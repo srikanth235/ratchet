@@ -214,6 +214,12 @@ export class Engine implements EngineApi {
         configYaml,
         status: 'draft',
         createdAt: now,
+        pack: config.pack ?? null,
+        objectiveName: config.objective.name ?? null,
+        evaluatorKind: config.evaluator.kind,
+        value: config.objective.value
+          ? { usdPerUnit: config.objective.value.usd_per_unit, period: config.objective.value.period, basis: config.objective.value.basis, unit: config.objective.value.unit ?? null }
+          : null,
       });
       for (const s of slots) {
         this.ledger.addAgent({ id: s.agentId, optimizationId: id, kind: s.kind, branch: s.branch, status: 'pending', createdAt: now });

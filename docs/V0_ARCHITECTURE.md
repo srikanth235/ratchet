@@ -385,6 +385,101 @@ packages/desktop/src/renderer/screens/
   Optimizations, NewOptimization, Environment, LiveAgents, BenchmarkHistory, Result
 ```
 
+### Ledger schema
+
+One SQLite file per machine (`packages/core/src/ledger/schema.ts`). It is the
+single source of truth for an optimization: the engine resumes from it after a
+crash, and every screen reads it. Pre-release there is one migration,
+`0000_init.sql`. Timestamps are epoch ms, money is USD, JSON columns are TEXT.
+
+```mermaid
+erDiagram
+  sandboxes ||--o{ optimizations : hosts
+  optimizations ||--o| baselines : "starts from"
+  optimizations ||--o{ agents : runs
+  agents ||--o{ candidates : submits
+  agents ||--o{ agent_events : streams
+  candidates ||--o{ bench_results : "evaluated by"
+  candidates ||--o| ratchet_moves : "verified as"
+  optimizations ||--o{ spend_events : costs
+  agents |o--o{ spend_events : "attributed to"
+
+  sandboxes {
+    text id PK
+    text provider
+    text region
+    text status
+    json outputs
+  }
+  optimizations {
+    text id PK
+    text metric
+    text direction
+    real min_gain
+    real budget_usd
+    text pack
+    text evaluator_kind
+    real value_usd_per_unit
+    text sandbox_id FK
+    text config_yaml
+  }
+  baselines {
+    text optimization_id PK
+    real value
+    real noise_floor
+    json samples
+  }
+  agents {
+    text id PK
+    text kind
+    text branch
+    text runner_instance_id
+    text status
+  }
+  candidates {
+    text id PK
+    text sha
+    text verdict
+    json reasons
+  }
+  bench_results {
+    int id PK
+    text phase
+    json samples
+    json stats
+    json guardrails
+  }
+  ratchet_moves {
+    int id PK
+    real from_value
+    real to_value
+  }
+  spend_events {
+    int id PK
+    text category
+    real usd
+    int estimated
+  }
+  agent_events {
+    int id PK
+    text type
+    json payload
+  }
+```
+
+| Table | Rule |
+|---|---|
+| `optimizations` | Snapshot of `ratchet.yaml` plus the columns screens filter on: metric, pack, evaluator kind, $ value model (`value_*`, all null without one) |
+| `candidates` | One row per (agent, sha); verdict `pending → verified / rejected / failed_confirm / blocked` |
+| `bench_results` | `phase = bench` (visible trace) or `confirm` (holdout) |
+| `ratchet_moves` | **Append-only** (triggers reject UPDATE/DELETE); one per verified win, strictly improving |
+| `spend_events` | **Append-only**; corrections are new rows, possibly negative |
+| `sandboxes` | `planned → applying → applied → destroying → destroyed / failed`; tofu outputs stored on apply |
+| `engine_kv` | Crash-safe engine bookkeeping (stop mode, plateau counters), keys `opt:<id>:…` |
+
+Enums (statuses, verdicts, agent kinds, evaluator kinds, value period/basis)
+are CHECK constraints, so a bad value fails in the database, not just in zod.
+
 ## 9. UI
 
 ### Design system: Midnight Brass

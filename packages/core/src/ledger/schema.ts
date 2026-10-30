@@ -1,7 +1,8 @@
 /**
  * Ledger schema (SQLite via drizzle). The ledger is the single source of truth
  * for an optimization. `ratchet_moves` and `spend_events` are append-only,
- * enforced by triggers in migrations/ (see 0001_append_only_triggers.sql).
+ * enforced by triggers at the end of migrations/0000_init.sql.
+ * Pre-release: there is ONE migration. Edit the schema, regenerate 0000_init.sql and re-append the triggers.
  *
  * Conventions:
  *  - timestamps are integer epoch milliseconds;
@@ -21,8 +22,19 @@ import {
 } from 'drizzle-orm/sqlite-core';
 
 export const DIRECTIONS = ['minimize', 'maximize'] as const;
-import type { Direction } from '../config/schema.js';
-export type { Direction };
+import { EVALUATOR_KINDS, type Direction, type EvaluatorKind } from '../config/schema.js';
+export type { Direction, EvaluatorKind };
+export { EVALUATOR_KINDS };
+
+export const VALUE_PERIODS = ['month', 'year'] as const;
+export type ValuePeriod = (typeof VALUE_PERIODS)[number];
+export const VALUE_BASES = ['estimated', 'measured'] as const;
+export type ValueBasis = (typeof VALUE_BASES)[number];
+
+export const SANDBOX_PROVIDERS = ['aws', 'mock'] as const;
+export type SandboxProviderKind = (typeof SANDBOX_PROVIDERS)[number];
+export const SANDBOX_STATUSES = ['planned', 'applying', 'applied', 'destroying', 'destroyed', 'failed'] as const;
+export type SandboxStatus = (typeof SANDBOX_STATUSES)[number];
 
 export const OPTIMIZATION_STATUSES = [
   'draft',
@@ -75,6 +87,27 @@ export type { GuardrailResult };
 const inList = (col: AnySQLiteColumn, values: readonly string[]): SQL =>
   sql`${col} in (${sql.raw(values.map((v) => `'${v}'`).join(', '))})`;
 
+/** One cloud sandbox (an applied infra/aws module). Optimizations run inside one. */
+export const sandboxes = sqliteTable(
+  'sandboxes',
+  {
+    id: text('id').primaryKey(),
+    provider: text('provider', { enum: SANDBOX_PROVIDERS }).notNull(),
+    region: text('region').notNull(),
+    accountId: text('account_id'),
+    status: text('status', { enum: SANDBOX_STATUSES }).notNull().default('planned'),
+    /** Contract outputs after apply (see infra/contract.md); null until applied. */
+    outputs: text('outputs', { mode: 'json' }).$type<Record<string, unknown>>(),
+    createdAt: integer('created_at').notNull(),
+    appliedAt: integer('applied_at'),
+    destroyedAt: integer('destroyed_at'),
+  },
+  (t) => [
+    check('sandboxes_provider_check', inList(t.provider, SANDBOX_PROVIDERS)),
+    check('sandboxes_status_check', inList(t.status, SANDBOX_STATUSES)),
+  ],
+);
+
 export const optimizations = sqliteTable(
   'optimizations',
   {
@@ -94,10 +127,25 @@ export const optimizations = sqliteTable(
     endedAt: integer('ended_at'),
     /** Snapshot of ratchet.yaml at creation time. */
     configYaml: text('config_yaml').notNull(),
+    /** Domain pack (`perf`, `forecasting`, …) and the objective's display name, from ratchet.yaml. */
+    pack: text('pack'),
+    objectiveName: text('objective_name'),
+    evaluatorKind: text('evaluator_kind', { enum: EVALUATOR_KINDS }).notNull().default('benchmark'),
+    /** `objective.value`: USD per unit of metric improvement per period. All null when no value model is set. */
+    valueUsdPerUnit: real('value_usd_per_unit'),
+    valuePeriod: text('value_period', { enum: VALUE_PERIODS }),
+    valueBasis: text('value_basis', { enum: VALUE_BASES }),
+    valueUnit: text('value_unit'),
+    sandboxId: text('sandbox_id').references(() => sandboxes.id),
   },
   (t) => [
+    index('optimizations_sandbox_idx').on(t.sandboxId),
     check('optimizations_direction_check', inList(t.direction, DIRECTIONS)),
     check('optimizations_status_check', inList(t.status, OPTIMIZATION_STATUSES)),
+    check('optimizations_evaluator_kind_check', inList(t.evaluatorKind, EVALUATOR_KINDS)),
+    check('optimizations_value_period_check', sql`${t.valuePeriod} is null or ${inList(t.valuePeriod, VALUE_PERIODS)}`),
+    check('optimizations_value_basis_check', sql`${t.valueBasis} is null or ${inList(t.valueBasis, VALUE_BASES)}`),
+    check('optimizations_value_usd_check', sql`${t.valueUsdPerUnit} is null or ${t.valueUsdPerUnit} > 0`),
   ],
 );
 
@@ -239,6 +287,13 @@ export const agentEvents = sqliteTable(
   (t) => [index('agent_events_agent_idx').on(t.agentId, t.id)],
 );
 
+/** Engine bookkeeping that must survive a crash (stop mode, plateau counters, …). Keys are namespaced `opt:<id>:…`. */
+export const engineKv = sqliteTable('engine_kv', {
+  key: text('key').primaryKey(),
+  value: text('value').notNull(),
+});
+
+export type SandboxRow = typeof sandboxes.$inferSelect;
 export type OptimizationRow = typeof optimizations.$inferSelect;
 export type BaselineRow = typeof baselines.$inferSelect;
 export type AgentRow = typeof agents.$inferSelect;

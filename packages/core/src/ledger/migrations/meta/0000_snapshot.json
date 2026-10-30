@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6d418ad2-f659-4363-9c2a-267c935b1db2",
+  "id": "70c7ab9e-613f-4d5e-8507-223ccd08ff3e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "agent_events": {
@@ -155,7 +155,7 @@
       "checkConstraints": {
         "agents_kind_check": {
           "name": "agents_kind_check",
-          "value": "\"agents\".\"kind\" in ('claude-code', 'codex')"
+          "value": "\"agents\".\"kind\" in ('claude-code', 'codex', 'mock')"
         },
         "agents_status_check": {
           "name": "agents_status_check",
@@ -455,6 +455,30 @@
         }
       }
     },
+    "engine_kv": {
+      "name": "engine_kv",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "optimizations": {
       "name": "optimizations",
       "columns": {
@@ -556,10 +580,89 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "pack": {
+          "name": "pack",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "objective_name": {
+          "name": "objective_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "evaluator_kind": {
+          "name": "evaluator_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'benchmark'"
+        },
+        "value_usd_per_unit": {
+          "name": "value_usd_per_unit",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "value_period": {
+          "name": "value_period",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "value_basis": {
+          "name": "value_basis",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "value_unit": {
+          "name": "value_unit",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sandbox_id": {
+          "name": "sandbox_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
-      "indexes": {},
-      "foreignKeys": {},
+      "indexes": {
+        "optimizations_sandbox_idx": {
+          "name": "optimizations_sandbox_idx",
+          "columns": [
+            "sandbox_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "optimizations_sandbox_id_sandboxes_id_fk": {
+          "name": "optimizations_sandbox_id_sandboxes_id_fk",
+          "tableFrom": "optimizations",
+          "tableTo": "sandboxes",
+          "columnsFrom": [
+            "sandbox_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
@@ -570,6 +673,22 @@
         "optimizations_status_check": {
           "name": "optimizations_status_check",
           "value": "\"optimizations\".\"status\" in ('draft', 'baselining', 'running', 'stopping', 'completed', 'stopped', 'failed')"
+        },
+        "optimizations_evaluator_kind_check": {
+          "name": "optimizations_evaluator_kind_check",
+          "value": "\"optimizations\".\"evaluator_kind\" in ('benchmark', 'backtest', 'eval', 'simulation')"
+        },
+        "optimizations_value_period_check": {
+          "name": "optimizations_value_period_check",
+          "value": "\"optimizations\".\"value_period\" is null or \"optimizations\".\"value_period\" in ('month', 'year')"
+        },
+        "optimizations_value_basis_check": {
+          "name": "optimizations_value_basis_check",
+          "value": "\"optimizations\".\"value_basis\" is null or \"optimizations\".\"value_basis\" in ('estimated', 'measured')"
+        },
+        "optimizations_value_usd_check": {
+          "name": "optimizations_value_usd_check",
+          "value": "\"optimizations\".\"value_usd_per_unit\" is null or \"optimizations\".\"value_usd_per_unit\" > 0"
         }
       }
     },
@@ -667,6 +786,89 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
+    },
+    "sandboxes": {
+      "name": "sandboxes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "region": {
+          "name": "region",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'planned'"
+        },
+        "outputs": {
+          "name": "outputs",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "applied_at": {
+          "name": "applied_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "destroyed_at": {
+          "name": "destroyed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "sandboxes_provider_check": {
+          "name": "sandboxes_provider_check",
+          "value": "\"sandboxes\".\"provider\" in ('aws', 'mock')"
+        },
+        "sandboxes_status_check": {
+          "name": "sandboxes_status_check",
+          "value": "\"sandboxes\".\"status\" in ('planned', 'applying', 'applied', 'destroying', 'destroyed', 'failed')"
+        }
+      }
     },
     "spend_events": {
       "name": "spend_events",

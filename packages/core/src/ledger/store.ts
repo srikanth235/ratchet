@@ -11,6 +11,7 @@ import {
   candidates,
   optimizations,
   ratchetMoves,
+  sandboxes,
   spendEvents,
   type AgentEventRow,
   type AgentKind,
@@ -26,6 +27,12 @@ import {
   type OptimizationRow,
   type OptimizationStatus,
   type RatchetMoveRow,
+  type EvaluatorKind,
+  type SandboxProviderKind,
+  type SandboxRow,
+  type SandboxStatus,
+  type ValueBasis,
+  type ValuePeriod,
   type SpendCategory,
   type SpendEventRow,
   type CandidateVerdict,
@@ -66,6 +73,21 @@ export interface CreateOptimizationInput {
   timeLimitS: number;
   configYaml: string;
   status?: OptimizationStatus;
+  createdAt?: number;
+  pack?: string | null;
+  objectiveName?: string | null;
+  evaluatorKind?: EvaluatorKind;
+  /** `objective.value` from ratchet.yaml; omit when the config has no value model. */
+  value?: { usdPerUnit: number; period: ValuePeriod; basis: ValueBasis; unit?: string | null } | null;
+  sandboxId?: string | null;
+}
+
+export interface RecordSandboxInput {
+  id: string;
+  provider: SandboxProviderKind;
+  region: string;
+  accountId?: string | null;
+  status?: SandboxStatus;
   createdAt?: number;
 }
 
@@ -291,10 +313,62 @@ export class Ledger {
         status: input.status ?? 'draft',
         createdAt: input.createdAt ?? this.now(),
         configYaml: input.configYaml,
+        pack: input.pack ?? null,
+        objectiveName: input.objectiveName ?? null,
+        evaluatorKind: input.evaluatorKind ?? 'benchmark',
+        valueUsdPerUnit: input.value?.usdPerUnit ?? null,
+        valuePeriod: input.value?.period ?? null,
+        valueBasis: input.value?.basis ?? null,
+        valueUnit: input.value?.unit ?? null,
+        sandboxId: input.sandboxId ?? null,
       })
       .returning()
       .get();
     return row;
+  }
+
+  // ------------------------------------------------------------ sandboxes
+
+  /** Register a sandbox (idempotent on id: an existing row is returned unchanged). */
+  recordSandbox(input: RecordSandboxInput): SandboxRow {
+    const existing = this.getSandbox(input.id);
+    if (existing) return existing;
+    return this.db
+      .insert(sandboxes)
+      .values({
+        id: input.id,
+        provider: input.provider,
+        region: input.region,
+        accountId: input.accountId ?? null,
+        status: input.status ?? 'planned',
+        createdAt: input.createdAt ?? this.now(),
+      })
+      .returning()
+      .get();
+  }
+
+  getSandbox(id: string): SandboxRow | undefined {
+    return this.db.select().from(sandboxes).where(eq(sandboxes.id, id)).get();
+  }
+
+  listSandboxes(): SandboxRow[] {
+    return this.db.select().from(sandboxes).orderBy(desc(sandboxes.createdAt)).all();
+  }
+
+  /** Move a sandbox through apply/destroy, stamping times; `outputs` is stored on apply. */
+  setSandboxStatus(id: string, status: SandboxStatus, opts: { outputs?: Record<string, unknown>; at?: number } = {}): SandboxRow {
+    if (!this.getSandbox(id)) throw new LedgerError('not_found', `sandbox ${id} not found`);
+    const at = opts.at ?? this.now();
+    const patch: Partial<SandboxRow> = { status };
+    if (status === 'applied') patch.appliedAt = at;
+    if (status === 'destroyed') patch.destroyedAt = at;
+    if (opts.outputs !== undefined) patch.outputs = opts.outputs;
+    return this.db.update(sandboxes).set(patch).where(eq(sandboxes.id, id)).returning().get();
+  }
+
+  /** Optimizations that ran in a sandbox; teardown must not destroy one that is still live. */
+  optimizationsInSandbox(sandboxId: string): OptimizationRow[] {
+    return this.db.select().from(optimizations).where(eq(optimizations.sandboxId, sandboxId)).all();
   }
 
   getOptimization(id: string): OptimizationRow | undefined {

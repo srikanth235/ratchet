@@ -5,22 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1793350636905,
+      "when": 1793363404231,
       "tag": "0000_init",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1793350638139,
-      "tag": "0001_append_only_triggers",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1793353000147,
-      "tag": "0002_agent_kind_mock",
       "breakpoints": true
     }
   ]

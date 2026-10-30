@@ -63,8 +63,10 @@ describe('openLedger', () => {
       'baselines',
       'bench_results',
       'candidates',
+      'engine_kv',
       'optimizations',
       'ratchet_moves',
+      'sandboxes',
       'spend_events',
     ]);
     expect(ledger.sqlite.pragma('foreign_keys', { simple: true })).toBe(1);
@@ -503,5 +505,40 @@ describe('transaction', () => {
       }),
     ).toThrow('boom');
     expect(ledger.listOptimizations()).toEqual([]);
+  });
+});
+
+describe('generic columns', () => {
+  it('stores pack, evaluator kind and the value model; defaults when absent', () => {
+    const o = mkOpt({ pack: 'forecasting', objectiveName: 'Weekly WAPE', evaluatorKind: 'backtest', value: { usdPerUnit: 5000, period: 'month', basis: 'measured', unit: 'pt' } });
+    expect(o).toMatchObject({ pack: 'forecasting', objectiveName: 'Weekly WAPE', evaluatorKind: 'backtest', valueUsdPerUnit: 5000, valuePeriod: 'month', valueBasis: 'measured', valueUnit: 'pt', sandboxId: null });
+    expect(mkOpt()).toMatchObject({ pack: null, evaluatorKind: 'benchmark', valueUsdPerUnit: null, valuePeriod: null });
+  });
+
+  it('rejects bad evaluator kinds and non-positive values at the DB level', () => {
+    expect(() => mkOpt({ evaluatorKind: 'vibes' as never })).toThrow(/CHECK/);
+    expect(() => mkOpt({ value: { usdPerUnit: -1, period: 'year', basis: 'estimated' } })).toThrow(/CHECK/);
+    expect(() => mkOpt({ value: { usdPerUnit: 1, period: 'week' as never, basis: 'estimated' } })).toThrow(/CHECK/);
+  });
+});
+
+describe('sandboxes', () => {
+  it('records idempotently, stamps apply/destroy and links optimizations', () => {
+    const s = ledger.recordSandbox({ id: 'sbx-1', provider: 'aws', region: 'us-east-1', accountId: '123456789012' });
+    expect(s).toMatchObject({ status: 'planned', outputs: null, appliedAt: null });
+    expect(ledger.recordSandbox({ id: 'sbx-1', provider: 'mock', region: 'x' }).provider).toBe('aws');
+    const applied = ledger.setSandboxStatus('sbx-1', 'applied', { outputs: { artifactsBucket: 'b' } });
+    expect(applied).toMatchObject({ status: 'applied', outputs: { artifactsBucket: 'b' } });
+    expect(applied.appliedAt).not.toBeNull();
+    const o = mkOpt({ sandboxId: 'sbx-1' });
+    expect(ledger.optimizationsInSandbox('sbx-1').map((r) => r.id)).toEqual([o.id]);
+    expect(ledger.setSandboxStatus('sbx-1', 'destroyed').destroyedAt).not.toBeNull();
+    expect(ledger.listSandboxes()).toHaveLength(1);
+  });
+
+  it('rejects unknown sandboxes and bad statuses', () => {
+    expect(() => mkOpt({ sandboxId: 'nope' })).toThrow(/FOREIGN KEY/);
+    expect(() => ledger.setSandboxStatus('nope', 'applied')).toThrow(LedgerError);
+    expect(() => ledger.recordSandbox({ id: 's', provider: 'gcp' as never, region: 'x' })).toThrow(/CHECK/);
   });
 });
