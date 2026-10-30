@@ -31,10 +31,6 @@ set -e
 [ "$rc" -eq 2 ] || die "ratchet-runner without configuration should exit 2, got $rc: $out"
 case "$out" in *RATCHET_OPTIMIZATION_ID*) ;; *) die "unexpected ratchet-runner output: $out" ;; esac
 
-log "ratchet shim is a no-op"
-ratchet runner >/dev/null
-ratchet bench-agent >/dev/null
-
 log "SSM agent"
 systemctl is-enabled amazon-ssm-agent >/dev/null || die "amazon-ssm-agent is not enabled"
 

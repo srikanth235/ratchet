@@ -24,7 +24,6 @@ infra/images/
     10-node.sh          Node tarball (sha256) + pnpm (npm tarball, sha512)                    (both)
     20-aws-cli.sh       AWS CLI v2 zip (sha256)                                               (both)
     30-bench-tools.sh   k6 + hyperfine (sha256)                                               (both)
-    35-ratchet-shim.sh  `ratchet runner|bench-agent` boot-time no-ops (see below)             (both)
     40-runner-tools.sh  perf, strace, sysstat, gcc, make, python3                             (runner)
     50-agent-clis.sh    claude + codex, pinned + sha512 checked                               (runner)
     60-ratchet-runner.sh  installs the packed tarballs, adds the `ratchet-runner` launcher    (runner)
@@ -104,15 +103,10 @@ data needs; it does not repeat what the user data does.
 | Metadata options | AMI default `imds_support = v2.0` | `RunInstances`: IMDSv2 required, hop limit 1 |
 | `/etc/ratchet/runner.env` (secret refs, ids, proxy) | nothing; the build fails if it exists | writes it |
 | Lifetime guard (`shutdown -h +N`) | nothing | sets it |
-| `ratchet runner` / `ratchet bench-agent` | a shim that exits 0 (below) | runs it with `nohup` |
+| Runner loop / bench jobs | nothing starts at boot | touches `/run/ratchet/user-data.done`; the app starts `ratchet-runner` and bench jobs over SSM |
 
-Two details worth knowing:
+One detail worth knowing:
 
-- **The shim.** The user data ends with `nohup ratchet runner` and `nohup ratchet bench-agent`, but the repository has
-  no such subcommands. The loop is `ratchet-runner`, started by `SsmRunnerControl` over SSM, and the bench is driven
-  by generated scripts through SSM Run Command. `35-ratchet-shim.sh` installs `/usr/local/bin/ratchet` that
-  acknowledges both and exits 0, so boot logs stay clean and, above all, a second runner cannot start next to the
-  SSM-started one. If those subcommands are ever implemented, remove the shim.
 - **The launcher.** `SsmRunnerControl.start` runs `env RATCHET_...=... ratchet-runner` from a plain SSM shell, which
   has not seen the user data's `/etc/ratchet/runner.env` (`RATCHET_SECRET_REFS`, proxy variables). The installed
   `/usr/local/bin/ratchet-runner` loads that file first; variables the caller already set win. The runner bin itself
@@ -191,7 +185,7 @@ AWS-managed service. Not built or tested here:
            action: ExecuteBash
            inputs:
              commands:
-               - for s in 00-base 10-node 20-aws-cli 30-bench-tools 35-ratchet-shim 70-bench-user 90-verify-bench 99-cleanup; do bash /tmp/ratchet-image/scripts/$s.sh; done
+               - for s in 00-base 10-node 20-aws-cli 30-bench-tools 70-bench-user 90-verify-bench 99-cleanup; do bash /tmp/ratchet-image/scripts/$s.sh; done
    ```
 
    (For the runner add `RATCHET_RUNNER_DIST=/tmp/ratchet-image/dist` and the steps from `runner_scripts`; note the

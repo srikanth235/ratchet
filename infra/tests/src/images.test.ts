@@ -67,7 +67,7 @@ describe("images: layout", () => {
     }
   });
   it("shares the base, node, aws cli, load-tool, shim and cleanup steps between both images", () => {
-    for (const s of ["00-base.sh", "10-node.sh", "20-aws-cli.sh", "30-bench-tools.sh", "35-ratchet-shim.sh", "99-cleanup.sh"]) {
+    for (const s of ["00-base.sh", "10-node.sh", "20-aws-cli.sh", "30-bench-tools.sh", "99-cleanup.sh"]) {
       expect(runnerScripts).toContain(s);
       expect(benchScripts).toContain(s);
     }
@@ -346,12 +346,10 @@ describe("runner image", () => {
     expect(s).toContain('saved="$(export -p)"');
     expect(s).toMatch(/eval "\$saved"/);
   });
-  it("does not start a second runner from user data: `ratchet runner` and `ratchet bench-agent` are no-ops", () => {
-    expect(awsTs).toContain("nohup ratchet runner");
-    expect(awsTs).toContain("nohup ratchet bench-agent");
-    const s = stripComments(read("scripts", "35-ratchet-shim.sh"));
-    expect(s).toMatch(/runner \| bench-agent\)\s*\n\s*echo [^\n]*\n\s*exit 0/);
-    expect(s).not.toMatch(/\b(exec|nohup|setsid)\b/);
+  it("does not start a second runner from user data: the loop is started over SSM only", () => {
+    expect(awsTs).not.toMatch(/nohup ratchet/);
+    expect(awsTs).toContain("touch /run/ratchet/user-data.done");
+    for (const f of runnerScripts) expect(stripComments(read("scripts", f)), f).not.toMatch(/\/usr\/local\/bin\/ratchet\b(?!-)/);
   });
   it("is not the bench image: no ratchet-bench user and no firewall changes", () => {
     for (const f of runnerScripts.filter((x) => !x.startsWith("90-"))) {

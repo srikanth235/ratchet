@@ -67,7 +67,7 @@ number. The forecasting pack is the next milestone (§10).
 Principles:
 
 1. **The Mac is mission control, not the runtime.** Agents run headless on
-   agent runners in the sandbox, each driven by a small `ratchet runner` loop;
+   agent runners in the sandbox, each driven by a small `ratchet-runner` loop;
    experiments and benchmarks run on AWS too. Work continues if the lid closes.
 2. **GitHub is the bus.** Agent = branch, candidate = commit, winner = PR.
 3. **Agents never touch the trusted path.** Only benchmarks the app launches,
@@ -83,7 +83,7 @@ Principles:
 | **Benchmark** | Command from `ratchet.yaml` that emits metrics (e.g. k6 `http_req_duration.p95`) |
 | **Metric** | Name, direction (lower / higher is better), minimum gain, noise floor |
 | **Agent** | One Claude Code or Codex instance, run headless on its own agent runner, working on its own branch `ratchet/<opt>/<agent>` |
-| **Agent runner** | EC2 instance in the sandbox that hosts one agent plus the `ratchet runner` loop |
+| **Agent runner** | EC2 instance in the sandbox that hosts one agent plus the `ratchet-runner` loop |
 | **Candidate** | A commit an agent submits, with cost attributed |
 | **Guardrails** | Hard pass/fail checks: tests, API contract, error rate, peak memory |
 | **Bench runner** | Trusted re-benchmark of every candidate on pinned hardware |
@@ -160,9 +160,10 @@ Ratchet controls instead of depending on vendor-hosted cloud sessions.
 
 One EC2 instance per agent, launched by the app into the sandbox:
 
-1. Boots a Ratchet runner image (Node, git, agent CLIs, profilers, AWS CLI).
-2. Clones the repo, checks out `ratchet/<opt>/<agent>`.
-3. Runs `ratchet runner` (from `packages/core`), which drives the loop
+1. Boots a Ratchet runner image (Node, git, agent CLIs, profilers, AWS CLI; built from `infra/images`).
+2. The app starts `ratchet-runner` (from `packages/agents`) over SSM; it clones the repo and checks out
+   `ratchet/<opt>/<agent>`.
+3. `ratchet-runner` drives the loop
    locally: build the prompt from `RATCHET.md` + `.ratchet/context.md`, invoke
    the agent headless, stream its JSON events to S3, wait for the verdict on
    each candidate, resume the agent with the result.

@@ -693,7 +693,10 @@ function noProxyList(region: string): string {
   ].join(',');
 }
 
-/** Starts `ratchet runner`. Secret VALUES never appear here: only SSM refs, fetched with the instance profile. */
+/**
+ * Prepares an agent runner; the app then starts `ratchet-runner` over SSM (SsmRunnerControl). Ends by touching
+ * /run/ratchet/user-data.done. Secret VALUES never appear here: only SSM refs, fetched with the instance profile.
+ */
 export function runnerUserData(spec: RunnerLaunchSpec, maxLifetimeHours: number, net?: RunnerNetworkOptions): string {
   // Comma-separated: the format runner-main's parseSecretRefs reads. Neither env names nor SSM parameter names allow commas.
   for (const s of spec.secrets) {
@@ -730,7 +733,7 @@ export function runnerUserData(spec: RunnerLaunchSpec, maxLifetimeHours: number,
     (net?.proxyUrl
       ? "grep -E '^(HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy|NODE_USE_ENV_PROXY)=' /etc/ratchet/runner.env | sed 's/^/export /' > /etc/profile.d/ratchet-proxy.sh\nchmod 644 /etc/profile.d/ratchet-proxy.sh\n"
       : '') +
-    'nohup ratchet runner >/var/log/ratchet-runner.log 2>&1 &\n'
+    'mkdir -p /run/ratchet && touch /run/ratchet/user-data.done\n'
   );
 }
 
@@ -811,7 +814,7 @@ export function benchUserData(spec: BenchLaunchSpec, maxLifetimeHours: number): 
     `mv ${CANDIDATE_SUDOERS_PATH}.tmp ${CANDIDATE_SUDOERS_PATH}\n` +
     envFile({ RATCHET_OPTIMIZATION_ID: spec.optimizationId, RATCHET_BENCH_PURPOSE: spec.purpose }) +
     'set -a; . /etc/ratchet/runner.env; set +a\n' +
-    'nohup ratchet bench-agent >/var/log/ratchet-bench.log 2>&1 &\n'
+    'mkdir -p /run/ratchet && touch /run/ratchet/user-data.done\n'
   );
 }
 

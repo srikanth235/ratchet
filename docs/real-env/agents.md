@@ -84,10 +84,8 @@ Pass the id as `runnerImageRef` to `createLiveRuntime` (`packages/runtime/src/li
 |---|---|
 | `ratchet-runner` | `/usr/local/bin/ratchet-runner`: a launcher that first loads `/etc/ratchet/runner.env` (written by the instance user data: secret refs, proxy) without overriding variables the caller already set, then runs the bin installed in `/usr/local/lib/ratchet-runner` |
 | `claude`, `codex` | `/usr/local/bin`, version-pinned; Claude Code's auto-updater is disabled in `/etc/claude-code/managed-settings.json` so the pin holds |
-| `ratchet runner`, `ratchet bench-agent` | no-op shims: the user data calls them, but the loop is started over SSM by `SsmRunnerControl` (a second runner would race it) |
 
-When you bump a CLI pin, rebuild and rerun sections 0-2 below: the adapters parse the CLIs' output formats. Known gaps
-(secret-ref separator, proxy variables not reaching the agent CLIs) are listed at the end of `infra/images/README.md`.
+When you bump a CLI pin, rebuild and rerun sections 0-2 below: the adapters parse the CLIs' output formats. Remaining gaps are listed at the end of `infra/images/README.md`.
 
 ### 0. Smoke the binaries by hand (this is Phase 0 spike A)
 

@@ -15,7 +15,6 @@ locals {
     "10-node.sh",
     "20-aws-cli.sh",
     "30-bench-tools.sh",
-    "35-ratchet-shim.sh",
     "70-bench-user.sh",
     "90-verify-bench.sh",
     "99-cleanup.sh",

@@ -382,7 +382,8 @@ describe('launch', () => {
     expect(volTags).toEqual(expect.arrayContaining([{ Key: 'ratchet:opt', Value: 'opt1' }, { Key: 'ratchet:agent', Value: 'a1' }]));
 
     const ud = Buffer.from(input.UserData!, 'base64').toString();
-    expect(ud).toContain('ratchet runner');
+    expect(ud).toContain('touch /run/ratchet/user-data.done');
+    expect(ud).not.toMatch(/nohup|ratchet runner/); // the runner loop is started over SSM, never at boot
     expect(ud).toContain('shutdown -h +120');
     expect(ud).toContain('RATCHET_SECRET_REFS=');
     expect(ud).toContain('/ratchet/opt1/a1/ANTHROPIC_API_KEY');
@@ -407,7 +408,7 @@ describe('launch', () => {
     const tags = input.TagSpecifications![0]!.Tags!;
     expect(tags).toEqual(expect.arrayContaining([{ Key: 'ratchet:opt', Value: 'opt1' }, { Key: 'ratchet:role', Value: 'bench' }, { Key: 'ratchet:purpose', Value: 'confirm' }]));
     expect(tags.find((t) => t.Key === 'ratchet:agent')).toBeUndefined();
-    expect(Buffer.from(input.UserData!, 'base64').toString()).toContain('ratchet bench-agent');
+    expect(Buffer.from(input.UserData!, 'base64').toString()).toContain('touch /run/ratchet/user-data.done');
   });
 
   it.each(['baseline', 'bench'] as const)('launchBenchInstance (%s) never gets the sealed-capable profile', async (purpose) => {
@@ -468,19 +469,19 @@ describe('launch', () => {
       return i;
     };
 
-    it('creates both unprivileged users and blocks IMDS for both, before the bench agent starts', () => {
+    it('creates both unprivileged users and blocks IMDS for both, before user data reports done', () => {
       for (const u of ['ratchet-bench', 'ratchet-holdout']) {
         expect(ud).toContain(`useradd --system --no-create-home --shell /usr/sbin/nologin ${u}`);
         expect(ud).toContain(`iptables -I OUTPUT 1 -m owner --uid-owner ${u} -d 169.254.169.254 -j REJECT`);
         expect(ud).toContain(`ip6tables -I OUTPUT 1 -m owner --uid-owner ${u} -d fd00:ec2::254 -j REJECT`);
-        expect(idx(`--uid-owner ${u} -d 169.254.169.254`)).toBeLessThan(idx('ratchet bench-agent'));
+        expect(idx(`--uid-owner ${u} -d 169.254.169.254`)).toBeLessThan(idx('user-data.done'));
       }
     });
 
-    it('hides each user from the other (hidepid) and installs the launcher and sudo rule before the agent starts', () => {
+    it('hides each user from the other (hidepid) and installs the launcher and sudo rule before user data reports done', () => {
       expect(ud).toContain('hidepid=2');
       for (const p of [CANDIDATE_EXEC_PATH, CANDIDATE_LAUNCHER_PATH, '/etc/sudoers.d/ratchet-holdout']) {
-        expect(idx(p)).toBeLessThan(idx('ratchet bench-agent'));
+        expect(idx(p)).toBeLessThan(idx('user-data.done'));
       }
       // the sudoers rule is validated before it is moved into place; an invalid one aborts the boot
       expect(idx('visudo -cf')).toBeLessThan(idx('mv /etc/sudoers.d/ratchet-holdout.tmp'));

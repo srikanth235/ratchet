@@ -12,7 +12,6 @@ locals {
     "10-node.sh",
     "20-aws-cli.sh",
     "30-bench-tools.sh",
-    "35-ratchet-shim.sh",
     "40-runner-tools.sh",
     "50-agent-clis.sh",
     "60-ratchet-runner.sh",
