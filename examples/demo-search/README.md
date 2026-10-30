@@ -25,7 +25,12 @@ curl 'localhost:3000/search?q=sleek+kettle&filters=price:<100+AND+instock:true'
 | `bench/query-mix.json` | 400 queries (seed 1) replayed in order by both tools |
 | `bench/traces/generate.ts` | `pnpm bench:mix -- --seed 99 --out bench/traces/hidden-mix.json` makes a different mix from the same distribution (point either tool at it with `--mix` / `QUERY_MIX`) |
 
-Output: `{ "http_req_duration": { "p50", "p95", "p99" }, "rps", "error_rate", ... }`, in ms.
+Output: `{ "http_req_duration": { "p50", "p95", "p99" }, "rps", "error_rate", ... }`, in ms. The local bench also
+reports `span`: where the time of a p95 request went. The server sends its own stage timings in a `Server-Timing`
+header (`parse`, `search`, `serialize`); the bench averages them over the requests ranked p94 to p96 and adds `wait`
+(measured latency minus those stages: event-loop queueing and the network). Ratchet's Result screen compares these
+spans between the baseline and the best verified commit. They are self-reported by the service and informational only:
+the ratchet judges `http_req_duration.p95`, never the spans.
 The k6 script is untested in this environment (see below).
 
 ### Baseline (local bench, 4-vCPU container, server and load generator on the same host)

@@ -6,8 +6,11 @@
  *        [--mix bench/query-mix.json] [--out result.json] [--url http://host:port]
  *
  * Without --url it starts the built server (dist/src/main.js) itself and also
- * reports its peak RSS. Output: { http_req_duration: {p50,p95,p99}, rps, error_rate, ... }
- * (durations in ms).
+ * reports its peak RSS. Output: { http_req_duration: {p50,p95,p99}, rps, error_rate, ..., span: {...} }
+ * (durations in ms). `span` is where the time of a p95 request went: the server's own stage timings
+ * (`Server-Timing` header: parse, search, serialize) averaged over the requests between p94 and p96, plus
+ * `wait` = measured latency minus those stages (queueing in the event loop and the network). Absent when the
+ * server sends no timings.
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -68,7 +71,19 @@ for (let i = 0; ; i++) {
   await sleep(100);
 }
 
-interface Sample { ms: number; ok: boolean }
+interface Sample { ms: number; ok: boolean; spans?: Record<string, number> }
+
+/** `parse;dur=0.120, search;dur=1.5` -> { parse: 0.12, search: 1.5 } (entries without a duration are skipped). */
+function parseServerTiming(header: string | string[] | undefined): Record<string, number> | undefined {
+  if (!header) return undefined;
+  const out: Record<string, number> = {};
+  for (const entry of (Array.isArray(header) ? header.join(",") : header).split(",")) {
+    const [name, ...params] = entry.trim().split(";");
+    const d = params.map((p) => /^\s*dur=([\d.]+)\s*$/.exec(p)?.[1]).find(Boolean);
+    if (name && d !== undefined) out[name] = Number(d);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 
 /** Fire `total` requests at `rate`/s, request i uses paths[i % n]; latency is measured from send. */
 async function run(total: number, startIndex: number): Promise<{ samples: Sample[]; seconds: number }> {
@@ -81,17 +96,17 @@ async function run(total: number, startIndex: number): Promise<{ samples: Sample
     const start = performance.now();
     pending++;
     let settled = false;
-    const done = (ok: boolean) => {
+    const done = (ok: boolean, spans?: Record<string, number>) => {
       if (settled) return;
       settled = true;
       pending--;
-      samples.push({ ms: performance.now() - start, ok });
+      samples.push({ ms: performance.now() - start, ok, ...(spans ? { spans } : {}) });
     };
     const req = http.get(
       { host: base.hostname, port: base.port, path: paths[(startIndex + i) % paths.length], agent, timeout: 10_000 },
       (res) => {
         res.resume();
-        res.on("end", () => done(res.statusCode === 200));
+        res.on("end", () => done(res.statusCode === 200, parseServerTiming(res.headers["server-timing"])));
         res.on("error", () => done(false));
       },
     );
@@ -124,12 +139,32 @@ const { samples, seconds } = await run(total, warmupTotal);
 const sorted = samples.map((s) => s.ms).sort((a, b) => a - b);
 const pct = (p: number) => sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)] as number;
 const round = (n: number) => Math.round(n * 1000) / 1000;
+
+/** Mean stage timings of the requests ranked between p94 and p96 (at least the p95 request itself). */
+function p95Spans(all: Sample[]): Record<string, number> | undefined {
+  const ranked = [...all].sort((a, b) => a.ms - b.ms);
+  const at = (p: number) => Math.min(ranked.length - 1, Math.max(0, Math.ceil((p / 100) * ranked.length) - 1));
+  const band = ranked.slice(at(94), at(96) + 1).filter((s) => s.spans);
+  if (band.length === 0) return undefined;
+  const sum: Record<string, number> = {};
+  for (const s of band) {
+    let server = 0;
+    for (const [k, v] of Object.entries(s.spans!)) {
+      sum[k] = (sum[k] ?? 0) + v;
+      server += v;
+    }
+    sum.wait = (sum.wait ?? 0) + Math.max(0, s.ms - server);
+  }
+  return Object.fromEntries(Object.entries(sum).map(([k, v]) => [k, round(v / band.length)]));
+}
+const spans = p95Spans(samples);
 const result = {
   http_req_duration: { p50: round(pct(50)), p95: round(pct(95)), p99: round(pct(99)) },
   rps: round(samples.length / seconds),
   error_rate: samples.filter((s) => !s.ok).length / samples.length,
   requests: samples.length,
   ...(server?.pid ? { peak_rss_mb: peakRssMb(server.pid) } : {}),
+  ...(spans ? { span: spans } : {}),
 };
 
 server?.kill();

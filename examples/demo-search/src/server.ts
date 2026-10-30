@@ -8,12 +8,31 @@ const MAX_FILTERS = 500;
 const MAX_LIMIT = 100;
 const MAX_OFFSET = 10_000;
 
-function send(res: http.ServerResponse, status: number, body: unknown): void {
+/**
+ * Stage timings of one request (ms since it arrived), reported in a `Server-Timing` header: `parse` (URL and
+ * parameter validation), `search` (the query itself) and `serialize` (JSON encoding, measured in `send`).
+ * bench/local.ts reads them to show where the time of a p95 request goes; they are informational, never judged.
+ */
+interface Timing {
+  start: number;
+  parsed: number;
+  searched: number;
+}
+
+const dur = (ms: number) => Math.max(0, ms).toFixed(3);
+
+function send(res: http.ServerResponse, status: number, body: unknown, timing?: Timing): void {
+  const t0 = performance.now();
   const payload = JSON.stringify(body);
-  res.writeHead(status, {
+  const headers: http.OutgoingHttpHeaders = {
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(payload),
-  });
+  };
+  if (timing) {
+    headers["server-timing"] =
+      `parse;dur=${dur(timing.parsed - timing.start)}, search;dur=${dur(timing.searched - timing.parsed)}, serialize;dur=${dur(performance.now() - t0)}`;
+  }
+  res.writeHead(status, headers);
   res.end(payload);
 }
 
@@ -29,7 +48,7 @@ function intParam(raw: string | null, name: string, def: number, min: number, ma
   return n;
 }
 
-function handleSearch(catalog: Catalog, url: URL, res: http.ServerResponse): void {
+function handleSearch(catalog: Catalog, url: URL, res: http.ServerResponse, start: number): void {
   const q = url.searchParams.get("q") ?? undefined;
   const filters = url.searchParams.get("filters") ?? undefined;
   if (q !== undefined && q.length > MAX_Q) return fail(res, 400, "invalid_request", `q must be at most ${MAX_Q} characters`);
@@ -45,7 +64,9 @@ function handleSearch(catalog: Catalog, url: URL, res: http.ServerResponse): voi
   if (q) params.q = q;
   if (filters) params.filters = filters;
   try {
-    send(res, 200, search(catalog, params));
+    const parsed = performance.now();
+    const result = search(catalog, params);
+    send(res, 200, result, { start, parsed, searched: performance.now() });
   } catch (err) {
     if (err instanceof FilterSyntaxError) return fail(res, 400, "invalid_filters", err.message);
     throw err;
@@ -54,6 +75,7 @@ function handleSearch(catalog: Catalog, url: URL, res: http.ServerResponse): voi
 
 export function createServer(catalog: Catalog = getCatalog()): http.Server {
   return http.createServer((req, res) => {
+    const start = performance.now();
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
       if (url.pathname !== "/search" && url.pathname !== "/health") {
@@ -63,7 +85,7 @@ export function createServer(catalog: Catalog = getCatalog()): http.Server {
       if (url.pathname === "/health") {
         return send(res, 200, { status: "ok", products: catalog.products.length });
       }
-      handleSearch(catalog, url, res);
+      handleSearch(catalog, url, res, start);
     } catch {
       fail(res, 500, "internal_error", "internal error");
     }
