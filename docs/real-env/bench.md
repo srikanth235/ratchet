@@ -12,7 +12,8 @@ One bench job (`BenchJob`: `baseline`, `bench` or `confirm`) is the same pipelin
 (`src/pipeline.ts`); only the executor differs:
 
 ```
-checkout candidate sha + bench.ref  ->  protected overlay  ->  setup  ->  command guardrails (fail fast)
+[dependency snapshot, once per lockfile]
+checkout candidate sha + bench.ref  ->  protected overlay (+ lockfile check)  ->  setup  ->  command guardrails (fail fast)
   ->  bench.run x job.repeats  ->  threshold guardrails over the per-metric medians
 ```
 
@@ -21,6 +22,7 @@ checkout candidate sha + bench.ref  ->  protected overlay  ->  setup  ->  comman
 | Used for | simulation mode, `ratchet bench`, development | live mode |
 | Where candidate code runs | this machine, current user, current env (**not a security boundary**) | a fresh bench instance per job (`CloudCompute.launchBenchInstance`, private subnet with no internet route). Setup, guardrails and candidate processes run as the unprivileged `ratchet-bench` OS user; the evaluator harness (`bench.run`) runs as a second unprivileged user, `ratchet-holdout`. Terminated in a `finally` |
 | Checkout | `GitHost.checkout(sha)` and `GitHost.checkout(bench.ref)`, `.git` removed | **pre-staged**: the controller materializes both trees (`GitHost.resolveRef` + `checkout`), uploads them as `code.tgz` / `bench.tgz` under `bench-inputs/<opt>/<job>/` in the artifacts bucket, and the instance downloads them from S3 (sha256 verified). No git, no GitHub, no token on the instance |
+| Dependencies | the machine's own network; but a changed lockfile is **blocked** exactly as live (parity) | a **snapshot** of the package store built once per lockfile on a separate `deps` instance (below); setup runs offline from it |
 | Steps | child processes in their own process group | one generated bash script per step through `CloudCompute.runCommand` |
 | Abort | `AbortSignal` kills the process groups | `AbortSignal` stops waiting and terminates the instance |
 
@@ -28,6 +30,85 @@ Failure model: a candidate that breaks a gate (setup, a command guardrail, a ben
 yields a `BenchOutcome` with a failed `GuardrailResult`; `evaluateCandidate` turns that into
 `blocked`. Infrastructure problems (checkout fails, `bench.ref` has no protected files, instance never
 registers with SSM, confirm job without a trace) throw `BenchError`; an abort throws an `AbortError`.
+
+### Dependencies on an offline bench
+
+Setup such as `pnpm install --frozen-lockfile && pnpm build` cannot download anything on a bench instance: no route
+out, and the DNS Firewall resolves only AWS service names. Rather than baking `node_modules` into the AMI (stale the
+moment the lockfile changes, and it still lets setup run an online install by mistake), the **package store** travels as
+a snapshot that is built once per lockfile, on a machine that does have egress, and restored before setup. It applies when
+the runner has a `setup` command (`RemoteBenchRunnerOptions.setup`, `LiveOptions.benchSetup`) and `evaluator.deps` is not
+`none`. Code: `src/deps.ts` (strategies, key, manifest), `src/deps-scripts.ts` (the builder script), `src/remote-deps.ts`
+(orchestration), the restore fragment in `src/remote-scripts.ts` (`checkoutScript`).
+
+```
+first job of a lockfile (the baseline, in practice)                                  every later job
+controller: resolve bench.ref to a commit, hash the lockfile(s) of THAT tree
+  key = <pm>-<sha256(strategy, revision, lockfile hashes, image, arch)[:40]>
+  bench-deps/<key>.json present, valid for this key, and its archive still in the bucket?  --- yes --->  reuse
+  no:  stage ONLY the base tree  bench-inputs/<opt>/<uuid>/deps-base.tgz   (the candidate is not involved)
+       launch a `deps` instance: AGENT subnet, agent_runner SG, deps_runner profile (egress, via the proxy if enabled)
+       as root:         download + sha256 check + unpack the base tree
+                        check user `ratchet-deps` exists and cannot reach IMDS (exit 12/13/14)
+       as ratchet-deps: setpriv --no-new-privs, env -i + proxy vars only:  `pnpm fetch`  (or `npm ci --ignore-scripts`)
+       as root:         prune, refuse symlinks, tar | zstd (gzip if the image has no zstd), sha256, then upload
+                        bench-deps/<key>/<sha256>.tar.zst  and, LAST, bench-deps/<key>.json
+       terminate the deps instance (finally); the controller re-reads and re-validates the manifest
+bench job:   stage candidate + bench.ref (hash the candidate's lockfile on the controller: differs -> BLOCKED, nothing launched further)
+  checkout script (root): overlay, isolation checks, then download the snapshot, verify sha256 and node / pm versions,
+                          extract, refuse symlinks, chown root + chmod go-w  -> read-only for ratchet-bench
+  setup + command guardrails (ratchet-bench) get  npm_config_store_dir / PNPM_STORE_DIR  (pnpm)  or  npm_config_cache (npm),
+                          npm_config_offline=true; pnpm also gets package_import_method=clone-or-copy and no self-update
+```
+
+Why this shape:
+
+- **The thing that touches the network never holds a credential, and the thing that holds a credential never runs
+  anything from the network.** The fetch runs as an unprivileged user with an empty environment (plus the proxy variables)
+  and no route to instance metadata; root only downloads the (trusted) base tree and packs/uploads what that user left.
+  `pnpm fetch` populates the content-addressed store only (no `node_modules`, no lifecycle scripts; `npm ci --ignore-scripts`
+  for npm), and packages are verified against the lockfile's integrity hashes.
+- **Never candidate code.** The deps job stages `bench.ref` only, under the one basename (`deps-base.tgz`) the deps identity may read;
+  it cannot read `code.tgz`, the sealed bucket, `bench-results/` or agent prefixes. It can write `bench-deps/` and nothing else.
+  The bench identities can read `bench-deps/` but never write it, so a candidate cannot poison a later job's snapshot.
+- **Snapshots are keyed, content-addressed and checked three times.** One per key (lockfile hash at the base ref + strategy
+  revision + image + architecture), reused by every candidate and optimization that shares it. The archive path contains its
+  sha256, so racing builders cannot leave a manifest pointing at someone else's bytes. The controller validates the manifest against
+  the hashes it computed itself (not the ones written to the bucket); the instance verifies the sha256 again and refuses a different
+  node or package-manager version than the builder had.
+- **Read-only store.** After restore everything under `<work>/deps` belongs to root with no group/other write. The one thing pnpm insists
+  on writing is a per-project registration inside the store (`<store>/vN/projects/`; a fully read-only store fails with `EACCES`, which
+  was checked with pnpm 10.28); that directory is a symlink to a scratch directory owned by `ratchet-bench` outside the store. Imports
+  use `clone-or-copy`, never hardlinks, so a `node_modules` file and a store file are never one inode.
+- **No second chance with the network.** A candidate whose lockfile differs from `bench.ref`'s is blocked on the controller before
+  the instance runs anything (`dependencies unchanged`: "dependency changes are not allowed in v0: the bench has no network"); the
+  check is a hash comparison against the key, including a deleted lockfile or a symlink in its place. The local runner applies the same
+  rule (when it has a setup) so a simulation does not accept what live mode refuses. Lockfiles are *effectively protected* without being
+  listed in `protected`: they are pinned to `bench.ref` like protected paths, so a setup or build that rewrites one is caught by the usual
+  `protected files intact` check. A candidate that edits `package.json` without touching the lockfile gets as far as setup and fails there
+  (`ERR_PNPM_OUTDATED_LOCKFILE`, or an offline "missing from the store" error); the setup failure carries a hint that dependency changes are
+  not allowed in v0.
+
+Strategies (`DepsStrategy`; `evaluator.deps: auto|pnpm|npm|none`, default `auto`):
+
+| | lockfile(s) | snapshot step (deps instance) | setup on the bench | store layout |
+|---|---|---|---|---|
+| `pnpm` | `pnpm-lock.yaml` | `pnpm fetch` | `npm_config_store_dir` / `PNPM_STORE_DIR`, `npm_config_offline=true`, `manage-package-manager-versions=false` | `<store>/vN/{files,index}`; `projects` re-linked on restore |
+| `npm` | `package-lock.json`, `npm-shrinkwrap.json` | `npm ci --ignore-scripts --no-audit --no-fund` into a throwaway tree, keep the cache | `npm_config_cache`, `npm_config_offline=true`, `npm_config_logs_dir` in scratch | npm cache (`_cacache`); `_logs` pruned |
+| `none` | none, or `deps: none` | nothing | nothing | nothing |
+
+`auto` picks pnpm, then npm; a repository with only `yarn.lock` gets `none` and a log line saying yarn is not supported. An explicit
+`pnpm` / `npm` without its lockfile at `bench.ref` is a `BenchError`. To add a package manager, implement `DepsStrategy` (five shell
+snippets and two environments) and add it to `DEPS_STRATEGIES`; the key, manifest, job and restore are shared.
+
+What the deps job needs from the sandbox (not on by default, an explicit operator choice): it runs in the agent subnet, so the package
+registry must be reachable from there. With `enable_egress_proxy = true` add the registry to `egress_proxy_extra_domains` (it feeds both
+squid and the DNS Firewall); without the proxy add it to `dns_firewall_extra_domains` (agent subnet is public, port 443 open). The
+bench subnet, its security group, route table and DNS allow-list are unchanged. Sandboxes applied before this change have no
+`deps_identity_ref`: re-apply (`aws.md` section 1), otherwise a job with a lockfile and a setup fails with
+"depsInstanceProfile is not configured" before launching anything. Unhandled today: private registries and auth tokens (the job has no
+credentials for them), git/url dependencies, and a candidate changing `.npmrc` / `pnpm-workspace.yaml` (those are not pinned; they cannot
+fetch anything either, so the effect is an offline install failure at worst).
 
 ### The protected-path rule (what comes from `bench.ref`)
 
@@ -82,7 +163,8 @@ before any bench time is spent.
 
 ### Remote protocol (what to look at when it breaks)
 
-Before any command the controller stages the candidate and `bench.ref` (see `stage.ts`). Steps are
+Before any command the controller stages the candidate and `bench.ref` (see `stage.ts`); for the first job of a lockfile a
+separate `deps` instance is launched, runs one script and is terminated before the bench instance exists (above). Steps are
 separate `runCommand` calls: `ping` (retried while SSM registers), `checkout` (download, verify,
 overlay, check the isolation), `setup`, `guardrail i/n`, `bench run i/n` (in a confirm job each bench run
 fetches and wipes the holdout itself; there is no separate trace step and the sealed bucket is not contacted
@@ -320,9 +402,10 @@ What `infra/aws` builds (all in the module, no manual steps):
   (see `aws.md` section 10 for why the bench is not in a VPC of its own). It fails closed.
 - The candidate arrives as a staged archive in S3 (above); GitHub is not in the allowed set, so it is no
   exfiltration channel.
-- Setup needs packages (`pnpm install`): bake `node_modules`/the store into the AMI and run
-  `pnpm install --offline --frozen-lockfile`. Do **not** reopen the internet for setup; if you must, run
-  setup in a separate, earlier instance and ship the result (not done today).
+- Setup needs packages (`pnpm install`): they come from a **dependency snapshot** (see "Dependencies on an offline bench"), built
+  once per lockfile by a separate `deps` instance in the agent subnet and restored read-only before setup, which runs with the
+  package manager offline. Do **not** reopen the internet for the bench, and do not bake `node_modules` into the AMI. The only
+  machine with egress is the short-lived deps instance, which never runs candidate code.
 
 Pass criteria, on a real bench instance (via SSM):
 
@@ -344,6 +427,47 @@ Pass criteria, on a real bench instance (via SSM):
 - [ ] An agent role cannot `run-instances` into the bench subnet or with the bench/endpoint/proxy security
       groups (explicit deny; see `aws.md` section 3).
 - [ ] A full bench + confirm job succeeds end to end.
+- [ ] **Dependency snapshots (4b):** the checks below.
+
+### 4b. Dependency snapshots on a real sandbox
+
+Prerequisites: sandbox re-applied with `deps_identity_ref` (aws.md section 1); the bench AMI rebuilt with `zstd` (or accept gzip);
+the package registry allowed for the agent path (`egress_proxy_extra_domains` with the proxy, else `dns_firewall_extra_domains`);
+a throwaway repo (or `examples/demo-search` plus a lockfile) with `evaluator.deps: auto`, a runner `setup` of
+`pnpm install --frozen-lockfile && pnpm build`, and `bench.ref` carrying the lockfile.
+
+- [ ] **Build.** The first (baseline) job logs `dependency snapshot <key>`; `aws ec2 describe-instances --filters Name=tag:ratchet:purpose,Values=deps`
+      shows exactly one instance, in the **agent** subnet with the agent_runner SG, profile `...-deps-runner`, IMDSv2 required, no public
+      inbound; it is `terminated` before the bench instance is launched (the log order says so), also when the fetch fails and when the job
+      is aborted. `listTagged(<opt>)` shows no `deps` leftover and the teardown orphan check stays clean.
+- [ ] **Objects.** `aws s3 ls s3://<artifacts>/bench-deps/ --recursive` lists `<key>.json` and `<key>/<sha256>.tar.zst` (`.tgz` without zstd);
+      `bench-inputs/<opt>/<uuid>/deps-base.tgz` is the only staged archive of that job. The manifest carries the lockfile hashes, `node`,
+      `pm`, `compression`, `sha256`; `aws s3api head-object` shows the object is encrypted. Unpacking the archive shows `v10/{files,index}`
+      (pnpm) or `_cacache` (npm), no `projects/`, no `_logs`, no symlinks.
+- [ ] **Identity.** From the deps instance (SSM session as root): `aws s3 cp x s3://<artifacts>/bench-deps/x` works;
+      `aws s3 cp x s3://<artifacts>/bench-results/x`, `.../artifacts/<opt>/<agent>/x`, `aws s3 cp s3://<artifacts>/bench-inputs/<opt>/<job>/code.tgz -`
+      and anything on the sealed bucket are `AccessDenied` (also `iam simulate-principal-policy` for the role). From a bench instance: the
+      bench role can `GetObject bench-deps/...` but `PutObject bench-deps/...` is denied. An agent role can do none of it.
+- [ ] **The fetch user.** On the deps instance while the job runs (or by hand): `ps -u ratchet-deps` shows only the package manager;
+      `sudo -u ratchet-deps curl -m 3 http://169.254.169.254/latest/meta-data/` fails (IMDS), `curl -m 5 https://registry.npmjs.org/` works
+      through the proxy (or directly without it) and `curl -m 5 https://example.com` does not (proxy allow-list + DNS Firewall); the user's
+      environment (`/proc/<pid>/environ`) has the proxy variables and nothing starting with `AWS_`. No `node_modules` exists in the job tree.
+- [ ] **Restore.** On the bench instance after `checkout`: `ls -ld <work>/deps <work>/deps/store` are `root:root` without group/other write;
+      `sudo -u ratchet-bench touch <work>/deps/store/v10/files/x` fails with `Permission denied`; `<work>/deps/store/v10/projects` is a symlink into
+      `<work>/home/.ratchet-deps` (owned by `ratchet-bench`); the shared store and `node_modules` share no inodes (`find node_modules -links +1 -type f | head`
+      is empty). `setup` runs `pnpm install --frozen-lockfile` with no network (`curl` fails, the install succeeds) and `pnpm build` works.
+- [ ] **Reuse.** The second job (another candidate) launches no deps instance and logs `reusing snapshot <key>`; two jobs started together
+      launch one. A new optimization with the same lockfile reuses it. Changing the lockfile at `bench.ref` (or the AMI, or the bench
+      architecture) builds a new key; the old one stays until the artifacts lifecycle (30 days) expires it.
+- [ ] **Blocked.** A candidate that changes `pnpm-lock.yaml` (or deletes it) ends `blocked` with
+      `guardrail failed: dependencies unchanged (dependency changes are not allowed in v0: the bench has no network ...)`; no `checkout` script
+      ran for it. A candidate that only edits `package.json` to add a dependency fails `setup` with the hint appended and the pnpm error in the log.
+      A setup that appends to the lockfile ends `blocked` with `protected files intact`.
+- [ ] **Integrity.** Overwrite the archive in S3 with other bytes: the bench job fails `checkout` with `sha256 mismatch for the dependency snapshot`
+      (exit 26) and the instance is still terminated. Edit `node` in the manifest: exit 27. Delete the archive but keep the manifest: the next job
+      rebuilds instead of failing.
+- [ ] **Cost/timing.** Record the deps job duration (instance boot + fetch + pack + upload) and the snapshot size for a real lockfile; the fetch
+      runs once per lockfile, not per candidate. Restore time on the bench (download + extract) is added to every job's `checkout`.
 
 ## 5. Live smoke checklist for `RemoteBenchRunner`
 
@@ -386,6 +510,7 @@ Run against a real instance with a throwaway repo first, then `examples/demo-sea
 | GitHub / git remote | `LocalGitHost` (`git archive` of a local repo) feeding `stageSource`; the staging store is a directory the `aws` shim reads | auth, rate limits of the real `GitHubGitHost`, real S3 puts, the instance-side download through the gateway endpoint |
 | Unprivileged users, IMDS block, launcher | `setpriv`/`iptables`/`pkill`/`chown`/`id` and the launcher are shims that log their arguments (`isolation: 'user'` tests); most tests run `isolation: 'none'`. The sudo rule, launcher and file modes were run once by hand on a real Linux host (users, `sudo`, `setpriv`), not in CI | that the users, the iptables rules, the sudoers rule and the launcher exist on the image, that the rule really rejects IMDS for those uids, that `setpriv --no-new-privs` blocks escalation, that the toolchain is usable by both users, that the real kernel denies the cross-user reads (run the split drill) |
 | Hidden trace in the sealed bucket | a local file / shimmed `s3://` path; the tests check order (fetch only in confirm bench steps, after setup and guardrails), wiping on success, crash and timeout, and the generated modes (`chown HU`, `chmod 600`) | bucket policy, KMS, that agents cannot read it, that the real file modes keep `ratchet-bench` out |
+| Package manager + registry + deps instance | `pnpm` / `npm` shims behind the same generated scripts: `fetch` fills a store from the lockfile, `install` refuses to run unless the network is switched off and every package is in the store; the deps "instance" is a second local bash; `aws s3 cp` also uploads (directory copy). One throwaway run used the real pnpm 10.28 against the real registry (fetch -> pack -> restore -> offline install -> `require('is-odd')`), and a fully read-only store failing with `EACCES` plus the `projects` symlink fix was checked by hand as an unprivileged user | the agent subnet / proxy / DNS path to the registry, the `deps` instance profile and its S3 scope, the real `ratchet-deps` user and its IMDS block, `zstd` on the AMI (shimmed), root-owned store modes enforced by the kernel for `ratchet-bench`, timings and sizes of a real lockfile, native optional dependencies per architecture |
 | k6 | not used; the demo test runs `node dist/bench/local.js --duration 3 --warmup 1` | k6 JSON output (`RESULT_FILE`) and the k6 script's own contract |
 | Noise | tests assert logic, not variance | everything in section 2 |
 

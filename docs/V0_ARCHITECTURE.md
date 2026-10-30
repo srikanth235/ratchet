@@ -126,6 +126,7 @@ evaluator:                        # the trusted evaluation (legacy alias: bench)
   run: k6 run bench/k6/search.js
   repeats: 5                      # also used for the baseline noise floor
   hardware: c7i.2xlarge           # pinned, dedicated host
+  deps: auto                      # auto | pnpm | npm | none: how dependencies reach the offline bench
   holdout: s3://sealed/search-trace.jsonl   # sealed; agents never see it
 guardrails:
   - run: pytest -q
@@ -144,6 +145,22 @@ agent:
 The evaluator comes from `evaluator.ref`, never from the candidate's tree, so an
 agent cannot change how it is scored. A forecasting config looks the same with
 `kind: backtest`, `metric: wape` and `holdout:` pointing at the latest unseen period.
+
+**`evaluator.deps`** (optional, default `auto`) says how the candidate's
+dependencies reach a bench that has no network. `auto` detects the package manager
+from the lockfile at `evaluator.ref` (`pnpm-lock.yaml` -> `pnpm`; `package-lock.json`
+or `npm-shrinkwrap.json` -> `npm`; neither -> nothing to do); `pnpm` / `npm` demand
+that lockfile; `none` switches it off (the image provides whatever setup needs).
+When the runner has a candidate setup (for example
+`pnpm install --frozen-lockfile && pnpm build`), the packages come from a *snapshot*
+of the base ref's lockfile that a separate short-lived machine with egress builds once
+(`pnpm fetch` / `npm ci --ignore-scripts`, no lifecycle scripts, never candidate code),
+and setup then installs from it with the package manager offline. Because of that,
+**dependency changes are not allowed in v0**: a candidate whose lockfile differs from
+`evaluator.ref`'s is `blocked` ("dependency changes are not allowed in v0: the bench has
+no network") before anything runs, and the lockfile counts as protected without being
+listed under `protected`. The local simulation applies the same rule. Details and
+real-environment checks: `docs/real-env/bench.md` ("Dependencies on an offline bench").
 
 ## 5. Agents: headless on agent runners
 
@@ -273,12 +290,13 @@ resources (the optional proxy is off by default):
 
 | Resource | Purpose |
 |---|---|
-| `aws_s3_bucket.artifacts` | Agent event streams and build outputs, one prefix per agent; `bench-inputs/` (staged candidates, read-only for the bench) and `bench-results/` |
+| `aws_s3_bucket.artifacts` | Agent event streams and build outputs, one prefix per agent; `bench-inputs/` (staged candidates, read-only for the bench), `bench-deps/` (dependency snapshots: written only by the deps identity, read by the bench identities) and `bench-results/` |
 | `aws_s3_bucket.sealed` | Hidden traffic traces, confirm runner only (holdout prefix) |
-| `aws_s3_bucket_policy.sealed_deny_agents` | Explicit deny for every agent identity and for the bench runner |
+| `aws_s3_bucket_policy.sealed_deny_agents` | Explicit deny for every agent identity, for the bench runner and for the dependency-snapshot builder |
 | `aws_iam_policy.agent_boundary` | Permission boundary for every agent role (launch only into the agent subnet, never with bench/endpoint/proxy groups) |
 | `aws_iam_role.bench_runner` + `aws_iam_instance_profile.bench_runner` | Trusted bench for `baseline`/`bench` phases: **no sealed access** |
 | `aws_iam_role.confirm_runner` + `aws_iam_instance_profile.confirm_runner` | Trusted bench for `confirm` only: reads the holdout prefix of the sealed bucket |
+| `aws_iam_role.deps_runner` + `aws_iam_instance_profile.deps_runner` | Dependency-snapshot builder (`purpose: deps`): runs in the **agent** subnet (egress, through the proxy when enabled), reads only the staged base tree (`bench-inputs/*/deps-base.tgz`), writes only `bench-deps/`; no sealed access, no candidate code |
 | `aws_vpc.sandbox`, `aws_subnet.bench`, `aws_subnet.agent`, route tables, internet gateway | Dedicated network; the bench subnet has no route to the internet |
 | `aws_vpc_endpoint.s3` (gateway, bucket-restricted policy) + 4 interface endpoints (`ssm`, `ssmmessages`, `ec2messages`, `logs`) | The only ways out of the bench subnet |
 | `aws_security_group.agent_runner` | Egress HTTPS + DNS (or, with the proxy, only proxy / endpoints / S3) |
@@ -317,6 +335,13 @@ by the app per optimization (below), not by OpenTofu.
    git credentials: it downloads the archives through the S3 endpoint.
 3. Setup and guardrails run as an unprivileged OS user (`ratchet-bench`) that
    cannot reach instance metadata (iptables owner rule, IMDSv2 hop limit 1).
+   If setup needs packages, the first job of a lockfile is preceded by a
+   short-lived **dependency-snapshot job** on a separate instance with egress
+   (agent subnet, `deps_runner` role): it fetches the package store for the
+   base ref's lockfile as an unprivileged user, uploads it to `bench-deps/` and
+   is terminated before the bench instance exists. The bench instance restores
+   it read-only before setup and installs offline; a candidate that changes the
+   lockfile is blocked.
 4. Runs guardrails, then the benchmark N times. The evaluator harness runs as a
    second user (`ratchet-holdout`) from a read-only snapshot and starts the
    candidate's own processes as `ratchet-bench` through a launcher. If the
