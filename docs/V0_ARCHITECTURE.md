@@ -326,7 +326,10 @@ by the app per optimization (below), not by OpenTofu.
   attributed to agent runners, agent experiments, bench runner and
   storage/egress. Model token usage is read from the agents' JSON event stream
   and shown alongside.
-- **Reconcile:** Cost Explorer by tag after the fact (~24 h lag).
+- **Reconcile:** Cost Explorer by tag after the fact (~24 h lag). Behind the `CostReconciler` port; writes
+  `estimated=false, source='cost-explorer'` correction rows (idempotent, may be negative) and reports `pending`
+  while data is incomplete. Runs at teardown (best effort), via `ratchet cost reconcile`, and `Engine.reconcileCosts`.
+  Procedure and IAM/tag-activation prerequisites: `docs/real-env/aws.md` §7b.
 - **Guard:** warn at 80% of budget; at 100%, kill switch plus reaper.
 - **Reaper:** terminates tagged resources past max lifetime, belonging to a
   stopped agent, or left after the optimization ends. Agent runners also

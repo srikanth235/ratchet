@@ -15,6 +15,7 @@ or production account).
 | `AwsPriceBook` | Filters sent, price parsing, cache | Filters match real Pricing API attribute values |
 | `S3ArtifactStore` | Request params, paging, NoSuchKey | Bucket policy / SSE / the agent prefix restriction |
 | `CostMeter`, `BudgetGuard`, `Reaper` | Math, rules, idempotency (against `MockCloudCompute`) | Tag filters return what we expect; `StateTransitionReason` parsing; real instance lifetimes |
+| `AwsCostReconciler` (+ `reconcileSpend`) | `GetCostAndUsage` request shape (tag filter, group-by, daily window, paging), tag-to-category mapping, completeness gates, idempotent correction rows (mocked SDK client, in-memory ledger) | Cost Explorer accepts the query, the group keys look as assumed (`ratchet:role$bench`), `Estimated` behaves as assumed, the tags are activated and show up, real deviation from the estimate |
 
 ## 0. Prerequisites
 
@@ -169,6 +170,72 @@ trips once at 100 % (wire `onTrip` to revoke + reaper; see 8).
 
 Known gap: terminated instances vanish from `DescribeInstances` after about an hour. Run
 `collect()` at least once a minute so the final slice is captured.
+
+### 7b. Cost Explorer reconcile (`AwsCostReconciler`)
+
+The cost meter is an estimate (tagged instance lifetimes x on-demand price). The reconcile step compares it
+with what AWS billed and appends correction rows to the ledger (`spend_events`: `estimated = false`,
+`source = 'cost-explorer'`, one row per category with a non-zero difference, positive or negative; the
+estimate rows are never touched). Entry points, all running the same `reconcileSpend` (core):
+
+- teardown: `Engine.teardown(id)` calls it best effort and records the outcome in the teardown report
+  (`costReconcile`). It never fails the teardown. Right after teardown the answer is almost always `pending`.
+- CLI: `ratchet cost reconcile <optimizationId> --db <ratchet.db> [--json] [--lag-hours 24] [--accept-estimated]`
+  (`--db` falls back to `$RATCHET_DB`).
+- Engine API: `Engine.reconcileCosts(id)` / `EngineApi.reconcileCosts?` (the desktop can call it later), report
+  readable with `Engine.costReconcileReport(id)`.
+
+**Required IAM permission** on the identity that runs the app/CLI (SSO role, not the agent roles; the agent
+boundary explicitly denies billing/cost):
+
+```json
+{ "Effect": "Allow", "Action": "ce:GetCostAndUsage", "Resource": "*" }
+```
+
+Cost Explorer has no resource-level permissions and one global endpoint (`us-east-1`; the client is created
+for that region regardless of the sandbox region). The Cost Explorer API costs $0.01 per request; one
+reconcile makes one request per page (usually 1). `infra/aws/*.tf` does not grant this; add it to whichever
+policy the operator's role uses.
+
+**Cost-allocation tags must be activated, once, by hand.** Tags only appear in Cost Explorer after they are
+activated as *user-defined cost allocation tags* in the **management (payer) account** of the organization
+(for a standalone account, that account): Billing and Cost Management > Cost allocation tags > select
+`ratchet:opt`, `ratchet:agent`, `ratchet:role`, `ratchet:sandbox` > Activate (CLI:
+`aws ce update-cost-allocation-tags-status --cost-allocation-tags-status TagKey=ratchet:opt,Status=Active ...`).
+A tag key is listed only after a resource carrying it has existed (launch one instance first; up to 24 h),
+and activation takes up to another 24 h to take effect. Activation is not retroactive: usage from before the
+activation is not attributed by tag. Until then the query returns no cost, which the reconcile reports as
+`pending` (never as a $0 bill).
+
+What is queried: `GetCostAndUsage`, `DAILY`, metric `UnblendedCost`, filter `ratchet:opt = <id>`, group by tags
+`ratchet:role` and `ratchet:agent`, window = optimization start day to the day it ended. Groups map to ledger
+categories: `role=agent_runner` -> `agent_runner`; `role=bench` -> `bench_runner`; `role=experiment`, or no role
+but an agent tag (agent-launched experiments carry only `ratchet:opt` + `ratchet:agent`) -> `experiment`;
+anything else tagged only with `ratchet:opt` -> `storage_egress`. EBS volumes carry their instance's tags, so
+they land with it. `tokens` are never reconciled (AWS does not bill them). Not captured: cost of resources
+without a `ratchet:opt` tag (the long-lived sandbox: VPC endpoints, buckets), credits and refunds (unblended
+cost is before credits).
+
+Writes happen only when the data can be final; otherwise the status is `pending` and the ledger is untouched:
+the optimization has not ended; less than 24 h (`--lag-hours`, `EngineSettings.costLagMs`) since it ended;
+any returned day is flagged `Estimated` (override with `--accept-estimated`); or Cost Explorer returned no
+cost while the ledger has an estimate (tags not activated, or data not there yet). Idempotence: each
+correction is `billed - everything the ledger already holds for that category`, so re-running with the same
+billing data writes nothing, and later, higher data writes only the remainder.
+
+Real-account check (after the 24 h wait of step 7):
+
+1. Activate the four tags (above), run a short real optimization (one `c7i.large` runner, one bench run), tear it down.
+2. Immediately: `ratchet cost reconcile <opt> --db ...` -> `pending` (still inside the 24 h gate), no rows.
+3. After 24-48 h: run it again. Expected: `reconciled`, one correction row per metered category, billed within a few percent of the
+   estimate (EBS and per-second rounding explain small differences). `select * from spend_events where source='cost-explorer'`
+   shows `estimated = 0`. Run it again: `unchanged`.
+4. **Verify the assumptions the mocks cannot:** the request is accepted (a `ValidationException` means the tag-group or date
+   assumption is wrong); `Groups[].Keys` look like `ratchet:role$bench` / `ratchet:agent$` (the parser relies on the
+   `<key>$<value>` form); `Estimated` is `false` for days older than ~1 day (if it is `true` for the whole current month,
+   every reconcile stays `pending`: use `--accept-estimated` and note that finalised numbers can still change until the month closes);
+   `ce:GetCostAndUsage` is the only permission needed; an identity without it gets `AccessDeniedException` and the CLI prints this doc's path.
+5. Negative case: with tags **not** activated the result is `pending` ("cost-allocation tags"), not a correction to $0.
 
 ## 8. `Reaper` and zero-orphan teardown
 

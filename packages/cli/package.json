@@ -12,6 +12,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@ratchet/aws": "workspace:*",
     "@ratchet/core": "workspace:*",
     "commander": "^15.0.0"
   }

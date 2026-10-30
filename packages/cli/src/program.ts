@@ -1,5 +1,6 @@
 import { Command, CommanderError, InvalidArgumentError } from 'commander';
 import { runBaseline } from './commands/baseline.js';
+import { runCostReconcile, type CostDeps } from './commands/cost.js';
 import { runValidate } from './commands/validate.js';
 import type { Io } from './io.js';
 
@@ -16,7 +17,7 @@ function parsePositiveInt(value: string): number {
 }
 
 /** Build the commander program. Commands record their exit code via `setExit`. */
-export function buildProgram(io: Io, setExit: (code: number) => void): Command {
+export function buildProgram(io: Io, setExit: (code: number) => void, deps: CostDeps = {}): Command {
   const program = new Command('ratchet')
     .description('Ratchet: autonomous optimization of a repo against a benchmark')
     .exitOverride()
@@ -58,15 +59,36 @@ export function buildProgram(io: Io, setExit: (code: number) => void): Command {
       },
     );
 
+  const cost = program.command('cost').description('spend and billing tools');
+  cost
+    .command('reconcile')
+    .description(
+      'compare the ledger\'s estimated spend with AWS Cost Explorer (tag ratchet:opt) and record\n' +
+        'correction rows. Idempotent. Prints "pending" and writes nothing while billing data is\n' +
+        'incomplete (Cost Explorer lags up to 24 h). Needs ce:GetCostAndUsage.',
+    )
+    .argument('<optimizationId>', 'optimization to reconcile')
+    .option('--db <path>', 'ledger SQLite file (default: $RATCHET_DB)')
+    .option('--json', 'machine-readable JSON output')
+    .option('--lag-hours <h>', 'hours after the optimization ended before billing is trusted; default 24', parseNumber)
+    .option('--accept-estimated', 'treat days Cost Explorer still marks as estimated as final')
+    .action(async (optimizationId: string, o: { db?: string; json?: boolean; lagHours?: number; acceptEstimated?: boolean }) => {
+      setExit(await runCostReconcile(optimizationId, o, io, deps));
+    });
+
   return program;
 }
 
 /** Run the CLI with `argv` (without node/script, i.e. `process.argv.slice(2)`). Returns the exit code. */
-export async function runCli(argv: string[], io: Io): Promise<number> {
+export async function runCli(argv: string[], io: Io, deps: CostDeps = {}): Promise<number> {
   let code = 0;
-  const program = buildProgram(io, (c) => {
-    code = c;
-  });
+  const program = buildProgram(
+    io,
+    (c) => {
+      code = c;
+    },
+    deps,
+  );
   for (const sub of program.commands) sub.exitOverride();
   try {
     await program.parseAsync(argv, { from: 'user' });
