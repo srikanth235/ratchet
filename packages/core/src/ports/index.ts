@@ -6,6 +6,10 @@
  */
 import type { RatchetConfig } from '../config/schema.js';
 import type { GuardrailResult } from '../config/guardrails.js';
+import type { Calibration } from '../bench/calibrate.js';
+import type { EffectiveProtected } from '../protected-set.js';
+import type { RenderTemplateOptions } from '../templates/render.js';
+import type { TemplateInfo } from '../templates/registry.js';
 import type { AgentKind, CandidateVerdict, SandboxProviderKind, SandboxStatus, SpendCategory } from '../ledger/schema.js';
 
 export type OptimizationId = string;
@@ -228,6 +232,23 @@ export interface FileDiff {
   patch: string;
 }
 
+/** A file for `commitFiles`. `path` is repo-relative POSIX; `executable` sets mode 100755. */
+export interface CommitFile {
+  path: string;
+  content: string;
+  executable?: boolean;
+}
+
+export interface CommitFilesInput {
+  /** Branch (or sha) the new commit is parented on and whose tree it extends. */
+  baseRef: string;
+  /** The branch to create. It must not exist yet. */
+  branch: string;
+  message: string;
+  /** Written over the base tree (added, or replaced when the path exists). */
+  files: CommitFile[];
+}
+
 export interface GitHost {
   /** Create `branch` at `fromRef` in the remote. */
   createBranch(fromRef: string, branch: string): Promise<void>;
@@ -243,6 +264,12 @@ export interface GitHost {
   /** Resolve a ref (branch, tag, sha) to a full commit sha. */
   resolveRef(ref: string): Promise<string>;
   remoteUrl(): string;
+  /**
+   * Create `branch` in the remote as one new commit on top of `baseRef` that adds `files` (a template, say) and return
+   * that commit's sha. Fails when the branch already exists. Optional so existing hosts keep compiling; LocalGitHost
+   * and GitHubGitHost implement it. To open the PR from the branch call `openPullRequest` with `shas: []`.
+   */
+  commitFiles?(input: CommitFilesInput): Promise<{ sha: string }>;
 }
 
 // ---------------------------------------------------------------- agents
@@ -309,6 +336,8 @@ export interface RunnerConfig {
   config: RatchetConfig;
   brief: string; // RATCHET.md contents
   baselineValue: number;
+  /** The win threshold in force (a fraction): ratchet.yaml's `min_gain`, or the one calibrated from the baseline. */
+  minGain?: number;
   budgetUsd: number;
   deadlineAt: number;
 }
@@ -405,6 +434,28 @@ export type EngineEvent =
   | { type: 'spend'; optimizationId: OptimizationId; totalUsd: number }
   | { type: 'notice'; optimizationId: OptimizationId; level: 'info' | 'warning' | 'error'; text: string };
 
+/** What `EngineApi.proposeTemplate` needs: a repository, the branch the PR targets, and the template. */
+export interface ProposeTemplateInput extends RenderTemplateOptions {
+  repoUrl: string;
+  /** The branch the PR targets (and the files are added on top of). */
+  baseRef: string;
+  /** A template id from `listTemplates()` (a legacy `--pack` name is accepted). Demos cannot be proposed. */
+  templateId: string;
+  /** Add the files even when some already exist on `baseRef` (they are replaced). Default false: refuse. */
+  overwrite?: boolean;
+}
+
+export interface ProposeTemplateResult {
+  prUrl: string;
+  /** The branch the PR was opened from. */
+  branch: string;
+  /** The commit on `branch`. */
+  sha: string;
+  templateId: string;
+  /** Repo paths added by the commit. */
+  files: string[];
+}
+
 export interface EngineApi {
   mode(): Mode;
   createOptimization(input: EngineCreateOptimizationInput): Promise<OptimizationId>;
@@ -422,6 +473,23 @@ export interface EngineApi {
    * existing implementations keep compiling.
    */
   reconcileCosts?(id: OptimizationId): Promise<CostReconcileReport>;
+  /**
+   * The auto-calibrated statistics of an optimization (docs/SIMPLIFIED_MODEL.md): how many runs each candidate gets,
+   * the gain a win must beat, and `explanation`, one plain-words sentence for the UI ("this metric is noisy (±9%);
+   * wins must beat 9%; ..."). Derived from the baseline, so `null` until the baseline has run. Optional so existing
+   * implementations keep compiling.
+   */
+  calibration?(id: OptimizationId): Promise<Calibration | null>;
+  /** Every path protected for this optimization, with why: the automatic set plus the user's `protected:` list. */
+  protectedPaths?(id: OptimizationId): Promise<EffectiveProtected>;
+  /** The evaluator template gallery: runnable templates, then the "Try a demo" entries (core's `listTemplates()`). */
+  listTemplates?(): Promise<TemplateInfo[]>;
+  /**
+   * "Use template": commit the template's files (ratchet.yaml, RATCHET.md, the evaluator) on a new branch of the repo
+   * and open a PR whose description says what was added and how to run a baseline. Refuses when the files already
+   * exist (unless `overwrite`) or the git host cannot commit files.
+   */
+  proposeTemplate?(input: ProposeTemplateInput): Promise<ProposeTemplateResult>;
   /** Sandbox lifecycle: planned -> applying -> applied -> destroying -> destroyed / failed, recorded in the ledger. */
   sandboxState(sandboxId: string): Promise<SandboxState>;
   planSandbox(input: SandboxInput): Promise<SandboxPlan>;

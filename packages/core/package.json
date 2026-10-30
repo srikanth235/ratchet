@@ -14,7 +14,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "gen:templates": "node scripts/gen-templates.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
