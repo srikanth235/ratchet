@@ -25,7 +25,7 @@ that prints a number.
 ## 2. Topology
 
 ```
-┌──────────────────── Ratchet desktop (Electron)───────────────────┐
+┌─────────────────── Ratchet desktop (Electron) ──────────────┐
 │ Optimization engine · Ratchet · Budget guard · Ledger · UI  │
 │ AgentAdapters (Claude Code, Codex) · GitHub watcher         │
 │ AWS controller (cost meter, reaper, bench runner)           │
