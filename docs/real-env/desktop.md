@@ -1,46 +1,52 @@
 # Real-environment testing: desktop app
 
-`packages/desktop` (Electron main + React renderer) is complete against the **dev engine stub**. This file lists
-what to verify on a real Mac, and exactly what is stubbed until the real engine lands.
+`packages/desktop` (Electron main + React renderer) implements the simplified model in
+[SIMPLIFIED_MODEL.md](../SIMPLIFIED_MODEL.md). This file lists what is real, what is faked in the automated tests, and what to verify on a
+real Mac with a real GitHub account, AWS profile and agent CLIs.
 
-## What is real vs. stubbed
+## What is real vs. faked
 
 | Piece | State |
 |---|---|
 | Ledger (`openLedger(<userData>/ratchet.db)`), all reads, view-model mappers | **Real.** Every screen reads the SQLite ledger through `Ledger` methods. |
-| Typed IPC, zod input validation, sender check, event push | **Real.** |
-| Secrets (`safeStorage`), settings file | **Real** code; the OS keychain path is only exercised on a real desktop session. |
-| Engine (`EngineApi`) | **Real** in both modes. Simulation: the core engine on mock AWS, a local git remote and scripted agents. Live: the core engine on `createLiveRuntime`, built from Settings (below). `DevEngine` (seeded demo data) is only used by renderer tests and `RATCHET_ENGINE=dev`. |
-| Sandbox plan / apply / destroy | **Real code, mock cloud in simulation.** Both modes go through `engine.planSandbox / applySandbox / destroySandbox`, which record `planned → applying → applied → destroying → destroyed / failed` and the outputs in the ledger (`sandboxes`). Simulation uses `MockSandboxProvider` (sandbox id `ratchet-sim`); live uses `TofuSandboxProvider` (id `ratchet-sandbox`). The two never share a row. |
-| PR url, teardown flags | Kept in `settings.json` (the ledger has no column); teardown checklist items 1 to 3 are *derived* from the optimization status. |
-| Bench pipeline strip (Live agents) | *Derived* from the newest candidate's bench/confirm rows; the real bench runner will have live state to show. |
+| Typed IPC, zod input validation, sender check, event push | **Real.** The renderer API (`RatchetApi`) has no method that returns a secret, and no plan / apply / destroy of infrastructure. |
+| Secrets (`safeStorage`), settings file | **Real** code; the OS keychain path is only exercised on a real desktop session. Without a keychain (Linux CI) the app refuses to store a token and says so. |
+| Engine (`EngineApi`) | **Real.** Repositories: `createHybridRuntime` per repo (local agents by default, cloud evaluator, automatic sandbox). Demos: the same Engine on `createSimulationRuntime`. `DevEngine` (seeded data) is only used by renderer tests and `RATCHET_ENGINE=dev`. |
+| Sandbox | **Automatic.** Created when a run starts, removed after the last run plus the idle window (30 min), receipt written. Demos get a mock one (`ratchet-sim-<project>`), repositories an AWS one. |
+| GitHub sign-in, repo list, `ratchet.yaml` read, template pull request | **Real code.** Tests fake `fetch` (unit) or a local HTTP server (`packages/e2e/harness/fakes.mjs`); nothing was run against github.com. |
+| AWS profiles | **Real parser** of `~/.aws/config` and `~/.aws/credentials` (names and kinds only). "Test connection" is `createConnectionTester` (STS); not run against a real account here. |
+| Harness detection | **Real** (`detectHarnesses` in the main process); tests use fake `claude` / `codex` executables on PATH. |
+| Local agents, cloud evaluator on real AWS | **Real code, not exercised here.** |
+| PR url | Kept in `settings.json` (the ledger has no column). |
 
-`DevEngine` writes everything through the normal `Ledger` API and judges candidates with the real
-`evaluateRatchet`, so the data has the right shape. It seeds four optimizations into an empty ledger and keeps the
-seeded "search-api" one running (one simulated agent turn every 2.5 s). It resumes any `running` optimization on startup.
+### How the main process is wired (`src/main`)
 
-### Live mode is built from Settings
+* `index.ts`: opens the ledger and the settings store, creates the `HarnessCache` (probed on launch), the GitHub API (client id from
+  `RATCHET_GITHUB_CLIENT_ID`), the service and the IPC; drives `powerSaveBlocker.start('prevent-app-suspension')` / `stop` from
+  the `run-active` event (`power.ts`).
+* `engine.ts` (`createEngineForApp`): the product engine. `slugOf(opt.repo)` decides where a command goes: a GitHub repo to the
+  runtime built for it, a filesystem path (a demo's local remote) to its simulation runtime. Runtimes are built lazily, from
+  Settings and the cached detection: region from the repo's `environment.region` (read in step 1), the bench AMI found by tag for
+  the app version (`resolveImageRefs`; the cloud runner AMI too, only needed for "Cloud"), the profile, the GitHub token, the
+  harnesses and the login PATH. Changing a setting or signing in/out marks them stale; an idle runtime is rebuilt on next use,
+  one with an active run is kept until it finishes. An AWS sandbox that outlived the app is watched from launch so its idle
+  destroy still happens. `run-active` from every runtime is merged into one signal.
+* `service.ts`: the renderer-facing API. `preflight` is the "what's missing" list; `inspectRepo` reads `ratchet.yaml` from the
+  default branch (GitHub contents API) or a local folder (`local-repo.ts`) and summarizes it with core's `parseConfig` and
+  `effectiveProtected`; `environments` / `endSandbox` use `sandboxActivity` / `endSandbox`; `getOptimization` adds the teardown
+  receipt and the calibration sentence.
+* `github.ts` + `github-signin.ts`: REST + the OAuth device flow (poll loop with `slow_down`, expiry, denial; injectable
+  `fetch`/`sleep`). `aws-profiles.ts`, `harnesses.ts`, `local-repo.ts`, `power.ts`: small, injectable, unit-tested.
 
-`createEngineForApp(ledger, 'live', { live })` (`src/main/engine.ts`) reads the non-secret settings from `SettingsStore`
-and the secrets from the keychain (main process only) and calls `createLiveRuntime`. It is built in stages:
+Configuration:
 
-1. **No sandbox applied yet** (`sandbox: null`): only plan / apply / destroy work (they need just the profile, the tofu
-   binary and the module). Every other port is "unready" and fails with `not_configured` and a sentence saying what to set.
-2. **After an apply** the service rebuilds the engine from the outputs stored in the ledger (`sandboxes.outputs`); the
-   compute, artifacts and runner ports become real. Changing a setting or a secret also rebuilds it, except while an
-   optimization is running (Settings then says the change applies once it has stopped).
-3. GitHub (repository + token), the bench AMI and the runner AMI complete the wiring; `LiveRuntime.missing` lists what is left.
-
-Rules enforced by the engine and covered by tests: a live optimization is created only inside an applied sandbox and is
-linked to it (`optimizations.sandbox_id`); starting one re-checks; destroy is refused while an optimization in the sandbox is
-baselining / running / stopping, while agent identities of its optimizations were not torn down, and while any tagged
-instance is alive. The Settings repository must match the repository in the New optimization form (live runs use one clone
-and one token).
-
-* `EngineCreateOptimizationInput` still has no ratchet.yaml text. The UI sends `configYaml` as an extra property (only the
-  dev engine uses it); the real engine reads `configPath` at `baseRef` from the repository.
-* Mode switching (Settings) calls `createApp(mode)` again after `dispose()`.
-* API keys: `SettingsStore.getSecret(name)` is main-process only; `secretSource(settings)` hands them to the engine.
+| Variable | Use |
+|---|---|
+| `RATCHET_GITHUB_CLIENT_ID` | OAuth app (device flow enabled) for "Sign in with GitHub". Without it a placeholder is used and Settings says so. |
+| `RATCHET_GITHUB_API_URL`, `RATCHET_GITHUB_WEB_URL` | GitHub Enterprise; the end-to-end tests point them at a fake. |
+| `RATCHET_SIM_IDLE_MS` | Idle window of a demo's mock environment (default 30 min). |
+| `RATCHET_E2E_PICK_FOLDER` | Test only: answers the "Local folder…" dialog. |
+| `RATCHET_USER_DATA_DIR`, `RATCHET_E2E_SAVE_DIR`, `RATCHET_REPO_ROOT`, `RATCHET_ENGINE=dev` | As before (isolated userData, report export, monorepo root for demos, the seeded stub). |
 
 ## Checklist on a real Mac
 
@@ -52,104 +58,70 @@ and one token).
 3. Verify: `codesign --verify --deep --strict --verbose=2 Ratchet.app`, `spctl -a -vvv -t install Ratchet.app`,
    `xcrun stapler validate Ratchet.dmg`.
 4. Open the DMG on a *different* Mac (quarantine flag set): no Gatekeeper warning, app starts.
-5. Confirm native module loading: the app opens and shows the seeded optimizations (proves `better-sqlite3` loads
-   from `app.asar.unpacked` under the hardened runtime; the entitlement `disable-library-validation` in
-   `build/entitlements.mac.plist` exists for this).
+5. Confirm native module loading: the app opens (proves `better-sqlite3` loads from `app.asar.unpacked` under the hardened
+   runtime; the entitlement `disable-library-validation` in `build/entitlements.mac.plist` exists for this).
 6. Confirm migrations ship: `Ratchet.app/Contents/Resources/migrations/*.sql` exists.
-7. Unverified risk: electron-builder with pnpm workspaces sometimes misses production deps (`better-sqlite3`,
-   `yaml`, `zod` are externalized from the main bundle). If the packaged app crashes with "Cannot find module",
-   set `node-linker=hoisted` for the desktop package install, or bundle those deps.
+7. Unverified risk: electron-builder with pnpm workspaces sometimes misses production deps (`better-sqlite3`, `yaml`, `zod` and now
+   `@ratchet/agents` / `@ratchet/aws` are externalized from the main bundle). If the packaged app crashes with "Cannot find
+   module", set `node-linker=hoisted` for the desktop package install, or bundle those deps.
 
-None of the packaging config (`electron-builder.yml`, entitlements) has been run: only `electron-vite build` and
-the headless Linux launch below were exercised.
+None of the packaging config (`electron-builder.yml`, entitlements) has been run: only `electron-vite build` and the headless
+Linux launch below were exercised.
 
-### 2. Keychain / secrets
+### 2. Settings (three rows)
 
-1. Settings → save an Anthropic key, OpenAI key and GitHub token. Pills turn to *Configured*; the input clears and
-   never shows the value again.
-2. Quit and relaunch: still *Configured*. `~/Library/Application Support/Ratchet/settings.json` contains base64
-   cipher text only (`grep -c sk-ant settings.json` is 0).
-3. Keychain Access shows a "Ratchet Safe Storage" item. Deny access once: Settings shows the
-   "keychain is unavailable" banner instead of crashing.
-4. Clear removes the key; relaunch confirms.
-5. Open DevTools (View → Toggle) and run `window.ratchet.getSettings()`: only booleans. Search the renderer's
-   network/IPC for key material: none.
+1. **GitHub.** Register an OAuth app with the device flow enabled, launch with `RATCHET_GITHUB_CLIENT_ID=<id>`. *Sign in with
+   GitHub* shows a code and opens `github.com/login/device`; approve; the row shows `Signed in as <you>` within a few seconds.
+   `~/Library/Application Support/Ratchet/settings.json` holds base64 cipher text only (`grep -c gho_ settings.json` is 0);
+   Keychain Access shows a "Ratchet Safe Storage" item. *Test connection* says `signed in as <you>`. *Sign out* clears it. Deny the
+   keychain once: the flow ends with the "keychain is unavailable" message instead of storing anything. Unverified: the token has
+   scope `repo` (a GitHub App with fine-grained permissions would be narrower; the flow is the same).
+2. **AWS.** *Connect AWS* lists the profiles and SSO sessions from `~/.aws` (names only). Pick an SSO profile after
+   `aws sso login --profile <p>`, *Test connection*: `signed in to account <id> in <region>`; an expired session appends the
+   `aws sso login` command. The region shows `us-east-1`; change it, save.
+3. **Agents.** With Claude Code and Codex installed and signed in, both show their version and `Signed in`, and `2 ready`. Sign out
+   of Codex in a terminal, *Re-detect*: it shows `Signed out`, the `codex login` hint and an API key field. Install nothing for a
+   harness: `Not installed` with the install command. Set `ANTHROPIC_API_KEY` in the environment you launch from: Claude Code
+   shows `API key`. A GUI launch does not inherit the shell PATH: confirm the CLIs are still found (login-shell PATH).
+4. **Advanced (development)** is collapsed; AMI ids typed there bypass the tag lookup.
+5. DevTools: `window.ratchet.getSettings()` returns booleans for the secrets and no values; `window.ratchet.githubStatus()` has the
+   login but no token.
 
-### 2b. Live mode: Settings, then the sandbox (needs a sandbox AWS account, `tofu`, a GitHub token)
+### 3. A real run on a repository
 
-1. Settings → Mode stays **Simulation**. Fill in the AWS section: profile (an SSO profile after `aws sso login --profile <p>`
-   works; pick *SSO* so errors say what to run), region, then **Test connection**: expect `signed in to account <id> in <region>`.
-   A wrong or expired profile must say so (for SSO it appends the `aws sso login` command). The account id must be the
-   dedicated sandbox account.
-2. GitHub: repository `owner/name`, store the token above, **Test connection**: expect `<repo> (private|public, default branch …); the token can push`.
-   A read-only token must be reported as "cannot push". Anthropic / OpenAI rows: store a key, **Test connection** per key
-   (a wrong key reports `rejected the key (401)`).
-3. OpenTofu: leave both empty to use the defaults shown as placeholders (packaged app: `Resources/infra/aws` and, if present,
-   `Resources/bin/tofu`; checkout: `infra/aws` and `tofu` on PATH). **Test connection**: expect `OpenTofu 1.x, module …`.
-4. Runner / bench AMIs: ids from your image builds. Format errors appear as you type; Save stays disabled until valid.
-5. The *Live readiness* list now shows everything ok except *Sandbox applied*.
-6. Switch to **Live**. Environments: the badge says *Live account* and *Not planned yet*; nothing ran. **Plan** runs `tofu plan`
-   (watch `<userData>/sandboxes/ratchet-sandbox/` fill with `vars.tfvars.json`, `plan.tfplan`) and shows the diff: every
-   resource is `+ create` (see `docs/real-env/aws.md` §1 for the expected list). Re-opening the screen must **not** run tofu again.
-7. **Apply sandbox** → the confirmation names the account, region and profile and shows the plan summary → **Confirm apply**.
-   The badge goes *Applying…*, then *Applied*; the Outputs card shows the real bucket names, boundary ARN and subnet. Check the
-   ledger: `sqlite3 ratchet.db "select id,provider,status,account_id,applied_at from sandboxes"` → `ratchet-sandbox|aws|applied|<acct>|…`
-   and `select json_extract(outputs,'$.artifactsBucket') from sandboxes`.
-8. Quit and relaunch in live mode: the sandbox is still *Applied* (status and outputs come from the ledger) and the live engine is
-   rebuilt from them (New optimization preflight: *Sandbox applied* ok).
-9. Kill the app (`kill -9`) in the middle of an apply: after relaunch the sandbox shows *Failed* with "interrupted"; **Apply sandbox**
-   again converges (tofu is idempotent).
-10. New optimization before any apply (or after a destroy): preflight *Sandbox applied* is red and creating the optimization is
-    refused with "apply it first". After the apply it is created and `select sandbox_id from optimizations` shows `ratchet-sandbox`.
-11. Destroy guards, in this order (each must leave the status *Applied* and change nothing in AWS):
-    a. a running optimization in the sandbox → the button is disabled with "Stop optimization … first";
-    b. stopped but not torn down → "agent identities … run its teardown first";
-    c. launch a tagged instance by hand (`aws ec2 run-instances …` with `ratchet:opt=<id>` in the sandbox VPC) → "tagged instance(s) still alive";
-    d. after teardown (Result → Run teardown) and no instances: **Destroy sandbox** → confirmation → *Destroying…* → *Destroyed*, outputs
-       back to "after apply"; run the zero-orphan list at the end of `docs/real-env/aws.md` §8.
-12. Secrets: DevTools → `window.ratchet.getSettings()` returns booleans for the three secrets and no values; `grep -c <key prefix> settings.json`
-    is 0; `ps eww` on the `tofu` process shows `AWS_PROFILE` but none of the keys or the token.
+Needs a sandbox AWS account with the published images (tag `ratchet:image` + `ratchet:image_version` = the app version), a GitHub repo
+you can push to, and a signed-in Claude Code or Codex.
 
-Unverified: bundling a pinned `tofu` into `Resources/bin/` (electron-builder only ships `infra/aws` today); behaviour when an SSO session
-expires during a long apply; whether one `tofu show -json` is fine for a large plan.
-
-### 3. Screens against the live engine
-
-For each screen, run a real optimization on `examples/demo-search` first (see `docs/real-env/engine.md`).
-
-* **Optimizations**: KPI numbers match the ledger (`sqlite3 ratchet.db` queries: wins = rows in `ratchet_moves`,
-  spend = `sum(spend_events.usd)`). Live card and chart update while agents run (events push; 10 s fallback poll).
-  Unit labels are guessed from the metric key (`unitForMetric`); confirm they are right for your metric.
-* **New optimization**: edit each field; the generated yaml validates through IPC (`parseConfig`). Paste a broken
-  yaml in *Edit* and check the error paths. Preflight must go red for missing AWS profile / keys in live mode.
-  "Run baseline & start" creates the optimization and lands on Live agents; the baseline appears in the ledger.
-* **AWS sandbox**: plan list is the real `tofu plan` (counts match `tofu show`); outputs match `infra/contract.md`;
-  account id, region and profile are the real ones; Apply / Destroy follow 2b. The diagram is static.
-* **Live agents**: the hypothesis tracks the agent's latest message; log lines stream in order without gaps or
-  duplicates across a reconnect (cursor is the ledger event id); Message reaches the agent's next turn; Pause /
-  Resume change the runner state; **Stop** (confirm, then kill switch) revokes identities and terminates instances
-  (check IAM and EC2 in the console). The bench strip should reflect the real bench runner.
-* **Benchmark history**: chart steps equal `ratchet_moves`; noise band equals the baseline noise floor; verdict
-  pills and reasons match the ratchet rule; histogram uses the baseline samples vs the best candidate's bench samples.
-* **Result**: *Open pull request* creates the PR through the engine and shows its url; *Export report* opens the
-  native save dialog and writes Markdown; *Run teardown* destroys the sandbox. The teardown checklist is derived
-  from status plus a local flag today: wire it to real teardown state.
+1. New optimization -> pick the repo (the list is your account's repos, most recently pushed first). With no `ratchet.yaml` on the
+   default branch the templates appear; *Add via pull request* opens a PR and shows its link (check the branch
+   `ratchet/template-<id>`); merge it, *I merged it: check again*.
+2. Review: measured metric, toolchain (`host` or the container), machine, region, protected paths (each with a reason). *What's
+   missing* must name exactly what is missing: GitHub, AWS, an agent that is not signed in; fix it in Settings and the list empties.
+   *Cloud (unattended)* adds the API key requirement and the cloud runner image.
+3. Budget & time (defaults $50 / 2 h) -> *Start*. Agents opens at *Baselining*. The Mac must not sleep while it runs (check with
+   `pmset -g assertions`: a `PreventUserIdleSystemSleep`-class assertion from Ratchet while a run is active, released after).
+4. Environments shows the sandbox appearing (`Creating`, then `Ready`) in the repo's region, instances and cost so far; *End sandbox
+   now* is disabled while a run is active. After the last run it goes `Idle` and says when it removes itself.
+5. *End sandbox now* (confirm) or wait for the idle window: the receipt appears on Environments and on Result; run the zero-orphan
+   list at the end of `docs/real-env/aws.md` §8 and compare.
+6. Local agents: each agent works in its own worktree under `<userData>/sandboxes/local-agents`; they die with the app.
+7. Local folder: pick a clone whose `origin` is on GitHub: the same ratchet.yaml is read from the working tree.
 
 ### 4. Not covered by anything yet
 
 * Windows / Linux packaging (config exists for AppImage, untested).
 * Auto-update.
-* The "time by code path" and "winning diff" panels from the design (§9 Result): no data source in the ledger yet.
 * "Open session" on an agent card: needs the runner's session URL from the engine.
+* A repo-less local folder (no GitHub `origin`): the evaluator fetches candidates from GitHub, so it is refused with a message.
+* More than one machine: the idle-destroy of a sandbox created by the app on another computer.
 
 ## Running the app headless (what dev/CI did)
 
 ```
 pnpm --filter @ratchet/desktop build
-PLAYWRIGHT_MODULE=/path/to/node_modules/playwright \
-  xvfb-run -a node packages/desktop/scripts/screenshots.mjs ./shots
+pnpm --filter @ratchet/e2e test:e2e          # Playwright under Xvfb; SKIP_BUILD=1, E2E_FILTER=03
 ```
 
-Launches the built app under Electron + Playwright with a throwaway user-data dir and screenshots every screen,
-including a create-and-start run through the real IPC. Under Xvfb the OS keychain is unavailable, so the Settings
-screenshot shows the keychain banner (expected there).
+The end-to-end specs launch the built app with a throwaway user-data dir and fakes for GitHub, the agent CLIs and `~/.aws`
+(`packages/e2e/harness/fakes.mjs`). Under Xvfb the OS keychain is unavailable, so the device-flow and pasted-token tests assert
+the refusal instead of a sign-in (the stored-token path is covered by the unit tests with a fake cipher).

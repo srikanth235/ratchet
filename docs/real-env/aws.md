@@ -123,7 +123,9 @@ must not run `tofu destroy` (`aws s3 ls` still shows the buckets).
 ### 1b. Sandbox lifecycle through the engine (what the desktop app does)
 
 The app never calls the provider directly: `engine.planSandbox / applySandbox / destroySandbox` wrap it in `SandboxLifecycle`
-(`packages/core/src/sandbox`) and write the ledger. Run the same thing from a script to check the recorded state:
+(`packages/core/src/sandbox`) and write the ledger. In the desktop app these are no longer buttons: the engine creates the sandbox at the
+first run start and destroys it after the idle window (`docs/SIMPLIFIED_MODEL.md`); Environments is read-only with "End sandbox now". Run the
+same calls from a script to check the recorded state:
 
 ```js
 import { Engine } from '@ratchet/engine';

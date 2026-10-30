@@ -676,20 +676,52 @@ Dark, precise, "instrument panel" look. Implement as tokens in `packages/ui`.
 
 ### Screens
 
-1. **Optimizations:** KPI cards (verified wins, median gain, spend, cost per
-   win), live run with ratchet chart, activity feed, table of all runs.
-2. **New optimization:** four steps (target, benchmark & metric, guardrails,
-   agents & limits) plus a review panel with the generated `ratchet.yaml` and
-   preflight checks; primary action "Run baseline & start".
-3. **AWS sandbox:** architecture diagram (trusted path in brass), OpenTofu plan
-   diff, account details, agent limits, contract outputs.
-4. **Live agents:** one card per agent (hypothesis, recent eval bars, stats,
-   live log, message / open session / pause) and the bench runner pipeline.
-5. **Benchmark history:** ratchet chart with noise band, latency histogram
-   baseline vs. best, percentile table, every candidate with its verdict.
-6. **Result:** headline before → after, time by code path, winning diff,
-   per-agent results, spend breakdown, teardown checklist, "Open pull
+The UI implements the simplified model ([SIMPLIFIED_MODEL.md](SIMPLIFIED_MODEL.md)): settings hold who you are, the repo holds what
+to optimize, and the environment is automatic. Everything that touches a credential, the machine or the cloud runs in the main
+process; the renderer gets view models (`window.ratchet`, `RatchetApi`).
+
+1. **Optimizations:** KPI cards (verified wins, median gain, spend, cost per win, value), live run with ratchet chart, activity
+   feed, table of all runs. The sidebar's four integration chips mean: GitHub signed in, an AWS profile chosen, Claude Code ready,
+   Codex ready (a harness is ready when it is installed and signed in, or has an API key in the environment).
+2. **New optimization, three steps** (a stepper at the top, a summary panel on the right):
+   - **Repo.** A searchable picker over the signed-in account's repositories (GitHub REST from the main process), or "Local
+     folder…" (native dialog; the folder must have a GitHub `origin`, because candidates are pushed to GitHub and the cloud
+     evaluator fetches them from there). `ratchet.yaml` is read from the default branch (the working tree for a local
+     folder). If the repo has none, the templates are offered with **Add via pull request** (`proposeTemplate`; the PR link is
+     shown, then "I merged it: check again"). An invalid `ratchet.yaml` is reported with its parse errors. **Try a demo** lists the
+     demo templates: a demo runs in simulation (scripted agents, mock AWS, nothing to set up).
+   - **Review.** Read-only facts from the repo: what is measured (metric, direction, evaluator template or `run`, whether a
+     holdout re-checks wins), the toolchain (`environment.image`, else "host"), the machine and region, the calibration note
+     ("noise is measured during the baseline"; the plain-words figures appear on Agents once the baseline ran), and the effective
+     protected set (`effectiveProtected`, each entry with its reason). "View ratchet.yaml" is a read-only disclosure. Then the
+     agents (the detected, signed-in harnesses are pre-selected, with version and sign-in status) and **Where agents run**: *This
+     Mac* (default) or *Cloud (unattended)*. Missing prerequisites show as a short "What's missing" list (sign in with GitHub,
+     connect AWS, an agent that is not installed or signed in, API keys for cloud runners) with an "Open Settings" button, never as
+     a form.
+   - **Budget & time.** Defaults $50 and 2 h, then **Start**. The yaml editor, evaluator cards and guardrail ticks of the earlier
+     design are gone: the repo owns the config, and changes go through a pull request.
+3. **Environments (read-only):** what is running in the automatic sandbox (phase from the `sandbox` events, region, active runs,
+   instances, cost so far, when it removes itself), the last teardown receipt, and **End sandbox now** behind a confirmation
+   (refused while a run is active). There is no plan, apply or destroy.
+4. **Agents (live):** one card per agent (hypothesis, recent eval bars, stats, live log, message / pause), the calibration note, and
+   the evaluator pipeline.
+5. **Benchmarks:** a switch between **Benchmark history** (ratchet chart with noise band, histogram baseline vs. best, percentile
+   table, every candidate with its verdict) and **Templates**: the gallery (title, what it measures, holdout, machine, **Use
+   template** = repo picker -> pull request -> link) and **Try a demo**.
+6. **Result:** headline before -> after, time by code path, winning diff, per-agent results, spend breakdown, the **teardown
+   receipt** (what was removed, what it cost, proof that nothing is left running; shown once the sandbox is gone), "Open pull
    request".
+7. **Settings, three rows** (all work in the main process; secrets never reach the renderer):
+   - **GitHub:** "Sign in with GitHub" (OAuth device flow; the code is shown, the app polls, the token goes to the
+     `safeStorage`-backed settings store, the login is shown with a sign-out). The client id is `RATCHET_GITHUB_CLIENT_ID`
+     (a documented placeholder otherwise); `RATCHET_GITHUB_API_URL` / `RATCHET_GITHUB_WEB_URL` point at GitHub Enterprise. Pasting
+     a token is under "Advanced".
+   - **AWS:** "Connect AWS": the profiles and SSO sessions found in `~/.aws/config` and `~/.aws/credentials` (names only), pick
+     one; the region defaults to `us-east-1` ("a repo can override it in `ratchet.yaml`"); Test connection.
+   - **Agents:** the detected harnesses (probed in the main process on launch and on "Re-detect") with version and sign-in status,
+     the install / sign-in hint when missing or signed out, an API key field only for a harness that is not signed in, and
+     "Cloud runners need API keys".
+   - "Advanced (development)", collapsed: AMI id overrides and the OpenTofu binary / module paths.
 
 ## 10. Milestones
 
