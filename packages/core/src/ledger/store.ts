@@ -374,6 +374,12 @@ export class Ledger {
     return this.db.update(sandboxes).set(patch).where(eq(sandboxes.id, id)).returning().get();
   }
 
+  /** Point an optimization at the sandbox it runs in (the engine creates the sandbox lazily, at the first run start). */
+  setOptimizationSandbox(id: string, sandboxId: string | null): OptimizationRow {
+    this.requireOptimization(id);
+    return this.db.update(optimizations).set({ sandboxId }).where(eq(optimizations.id, id)).returning().get();
+  }
+
   /** Optimizations that ran in a sandbox; teardown must not destroy one that is still live. */
   optimizationsInSandbox(sandboxId: string): OptimizationRow[] {
     return this.db.select().from(optimizations).where(eq(optimizations.sandboxId, sandboxId)).all();

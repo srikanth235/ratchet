@@ -192,6 +192,7 @@ export class FakeRunners implements RunnerControl {
   readonly started: Array<{ handle: RunnerHandle; config: RunnerConfig }> = [];
   readonly sent: Array<{ agentId: string; message: RunnerMessage }> = [];
   readonly stopped: string[] = [];
+  readonly released: string[] = [];
   readonly pollCalls: Array<{ agentId: string; cursor: string | undefined }> = [];
   readonly queues = new Map<string, AgentEvent[]>();
   failPoll = new Set<string>();
@@ -227,6 +228,11 @@ export class FakeRunners implements RunnerControl {
   async stop(handle: RunnerHandle): Promise<void> {
     this.log.push(`runners.stop:${handle.agentId}`);
     this.stopped.push(handle.agentId);
+  }
+
+  async release(optimizationId: string): Promise<void> {
+    this.log.push(`runners.release:${optimizationId}`);
+    this.released.push(optimizationId);
   }
 
   sentTo(agentId: string): RunnerMessage[] {

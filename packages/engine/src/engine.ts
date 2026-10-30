@@ -15,6 +15,7 @@ import {
   parseConfig,
   type AgentEvent,
   type AgentIdentity,
+  type AgentsWhere,
   type AgentKind,
   type AgentRow,
   type AgentStatus,
@@ -31,12 +32,15 @@ import {
   type OptimizationRow,
   type RatchetConfig,
   type RatchetOutcome,
+  type RunnerControl,
   type RunnerHandle,
   type RunnerMessage,
+  type SandboxActivity,
   type SandboxInput,
   type SandboxOutputs,
   type SandboxPlan,
   type SandboxState,
+  type SandboxTeardownReceipt,
   type SecretRef,
   SandboxLifecycle,
   SandboxLifecycleError,
@@ -47,6 +51,7 @@ import { tokenCostUsd, type Deps } from './deps.js';
 import { assertValidId, EngineError } from './errors.js';
 import { K, KvStore } from './kv.js';
 import { reap } from './reaper.js';
+import { AutoSandbox } from './sandbox-auto.js';
 import { defaultReport } from './report.js';
 import { resolveSettings, type EngineSettings, type ResolvedSettings } from './settings.js';
 import type { EnginePorts } from './ports.js';
@@ -120,6 +125,10 @@ export class Engine implements EngineApi {
   private readonly deps: Deps;
   private readonly meter: CostMeter;
   private readonly sandboxes: SandboxLifecycle;
+  private readonly autoSandbox: AutoSandbox;
+  /** Optimizations whose `start()` is in flight (a sandbox may be created for them before their status changes). */
+  private readonly pendingStarts = new Set<string>();
+  private runActiveFlag = false;
 
   private readonly listeners = new Set<(e: EngineEvent) => void>();
   private readonly rt = new Map<string, Runtime>();
@@ -159,12 +168,34 @@ export class Engine implements EngineApi {
         set: (id, input) => this.kv.setJson(K.sandboxInput(id), input),
       },
     });
+    this.autoSandbox = new AutoSandbox({
+      ledger: this.ledger,
+      kv: this.kv,
+      clock: this.clock,
+      mode: this.modeValue,
+      settings: this.settings,
+      lifecycle: this.sandboxes,
+      provider: this.ports.sandbox,
+      compute: this.ports.compute,
+      configOf: (id) => this.config(id),
+      teardown: (id) => this.teardown(id),
+      teardownReport: (id) => this.teardownReport(id),
+      lifecycleCall: (fn) => this.sandboxCall(fn),
+      hasPendingStarts: () => this.pendingStarts.size > 0,
+      emit: (e) => this.emit(e),
+      reportError: (err, context) => this.reportError(err, context),
+    });
     // An apply / destroy that a crash cut short left unknown infrastructure: surface it as `failed`.
     for (const id of this.sandboxes.recover()) this.reportError(new Error('interrupted by a restart'), `sandbox ${id}`);
-    this.resumed = this.resume().catch((err) => {
-      this.reportError(err, 'resume');
-      return { attached: [] };
-    });
+    this.resumed = this.resume()
+      .catch((err) => {
+        this.reportError(err, 'resume');
+        return { attached: [] };
+      })
+      .then((r) => {
+        this.syncRunActive();
+        return r;
+      });
   }
 
   // ------------------------------------------------------------------ small public surface
@@ -176,6 +207,36 @@ export class Engine implements EngineApi {
   /** Resolves once the constructor's `resume()` pass has re-attached to running optimizations. */
   ready(): Promise<ResumeReport> {
     return this.resumed;
+  }
+
+  /**
+   * True while any optimization is starting, baselining, running or stopping: the machine should not sleep. The same signal
+   * is emitted as `{ type: 'run-active' }` whenever it flips.
+   */
+  runActive(): boolean {
+    return this.runActiveFlag;
+  }
+
+  /** The receipt of the sandbox teardown that covered the optimization, or null while its sandbox is still alive. */
+  async teardownReceipt(optimizationId: string): Promise<SandboxTeardownReceipt | null> {
+    assertValidId('optimization id', optimizationId);
+    await this.resumed;
+    return this.autoSandbox.receiptFor(optimizationId);
+  }
+
+  /** The automatic sandbox seen from outside: running instances, spend of active runs, when it will be removed, last receipt. */
+  async sandboxActivity(sandboxId: string): Promise<SandboxActivity> {
+    await this.resumed;
+    return this.autoSandbox.activity(sandboxId);
+  }
+
+  /**
+   * End the sandbox now instead of after the idle window: tears down the finished runs' cloud resources, destroys the sandbox,
+   * verifies nothing is left and returns the receipt. Refuses (`sandbox_in_use`) while a run is active.
+   */
+  async endSandbox(sandboxId: string): Promise<SandboxTeardownReceipt> {
+    await this.resumed;
+    return this.autoSandbox.destroy(sandboxId, 'manual');
   }
 
   subscribe(listener: (e: EngineEvent) => void): () => void {
@@ -212,6 +273,7 @@ export class Engine implements EngineApi {
 
   /** planned -> applying -> applied (or failed); the contract outputs are stored in the ledger. */
   applySandbox(input: SandboxInput): Promise<SandboxOutputs> {
+    this.autoSandbox.release(input.sandboxId); // an explicit apply takes it out of automatic management
     return this.sandboxCall(() => this.sandboxes.apply(input));
   }
 
@@ -220,7 +282,10 @@ export class Engine implements EngineApi {
    * stopping, while agent identities of its optimizations were not torn down, and while any tagged instance is alive.
    */
   destroySandbox(sandboxId: string): Promise<void> {
-    return this.sandboxCall(() => this.sandboxes.destroy(sandboxId));
+    return this.sandboxCall(async () => {
+      await this.sandboxes.destroy(sandboxId);
+      this.autoSandbox.release(sandboxId);
+    });
   }
 
   private async sandboxCall<T>(fn: () => Promise<T>): Promise<T> {
@@ -256,6 +321,7 @@ export class Engine implements EngineApi {
   private sandboxForNewOptimization(requested: string | undefined): string | null {
     if (requested !== undefined) assertValidId('sandbox id', requested);
     const row = requested ? this.ledger.getSandbox(requested) : undefined;
+    if (this.settings.sandbox.auto) return row ? row.id : null; // created (or re-created) at the first run start
     if (this.modeValue === 'live') {
       this.assertSandboxApplied(requested ?? null);
       return requested!;
@@ -303,6 +369,7 @@ export class Engine implements EngineApi {
       throw new EngineError('invalid_config', `agent.instructions file ${config.agent.instructions} is missing or empty at ${input.baseRef}`);
     }
 
+    const where = this.resolveAgentsWhere(input.agentsWhere);
     const now = this.clock.now();
     const slots = this.agentSlots(id, input.agents);
     this.ledger.transaction(() => {
@@ -331,9 +398,30 @@ export class Engine implements EngineApi {
         this.ledger.addAgent({ id: s.agentId, optimizationId: id, kind: s.kind, branch: s.branch, status: 'pending', createdAt: now });
       }
       this.kv.set(K.plateau(id), String(input.plateauEvals));
+      this.kv.set(K.agentsWhere(id), where);
     });
     this.emit({ type: 'optimization', optimizationId: id, status: 'draft' });
     return id;
+  }
+
+  /** Request > engine setting > `local` when a local runner control exists > `cloud`. */
+  private resolveAgentsWhere(requested: AgentsWhere | undefined): AgentsWhere {
+    const where = requested ?? this.settings.agentsWhere ?? (this.ports.localRunners ? 'local' : 'cloud');
+    if (where !== 'local' && where !== 'cloud') throw new EngineError('invalid_input', `agentsWhere must be 'local' or 'cloud'`);
+    if (where === 'local' && !this.ports.localRunners) {
+      throw new EngineError('invalid_input', 'agents cannot run on this machine here: the engine has no local runner control (use agentsWhere: cloud)');
+    }
+    return where;
+  }
+
+  /** Where this optimization's agents run (optimizations created before the setting existed ran in the cloud). */
+  agentsWhere(optimizationId: string): AgentsWhere {
+    return this.kv.get(K.agentsWhere(optimizationId)) === 'local' && this.ports.localRunners ? 'local' : 'cloud';
+  }
+
+  /** The runner control for an optimization: the local one for local agents, else the cloud (SSM) one. */
+  private runnersFor(optimizationId: string): RunnerControl {
+    return this.agentsWhere(optimizationId) === 'local' ? this.ports.localRunners! : this.ports.runners;
   }
 
   private validateCreateInput(input: CreateOptimizationInput): void {
@@ -409,8 +497,17 @@ export class Engine implements EngineApi {
     if (opt.status !== 'draft' && !resumable) {
       throw new EngineError('invalid_state', `optimization ${id} is ${opt.status}; only a draft can be started`);
     }
-    this.assertSandboxApplied(opt.sandboxId);
-    await this.beginStart(id);
+    this.pendingStarts.add(id);
+    this.syncRunActive();
+    try {
+      // The sandbox is created lazily, at the first run start in a region, and reused while runs are active.
+      if (!resumable && this.autoSandbox.enabled) await this.autoSandbox.ensureFor(id);
+      this.assertSandboxApplied(this.requireOpt(id).sandboxId);
+      await this.beginStart(id);
+    } finally {
+      this.pendingStarts.delete(id);
+      this.syncRunActive();
+    }
   }
 
   private beginStart(id: string): Promise<void> {
@@ -524,7 +621,10 @@ export class Engine implements EngineApi {
   private async launchAgent(optId: string, agentId: string, config: RatchetConfig, brief: string, baselineValue: number): Promise<void> {
     const opt = this.requireOpt(optId);
     const agent = this.requireAgent(agentId);
-    const { compute, runners } = this.ports;
+    const { compute } = this.ports;
+    const runners = this.runnersFor(optId);
+    // Local agents use the user's own CLI login on this machine: no cloud identity, secrets or runner instance.
+    const local = this.agentsWhere(optId) === 'local';
     const git = this.gitFor(opt.repo);
     let step = this.kv.getNumber(K.launch(agentId)) ?? 0;
     const done = (n: number): void => {
@@ -534,15 +634,15 @@ export class Engine implements EngineApi {
     if (step >= 5) return;
     if (agent.status === 'pending') this.ledger.setAgentStatus(agentId, 'launching');
 
-    if (step < 1) {
+    if (!local && step < 1) {
       const identity = await compute.createAgentIdentity(optId, agentId);
       this.kv.setJson(K.identity(agentId), identity);
       done(1);
     }
     const identity = this.kv.getJson<AgentIdentity>(K.identity(agentId));
-    if (!identity) throw new EngineError('invalid_state', `identity for ${agentId} is missing`);
+    if (!local && !identity) throw new EngineError('invalid_state', `identity for ${agentId} is missing`);
 
-    if (step < 2) {
+    if (!local && step < 2) {
       const refs: SecretRef[] = [];
       for (const name of this.settings.secretNames[agent.kind]) {
         const value = await this.settings.secrets(agent.kind, name);
@@ -560,14 +660,18 @@ export class Engine implements EngineApi {
       await git.createBranch(await this.baseSha(opt), agent.branch);
       done(3);
     }
-    if (step < 4) {
+    if (local && step < 4) {
+      this.ledger.setAgentStatus(agentId, 'launching', `local:${agentId}`);
+      done(4);
+    }
+    if (!local && step < 4) {
       const instance = await compute.launchRunner({
         optimizationId: optId,
         agentId,
         kind: agent.kind,
         instanceType: config.agent.allowed_instance_types[0]!,
         imageRef: this.settings.runnerImageRef,
-        identity,
+        identity: identity!,
         secrets,
         repoUrl: opt.repo,
         branch: agent.branch,
@@ -629,7 +733,7 @@ export class Engine implements EngineApi {
     await Promise.allSettled(
       agents
         .filter((a) => a.runnerInstanceId && a.status !== 'stopped')
-        .map((a) => this.ports.runners.stop(this.handle(a)).catch((e) => this.reportError(e, `runners.stop ${a.id}`))),
+        .map((a) => this.runnersFor(a.optimizationId).stop(this.handle(a)).catch((e) => this.reportError(e, `runners.stop ${a.id}`))),
     );
     // 3. terminate everything tagged for this optimization.
     await this.terminateAll(id);
@@ -674,7 +778,7 @@ export class Engine implements EngineApi {
     await Promise.allSettled(
       agents
         .filter((a) => a.runnerInstanceId && LIVE_AGENT.has(a.status))
-        .map((a) => this.ports.runners.stop(this.handle(a)).catch((e) => this.reportError(e, `runners.stop ${a.id}`))),
+        .map((a) => this.runnersFor(a.optimizationId).stop(this.handle(a)).catch((e) => this.reportError(e, `runners.stop ${a.id}`))),
     );
     // The runners are down: collect what they left behind (events first, then a final git poll of every
     // branch), then close the agents' access. A git poll that fails here is retried on every drain tick.
@@ -703,7 +807,7 @@ export class Engine implements EngineApi {
   async pauseAgent(agentId: string): Promise<void> {
     const agent = this.liveAgent(agentId);
     if (agent.status === 'paused') return;
-    await this.ports.runners.send(this.handle(agent), { type: 'pause' });
+    await this.runnersFor(agent.optimizationId).send(this.handle(agent), { type: 'pause' });
     this.ledger.setAgentStatus(agentId, 'paused');
     this.logAgent(agent, { at: this.clock.now(), type: 'status', text: 'paused by user', data: { state: 'paused' } });
   }
@@ -711,7 +815,7 @@ export class Engine implements EngineApi {
   async resumeAgent(agentId: string): Promise<void> {
     const agent = this.liveAgent(agentId);
     if (agent.status !== 'paused') return;
-    await this.ports.runners.send(this.handle(agent), { type: 'resume' });
+    await this.runnersFor(agent.optimizationId).send(this.handle(agent), { type: 'resume' });
     this.ledger.setAgentStatus(agentId, 'running');
     this.logAgent(agent, { at: this.clock.now(), type: 'status', text: 'resumed by user', data: { state: 'running' } });
   }
@@ -719,7 +823,7 @@ export class Engine implements EngineApi {
   async messageAgent(agentId: string, text: string): Promise<void> {
     if (typeof text !== 'string' || text.trim() === '') throw new EngineError('invalid_input', 'message must not be empty');
     const agent = this.liveAgent(agentId);
-    await this.ports.runners.send(this.handle(agent), { type: 'user', text });
+    await this.runnersFor(agent.optimizationId).send(this.handle(agent), { type: 'user', text });
     this.logAgent(agent, { at: this.clock.now(), type: 'message', text, data: { from: 'user' } });
   }
 
@@ -820,8 +924,9 @@ export class Engine implements EngineApi {
       }
     };
 
+    const local = this.agentsWhere(id) === 'local';
     for (const agent of this.ledger.listAgents(id)) {
-      if (await attempt(`deleteSecrets ${agent.id}`, () => compute.deleteSecrets(id, agent.id))) report.deletedSecretsFor.push(agent.id);
+      if (!local && (await attempt(`deleteSecrets ${agent.id}`, () => compute.deleteSecrets(id, agent.id)))) report.deletedSecretsFor.push(agent.id);
       const identity = this.kv.getJson<AgentIdentity>(K.identity(agent.id));
       if (identity) {
         await this.revokeAgent(agent);
@@ -831,6 +936,9 @@ export class Engine implements EngineApi {
         }
       }
     }
+    // Local worktrees and the local clone (the commits the agents pushed are on the remote).
+    const runners = this.runnersFor(id);
+    if (runners.release) await attempt('release agent workspaces', () => runners.release!(id));
     await attempt('terminate leftovers', async () => {
       report.terminatedInstanceIds = await this.terminateAll(id);
     });
@@ -939,6 +1047,9 @@ export class Engine implements EngineApi {
         this.reportError(err, `tick ${id}`);
       }
     }
+    // After the per-run work: the idle clock of the automatic sandbox (destroys it once no run has been active for the idle window).
+    await this.autoSandbox.tick();
+    this.syncRunActive();
   }
 
   private async tickRunning(id: string): Promise<void> {
@@ -1079,7 +1190,7 @@ export class Engine implements EngineApi {
     const cursor = this.kv.get(K.cursor(agent.id));
     let res: { events: AgentEvent[]; cursor: string };
     try {
-      res = await this.ports.runners.poll(this.handle(agent), cursor);
+      res = await this.runnersFor(agent.optimizationId).poll(this.handle(agent), cursor);
     } catch (err) {
       const n = (rt.pollFailures.get(agent.id) ?? 0) + 1;
       rt.pollFailures.set(agent.id, n);
@@ -1398,7 +1509,7 @@ export class Engine implements EngineApi {
     const cur = this.ledger.getAgent(agent.id);
     if (!cur?.runnerInstanceId || !LIVE_AGENT.has(cur.status)) return;
     try {
-      await this.ports.runners.send(this.handle(cur), msg);
+      await this.runnersFor(cur.optimizationId).send(this.handle(cur), msg);
     } catch (err) {
       this.reportError(err, `send ${msg.type} to ${agent.id}`);
       this.logAgent(cur, { at: this.clock.now(), type: 'error', text: `could not deliver ${msg.type}: ${(err as Error).message}` });
@@ -1484,6 +1595,23 @@ export class Engine implements EngineApi {
   private setStatus(id: string, status: Parameters<Ledger['setOptimizationStatus']>[1]): void {
     this.ledger.setOptimizationStatus(id, status, this.clock.now());
     this.emit({ type: 'optimization', optimizationId: id, status });
+    this.syncRunActive();
+  }
+
+  /** Optimizations that hold the machine awake: starting, baselining, running or stopping. */
+  private activeRunIds(): string[] {
+    const ids = new Set(this.pendingStarts);
+    for (const o of this.ledger.listOptimizations({ status: ['baselining', 'running', 'stopping'] })) ids.add(o.id);
+    return [...ids];
+  }
+
+  /** Emit `run-active` when the "any run is live" signal flips (the desktop turns it into a power-save blocker). */
+  private syncRunActive(): void {
+    const ids = this.activeRunIds();
+    const active = ids.length > 0;
+    if (active === this.runActiveFlag) return;
+    this.runActiveFlag = active;
+    this.emit({ type: 'run-active', active, optimizationIds: ids });
   }
 
   private emit(e: EngineEvent): void {

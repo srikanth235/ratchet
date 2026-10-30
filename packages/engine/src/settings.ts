@@ -1,11 +1,36 @@
-import type { AgentKind, Ledger, NoiseFloorOptions } from '@ratchet/core';
+import type { AgentKind, AgentsWhere, Ledger, NoiseFloorOptions, RatchetConfig, SandboxInput } from '@ratchet/core';
 
 /** Where API keys come from (desktop: OS keychain). Values go to `putSecret` and nowhere else. */
 export type SecretSource = (kind: AgentKind, name: string) => string | undefined | Promise<string | undefined>;
 
 export type ReportBuilder = (ledger: Ledger, optimizationId: string) => string | Promise<string>;
 
+/**
+ * The invisible sandbox. Off by default (the sandbox is then applied and destroyed explicitly, as in the tests and for
+ * advanced use); the live and hybrid runtimes turn it on.
+ */
+export interface SandboxSettings {
+  /** Create the sandbox lazily at the first run start and destroy it after the idle window. Default false. */
+  auto?: boolean;
+  /** How long after the last run ends the sandbox is destroyed (default 30 min). */
+  idleMs?: number;
+  /** Region when ratchet.yaml names none (`environment.region`). Default `us-east-1`. */
+  defaultRegion?: string;
+  /** After a failed automatic destroy, wait this long before trying again (default 5 min). */
+  retryMs?: number;
+  /** Sandbox id for a region. Default `ratchet-sandbox` (`ratchet-sim` in simulation) in the default region, `<id>-<region>` elsewhere. */
+  sandboxId?(region: string): string;
+  /** Override the plan inputs (instance types, limits) derived from ratchet.yaml. */
+  input?(ctx: { sandboxId: string; region: string; config: RatchetConfig }): SandboxInput | undefined;
+}
+
 export interface EngineSettings {
+  sandbox?: SandboxSettings;
+  /**
+   * Where agents run when an optimization does not say. Default: `local` if the engine was given a `localRunners` port, else
+   * `cloud`.
+   */
+  agentsWhere?: AgentsWhere;
   secrets?: SecretSource;
   /** Secret names pushed to each agent's runner. Defaults below. */
   secretNames?: Partial<Record<AgentKind, string[]>>;
@@ -49,7 +74,18 @@ export const DEFAULT_SECRET_NAMES: Record<AgentKind, string[]> = {
 
 export const DEFAULT_TOKEN_PRICING = { inputUsdPerMTok: 3, outputUsdPerMTok: 15 };
 
+export interface ResolvedSandboxSettings {
+  auto: boolean;
+  idleMs: number;
+  defaultRegion: string;
+  retryMs: number;
+  sandboxId: SandboxSettings['sandboxId'];
+  input: SandboxSettings['input'];
+}
+
 export interface ResolvedSettings {
+  sandbox: ResolvedSandboxSettings;
+  agentsWhere: AgentsWhere | undefined;
   secrets: SecretSource;
   secretNames: Record<AgentKind, string[]>;
   tickIntervalMs: number;
@@ -73,6 +109,15 @@ const HOUR = 3_600_000;
 
 export function resolveSettings(s: EngineSettings = {}): ResolvedSettings {
   return {
+    sandbox: {
+      auto: s.sandbox?.auto ?? false,
+      idleMs: s.sandbox?.idleMs ?? 30 * 60_000,
+      defaultRegion: s.sandbox?.defaultRegion ?? 'us-east-1',
+      retryMs: s.sandbox?.retryMs ?? 5 * 60_000,
+      sandboxId: s.sandbox?.sandboxId,
+      input: s.sandbox?.input,
+    },
+    agentsWhere: s.agentsWhere,
     secrets: s.secrets ?? (() => undefined),
     secretNames: { ...DEFAULT_SECRET_NAMES, ...s.secretNames },
     tickIntervalMs: s.tickIntervalMs ?? 15_000,

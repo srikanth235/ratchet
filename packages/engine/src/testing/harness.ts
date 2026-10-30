@@ -44,6 +44,8 @@ export interface Harness {
   git: FakeGit;
   bench: FakeBench;
   runners: FakeRunners;
+  /** The local-agents control, when the harness was built with `localRunners: true`. */
+  localRunners: FakeRunners;
   compute: FakeCompute;
   sandbox: FakeSandbox;
   prices: FakePrices;
@@ -68,9 +70,12 @@ export interface BeginOptions {
   baseline?: number[];
   confirmBaseline?: number[];
   sandboxId?: string;
+  agentsWhere?: 'local' | 'cloud';
 }
 
 export interface HarnessOptions {
+  /** Also give the engine a local runner control (`h.localRunners`); optimizations then default to local agents. */
+  localRunners?: boolean;
   ledgerPath?: string;
   hourly?: number;
   settings?: EngineSettings;
@@ -87,6 +92,7 @@ export function makeHarness(opts: HarnessOptions = {}): Harness {
   const git = new FakeGit(log, clock, { 'ratchet.yaml': opts.configYaml ?? CONFIG_YAML, 'RATCHET.md': '# Brief\nMake it faster.\n' });
   const bench = new FakeBench(log, clock);
   const runners = new FakeRunners(log);
+  const localRunners = new FakeRunners(log);
   const compute = new FakeCompute(log, clock);
   const prices = new FakePrices({}, opts.hourly ?? 1);
   const artifacts = new FakeArtifacts();
@@ -104,7 +110,7 @@ export function makeHarness(opts: HarnessOptions = {}): Harness {
       ledger,
       mode: opts.mode ?? 'simulation',
       clock,
-      ports: { sandbox, compute, prices, artifacts, git, runners, bench, ...(opts.costs ? { costs: opts.costs } : {}) },
+      ports: { sandbox, compute, prices, artifacts, git, runners, bench, ...(opts.localRunners ? { localRunners } : {}), ...(opts.costs ? { costs: opts.costs } : {}) },
       settings,
     });
     e.subscribe((ev) => events.push(ev));
@@ -112,7 +118,7 @@ export function makeHarness(opts: HarnessOptions = {}): Harness {
   };
 
   const h: Harness = {
-    log, clock, ledger, git, bench, runners, compute, sandbox, prices, artifacts, settings, events,
+    log, clock, ledger, git, bench, runners, localRunners, compute, sandbox, prices, artifacts, settings, events,
     engine: build(),
     restart(reopenLedger = false) {
       void h.engine.close();
@@ -150,6 +156,7 @@ export function makeHarness(opts: HarnessOptions = {}): Harness {
         timeLimitSeconds: b.timeLimitSeconds ?? 8 * 3600,
         plateauEvals: b.plateauEvals ?? 50,
         ...(b.sandboxId ? { sandboxId: b.sandboxId } : {}),
+        ...(b.agentsWhere ? { agentsWhere: b.agentsWhere } : {}),
       });
       await h.engine.start(id);
       const agents = Object.fromEntries(ledger.listAgents(id).map((a) => [a.kind, a.id]));

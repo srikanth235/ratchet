@@ -9,6 +9,7 @@ export type EngineErrorCode =
   | 'orphans'
   | 'teardown_incomplete'
   | 'unavailable'
+  | 'sandbox_unavailable'
   | 'aborted'
   | 'sandbox_not_applied'
   | 'sandbox_in_use'

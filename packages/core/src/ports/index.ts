@@ -325,7 +325,15 @@ export interface RunnerControl {
   /** Events since `cursor` (opaque); returns the next cursor. */
   poll(handle: RunnerHandle, cursor?: string): Promise<{ events: AgentEvent[]; cursor: string }>;
   stop(handle: RunnerHandle): Promise<void>;
+  /**
+   * Free whatever the control holds on this machine for an optimization (local worktrees and clones). Called by the
+   * engine's `teardown`. Optional: the SSM control keeps nothing locally.
+   */
+  release?(optimizationId: OptimizationId): Promise<void>;
 }
+
+/** Where an optimization's agents run: this machine (their own CLI login, a git worktree each) or cloud runners. */
+export type AgentsWhere = 'local' | 'cloud';
 
 // ---------------------------------------------------------------- bench
 
@@ -378,6 +386,11 @@ export interface EngineCreateOptimizationInput {
    * (`optimizations.sandbox_id`); in simulation an applied one is linked, otherwise the field stays null.
    */
   sandboxId?: string;
+  /**
+   * Where the agents run. Default: the engine's `agentsWhere` setting, else `local` when the engine has a local runner
+   * control, else `cloud`. The evaluator always runs in the cloud sandbox.
+   */
+  agentsWhere?: AgentsWhere;
 }
 
 /** What the ledger knows about one sandbox, plus the optimizations linked to it. */
@@ -403,7 +416,66 @@ export type EngineEvent =
   | { type: 'candidate'; optimizationId: OptimizationId; candidateId: string; verdict: CandidateVerdict }
   | { type: 'ratchet'; optimizationId: OptimizationId; from: number; to: number }
   | { type: 'spend'; optimizationId: OptimizationId; totalUsd: number }
-  | { type: 'notice'; optimizationId: OptimizationId; level: 'info' | 'warning' | 'error'; text: string };
+  | { type: 'notice'; optimizationId: OptimizationId; level: 'info' | 'warning' | 'error'; text: string }
+  /**
+   * True while any optimization is starting, baselining, running or stopping (false again once none is). The desktop main
+   * process turns this into `powerSaveBlocker` start/stop so the machine does not sleep under a live run.
+   */
+  | { type: 'run-active'; active: boolean; optimizationIds: OptimizationId[] }
+  /** The automatic sandbox changing phase (docs/SIMPLIFIED_MODEL.md, "Sandbox lifecycle: invisible"). */
+  | { type: 'sandbox'; sandboxId: string; phase: SandboxPhase; region: string | null; text: string };
+
+/** `creating` -> `ready` -> (`idle` while no run is active) -> `destroying` -> `destroyed`; `failed` when a step failed. */
+export type SandboxPhase = 'creating' | 'ready' | 'idle' | 'destroying' | 'destroyed' | 'failed';
+
+/**
+ * What the engine records when it tears the sandbox down (automatically after the idle window, or on demand):
+ * what was removed, what it cost, and proof that nothing is left running. Shown on the Result screen and Environments.
+ */
+export interface SandboxTeardownReceipt {
+  sandboxId: string;
+  region: string;
+  /** `idle`: the idle window after the last run elapsed; `manual`: `endSandbox`. */
+  trigger: 'idle' | 'manual';
+  createdAt: number | null;
+  destroyedAt: number;
+  runs: Array<{ optimizationId: OptimizationId; status: string; spendUsd: number }>;
+  /** Estimated spend of every run that used the sandbox, split by category (tokens, compute, ...). */
+  spendUsd: number;
+  spendByCategory: Record<string, number>;
+  removed: {
+    /** Instances terminated during teardown (agent runners, bench, experiment). */
+    instances: string[];
+    agentIdentities: string[];
+    secrets: string[];
+    /** The sandbox's own resources, named from its outputs (buckets, network, roles). */
+    resources: string[];
+  };
+  /** Verified by `listTagged` after the destroy: nothing tagged is left, so nothing is billing. */
+  nothingRunning: boolean;
+  orphans: Array<{ id: string; role: string; state: string }>;
+  errors: string[];
+  /** One plain-words line for the UI. */
+  summary: string;
+}
+
+/** The invisible sandbox seen from outside: what is running, what it costs, when it goes away, the last receipt. */
+export interface SandboxActivity {
+  sandboxId: string;
+  status: SandboxState['status'];
+  region: string | null;
+  /** True when the engine created it itself and will destroy it after the idle window. */
+  auto: boolean;
+  activeRuns: OptimizationId[];
+  /** Tagged instances alive now (null: could not be listed). */
+  instancesRunning: number | null;
+  /** Estimated spend of the runs currently active in it. */
+  spendUsd: number;
+  idleSince: number | null;
+  /** When the automatic destroy is due; null while runs are active or the sandbox is not auto-managed. */
+  destroyAt: number | null;
+  lastReceipt: SandboxTeardownReceipt | null;
+}
 
 export interface EngineApi {
   mode(): Mode;
@@ -429,6 +501,15 @@ export interface EngineApi {
   /** Refuses while an optimization in the sandbox is running, or while tagged instances / agent identities remain. */
   destroySandbox(sandboxId: string): Promise<void>;
   subscribe(listener: (e: EngineEvent) => void): () => void;
+  /**
+   * The receipt of the sandbox teardown that covered this optimization (null while the sandbox is still alive or the
+   * run never used one). Optional so existing implementations keep compiling.
+   */
+  teardownReceipt?(optimizationId: OptimizationId): Promise<SandboxTeardownReceipt | null>;
+  /** Live view of the automatic sandbox (running instances, spend, destroy time, last receipt). */
+  sandboxActivity?(sandboxId: string): Promise<SandboxActivity>;
+  /** True while any run is active (the same signal as the `run-active` event), for the sleep-prevention hook. */
+  runActive?(): boolean;
 }
 
 // ---------------------------------------------------------------- runner loop (`ratchet runner`)

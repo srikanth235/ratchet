@@ -82,4 +82,10 @@ export const K = {
   revoked: (agent: string) => `agent:${agent}:revoked`,
   acct: (instance: string) => `acct:${instance}`,
   sandboxInput: (sandbox: string) => `sandbox:${sandbox}:input`,
+  /** Set when the engine created the sandbox itself (and so destroys it after the idle window). */
+  sandboxAuto: (sandbox: string) => `sandbox:${sandbox}:auto`,
+  sandboxIdle: (sandbox: string) => `sandbox:${sandbox}:idle_since`,
+  sandboxReceipt: (sandbox: string) => `sandbox:${sandbox}:receipt`,
+  optReceipt: (opt: string) => `opt:${opt}:sandbox_receipt`,
+  agentsWhere: (opt: string) => `opt:${opt}:agents_where`,
 } as const;

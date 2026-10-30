@@ -18,7 +18,10 @@ export interface EnginePorts {
   artifacts: ArtifactStore;
   /** One host, or a factory when the app drives several repositories. */
   git: GitHost | ((repoUrl: string) => GitHost);
+  /** Cloud agent runners (EC2 + SSM). */
   runners: RunnerControl;
+  /** Agents on the user's machine (their own CLI login, a git worktree each). Optional; see `EngineSettings.agentsWhere`. */
+  localRunners?: RunnerControl;
   bench: BenchRunner;
   /** Billing truth for the cost estimate (Cost Explorer). Optional: without it `reconcileCosts` reports it is unavailable. */
   costs?: CostReconciler;
