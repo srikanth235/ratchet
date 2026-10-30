@@ -72,7 +72,7 @@ export function Benchmarks() {
               <div className="segmented segmented--sm metric-switch" role="radiogroup" aria-label="Metric">
                 {sr.options.map((o) => (
                   <button key={o.key} type="button" role="radio" aria-checked={o.key === sr.metric} title={o.key}
-                    className={o.key === sr.metric ? 'segmented__on' : ''} onClick={() => setMetric(o.objective ? null : o.key)}>{o.label}</button>
+                    className={`mono${o.key === sr.metric ? ' segmented__on' : ''}`} onClick={() => setMetric(o.objective ? null : o.key)}>{o.label}</button>
                 ))}
               </div>
             )}

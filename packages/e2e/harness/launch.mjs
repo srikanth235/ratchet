@@ -35,8 +35,11 @@ export async function launchApp({ width = VIEWPORT.width, height = VIEWPORT.heig
     ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
   };
   // `real` = the core Engine in simulation mode (default). `dev` = the seeded stub, for design screenshots only.
-  if (engine === 'dev') env.RATCHET_ENGINE = 'dev';
-  else delete env.RATCHET_ENGINE;
+  // Design tools compare screens against the design: the dev agents tick once an hour so the seeded ledger holds still.
+  if (engine === 'dev') {
+    env.RATCHET_ENGINE = 'dev';
+    env.RATCHET_DEV_TICK_MS ??= '3600000';
+  } else delete env.RATCHET_ENGINE;
   const app = await _electron.launch({
     executablePath: electronPath(),
     args: [MAIN_ENTRY, '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
