@@ -1,0 +1,29 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyAgentRolesByPath",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": ["${sealed_bucket_arn}", "${sealed_bucket_arn}/*"],
+      "Condition": { "ArnLike": { "aws:PrincipalArn": "${agent_role_arn_pattern}" } }
+    },
+    {
+      "Sid": "DenyAnyPrincipalTaggedAsAgent",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": ["${sealed_bucket_arn}", "${sealed_bucket_arn}/*"],
+      "Condition": { "Null": { "aws:PrincipalTag/ratchet:agent": "false" } }
+    },
+    {
+      "Sid": "DenyInsecureTransport",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": ["${sealed_bucket_arn}", "${sealed_bucket_arn}/*"],
+      "Condition": { "Bool": { "aws:SecureTransport": "false" } }
+    }
+  ]
+}
