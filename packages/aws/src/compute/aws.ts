@@ -123,6 +123,8 @@ export interface AwsClients {
 
 export interface AwsCloudComputeOptions {
   clients?: Partial<AwsClients>;
+  /** Named profile in ~/.aws/config (static, SSO or assume-role); default credential chain when unset. */
+  profile?: string;
   clock?: Clock;
   /** SSM poll interval for runCommand. Default 2000. */
   pollIntervalMs?: number;
@@ -144,11 +146,12 @@ export class AwsCloudCompute implements CloudCompute {
     private readonly opts: AwsCloudComputeOptions = {},
   ) {
     const region = cfg.region;
+    const profile = opts.profile ? { profile: opts.profile } : {};
     this.clients = {
-      ec2: opts.clients?.ec2 ?? new EC2Client({ region }),
-      iam: opts.clients?.iam ?? new IAMClient({ region }),
-      ssm: opts.clients?.ssm ?? new SSMClient({ region }),
-      sts: opts.clients?.sts ?? new STSClient({ region }),
+      ec2: opts.clients?.ec2 ?? new EC2Client({ region, ...profile }),
+      iam: opts.clients?.iam ?? new IAMClient({ region, ...profile }),
+      ssm: opts.clients?.ssm ?? new SSMClient({ region, ...profile }),
+      sts: opts.clients?.sts ?? new STSClient({ region, ...profile }),
     };
     this.clock = opts.clock ?? systemClock;
     if (!cfg.agentRolePath.startsWith('/') || !cfg.agentRolePath.endsWith('/')) {

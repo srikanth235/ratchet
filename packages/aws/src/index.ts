@@ -8,3 +8,4 @@ export * from './pricing.js';
 export * from './artifacts.js';
 export * from './cost.js';
 export * from './reaper.js';
+export * from './identity.js';

@@ -38,6 +38,14 @@ describe('MockSandboxProvider', () => {
     expect(await p.outputs('sim')).toBeNull();
   });
 
+  it('can start with sandboxes that are already applied', async () => {
+    const first = new MockSandboxProvider();
+    const out = await first.apply(input);
+    const restored = new MockSandboxProvider({ initial: { sim: out } });
+    expect(await restored.outputs('sim')).toBe(out);
+    expect((await restored.plan(input)).changes.every((c) => c.action === 'no-op')).toBe(true);
+  });
+
   it('validates the sandbox id', async () => {
     await expect(new MockSandboxProvider().plan({ ...input, sandboxId: 'BAD' })).rejects.toThrow();
   });

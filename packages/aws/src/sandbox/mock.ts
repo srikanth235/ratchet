@@ -29,6 +29,8 @@ export interface MockSandboxProviderOptions {
   accountId?: string;
   /** Called on destroy, mirroring TofuSandboxProvider's teardown guard. */
   listRuntimeAgentRoles?: (input: SandboxInput) => Promise<string[]>;
+  /** Sandboxes that are already applied (e.g. restored from the ledger after an app restart), by sandbox id. */
+  initial?: Record<string, AwsSandboxOutputs>;
 }
 
 /** In-memory SandboxProvider for simulation; behaves like TofuSandboxProvider for the engine. */
@@ -36,7 +38,9 @@ export class MockSandboxProvider implements SandboxProvider {
   private readonly applied = new Map<string, AwsSandboxOutputs>();
   readonly calls: string[] = [];
 
-  constructor(private readonly opts: MockSandboxProviderOptions = {}) {}
+  constructor(private readonly opts: MockSandboxProviderOptions = {}) {
+    for (const [id, out] of Object.entries(opts.initial ?? {})) this.applied.set(id, out);
+  }
 
   async plan(input: SandboxInput): Promise<{ changes: PlanChange[]; summary: string }> {
     this.calls.push(`plan:${input.sandboxId}`);
