@@ -1,3 +1,5 @@
 #!/usr/bin/env node
-import { VERSION } from '@ratchet/core';
-console.log('ratchet', VERSION);
+import { processIo } from './io.js';
+import { runCli } from './program.js';
+
+process.exitCode = await runCli(process.argv.slice(2), processIo);

@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { parseDocument } from 'yaml';
+import { LineCounter, parseDocument } from 'yaml';
 import { configSchema, type RatchetConfig } from './schema.js';
 
 export interface ConfigError {
@@ -29,12 +29,13 @@ export function formatConfigError(e: ConfigError): string {
 
 /** Parse and validate ratchet.yaml text. Never throws for bad input. */
 export function parseConfig(text: string): ConfigResult {
-  const doc = parseDocument(text, { prettyErrors: false });
+  const lineCounter = new LineCounter();
+  const doc = parseDocument(text, { prettyErrors: false, lineCounter });
   if (doc.errors.length > 0) {
     return {
       ok: false,
       errors: doc.errors.map((e) => {
-        const line = e.linePos?.[0];
+        const line = e.pos?.[0] === undefined ? undefined : lineCounter.linePos(e.pos[0]);
         return {
           path: '',
           message: `invalid YAML${line ? ` (line ${line.line}, column ${line.col})` : ''}: ${e.message.split('\n')[0]}`,
