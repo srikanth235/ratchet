@@ -15,7 +15,7 @@ that prints a number.
 
 | In scope | Out of scope (later) |
 |---|---|
-| macOS desktop app (Swift / SwiftUI) as mission control | Hosted controller / web dashboard |
+| Desktop app (Electron + React, macOS first) as mission control | Hosted controller / web dashboard |
 | Agents: **Claude Code** cloud sessions, **Codex** cloud tasks | Grok, OpenCode, self-hosted runners |
 | Cloud: **AWS** only | Azure, GCP, cross-cloud placement |
 | GitHub repos with a reproducible benchmark (k6, criterion, pytest-benchmark, hyperfine, custom command) | Repos without a benchmark; ML / forecasting objectives |
@@ -25,7 +25,7 @@ that prints a number.
 ## 2. Topology
 
 ```
-┌──────────────────── Ratchet.app (macOS) ────────────────────┐
+┌──────────────────── Ratchet desktop (Electron)───────────────────┐
 │ Optimization engine · Ratchet · Budget guard · Ledger · UI  │
 │ AgentAdapters (Claude Code, Codex) · GitHub watcher         │
 │ AWS controller (cost meter, reaper, bench runner)           │
@@ -112,14 +112,14 @@ agent cannot change how it is scored.
 
 ## 5. Agent adapters
 
-```swift
-protocol AgentAdapter {
-    var kind: AgentKind { get }                    // .claudeCode, .codex
-    func preflight() async throws -> Preflight     // signed in, environment ready
-    func start(_ spec: AgentSpec) async throws -> SessionHandle
-    func send(_ message: String, to: SessionHandle) async throws
-    func events(_ session: SessionHandle) -> AsyncThrowingStream<AgentEvent, Error>
-    func stop(_ session: SessionHandle) async throws
+```ts
+interface AgentAdapter {
+  kind: "claude-code" | "codex";
+  preflight(): Promise<Preflight>;               // signed in, environment ready
+  start(spec: AgentSpec): Promise<SessionHandle>;
+  send(session: SessionHandle, message: string): Promise<void>;
+  events(session: SessionHandle): AsyncIterable<AgentEvent>;
+  stop(session: SessionHandle): Promise<void>;
 }
 ```
 
@@ -185,7 +185,7 @@ output "eval_identity_ref"  { value = ... }  # AWS: bench runner role / profile
 output "network_ref"        { value = ... }  # AWS: subnet + security group
 ```
 
-In Swift, `SandboxProvider` wraps the contract; `AWSSandboxProvider` is the
+In core, `SandboxProvider` wraps the contract; `AWSSandboxProvider` is the
 only v0 implementation.
 
 | Layer | Lifetime | Mechanism |
@@ -253,30 +253,62 @@ once a hosted controller exists.
   stopped agent, or left after the optimization ends. Backstop later:
   EventBridge + Lambda in the sandbox account for when the Mac is offline.
 
-## 8. Mac app
+## 8. Tech stack
 
-**Stack:** SwiftUI, Swift Concurrency (one actor per agent), GRDB/SQLite
-ledger, Keychain for secrets, AWS SDK for Swift, bundled `tofu`, `git` / `gh`
-and vendor CLIs as subprocesses. Developer ID + notarization, outside the Mac
-App Store (its sandbox would block spawning CLIs).
+**Decision: TypeScript everywhere, Electron for the desktop shell, engine kept
+headless.** The engine is a standalone package with no UI dependency, so the
+same code becomes the open-source CLI now and the hosted controller later, and
+the shell can be swapped (Tauri, GPUI) without touching the engine.
 
 ```
-RatchetApp/
-  Optimization/ OptimizationEngine, Ratchet, StopRules
-  Agents/       AgentAdapter, ClaudeCodeAdapter, CodexAdapter
-  GitHub/       BranchWatcher, PRBuilder
-  Sandbox/      SandboxProvider, TofuRunner, AWSSandboxProvider
-  AWS/          CredentialMinter, CostMeter, Reaper, BenchRunner
-  Ledger/       Schema, Store
-  UI/           DesignSystem, Optimizations, NewOptimization, Environment,
-                LiveAgents, BenchmarkHistory, Result
+packages/
+  core/      TypeScript (Node): engine, ratchet rule, ledger, agents, AWS, sandbox
+  cli/       `ratchet` CLI over core              ← free / open-source local runs
+  desktop/   Electron main + React renderer       ← the six screens
+  ui/        design-system tokens + components (Midnight Brass)
+infra/       OpenTofu modules + sandbox contract
+```
+
+| Need | Choice |
+|---|---|
+| Language | TypeScript (strict), Node LTS; pnpm workspaces |
+| Desktop shell | Electron: core runs in the main process (or a utility process), renderer talks to it over typed IPC |
+| UI | React + TypeScript, Tailwind themed with the tokens below, visx/d3 for charts |
+| Storage | SQLite via better-sqlite3 + Drizzle; same schema locally and when hosted |
+| Secrets | OS keychain via Electron `safeStorage` / keytar |
+| Cloud | AWS SDK for JavaScript v3; bundled, pinned `tofu` binary |
+| Git / GitHub | `git` CLI + Octokit |
+| Agents | vendor CLIs / SDKs (Claude Code, Codex) as subprocesses or libraries |
+| Long-running work | in-process job queue in core, swappable for a durable queue when hosted |
+| Packaging | electron-builder; macOS Developer ID + notarization, auto-update; Linux/Windows later at little cost |
+
+**Why Electron over Tauri:** one language (no Rust layer, no sidecar
+packaging), identical Chromium rendering on every OS for chart-heavy screens,
+and the most mature tooling (auto-update, native modules, DevTools). Accepted
+cost: larger download and memory use (~150 MB vs ~10 MB). Revisit Tauri if
+footprint or a stricter security story becomes a customer ask; revisit GPUI if
+web-view performance limits the live screens.
+
+**Security notes:** `contextIsolation` on, `nodeIntegration` off in the
+renderer, a narrow preload API; AWS keys and tokens never reach the renderer.
+
+```
+packages/core/src/
+  optimization/ engine, ratchet, stop-rules
+  agents/       adapter, claude-code, codex
+  github/       branch-watcher, pr-builder
+  sandbox/      provider, tofu-runner, aws-provider
+  aws/          credential-minter, cost-meter, reaper, bench-runner
+  ledger/       schema, store
+packages/desktop/src/renderer/screens/
+  Optimizations, NewOptimization, Environment, LiveAgents, BenchmarkHistory, Result
 ```
 
 ## 9. UI
 
 ### Design system: Midnight Brass
 
-Dark, precise, "instrument panel" look. Implement as `UI/DesignSystem` tokens.
+Dark, precise, "instrument panel" look. Implement as tokens in `packages/ui`.
 
 | Token | Value | Use |
 |---|---|---|
@@ -311,7 +343,7 @@ Dark, precise, "instrument panel" look. Implement as `UI/DesignSystem` tokens.
 
 ## 10. Milestones
 
-1. **M0, skeleton:** app shell, design-system tokens, `ratchet.yaml` parser,
+1. **M0, skeleton:** pnpm monorepo (core, cli, desktop, ui), Electron shell, design tokens, `ratchet.yaml` parser,
    ledger, GitHub watcher.
 2. **M1, AWS sandbox:** contract, OpenTofu AWS module, `tofu` runner,
    credential minter, cost meter, reaper.
