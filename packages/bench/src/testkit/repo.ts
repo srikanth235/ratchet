@@ -48,6 +48,9 @@ export class LocalGitHost implements GitHost {
     mkdirSync(dir, { recursive: true });
     execFileSync('sh', ['-c', `git -C "$1" archive "$2" | tar -x -C "$3"`, 'sh', this.repo, ref, dir], { stdio: 'pipe' });
   }
+  async resolveRef(ref: string): Promise<string> {
+    return git(this.repo, 'rev-parse', '--verify', `${ref}^{commit}`);
+  }
   async openPullRequest(): Promise<{ url: string }> {
     return { url: 'https://example.invalid/pr/1' };
   }

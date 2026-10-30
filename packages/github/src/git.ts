@@ -108,6 +108,12 @@ export abstract class BaseGitHost implements GitHost {
     throw new Error(`cannot resolve ref "${ref}"${lastErr ? `: ${(lastErr as Error).message}` : ''}`);
   }
 
+  /** GitHost port: resolve a branch, tag or sha to a full commit sha. */
+  async resolveRef(ref: string): Promise<string> {
+    await this.sync();
+    return this.resolve(ref);
+  }
+
   async createBranch(fromRef: string, branch: string): Promise<void> {
     await this.sync();
     const sha = await this.resolve(fromRef);

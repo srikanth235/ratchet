@@ -255,7 +255,8 @@ export type EngineEventVM =
   | { type: 'agent-event'; optimizationId: string; agentId: string }
   | { type: 'candidate'; optimizationId: string; candidateId: string; verdict: Verdict }
   | { type: 'ratchet'; optimizationId: string; from: number; to: number }
-  | { type: 'spend'; optimizationId: string; totalUsd: number };
+  | { type: 'spend'; optimizationId: string; totalUsd: number }
+  | { type: 'notice'; optimizationId: string; level: 'info' | 'warning' | 'error'; text: string };
 
 // ------------------------------------------------------------------ inputs (renderer → main), validated by zod in shared/ipc.ts
 
