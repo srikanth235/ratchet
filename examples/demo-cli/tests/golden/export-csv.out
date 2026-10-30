@@ -1,0 +1,111 @@
+id,title,status,priority,assignee,labels,estimate,created,due
+1,Rename coupon when the queue is full,todo,2,jonas.berg,,12.5,2025-11-29,
+2,Test webhook when the queue is full,todo,1,omar.haddad,,4,2026-01-25,
+3,Document refund in staging,todo,1,yara.saleh,search;checkout,13,2025-11-04,2026-03-30
+4,Fix webhook in the mobile app,done,2,maya.chen,support,1,2025-12-08,
+5,Split sitemap in the mobile app,doing,1,tomas.ruiz,infra,1,2026-01-10,
+6,Migrate invoice with better errors,todo,4,omar.haddad,,28,2025-11-12,
+7,Simplify inventory sync in the admin console,done,4,ivan.petrov,,37.5,2026-01-23,2026-03-09
+8,Migrate avatar upload for EU customers,done,3,iris.tanaka,,13,2025-12-21,2026-02-18
+9,Fix checkout in the admin console,done,4,zoe.martin,perf;auth,0.5,2025-11-04,2026-03-17
+10,Validate permissions for the new plan,done,1,iris.tanaka,billing;a11y,11,2025-10-23,
+11,Instrument password reset with better errors,todo,4,ivan.petrov,search,22,2026-01-20,
+12,Cache address form after the last release,doing,2,hana.kim,,11.5,2025-07-26,2026-01-21
+13,Refactor checkout on slow networks,doing,4,iris.tanaka,checkout,0.5,2025-07-25,2026-02-14
+14,Split tax rules for EU customers,doing,3,sofia.rossi,mobile,13,2025-08-21,
+15,Validate report behind a flag,blocked,1,yara.saleh,bug;billing,3,2025-09-06,
+16,Review rate limit for EU customers,doing,1,felix.wagner,api;a11y,13.5,2026-01-27,2026-04-25
+17,Automate importer after the last release,doing,3,sofia.rossi,email,15.5,2025-12-28,
+18,Rename avatar upload in the admin console,doing,1,amara.okafor,,0.5,2025-11-27,2026-05-09
+19,Document refund when the queue is full,done,3,sam.osei,payments;search,16,2025-11-28,
+20,Update session in staging,done,2,nora.lund,billing,12.5,2026-01-05,
+21,Document coupon when the queue is full,done,4,ana.silva,,11.5,2026-01-09,2026-01-25
+22,Backfill cache layer for the new plan,doing,1,priya.nair,email;i18n,23,2025-07-09,2025-12-25
+23,Document report in staging,done,1,kenji.mori,,39,2025-07-03,2025-12-25
+24,Remove cart behind a flag,doing,2,priya.nair,email;billing,24.5,2025-08-23,2026-04-01
+25,Split inventory sync before the audit,done,4,zoe.martin,,4.5,2025-07-06,2025-12-29
+26,Test onboarding in staging,done,1,sam.osei,billing;docs,1.5,2025-08-08,2026-01-13
+27,Backfill email template behind a flag,done,2,ella.novak,,1.5,2025-10-12,2025-12-23
+28,Optimize invoice on retry,done,1,priya.nair,testing;bug,3.5,2025-09-02,2026-04-17
+29,Simplify avatar upload with better errors,done,1,sofia.rossi,admin;onboarding,18,2025-08-29,
+30,Review avatar upload before the audit,todo,3,omar.haddad,security,8,2025-09-13,
+31,Test importer without downtime,done,1,sofia.rossi,,36,2025-11-25,2026-03-03
+32,Add password reset behind a flag,done,1,hana.kim,,2.5,2025-12-28,
+33,Update webhook for large accounts,done,3,sam.osei,payments,2.5,2025-06-16,2026-02-27
+34,Backfill notification for EU customers,done,3,lena.fischer,,1,2025-11-07,2025-12-31
+35,Split audit log in staging,blocked,2,sam.osei,email,15.5,2025-11-03,
+36,Instrument sitemap without downtime,done,1,amara.okafor,admin;onboarding,40,2025-07-31,
+37,Test tax rules before the audit,done,1,lena.fischer,,20,2025-11-10,
+38,Backfill search index after the last release,todo,1,sam.osei,,0.5,2025-11-26,2025-12-12
+39,Optimize report before the audit,done,1,raj.patel,payments,24,2025-10-17,2026-04-09
+40,Optimize export job in staging,doing,1,lena.fischer,search,1,2025-08-31,2026-05-10
+41,Fix webhook after the last release,done,2,kenji.mori,onboarding,1.5,2025-09-27,
+42,Simplify onboarding in the mobile app,doing,1,kenji.mori,,24.5,2025-12-31,2026-03-08
+43,Validate report in the admin console,done,3,ella.novak,payments;auth,4.5,2025-08-23,
+44,Automate audit log before the audit,done,2,raj.patel,reports,33.5,2025-08-22,2025-12-14
+45,Review webhook with better errors,blocked,3,mia.jensen,bug,24.5,2025-12-11,2026-03-02
+46,Migrate email template for the new plan,done,2,sofia.rossi,perf;payments,3.5,2025-10-07,
+47,Simplify avatar upload without downtime,done,4,maya.chen,auth;reports,25.5,2026-01-12,
+48,Test onboarding in the admin console,todo,4,priya.nair,reports,18,2025-08-08,
+49,Rename permissions for the new plan,blocked,1,priya.nair,perf,30,2025-07-01,2026-04-21
+50,Investigate session behind a flag,todo,2,tomas.ruiz,auth,38.5,2025-06-29,
+51,Backfill sitemap for large accounts,done,1,ivan.petrov,checkout,2.5,2025-08-24,
+52,Update sitemap in the admin console,doing,3,zoe.martin,,9.5,2025-09-04,2025-12-25
+53,Add dashboard on slow networks,todo,2,ella.novak,security,35.5,2025-07-03,
+54,Update invoice before the audit,done,3,tomas.ruiz,infra;tech-debt,6,2025-12-14,
+55,Rename importer in the mobile app,done,1,ben.carter,docs,28,2025-09-08,
+56,Add dashboard on retry,doing,4,ben.carter,testing,25.5,2025-09-27,2026-02-02
+57,Refactor login flow in the mobile app,doing,2,amara.okafor,,16.5,2026-01-18,2026-05-20
+58,Review report on retry,todo,4,lena.fischer,testing;onboarding,1,2025-09-16,
+59,Add export job behind a flag,todo,1,yara.saleh,,20.5,2025-09-04,
+60,Automate coupon in the admin console,done,3,maya.chen,,30.5,2026-01-20,2026-04-18
+61,Add session for the new plan,todo,1,tomas.ruiz,search,13,2026-01-04,2026-02-20
+62,Update feature flag on retry,done,2,omar.haddad,auth;bug,20.5,2025-12-08,2026-02-13
+63,Automate checkout before the audit,todo,4,nora.lund,checkout,25,2026-01-03,2026-03-29
+64,Add tax rules after the last release,doing,1,jonas.berg,infra;admin,2.5,2025-12-17,2025-12-14
+65,Add invoice in staging,blocked,1,amara.okafor,ux,18,2025-10-24,2026-01-25
+66,Migrate report behind a flag,doing,3,ana.silva,checkout,31,2025-08-26,
+67,Cache permissions when the queue is full,done,1,luca.bianchi,data,32,2025-12-20,
+68,Optimize onboarding in the admin console,todo,4,nora.lund,docs,23,2025-09-08,2026-03-12
+69,Migrate refund in staging,todo,1,ella.novak,,0.5,2026-01-24,
+70,Optimize sitemap behind a flag,blocked,1,diego.alves,ux,8.5,2025-07-11,
+71,Add report in the admin console,todo,1,nora.lund,onboarding,1.5,2025-12-04,2026-01-07
+72,Automate retry policy behind a flag,done,3,nora.lund,a11y,32,2025-07-14,2026-01-01
+73,Optimize checkout without downtime,doing,4,ivan.petrov,,39,2025-06-27,2026-03-26
+74,Deprecate password reset in staging,todo,3,sofia.rossi,reports;bug,34.5,2025-11-12,2026-02-18
+75,Instrument email template before the audit,done,3,yara.saleh,data;bug,8.5,2025-09-30,
+76,Test email template after the last release,doing,2,maya.chen,security,6,2025-10-16,2026-03-09
+77,Cache inventory sync behind a flag,done,1,amara.okafor,admin;email,31.5,2025-10-22,2026-04-13
+78,Simplify checkout behind a flag,done,3,priya.nair,auth,4,2025-10-22,2025-12-25
+79,Simplify password reset before the audit,blocked,2,ella.novak,checkout,1,2025-09-09,2026-01-23
+80,Test tax rules in the mobile app,done,4,nora.lund,perf;docs,3.5,2025-10-19,2026-05-03
+81,Split report after the last release,done,1,luca.bianchi,reports;bug,3.5,2025-07-24,2026-03-05
+82,Rename avatar upload before the audit,todo,2,luca.bianchi,auth;ux,32,2025-08-23,
+83,Backfill rate limit without downtime,doing,1,sam.osei,bug,3.5,2025-07-27,2026-01-06
+84,Split tax rules behind a flag,todo,1,lena.fischer,perf,11.5,2025-11-26,2025-12-31
+85,Simplify inventory sync in staging,blocked,1,maya.chen,docs;ux,34.5,2025-11-13,
+86,Deprecate session on slow networks,todo,2,sam.osei,checkout;payments,11.5,2025-10-20,
+87,Split password reset for EU customers,doing,2,lena.fischer,data,39,2025-10-10,
+88,Add coupon behind a flag,todo,1,zoe.martin,a11y;billing,7,2026-01-27,2026-02-22
+89,Add email template on slow networks,done,3,priya.nair,bug;docs,16,2025-06-28,2026-05-12
+90,Automate dashboard after the last release,doing,1,tomas.ruiz,,24.5,2025-12-31,2026-02-03
+91,Fix search index for EU customers,done,1,jonas.berg,onboarding;search,4,2025-12-11,
+92,Split refund for the new plan,todo,1,kenji.mori,search;security,8.5,2025-07-30,2026-04-30
+93,Cache retry policy without downtime,done,3,lena.fischer,perf;bug,4,2025-07-26,
+94,Simplify pricing page in the mobile app,doing,1,luca.bianchi,growth;search,14,2026-01-11,2026-04-05
+95,Cache feature flag for the new plan,blocked,3,nora.lund,checkout,1.5,2026-01-27,
+96,Refactor rate limit before the audit,done,2,ella.novak,reports,18.5,2025-11-15,2026-02-27
+97,"Handle ""quoted"" titles, commas and pipes | in exports",doing,1,maya.chen,,1.5,2025-10-21,2026-01-14
+98,Document notification after the last release,todo,3,lena.fischer,ux,5,2025-06-20,2026-02-14
+99,Automate schema for the new plan,doing,1,sofia.rossi,tech-debt;support,15,2025-06-28,2026-04-04
+100,Investigate cart on slow networks,done,4,nora.lund,search,3.5,2025-06-29,2025-12-28
+101,Split email template after the last release,todo,1,kenji.mori,,0.5,2025-12-09,
+102,Optimize cart before the audit,doing,3,sofia.rossi,reports,21.5,2025-11-11,2026-02-20
+103,Update pricing page in staging,todo,3,priya.nair,,13.5,2025-11-27,
+104,Split webhook with better errors,todo,1,ella.novak,checkout;perf,16.5,2025-09-26,
+105,Optimize webhook for EU customers,done,1,maya.chen,,36.5,2025-12-30,2026-01-10
+106,Migrate email template in the admin console,done,1,kenji.mori,checkout;billing,6,2025-08-19,2026-04-09
+107,Remove refund when the queue is full,todo,1,mia.jensen,support,9.5,2025-08-10,2026-04-29
+108,Split notification on retry,todo,4,yara.saleh,search,8.5,2025-08-07,2026-03-22
+109,Automate inventory sync on slow networks,todo,2,amara.okafor,a11y,1.5,2025-10-25,2026-04-23
+110,Split pricing page for the new plan,doing,4,amara.okafor,a11y;docs,32,2025-10-22,2026-04-04

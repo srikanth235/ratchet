@@ -1,0 +1,6 @@
+sources     packages/web/package.json, .taskrrc.json
+data file   data/tasks.json
+time zone   Europe/Berlin (UTC+01:00)
+page size   12
+terminal    80 columns, 8 colors
+plugins     @taskr/plugin-burndown@1.2.0, taskr-plugin-gantt@0.4.1

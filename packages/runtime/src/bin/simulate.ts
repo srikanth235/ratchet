@@ -2,12 +2,13 @@
 /**
  * Run a full Ratchet optimization in simulation mode against a shipped demo.
  *
- *   node packages/runtime/dist/bin/simulate.js [--project search|forecast] [--attempts N] [--duration S] [--repeats N] [--minutes M]
+ *   node packages/runtime/dist/bin/simulate.js [--project search|forecast|cli] [--attempts N] [--duration S] [--repeats N] [--minutes M]
  *                                              [--db <path>] [--summary <path.json>]
  *
  * `--project search` (default): examples/demo-search, perf pack. `--project forecast`: examples/demo-forecast,
- * forecasting pack. Build first (`pnpm build`). Prints engine events and a final summary with the $ value of the win
- * (core's estimateValue / returnOnSpend); exits non-zero if no verified win.
+ * forecasting pack. `--project cli`: examples/demo-cli (CLI cold start), perf pack. Build first (`pnpm build`).
+ * Prints engine events and a final summary with the $ value of the win (core's estimateValue / returnOnSpend);
+ * exits non-zero if no verified win.
  *
  * The scratch directory (`.ratchet-sim-*` in the repo root, holding the git remote, artifacts and PR) is never
  * deleted. The ledger lives there too unless `--db <path>` puts it somewhere that outlives the scratch dir.

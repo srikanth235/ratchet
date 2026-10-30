@@ -1,0 +1,20 @@
+{
+  "name": "@ratchet/demo-cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "taskr": "dist/src/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "pnpm build && vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:contract": "vitest run tests/contract",
+    "golden": "pnpm build && node dist/bench/update-golden.js",
+    "bench:spawn": "pnpm build && node dist/bench/spawn.js",
+    "bench:hyperfine": "pnpm build && node dist/bench/hyperfine.js",
+    "bench:mix": "pnpm build && node dist/bench/gen-invocations.js"
+  }
+}

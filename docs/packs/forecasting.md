@@ -144,6 +144,23 @@ guardrails and ratchet rule; only AWS and the agent CLIs are mocked. Result of o
 2. **Repeated identical candidates.** A scripted agent whose patch is already in the best submits a tree identical to the
    best, which lands as `rejected` ("not better than current best"). Harmless, but it inflates the candidate count.
 
+## Scaffolding a repo: `ratchet init --pack forecasting`
+
+```sh
+ratchet init --pack forecasting                # ratchet.yaml, RATCHET.md, eval/backtest.mjs, src/forecast.mjs
+ratchet init --pack forecasting --metric mape --value-usd 8000 --dir ./my-forecaster
+ratchet init --pack forecasting --dry-run
+```
+
+Writes a `ratchet.yaml` for this pack (`kind: backtest`, `eval/**`, `data/**`, `ratchet.yaml` and `package.json` protected,
+a `leakage_violations: "== 0"` guardrail, a `value:` block marked `estimated`), a `RATCHET.md` brief, a rolling-origin
+backtest stub `eval/backtest.mjs` (5 origins, 4-period horizon; each forecast is handed only the history before its
+origin; prints `{ wape, bias, leakage_violations }`; `RATCHET_TRACE` names the sealed holdout series) and the model it
+scores, `src/forecast.mjs`, a mean-of-the-last-4-periods baseline to be replaced. The stub runs on a seeded synthetic
+series: replace `loadSeries()` with the real data, and add a real leakage probe if the pipeline loads data itself. Options
+as for `perf`: `--metric`, `--direction`, `--value-usd`, `--dir`, `--force` (without it existing files are never
+overwritten), `--dry-run`, `--list-packs`. The output passes `ratchet validate`.
+
 ## Using the demo
 
 ```sh

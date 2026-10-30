@@ -1,0 +1,13 @@
+# Overlay for local simulation runs (packages/runtime): merged over ratchet.yaml before the demo is pushed to the
+# simulated "GitHub"; the simulator removes this file from the repo it creates.
+#
+# hyperfine is not installed here, so the Node fallback bench (same JSON) is used. The box is shared and loaded:
+# each invocation is started 3 times and only the fastest two thirds of the runs count (--keep), because a slow run
+# is the machine, not the CLI; no warm-up pass (the build just warmed the file cache); two repeats per candidate.
+sealed:                           # hidden invocation mix: same kinds of command, a seed the agents never see
+  run: node dist/bench/gen-invocations.js --seed 424242 --out "{out}"
+  file: sealed-invocations.json
+evaluator:
+  run: node dist/bench/spawn.js --runs 3 --warmup 0 --keep 0.67 --mix "${RATCHET_TRACE:-bench/invocations.json}"
+  repeats: 2
+  holdout: "{sealed}"

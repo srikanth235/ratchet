@@ -1,0 +1,39 @@
+diff --git a/src/context.ts b/src/context.ts
+index 16f1e29..6785224 100644
+--- a/src/context.ts
++++ b/src/context.ts
+@@ -13,3 +13,3 @@ export interface Io {
+ 
+-/** Everything a command needs, resolved once per process. */
++/** Everything a command needs, resolved once per process (and only if the command asks). */
+ export interface Context extends Io {
+@@ -30,7 +30,25 @@ export function createContext(io: Io, cwd: string, env: NodeJS.ProcessEnv): Cont
+   if (!isKnownZone(config.tz)) throw new TaskrError('E0101', { tz: config.tz });
+-  const plugins = scanPlugins(cwd);
+-  const terminal = detectTerminal();
+-  const store = loadStore(config.dataFile);
+   const now = env.TASKR_NOW ? new Date(env.TASKR_NOW) : new Date();
+-  return { ...io, cwd, env, now, config, rootDir, sources, plugins, terminal, store };
++  // plugins, terminal and store are resolved the first time a command asks for them
++  let plugins: Plugin[] | undefined;
++  let terminal: Terminal | undefined;
++  let store: Store | undefined;
++  return {
++    ...io,
++    cwd,
++    env,
++    now,
++    config,
++    rootDir,
++    sources,
++    get plugins() {
++      return (plugins ??= scanPlugins(cwd));
++    },
++    get terminal() {
++      return (terminal ??= detectTerminal());
++    },
++    get store() {
++      return (store ??= loadStore(config.dataFile));
++    },
++  };
+ }

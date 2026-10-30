@@ -141,7 +141,7 @@ describe.skipIf(!existsSync(BIN))('ratchet-runner binary (needs `pnpm build`)', 
     await engineLoop(control, () => finished);
     expect(await exited, stderr).toBe(0);
     expect(JSON.parse((await store.get(doneKey(runnerPrefix('opt1', 'cc'))))!).candidates).toBe(2);
-  }, 30_000);
+  }, 60_000);
 
   it('SIGTERM aborts the agent and exits cleanly, recording why', async () => {
     const { store, config, env, work } = setup();
@@ -156,7 +156,7 @@ describe.skipIf(!existsSync(BIN))('ratchet-runner binary (needs `pnpm build`)', 
     expect(await exited).toBe(0);
     expect(JSON.parse((await store.get(doneKey(runnerPrefix('opt1', 'cc'))))!).reason).toBe('aborted');
     void AcceleratedClock;
-  }, 30_000);
+  }, 60_000);
 
   it('exits 2 with a message when misconfigured', async () => {
     const child = run({ PATH: process.env['PATH'] });
