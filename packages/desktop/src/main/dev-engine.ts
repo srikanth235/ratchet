@@ -20,6 +20,7 @@ import {
   type SandboxProvider,
   type SandboxState,
   SandboxLifecycle,
+  CALIBRATION,
 } from '@ratchet/core';
 import { DEFAULT_CONFIG_YAML } from './default-config.js';
 import { DevSandboxProvider } from './dev-sandbox.js';
@@ -164,7 +165,7 @@ export class DevEngine implements EngineApi {
       baseRef: input.baseRef,
       metric: cfg.objective.metric,
       direction: cfg.objective.direction,
-      minGain: cfg.objective.min_gain,
+      minGain: cfg.objective.min_gain ?? CALIBRATION.fallbackGain,
       budgetUsd: input.budgetUsd,
       timeLimitS: input.timeLimitSeconds,
       configYaml: input.configYaml ?? DEFAULT_CONFIG_YAML,
@@ -279,7 +280,7 @@ export class DevEngine implements EngineApi {
   private recordBaseline(id: OptimizationId, run: Run): void {
     const max = run.config.objective.direction === 'maximize';
     const center = max ? 40 + this.rand() * 10 : 150 + this.rand() * 60;
-    const samples = Array.from({ length: Math.max(5, run.config.bench.repeats) }, () => round(center * (1 + (this.rand() - 0.5) * 0.04)));
+    const samples = Array.from({ length: Math.max(5, run.config.bench.repeats ?? CALIBRATION.baselineRepeats) }, () => round(center * (1 + (this.rand() - 0.5) * 0.04)));
     const s = summarize(samples);
     const t = this.now();
     this.ledger.recordBaseline({
@@ -325,7 +326,7 @@ export class DevEngine implements EngineApi {
     const effect = r < 0.22 ? 0.04 + this.rand() * 0.05 : r < 0.75 ? (this.rand() - 0.4) * 0.03 : -0.02 - this.rand() * 0.03;
     const centre = best * (1 + sign * effect);
     const sample = (c: number) => round(c * (1 + (this.rand() - 0.5) * 0.03));
-    const samples = Array.from({ length: cfg.bench.repeats }, () => sample(centre));
+    const samples = Array.from({ length: cfg.bench.repeats ?? CALIBRATION.baselineRepeats }, () => sample(centre));
     const guardrails: GuardrailResult[] = cfg.guardrails.map((g) => {
       const name = g.kind === 'command' ? g.run : `${g.metric} ${g.raw}`;
       return this.rand() < 0.04 ? { name, passed: false, detail: 'regressed' } : { name, passed: true };
@@ -350,7 +351,7 @@ export class DevEngine implements EngineApi {
     if (outcome.verdict === 'pending_confirm') {
       // Hidden-trace confirm: usually holds, occasionally doesn't.
       const holds = this.rand() > 0.15;
-      const confirm = Array.from({ length: cfg.bench.repeats }, () => sample(holds ? centre : best * (1 + (-sign) * 0.01)));
+      const confirm = Array.from({ length: cfg.bench.repeats ?? CALIBRATION.baselineRepeats }, () => sample(holds ? centre : best * (1 + (-sign) * 0.01)));
       const c0 = this.now();
       outcome = evaluateRatchet({ ...input, confirm });
       this.ledger.recordBenchResult({ candidateId: cand.id, phase: 'confirm', samples: confirm, stats: stats(confirm), guardrails: [], startedAt: c0, finishedAt: this.now() });

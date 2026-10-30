@@ -9,6 +9,7 @@ import {
   type Ledger,
   type OptimizationSummary,
   type SpendBreakdown,
+  CALIBRATION,
 } from '@ratchet/core';
 import type {
   ActivityItem,
@@ -517,8 +518,9 @@ export function validateConfigText(text: string): ValidateConfigResult {
     pack: c.pack ?? null,
     metric: c.objective.metric,
     direction: c.objective.direction,
-    minGain: c.objective.min_gain,
-    evaluator: { kind: c.evaluator.kind, ref: c.evaluator.ref, run: c.evaluator.run, repeats: c.evaluator.repeats, hardware: c.evaluator.hardware, holdout: c.evaluator.holdout ?? null },
+    // Absent in ratchet.yaml means "calibrated from the baseline" (EngineApi.calibration shows the real figure); the default stands in here.
+    minGain: c.objective.min_gain ?? CALIBRATION.fallbackGain,
+    evaluator: { kind: c.evaluator.kind, ref: c.evaluator.ref, run: c.evaluator.run, repeats: c.evaluator.repeats ?? CALIBRATION.baselineRepeats, hardware: c.evaluator.hardware, holdout: c.evaluator.holdout ?? null },
     value: v ? { usdPerUnit: v.usd_per_unit, period: v.period, basis: v.basis, unit: v.unit ?? null } : null,
     guardrails: c.guardrails.map((g) => (g.kind === 'command' ? `run: ${g.run}` : `${g.metric} ${g.raw}`)),
     protectedGlobs: c.protected,
