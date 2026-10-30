@@ -1,0 +1,11 @@
+{
+  "name": "@ratchet/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo 'desktop: scaffold pending'",
+    "typecheck": "echo 'desktop: scaffold pending'",
+    "test": "echo 'desktop: scaffold pending'"
+  }
+}

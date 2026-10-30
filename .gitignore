@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+*.tsbuildinfo
+.env
+.DS_Store
+coverage/
+.terraform/
+*.tfstate*
