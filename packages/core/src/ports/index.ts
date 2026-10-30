@@ -508,6 +508,8 @@ export interface EngineApi {
   teardownReceipt?(optimizationId: OptimizationId): Promise<SandboxTeardownReceipt | null>;
   /** Live view of the automatic sandbox (running instances, spend, destroy time, last receipt). */
   sandboxActivity?(sandboxId: string): Promise<SandboxActivity>;
+  /** "End the environment now": tear the sandbox down without waiting for the idle window. Refuses while a run is active. */
+  endSandbox?(sandboxId: string): Promise<SandboxTeardownReceipt>;
   /** True while any run is active (the same signal as the `run-active` event), for the sleep-prevention hook. */
   runActive?(): boolean;
 }

@@ -14,7 +14,9 @@ of **M3/M4**.
 | Process handling (`nodeSpawner`, `runProcess`) | **Real** child processes: stdin, stderr tail, process-group kill including a grandchild that ignores SIGTERM | none (re-run on the runner AMI's Linux, the container here is also Linux) |
 | `runRunnerLoop` | **Real** `git` against a temp repo with a bare remote, `ScriptedAgent`, fake verdicts | Real GitHub remote and token, real latency |
 | `ScriptedAgent` + `scripts/demo-search` | Real patches against `examples/demo-search`; each good patch keeps the demo's 65 tests green | none (it is the mock) |
-| `LocalRunnerControl` | Real clones, in-process loop | n/a (simulation only) |
+| `LocalRunnerControl` (clone mode) | Real clones, in-process loop | n/a (simulation only) |
+| `LocalRunnerControl` (worktree mode, local agents) | Real `git worktree`s against a bare remote; the real `ClaudeCodeAdapter` driving a **shell stand-in** for `claude` (env, cwd, binary path, no API key); two agents sharing one clone | The real `claude` / `codex` on a developer machine: see "Local agents with your own login" below |
+| `detectHarnesses` / `resolveLoginPath` | Fake spawner and file system for every branch; shell stand-ins for the CLIs through real processes; `codex login status` wording checked against codex-cli 0.166 on Linux | `claude auth status` (never run: the CLI could not be installed here), the macOS keychain probe, a GUI-launched Electron app's PATH, `codex login status` for a ChatGPT login |
 | `SsmRunnerControl` | In-memory `CloudCompute` + `ArtifactStore` | Real SSM `SendCommand` (quoting, 24 KB script limit, timeouts), real S3 |
 | `AwsCliArtifactStore` | Fake `aws` binary | Real `aws s3 cp` / `s3api list-objects-v2` behaviour and IAM |
 | `ratchet-runner` bin | Spawned as a real subprocess with a filesystem artifact store and the mock agent | Real instance profile, SSM secrets, systemd/`setsid` launch |
@@ -55,6 +57,100 @@ The agent CLI gets a deliberately small environment (`PATH`, `HOME`, `USER`, `LA
 `SHELL`, `AWS_REGION`, `AWS_DEFAULT_REGION` and the model key). `SIGTERM`/`SIGINT` abort the running turn (process group
 killed) and the runner exits 0 with `done.json.reason = "aborted"`. Exit code 1 = `failed`/`agent-unavailable`,
 2 = bad configuration.
+
+## Local agents with your own login ("This machine")
+
+The default mode needs no AWS for the agents at all: the app drives the `claude` / `codex` you already use, signed in
+the way you already are. Do this first, before the EC2 steps below; it is the fastest way to find out whether the real
+flags and event shapes match the fixtures.
+
+Prerequisites: `claude` and/or `codex` installed and signed in (`claude` once interactively, `codex login`), a scratch
+repository you can push branches to (a fork of `examples/demo-search`), and a GitHub token that can push to it.
+
+### 0. Detection
+
+```ts
+import { detectHarnesses, resolveLoginPath } from '@ratchet/agents';
+const login = await resolveLoginPath();            // what $SHELL -lc 'echo $PATH' gives, plus common install dirs
+console.log(login);
+console.log(await detectHarnesses({ loginPath: login.path }));
+```
+
+Verify, per harness: `installed`, `version`, `path` are right; `auth` matches reality in all four states (signed in,
+API key only via env, signed out, binary missing). Specifically:
+
+- **From a GUI launch (the part that matters).** Run the same call from the packaged app launched from the Dock /
+  Finder, not from a terminal. `fromLoginShell` must be `true`, and `claude` / `codex` must be found even though the
+  app's own PATH is the bare launchd one. If your shell sets PATH only in `~/.zshrc` (nvm, volta shims), the login shell
+  will not see it; the fallback directories (`~/.nvm/versions/node/*/bin`, `~/.volta/bin`, ...) should still find the
+  binary. If not, add the directory to `fallbackPathDirs`.
+- **Claude Code auth.** `claude auth status` is assumed to print JSON with `loggedIn` (and `authMethod`) and exit non-zero
+  when signed out. **Not verified**: record the real output of both states in `test/fixtures` and fix `claudeAuth` if it
+  differs. Check the credential-file fallback (`~/.claude/.credentials.json`, or `$CLAUDE_CONFIG_DIR`) and, on macOS, that
+  `security find-generic-password -s "Claude Code-credentials"` (no `-w`) exits 0 with a login and 44 without, and that it
+  never raises a keychain prompt.
+- **Codex auth.** Verified on codex-cli 0.166: `codex login status` writes to **stderr**; "Not logged in" exits 1,
+  "API key configured - sk-***" exits 0. Not verified: the wording for a ChatGPT login ("Logged in using ChatGPT" is
+  assumed) and whether `OPENAI_API_KEY` / `CODEX_API_KEY` in the environment change the answer (here they did not).
+- **No secrets.** `JSON.stringify` the result and the logs: no key, token or masked key text may appear.
+- **Timeouts.** Put a `sleep 30` script first on PATH under the name `codex`: detection must return `installed: false`
+  with a "timed out" hint after about 5 s, never hang the app.
+
+### 1. One local turn, by hand
+
+```bash
+export PATH="$(resolve the login PATH from step 0)"
+git clone <your fork> /tmp/rt-local && cd /tmp/rt-local
+env -i HOME="$HOME" PATH="$PATH" claude -p --output-format stream-json --verbose --permission-mode acceptEdits \
+  --allowedTools Bash,Read,Edit,Write,Glob,Grep <<< "add a comment to README.md"
+```
+
+With no `ANTHROPIC_API_KEY` in that environment the turn must run on your login. Check that the stream has an init line
+with a session id, a `result` line with `total_cost_usd` (for a subscription this is a notional figure; confirm it is
+present, because the engine's budget rule runs on it), and that `--resume <id>` continues the session. Same for
+`codex exec --json -c sandbox_mode="workspace-write" -` with `CODEX_HOME` untouched.
+
+### 2. The local control, no engine
+
+```ts
+import { createLocalAgentControl, detectHarnesses, resolveLoginPath } from '@ratchet/agents';
+const { path: loginPath } = await resolveLoginPath();
+const control = createLocalAgentControl({
+  rootDir: '/tmp/ratchet-local', harnesses: await detectHarnesses({ loginPath }), loginPath,
+  gitEnv: gitAuthEnv(repoUrl, token),
+});
+```
+
+Start one agent through `control.start(handle, config)` (use `packages/agents/test/harness.ts` for a config), answer its
+`commit` events with `verified` by `control.send`, and check:
+
+- the worktree exists at `/tmp/ratchet-local/<opt>/<agent>` with a `.git` **file**, the clone at `.../clone`;
+- the commit is authored by `<agent> (ratchet)` unless your global git identity is set (then yours; both are fine) and is
+  not signed (`commit.gpgsign=false` in the worktree), so no pinentry prompt can block an unattended turn;
+- the branch reached the remote with the `Ratchet-Candidate: true` trailer;
+- the agent process environment has **no** `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `AWS_*` (add `env | sort > /tmp/env.txt`
+  to a prompt, or run the shim from `test/local-agents.test.ts`), and `PATH` starts with the login PATH;
+- `control.stop(handle)` removes the worktree and leaves the branch on the remote; `control.release(optId)` removes the clone;
+- with two agents at once, `git -C <clone> worktree list` shows both and their `refs/ratchet/<agent>/accepted` refs differ.
+
+### 3. Through the engine
+
+`createHybridRuntime({ ..., sandbox: null })` with real settings (profile, region, GitHub, bench image) and the fork:
+create an optimization with `agentsWhere: 'local'`, start it, and watch the sandbox appear (`sandbox` events:
+`creating`, `ready`), the baseline run on the bench instance, the agent commit, the bench / confirm verdict, and the
+sandbox disappear after the idle window (set `sandboxIdleMs: 120000` for the test) with `teardownReceipt(id)` showing
+`nothingRunning: true`. In the AWS console, after the receipt: no tagged instances, no buckets, no `ratchet-*` roles.
+
+Things this mode cannot prove from here and that the first real run has to answer:
+
+- an unattended `claude -p` with `--allowedTools Bash,...` and `acceptEdits` runs commands on your machine without a prompt;
+  decide whether that is acceptable for your repo before pointing it at anything sensitive;
+- Claude Code subscription limits: a long run may hit the 5-hour window; the loop sees an `error` result and retries up to
+  `maxConsecutiveFailures`, then the agent is `failed`. See "Terms and authentication" below for whether a subscription
+  may be used for automated runs;
+- macOS: does the Dock-launched app inherit enough environment (`HOME`, `SSH_AUTH_SOCK` is deliberately removed) for the
+  CLI to find its keychain item?
+- the app being closed or the Mac asleep stops local agents (use `agentsWhere: 'cloud'` for those runs).
 
 ## Testing the real adapters on an EC2 runner
 

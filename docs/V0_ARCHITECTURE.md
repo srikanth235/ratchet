@@ -164,18 +164,71 @@ no network") before anything runs, and the lockfile counts as protected without 
 listed under `protected`. The local simulation applies the same rule. Details and
 real-environment checks: `docs/real-env/bench.md` ("Dependencies on an offline bench").
 
-## 5. Agents: headless on agent runners
+## 5. Agents: local by default, cloud optional
 
-Both agents have documented headless modes, so v0 runs them on EC2 machines
-Ratchet controls instead of depending on vendor-hosted cloud sessions.
+Both agents have documented headless modes, so the same loop (`runRunnerLoop`) drives them either on
+the user's machine or on EC2 machines Ratchet controls, instead of depending on vendor-hosted cloud
+sessions. The evaluator never moves: bench and confirm instances always run in the cloud sandbox, so
+measurements are on pinned hardware and the holdout never reaches the machine the agents work on
+(`docs/SIMPLIFIED_MODEL.md`).
 
 | | Claude Code | Codex |
 |---|---|---|
 | Headless entry point | `claude -p --output-format stream-json` (or Claude Agent SDK) | `codex exec --json` (or Codex SDK) |
 | Continue a session | resume by session id | resume the previous exec session |
 | Auth | Anthropic API key (subscription only where terms allow) | OpenAI API key or ChatGPT sign-in, per terms |
+| Local sign-in check | `claude auth status`, credentials file / keychain item, `ANTHROPIC_API_KEY` | `codex login status`, `~/.codex/auth.json`, `OPENAI_API_KEY` |
 
-### Agent runner
+### Where agents run (`agentsWhere`)
+
+| | `local` ("This machine", the default) | `cloud` (unattended) |
+|---|---|---|
+| Control | `LocalRunnerControl` in `worktree` mode, in the app's main process | `SsmRunnerControl` over SSM + S3 |
+| Adapter | the real `ClaudeCodeAdapter` / `CodexAdapter` on the **detected** binary | the same adapters on the runner image |
+| Credentials | the user's own CLI login; no API key is passed unless the harness reports `api-key` auth | model keys in SSM Parameter Store, per-agent IAM role |
+| Workspace | one local clone per optimization, one `git worktree` per agent, removed on stop / teardown | the runner's own clone |
+| Laptop closed | the run pauses (the app holds a power-save blocker while a run is live) | keeps going |
+| Cloud resources per agent | none (no identity, secret or runner instance) | identity, secrets, EC2 runner |
+
+The engine takes `agentsWhere` per optimization (`createOptimization({ agentsWhere })`), else its
+`agentsWhere` setting, else `local` when it was given a `localRunners` port, else `cloud`.
+
+**Detection** (`detectHarnesses`, `packages/agents/src/detect.ts`) runs in the main process on launch and
+on demand and returns `{ kind, installed, version, path, auth: 'signed-in' | 'api-key' | 'signed-out',
+hint }` per harness. PATH is resolved like a login shell (`$SHELL -lc`) because a GUI app on macOS does
+not inherit it. Auth asks the CLI's own non-interactive status command first, then checks that
+credentials exist (never their contents), then API-key variables.
+
+**Local agent environment** (`localAgentEnv`): the user's environment with the login-shell PATH, minus
+anything that looks like a credential (`AWS_*`, `*_TOKEN`, `*_API_KEY`, ...). The harness's model key is
+added back only for `api-key` auth, so a signed-in harness always uses the login. Git credentials stay
+with the control (clone and push) and never reach the agent process. A local agent has the user's own
+file and network permissions: the worktree isolates the git state, not the machine (Codex still runs in
+its `workspace-write` sandbox).
+
+**Local agents do not survive the app.** The loop lives in the main process. After a restart, polling a
+lost agent reports it failed, so the engine ends the run instead of waiting. Use `cloud` for long
+unattended runs.
+
+### Sandbox lifecycle: invisible
+
+With `sandbox.auto` (the live and hybrid runtimes) the engine owns the sandbox:
+
+- created at the first run start in a region (`ratchet.yaml` `environment.region`, else the setting
+  default `us-east-1`; one sandbox per region, `ratchet-sandbox` / `ratchet-sandbox-<region>`);
+- reused while runs are active; every `tick()` looks at the idle clock (persisted in the ledger's kv table,
+  so a sandbox that outlived the app is removed on the first tick after launch);
+- destroyed once no run has been active for the idle window (default 30 min, `sandbox.idleMs`): finished
+  runs are torn down first (identities, secrets, leftover instances), the destroy goes through the same
+  orphan check as an explicit one, and a **teardown receipt** is recorded (resources removed, spend per
+  category, `nothingRunning` verified with `listTagged`). A failed destroy is retried with back-off;
+- explicit `applySandbox` / `destroySandbox` still work and take a sandbox out of automatic management.
+
+Engine surface for the UI: `teardownReceipt(optimizationId)`, `sandboxActivity(sandboxId)`, `endSandbox(sandboxId)`
+("end now"), `runActive()` and the `run-active` / `sandbox` events (the main process maps `run-active` to
+`powerSaveBlocker`).
+
+### Cloud agent runner
 
 One EC2 instance per agent, launched by the app into the sandbox:
 

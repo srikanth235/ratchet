@@ -15,17 +15,31 @@ keeps its own detailed notes in `docs/real-env/<area>.md`.
 | `PriceBook` | `@ratchet/aws` (Pricing API) | static price table | Pricing API access |
 | `ArtifactStore` | `@ratchet/aws` (S3) | filesystem | Artifacts bucket |
 | `GitHost` | GitHub (git + Octokit) | local bare repo | Repo-scoped GitHub token |
-| `AgentAdapter` | `@ratchet/agents` claude-code, codex | `ScriptedAgent` | Anthropic / OpenAI API keys, CLIs on runner image |
-| `RunnerControl` | SSM + S3 event stream | local child process | Runner AMI, SSM agent |
+| `AgentAdapter` | `@ratchet/agents` claude-code, codex | `ScriptedAgent` | **Local (default):** the CLIs installed and signed in on the test machine. **Cloud:** Anthropic / OpenAI API keys, CLIs on runner image |
+| `RunnerControl` | **Local (default):** `LocalRunnerControl` in worktree mode, one working tree per agent. **Cloud:** SSM + S3 event stream | `LocalRunnerControl` (clone mode), local child process | Local: only the CLIs and a repo you can push to. Cloud: runner AMI, SSM agent |
+| Harness detection | `detectHarnesses` (login-shell PATH, `claude auth status`, `codex login status`) | fake spawner / fs | A Dock-launched app on macOS, a signed-in and a signed-out machine |
+| Sandbox lifecycle | Engine `sandbox.auto`: created at the first run, destroyed after the idle window, with a teardown receipt | `MockSandboxProvider` + fake clock | AWS account: apply at first start, destroy after the idle window, nothing left (`aws.md`) |
 | `BenchRunner` | EC2 bench instance via SSM | `LocalBenchRunner` | Dedicated `c7i.2xlarge`, hidden traces in sealed bucket |
 
 ## Order of real tests
 
+0. `docs/real-env/agents.md`, "Local agents with your own login" — detection and a local agent turn, no AWS needed.
 1. `docs/real-env/aws.md` — tofu apply/destroy, identities, kill switch, reaper.
 2. `docs/real-env/bench.md` — baseline noise on pinned hardware, confirm trace.
-3. `docs/real-env/agents.md` — headless Claude Code / Codex on a runner.
+3. `docs/real-env/agents.md` — headless Claude Code / Codex on a runner (the `cloud` mode).
 4. `docs/real-env/engine.md` — full optimization on demo-search, then a partner repo.
 5. `docs/real-env/desktop.md` — signed build on macOS, every screen against live data.
+
+## Local agents and the invisible sandbox (what is new, what is unproven)
+
+`createHybridRuntime` (`@ratchet/runtime`) is the product wiring: agents on this machine through `LocalRunnerControl`, the
+evaluator on AWS, and the sandbox created and destroyed by the engine. Its tests run without AWS or the real CLIs: the engine
+with the fake clock (idle window, receipt, orphans, restart), detection against fake spawners and shell stand-ins, and one
+integration test (`packages/runtime/src/local-agents.int.test.ts`) that runs a stand-in `claude` through the real Engine, a
+worktree and a mock sandbox. Unproven until run for real: the real CLIs' flags and auth status output on a developer machine
+(`agents.md`), `tofu apply` at the first run start and `tofu destroy` after the idle window (`aws.md`), and the late-bound AWS
+ports (built from the sandbox outputs in the ledger on first use). Sleep prevention is an engine signal (`run-active` event,
+`engine.runActive()`); the desktop main process has to turn it into `powerSaveBlocker`, which nothing here exercises.
 
 ## Security caveats (read before the first apply)
 
