@@ -89,6 +89,12 @@ export interface AwsComputeConfig {
    * sealed bucket. Required to launch a confirm instance; must differ from `benchInstanceProfile`.
    */
   confirmInstanceProfile?: string;
+  /**
+   * Instance profile for `deps` jobs only (`deps_identity_ref`): writes `bench-deps/` and nothing else, no sealed access. Required to
+   * launch a dependency-snapshot job (absent in sandboxes applied before snapshots existed: re-apply). Must differ from the bench and
+   * confirm profiles.
+   */
+  depsInstanceProfile?: string;
   /** `network_ref.egress_proxy_url`; when set, agent runners get HTTPS_PROXY. Null/undefined: no proxy. */
   egressProxyUrl?: string | null;
   artifactsBucket: string;
@@ -108,6 +114,7 @@ export function awsComputeConfigFromOutputs(o: AwsSandboxOutputs, sandboxId: str
     benchSecurityGroupId: o.network.benchSecurityGroupId,
     benchInstanceProfile: o.evalIdentity.instanceProfileArn,
     confirmInstanceProfile: o.confirmIdentity.instanceProfileArn,
+    ...(o.depsIdentity ? { depsInstanceProfile: o.depsIdentity.instanceProfileArn } : {}),
     egressProxyUrl: o.network.egressProxyUrl,
     artifactsBucket: o.artifactsBucket,
     maxInstanceLifetimeHours: o.limits.maxInstanceLifetimeHours,
@@ -159,6 +166,9 @@ export class AwsCloudCompute implements CloudCompute {
     }
     if (cfg.confirmInstanceProfile && cfg.confirmInstanceProfile === cfg.benchInstanceProfile) {
       throw new Error('confirmInstanceProfile must differ from benchInstanceProfile: baseline/bench phases must not hold sealed access');
+    }
+    if (cfg.depsInstanceProfile && (cfg.depsInstanceProfile === cfg.benchInstanceProfile || cfg.depsInstanceProfile === cfg.confirmInstanceProfile)) {
+      throw new Error('depsInstanceProfile must differ from the bench and confirm profiles: the snapshot builder has egress and writes bench-deps/, the bench runs candidate code');
     }
   }
 
@@ -401,26 +411,34 @@ export class AwsCloudCompute implements CloudCompute {
    * Bench instances sit in the private bench subnet. The instance profile depends on the phase:
    * only `confirm` gets the identity that can read the sealed bucket; `baseline` and `bench` run
    * candidate code with no sealed access at all. Anything else, or a missing profile, fails closed.
+   *
+   * `deps` (dependency snapshot) is the one purpose that runs elsewhere: in the AGENT subnet with the agent runner
+   * security group (egress, through the allow-list proxy when it is enabled), under its own profile that can write
+   * `bench-deps/` and nothing else. It never executes candidate code, and there is no fallback from `deps` to a
+   * bench subnet or profile or the other way round.
    */
   async launchBenchInstance(spec: BenchLaunchSpec): Promise<InstanceInfo> {
     assertValidId('optimization', spec.optimizationId);
     const p = benchProfileFor(this.cfg, spec.purpose);
-    if (!this.cfg.benchSubnetId) {
+    const deps = spec.purpose === 'deps';
+    if (!deps && !this.cfg.benchSubnetId) {
       throw new Error('benchSubnetId is not configured (network_ref.bench_subnet_id): refusing to launch a bench instance in a subnet that may have internet access');
     }
     const params = this.baseRunParams({
       imageRef: spec.imageRef,
       instanceType: spec.instanceType,
-      subnetId: this.cfg.benchSubnetId,
-      securityGroupId: this.cfg.benchSecurityGroupId,
+      subnetId: deps ? this.cfg.subnetId : this.cfg.benchSubnetId!,
+      securityGroupId: deps ? this.cfg.agentRunnerSecurityGroupId : this.cfg.benchSecurityGroupId,
       profile: p.startsWith('arn:') ? { Arn: p } : { Name: p },
-      userData: benchUserData(spec, this.cfg.maxInstanceLifetimeHours ?? 2),
+      userData: deps
+        ? depsUserData(spec, this.cfg.maxInstanceLifetimeHours ?? 2, { region: this.cfg.region, proxyUrl: this.cfg.egressProxyUrl ?? null })
+        : benchUserData(spec, this.cfg.maxInstanceLifetimeHours ?? 2),
       tags: [
         { Key: TAG_OPT, Value: spec.optimizationId },
         { Key: TAG_ROLE, Value: 'bench' },
         { Key: TAG_PURPOSE, Value: spec.purpose },
         { Key: TAG_SANDBOX, Value: this.cfg.sandboxId },
-        { Key: 'Name', Value: `ratchet-bench-${spec.optimizationId}-${spec.purpose}` },
+        { Key: 'Name', Value: `ratchet-${deps ? 'deps' : 'bench'}-${spec.optimizationId}-${spec.purpose}` },
       ],
     });
     return this.runInstance(params, 'bench', spec.optimizationId, undefined, spec.instanceType);
@@ -581,8 +599,11 @@ export function secretPrefix(opt: string, agent: string): string {
   return `/ratchet/${opt}/${agent}/`;
 }
 
-/** Picks the instance profile for a bench phase; the sealed-capable one only for `confirm`. */
-export function benchProfileFor(cfg: Pick<AwsComputeConfig, 'benchInstanceProfile' | 'confirmInstanceProfile'>, purpose: BenchLaunchSpec['purpose']): string {
+/** Picks the instance profile for a bench phase; the sealed-capable one only for `confirm`, the `bench-deps/` writer only for `deps`. */
+export function benchProfileFor(
+  cfg: Pick<AwsComputeConfig, 'benchInstanceProfile' | 'confirmInstanceProfile' | 'depsInstanceProfile'>,
+  purpose: BenchLaunchSpec['purpose'],
+): string {
   switch (purpose) {
     case 'baseline':
     case 'bench':
@@ -592,6 +613,11 @@ export function benchProfileFor(cfg: Pick<AwsComputeConfig, 'benchInstanceProfil
         throw new Error('confirmInstanceProfile is not configured (confirm_identity_ref): refusing to run a confirm job under the bench identity');
       }
       return cfg.confirmInstanceProfile;
+    case 'deps':
+      if (!cfg.depsInstanceProfile) {
+        throw new Error('depsInstanceProfile is not configured (deps_identity_ref): re-apply the sandbox to create the dependency-snapshot identity; refusing to build a snapshot under another identity');
+      }
+      return cfg.depsInstanceProfile;
     default:
       throw new Error(`unknown bench purpose ${JSON.stringify(purpose)}`);
   }
@@ -693,6 +719,22 @@ function noProxyList(region: string): string {
   ].join(',');
 }
 
+/** HTTP(S)_PROXY and friends for a machine in the agent subnet; empty without a proxy. Validates the URL (it ends up in a shell env file). */
+function proxyEnv(net?: RunnerNetworkOptions): Record<string, string> {
+  if (!net?.proxyUrl) return {};
+  if (!/^http:\/\/[0-9.]+:\d+$/.test(net.proxyUrl)) throw new Error(`invalid egress proxy url ${JSON.stringify(net.proxyUrl)}`);
+  return {
+    HTTPS_PROXY: net.proxyUrl,
+    https_proxy: net.proxyUrl,
+    HTTP_PROXY: net.proxyUrl,
+    http_proxy: net.proxyUrl,
+    NO_PROXY: noProxyList(net.region),
+    no_proxy: noProxyList(net.region),
+    // Node's built-in fetch ignores the variables above unless this is set (the agent CLIs are Node programs).
+    NODE_USE_ENV_PROXY: '1',
+  };
+}
+
 /**
  * Prepares an agent runner; the app then starts `ratchet-runner` over SSM (SsmRunnerControl). Ends by touching
  * /run/ratchet/user-data.done. Secret VALUES never appear here: only SSM refs, fetched with the instance profile.
@@ -703,19 +745,7 @@ export function runnerUserData(spec: RunnerLaunchSpec, maxLifetimeHours: number,
     if (!/^[A-Z_][A-Z0-9_]*$/.test(s.name) || !/^[A-Za-z0-9_.\-/]+$/.test(s.ref)) throw new Error(`invalid secret ref ${JSON.stringify(`${s.name}=${s.ref}`)}`);
   }
   const refs = spec.secrets.map((s) => `${s.name}=${s.ref}`).join(',');
-  const proxy: Record<string, string> = net?.proxyUrl
-    ? {
-        HTTPS_PROXY: net.proxyUrl,
-        https_proxy: net.proxyUrl,
-        HTTP_PROXY: net.proxyUrl,
-        http_proxy: net.proxyUrl,
-        NO_PROXY: noProxyList(net.region),
-        no_proxy: noProxyList(net.region),
-        // Node's built-in fetch ignores the variables above unless this is set (the agent CLIs are Node programs).
-        NODE_USE_ENV_PROXY: '1',
-      }
-    : {};
-  if (net?.proxyUrl && !/^http:\/\/[0-9.]+:\d+$/.test(net.proxyUrl)) throw new Error(`invalid egress proxy url ${JSON.stringify(net.proxyUrl)}`);
+  const proxy = proxyEnv(net);
   return (
     COMMON_SCRIPT_HEAD +
     lifetimeGuard(maxLifetimeHours) +
@@ -813,6 +843,32 @@ export function benchUserData(spec: BenchLaunchSpec, maxLifetimeHours: number): 
     `visudo -cf ${CANDIDATE_SUDOERS_PATH}.tmp >/dev/null || { rm -f ${CANDIDATE_SUDOERS_PATH}.tmp; echo "invalid sudoers rule for ${HOLDOUT_OS_USER}" >&2; exit 1; }\n` +
     `mv ${CANDIDATE_SUDOERS_PATH}.tmp ${CANDIDATE_SUDOERS_PATH}\n` +
     envFile({ RATCHET_OPTIMIZATION_ID: spec.optimizationId, RATCHET_BENCH_PURPOSE: spec.purpose }) +
+    'set -a; . /etc/ratchet/runner.env; set +a\n' +
+    'mkdir -p /run/ratchet && touch /run/ratchet/user-data.done\n'
+  );
+}
+
+/** Unprivileged OS user that runs the package manager's fetch step in a dependency-snapshot job. Must match remote-scripts `DEPS_USER`. */
+export const DEPS_OS_USER = 'ratchet-deps';
+
+/**
+ * Prepares a dependency-snapshot instance (`purpose: 'deps'`). It runs in the AGENT subnet, i.e. WITH egress (through the
+ * allow-list proxy when it is enabled: the proxy variables are written to /etc/ratchet/runner.env, which the job script
+ * sources as root and passes on explicitly), and executes no candidate code: only the package manager's fetch step on the
+ * trusted base ref's lockfile, as the unprivileged `ratchet-deps` user, which has no route to instance metadata (the same
+ * owner-match rule as the bench users, checked by the job script before it runs anything). Its instance profile can write
+ * `bench-deps/` and nothing else. The lifetime guard is shorter than a bench's: a snapshot build is minutes.
+ */
+export function depsUserData(spec: BenchLaunchSpec, maxLifetimeHours: number, net?: RunnerNetworkOptions): string {
+  const u = DEPS_OS_USER;
+  return (
+    COMMON_SCRIPT_HEAD +
+    lifetimeGuard(Math.min(maxLifetimeHours, 1)) +
+    `id -u ${u} >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin ${u}\n` +
+    `iptables -I OUTPUT 1 -m owner --uid-owner ${u} -d 169.254.169.254 -j REJECT\n` +
+    `command -v ip6tables >/dev/null 2>&1 && ip6tables -I OUTPUT 1 -m owner --uid-owner ${u} -d fd00:ec2::254 -j REJECT || true\n` +
+    'mount -o remount,hidepid=2 /proc >/dev/null 2>&1 || true\n' +
+    envFile({ RATCHET_OPTIMIZATION_ID: spec.optimizationId, RATCHET_BENCH_PURPOSE: spec.purpose, ...proxyEnv(net) }) +
     'set -a; . /etc/ratchet/runner.env; set +a\n' +
     'mkdir -p /run/ratchet && touch /run/ratchet/user-data.done\n'
   );

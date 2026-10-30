@@ -88,6 +88,18 @@ const nonEmpty = (what: string) => z.string({ error: `${what} must be a string` 
 export const EVALUATOR_KINDS = ['benchmark', 'backtest', 'eval', 'simulation'] as const;
 export type EvaluatorKind = (typeof EVALUATOR_KINDS)[number];
 
+/**
+ * How the candidate's dependencies reach the offline bench (`evaluator.deps`):
+ *  - `auto` (default): detect from the lockfile at `evaluator.ref` (`pnpm-lock.yaml` -> pnpm, `package-lock.json` /
+ *    `npm-shrinkwrap.json` -> npm, otherwise none);
+ *  - `pnpm` / `npm`: that package manager; the lockfile must exist at `evaluator.ref`;
+ *  - `none`: the bench installs nothing; dependencies are part of the machine image or not needed.
+ * Whatever is chosen, dependency changes are not allowed in v0: a candidate whose lockfile differs from the one at
+ * `evaluator.ref` is blocked, because the bench has no network.
+ */
+export const DEPS_MODES = ['auto', 'pnpm', 'npm', 'none'] as const;
+export type DepsMode = (typeof DEPS_MODES)[number];
+
 const evaluatorSchema = z
   .strictObject({
     kind: z.enum(EVALUATOR_KINDS, { error: `evaluator.kind must be one of ${EVALUATOR_KINDS.join(', ')}` }).default('benchmark'),
@@ -98,6 +110,8 @@ const evaluatorSchema = z
       .int('repeats must be an integer')
       .min(1, 'repeats must be >= 1'),
     hardware: nonEmpty('evaluator.hardware'),
+    /** Package-manager strategy for the offline bench's dependencies. See `DEPS_MODES`. */
+    deps: z.enum(DEPS_MODES, { error: `evaluator.deps must be one of ${DEPS_MODES.join(', ')}` }).default('auto'),
     /** Sealed holdout the agents never see: hidden traffic trace, most recent unseen period, held-out partition. */
     holdout: z.string({ error: 'holdout must be a string' }).min(1).optional(),
     /** Deprecated alias of `holdout`. */

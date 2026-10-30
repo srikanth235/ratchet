@@ -24,6 +24,11 @@ export interface AwsSandboxOutputs extends SandboxOutputs {
   evalIdentity: AwsIdentityRef;
   /** Confirm runner (`confirm_identity_ref`): the only identity that reads the sealed bucket. Use only for confirm runs. */
   confirmIdentity: AwsIdentityRef;
+  /**
+   * Dependency-snapshot builder (`deps_identity_ref`): runs in the agent subnet, reads only the staged base tree, writes only
+   * `bench-deps/`, no sealed access. Absent in sandboxes applied before dependency snapshots existed (re-apply to get it).
+   */
+  depsIdentity?: AwsIdentityRef;
   /** Key prefix of the confirm traces in the sealed bucket. */
   sealedConfirmPrefix: string;
   network: SandboxOutputs['network'] & {
@@ -284,6 +289,8 @@ export function parseTofuOutputs(json: string, region?: string): AwsSandboxOutpu
   });
   const eval_ = get<RawIdentity>('eval_identity_ref');
   const confirm = get<RawIdentity>('confirm_identity_ref');
+  // Optional: sandboxes applied before dependency snapshots have no such output.
+  const deps = doc.deps_identity_ref ? (doc.deps_identity_ref.value as RawIdentity) : undefined;
   const net = get<{
     vpc_id: string;
     subnet_id: string;
@@ -310,6 +317,7 @@ export function parseTofuOutputs(json: string, region?: string): AwsSandboxOutpu
     vpcId: net.vpc_id,
     evalIdentity: identity(eval_),
     confirmIdentity: identity(confirm),
+    ...(deps ? { depsIdentity: identity(deps) } : {}),
     sealedConfirmPrefix: get<string>('sealed_confirm_prefix'),
     limits: { maxInstancesPerAgent: limits.max_instances_per_agent, maxInstanceLifetimeHours: limits.max_instance_lifetime_hours },
   };
