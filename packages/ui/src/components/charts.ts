@@ -45,7 +45,7 @@ export function niceTicks(lo: number, hi: number, count = 4): number[] {
   const raw = span / Math.max(1, count - 1);
   const mag = 10 ** Math.floor(Math.log10(raw));
   const norm = raw / mag;
-  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10) * mag;
   const start = Math.floor(lo / step) * step;
   const out: number[] = [];
   for (let v = start; v < hi + step - 1e-9 && out.length < 12; v += step) out.push(+v.toFixed(10));

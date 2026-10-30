@@ -167,6 +167,8 @@ importers:
         specifier: ^7.0.0
         version: 7.3.7(@types/node@22.20.5)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
 
+  packages/e2e: {}
+
   packages/engine:
     dependencies:
       '@ratchet/core':

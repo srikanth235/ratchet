@@ -22,7 +22,7 @@ export function fmtDuration(seconds: number): string {
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m`;
   const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
+  return m % 60 === 0 ? `${h}h` : `${h}h ${m % 60}m`;
 }
 
 /** Signed % improvement; positive is always better regardless of direction. */
@@ -45,11 +45,12 @@ export function gainLabel(o: Pick<Optimization, 'baseline' | 'best' | 'direction
   return `${sign}${Math.abs(g).toFixed(digits)}%`;
 }
 
-/** Short icon label for a metric key: `http_req_duration.p95` → `p95`, `events_per_s` → `eps`. */
+/** Short icon label for a metric key: `http_req_duration.p95` → `p95`, `events_per_s` → `eps`, `cold_start.s` → `cs`. */
 export function metricGlyph(metric: string): string {
-  const parts = metric.split(/[._\-\s]+/).filter(Boolean);
-  const last = parts.at(-1) ?? metric;
-  if (last.length <= 3 && (parts.length === 1 || /\d/.test(last))) return last.toLowerCase();
-  const initials = parts.map((p) => p[0]).join('').toLowerCase();
-  return initials.length >= 2 ? initials.slice(0, 3) : last.slice(0, 3).toLowerCase();
+  const segs = metric.split('.').filter(Boolean);
+  let pick = segs.at(-1) ?? metric;
+  if (pick.length <= 2 && segs.length > 1) pick = segs.at(-2)!;
+  if (/^[a-z]?\d+$/i.test(pick)) return pick.toLowerCase();
+  const words = pick.split(/[_\-\s]+/).filter(Boolean);
+  return (words.length > 1 ? words.map((w) => w[0]).join('').slice(0, 3) : pick.slice(0, 3)).toLowerCase();
 }

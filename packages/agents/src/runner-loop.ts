@@ -58,6 +58,8 @@ class Mailbox {
   bestSeen: number | undefined;
   private waiters = new Set<() => void>();
   private readonly ac = new AbortController();
+  /** Latest shared best announced by the engine (`ratchet` message) or won by this agent. */
+  latestBest: { sha: string; branch: string; value: number } | null = null;
 
   constructor(
     private readonly inbox: RunnerLoopOptions['inbox'],
@@ -101,6 +103,16 @@ class Mailbox {
         this.stopped = true;
         this.onStop();
         break;
+      case 'ratchet':
+        // Another agent's candidate moved the shared ratchet: rebase onto it on the next sync.
+        this.latestBest = { sha: m.sha, branch: m.branch, value: m.value };
+        this.bestSeen = m.value;
+        this.onEvent({ type: 'status', text: `ratchet moved to ${m.value} by ${m.branch}`, data: { sha: m.sha, branch: m.branch, value: m.value } });
+        break;
+      default: {
+        const unknown: never = m;
+        this.onEvent({ type: 'error', text: `unknown runner message ${JSON.stringify(unknown)}` });
+      }
     }
   }
 
@@ -259,8 +271,18 @@ export async function runRunnerLoop(opts: RunnerLoopDeps): Promise<RunnerLoopRes
 
     /** Fetch the ratchet best and rebase onto it when it moved. Returns notes for the agent. */
     const syncToBest = async (): Promise<string[]> => {
-      const fetched = await git.try(['fetch', '--quiet', remote, `+refs/heads/${bestBranch}:${bestTracking}`]);
-      const bestSha = fetched.code === 0 ? await git.revParse(bestTracking) : null;
+      let bestSha: string | null = null;
+      const announced = mailbox.latestBest;
+      if (announced) {
+        // Preferred: the engine told us exactly which commit is the best and on which branch it lives.
+        const fetched = await git.try(['fetch', '--quiet', remote, `+refs/heads/${announced.branch}:${bestTracking}`]);
+        if (fetched.code === 0 && (await git.try(['cat-file', '-e', `${announced.sha}^{commit}`])).code === 0) bestSha = announced.sha;
+      }
+      if (!bestSha) {
+        // Fallback: a remote branch holding the best (`ratchet/best` by convention).
+        const fetched = await git.try(['fetch', '--quiet', remote, `+refs/heads/${bestBranch}:${bestTracking}`]);
+        bestSha = fetched.code === 0 ? await git.revParse(bestTracking) : null;
+      }
       if (!bestSha) return [];
       state.bestSha = bestSha;
       await git.run(['update-ref', 'refs/ratchet/accepted', bestSha]);
@@ -367,7 +389,10 @@ export async function runRunnerLoop(opts: RunnerLoopDeps): Promise<RunnerLoopRes
       entry = { n: state.history.length + 1, sha: candidate.sha, verdict: verdict.verdict as CandidateVerdict, reasons: verdict.reasons, best: verdict.currentBest, at: clock.now() };
       state.history.push(entry);
       emit({ type: 'verdict', text: `${verdict.verdict}`, data: { sha: candidate.sha, verdict: verdict.verdict, reasons: verdict.reasons, currentBest: verdict.currentBest } });
-      if (verdict.verdict === 'verified') await git.run(['update-ref', 'refs/ratchet/accepted', candidate.sha]);
+      if (verdict.verdict === 'verified') {
+        await git.run(['update-ref', 'refs/ratchet/accepted', candidate.sha]);
+        mailbox.latestBest = { sha: candidate.sha, branch: config.branch, value: verdict.currentBest };
+      }
 
       notes = await syncToBest();
       known.add(await git.head());

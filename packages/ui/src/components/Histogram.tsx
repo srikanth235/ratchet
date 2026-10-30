@@ -35,9 +35,10 @@ function steppedPath(counts: readonly number[], x: (v: number) => number, y: (v:
 }
 
 /** Overlaid latency histograms over a shared x range (baseline outline vs best fill). */
-export function Histogram({ series, bins = 28, unit = '', markers = [], legend = false, width = 560, height = 214 }: HistogramProps) {
+export function Histogram({ series, bins: binsProp, unit = '', markers = [], legend = false, width = 560, height = 214 }: HistogramProps) {
   const all = series.flatMap((s) => s.values).filter(Number.isFinite);
   if (all.length === 0) return null;
+  const bins = binsProp ?? Math.max(8, Math.min(28, Math.round(Math.sqrt(Math.max(...series.map((s) => s.values.length))) * 4)));
   const lo = Math.min(...all);
   const hi = Math.max(...all);
   const span = hi - lo || 1;

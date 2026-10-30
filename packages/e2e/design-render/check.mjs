@@ -126,6 +126,7 @@ function equal(prop, d, a) {
 async function runChecks(dPage, aPage, checks, group) {
   const rows = [];
   for (const [name, dLoc, aLoc, props] of checks) {
+    if (process.env.CHECK_TRACE) console.log('check', name);
     const d = await dPage.evaluate(measure, { loc: dLoc, props });
     const a = await aPage.evaluate(measure, { loc: aLoc ?? dLoc, props });
     if (!d.found) { rows.push({ group, check: name, prop: '(element)', design: 'NOT FOUND IN DESIGN', app: a.found ? 'found' : 'missing', pass: false, note: `design locator ${dLoc}` }); continue; }
@@ -150,9 +151,9 @@ async function runStructure(dPage, aPage, items) {
 const APP_ROUTE = {
   optimizations: (win) => goTo(win, 'Optimizations'),
   'new-optimization': (win) => openNewOptimization(win),
-  sandbox: (win) => goTo(win, 'AWS sandbox'),
-  'live-agents': (win) => goTo(win, 'Live agents'),
-  benchmarks: (win) => goTo(win, 'Benchmark history'),
+  sandbox: (win) => goTo(win, 'Environments'),
+  'live-agents': (win) => goTo(win, 'Agents'),
+  benchmarks: (win) => goTo(win, 'Benchmarks'),
   result: (win) => goTo(win, 'Result'),
 };
 

@@ -1,126 +1,163 @@
-import { Card, Eyebrow, Pill } from '@ratchet/ui';
-import { tokens } from '@ratchet/ui';
+import { Button, Card, Eyebrow, Pill } from '@ratchet/ui';
 import type { PlanChangeVM } from '../../shared/types';
 import { ErrorNote, PageHeader } from '../components/common';
 import { useQuery } from '../data';
 
-const SIGIL: Record<PlanChangeVM['action'], { sym: string; cls: string; label: string }> = {
-  create: { sym: '+', cls: 'plan--create', label: 'create' },
-  update: { sym: '~', cls: 'plan--update', label: 'update' },
-  replace: { sym: '±', cls: 'plan--update', label: 'replace' },
-  delete: { sym: '−', cls: 'plan--delete', label: 'destroy' },
-  'no-op': { sym: '·', cls: 'plan--noop', label: 'no change' },
+const SIGIL: Record<PlanChangeVM['action'], { cls: string; label: string }> = {
+  create: { cls: 'plan--create', label: '+ create' },
+  update: { cls: 'plan--update', label: '~ update' },
+  replace: { cls: 'plan--update', label: '± replace' },
+  delete: { cls: 'plan--delete', label: '− destroy' },
+  'no-op': { cls: 'plan--noop', label: 'no change' },
 };
 
-/** Static architecture sketch: the trusted path (brass) from the control plane through the eval identity to the sealed bucket. */
-export function SandboxDiagram() {
-  const box = (x: number, y: number, w: number, label: string, sub: string, trusted = false) => (
-    <g>
-      <rect x={x} y={y} width={w} height={56} rx={10} fill={tokens.color.card} stroke={trusted ? tokens.color.brass : tokens.color.hairline} strokeWidth={trusted ? 1.5 : 1} />
-      <text x={x + 12} y={y + 24} fill={tokens.color.text} fontSize="12" fontWeight="600" fontFamily={tokens.font.sans}>{label}</text>
-      <text x={x + 12} y={y + 42} fill={tokens.color.textTertiary} fontSize="10.5" fontFamily={tokens.font.mono}>{sub}</text>
-    </g>
-  );
-  const arrow = (x1: number, y1: number, x2: number, y2: number, trusted = false) => (
-    <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={trusted ? tokens.color.brass : tokens.color.textTertiary} strokeWidth={trusted ? 2 : 1.2} strokeDasharray={trusted ? undefined : '4 4'} markerEnd={`url(#${trusted ? 'arr-brass' : 'arr-grey'})`} />
-  );
+/** `aws_s3_bucket_policy.x` → S3, `aws_iam_role.x` → IAM, `aws_security_group.x` → EC2. */
+export function resourceKind(type: string): { label: string; cls: string } {
+  if (/^aws_s3/.test(type)) return { label: 'S3', cls: 'plan__kind--s3' };
+  if (/^aws_iam/.test(type)) return { label: 'IAM', cls: 'plan__kind--iam' };
+  if (/^aws_(security_group|instance|launch|vpc|subnet|ec2)/.test(type)) return { label: 'EC2', cls: 'plan__kind--ec2' };
+  return { label: (type.replace(/^aws_/, '').split('_')[0] ?? '·').slice(0, 3).toUpperCase(), cls: '' };
+}
+
+const BOX = { fill: '#151D2B', stroke: 'rgba(148,163,190,.2)' };
+const TRUSTED = { fill: '#1A1A16', stroke: 'rgba(217,178,111,.55)' };
+
+function Node({ x, y, title, sub, trusted = false, icon }: { x: number; y: number; title: string; sub: string; trusted?: boolean; icon: string }) {
+  const c = trusted ? TRUSTED : BOX;
   return (
-    <svg className="rt-chart sandbox-diagram" viewBox="0 0 760 250" role="img" aria-label="Sandbox architecture: control plane, eval identity and sealed bucket on the trusted path; agent runners confined to the agent boundary">
-      <defs>
-        <marker id="arr-brass" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill={tokens.color.brass} /></marker>
-        <marker id="arr-grey" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill={tokens.color.textTertiary} /></marker>
-      </defs>
-      <rect x="1" y="1" width="758" height="248" rx="14" fill="none" stroke={tokens.color.hairline} />
-      {box(24, 28, 170, 'Ratchet app', 'control plane · your Mac', true)}
-      {box(300, 28, 190, 'Eval identity', 'bench + confirm only', true)}
-      {box(580, 28, 156, 'Sealed bucket', 'hidden traces', true)}
-      {arrow(194, 56, 300, 56, true)}
-      {arrow(490, 56, 580, 56, true)}
-      <text x="128" y="124" fill={tokens.color.brass} fontSize="10" letterSpacing="1.5" fontFamily={tokens.font.sans} fontWeight="600">TRUSTED PATH</text>
-      <line x1="24" y1="140" x2="736" y2="140" stroke={tokens.color.hairline} />
-      <text x="128" y="162" fill={tokens.color.textTertiary} fontSize="10" letterSpacing="1.5" fontFamily={tokens.font.sans} fontWeight="600">AGENT BOUNDARY</text>
-      {box(24, 178, 170, 'Agent runners', 'EC2 · per-agent role', false)}
-      {box(300, 178, 190, 'Experiment instances', 'tagged · lifetime-capped', false)}
-      {box(580, 178, 156, 'Artifacts bucket', 'logs · bench output', false)}
-      {arrow(194, 206, 300, 206)}
-      {arrow(490, 206, 580, 206)}
-      {arrow(109, 84, 109, 178)}
-    </svg>
+    <g>
+      <rect x={x} y={y} width="176" height="72" rx="12" fill={c.fill} stroke={c.stroke} />
+      <path d={icon} transform={`translate(${x + 14} ${y + 28})`} fill="none" stroke={trusted ? '#D9B26F' : '#A7B1C2'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <text x={x + 44} y={y + 32} fontSize="12.5" fontWeight="600" fill={trusted ? '#F4E3C0' : '#ECEFF4'} fontFamily="Instrument Sans, sans-serif">{title}</text>
+      <text x={x + 44} y={y + 49} fontSize="12" fill={trusted ? '#A7B1C2' : '#8592A6'} fontFamily="Instrument Sans, sans-serif">{sub}</text>
+    </g>
   );
 }
 
+/** Architecture sketch: the trusted path (brass) from the control plane through the bench runner to the sealed traces. */
+export function SandboxDiagram({ region, sandboxId }: { region: string; sandboxId: string }) {
+  const grey = '#8592A6';
+  const label = { fontSize: 13, fontFamily: 'Instrument Sans, sans-serif' } as const;
+  return (
+    <div className="diagram rt-dots" style={{ padding: 0 }}>
+      <svg viewBox="0 0 1016 340" role="img" aria-label="Sandbox architecture: control plane, bench runner and sealed traces on the trusted path; agent runners confined to the agent boundary" className="rt-chart sandbox-diagram">
+        <defs>
+          <marker id="sb-grey" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill={grey} /></marker>
+          <marker id="sb-brass" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill="#D9B26F" /></marker>
+        </defs>
+        <rect x="264" y="168" width="744" height="156" rx="14" fill="rgba(217,178,111,.04)" stroke="rgba(217,178,111,.28)" strokeDasharray="5 5" />
+        <path d="M112 112 V232 H288" fill="none" stroke={grey} strokeWidth="1.5" markerEnd="url(#sb-grey)" />
+        <path d="M376 196 V76 H552" fill="none" stroke={grey} strokeWidth="1.5" markerEnd="url(#sb-grey)" />
+        <path d="M640 112 V196" fill="none" stroke="#D9B26F" strokeWidth="2" markerEnd="url(#sb-brass)" />
+        <path d="M816 232 H728" fill="none" stroke="#D9B26F" strokeWidth="2" markerEnd="url(#sb-brass)" />
+        <Node x={24} y={40} title="Ratchet.app" sub="your Mac · control" icon="M0 0h14v9H0zM4 13h6" />
+        <Node x={552} y={40} title="GitHub" sub="one branch per agent" icon="M3 0a2 2 0 1 0 0 .01M3 12a2 2 0 1 0 0 .01M11 4a2 2 0 1 0 0 .01M3 2v8M11 6c0 4-8 2-8 4" />
+        <Node x={288} y={196} title="Agent runners" sub="Claude Code · Codex" icon="M0 0h14v10H0zM3 3l2 2-2 2M7 8h3" />
+        <Node x={552} y={196} title="Bench runner" sub="eval-only role" trusted icon="M0 10a7 7 0 0 1 14 0M7 10l3-4" />
+        <Node x={816} y={196} title="Sealed traces" sub="S3 · deny agents" trusted icon="M2 6h10v7H2zM4 6V4a3 3 0 0 1 6 0v2" />
+        <text x="124" y="176" fill="#A7B1C2" {...label}>launch · SSM</text>
+        <text x="448" y="62" fill="#A7B1C2" {...label}>push</text>
+        <text x="392" y="140" fill="#A7B1C2" {...label}>headless agent</text>
+        <text x="656" y="158" fill="#EBCB8E" {...label}>re-bench</text>
+        <text x="756" y="216" fill="#EBCB8E" {...label}>read</text>
+        <text x="284" y="310" fill="#C9A86A" fontSize="10.5" letterSpacing="1.5" fontWeight="600" fontFamily="Instrument Sans, sans-serif">YOUR AWS ACCOUNT · {region.toUpperCase()} · {sandboxId.toUpperCase()}</text>
+      </svg>
+    </div>
+  );
+}
+
+const mask = (id: string | null) => (id && id.length >= 8 ? `${id.slice(0, 4)} ···· ${id.slice(-4)}` : (id ?? '—'));
+
 export function Sandbox() {
-  const { data, error } = useQuery(() => window.ratchet.sandboxInfo(), [], { intervalMs: 15_000 });
+  const { data, error, refresh, loading } = useQuery(() => window.ratchet.sandboxInfo(), [], { intervalMs: 15_000 });
   if (error && !data) return <ErrorNote error={error} />;
   if (!data) return <p className="muted">Loading…</p>;
   const { plan, outputs, account, limits } = data;
+  const count = (a: PlanChangeVM['action']) => plan.changes.filter((c) => c.action === a).length;
+  const toAdd = count('create');
+  const status = outputs
+    ? <Pill tone="mint" dot large>Applied</Pill>
+    : <Pill tone="brass" dot large>Plan ready · {toAdd} to add</Pill>;
+  const outRows: [string, string | null][] = [
+    ['artifacts_bucket', outputs?.artifactsBucket ?? null],
+    ['sealed_bucket', outputs?.sealedBucket ?? null],
+    ['agent_boundary_ref', outputs?.agentBoundaryRef ?? null],
+    ['eval_identity_ref', outputs?.evalIdentityRef ?? null],
+    ['network_ref', outputs?.network.subnetId ?? null],
+  ];
 
   return (
     <>
       <PageHeader
+        eyebrow="Environments"
         title="AWS sandbox"
-        sub="Agents run inside a boundary; benchmarking and hidden traces stay on the trusted path."
-        actions={account.simulated ? <Pill tone="neutral">Simulated sandbox</Pill> : <Pill tone="brass" dot>Live account</Pill>}
+        badge={<>{status}{account.simulated ? <Pill tone="neutral" large>Simulated sandbox</Pill> : <Pill tone="brass" large>Live account</Pill>}</>}
+        sub="A fenced area in a dedicated account. Agents run headless on runners inside it; the trusted bench runner sits outside their reach."
+        actions={<Button variant="ghost" disabled={loading} onClick={refresh}>Re-plan</Button>}
       />
 
-      <Card><Eyebrow>Architecture</Eyebrow><SandboxDiagram /></Card>
+      <Card className="diagram-card">
+        <div className="card-head">
+          <h2 className="card-title">How it fits together</h2>
+          <span className="card-head__note">Brass lines are the trusted path agents can’t touch.</span>
+        </div>
+        <SandboxDiagram region={account.region} sandboxId={account.sandboxId} />
+      </Card>
 
-      <section className="grid-two">
-        <Card>
-          <div className="row-between"><Eyebrow>OpenTofu plan</Eyebrow><span className="mono muted">{plan.summary}</span></div>
+      <section className="sandbox-split">
+        <Card className="plan-card">
+          <div className="plan-card__head">
+            <h2 className="card-title">OpenTofu plan</h2>
+            <span className="mono faint" style={{ fontSize: 12 }}>{plan.summary}</span>
+            <span className="plan__counts mono" aria-label="Plan totals">
+              <span style={{ color: 'var(--rt-color-mint)' }}>+{toAdd}</span><span>~{count('update') + count('replace')}</span><span>−{count('delete')}</span>
+            </span>
+          </div>
           <ul className="plan" aria-label="Plan changes">
             {plan.changes.map((c) => {
               const g = SIGIL[c.action];
+              const k = resourceKind(c.type);
               return (
                 <li key={c.address} className={g.cls}>
-                  <span className="plan__sym mono" aria-hidden="true">{g.sym}</span>
-                  <span className="mono plan__addr">{c.address}</span>
-                  <span className="plan__type muted">{c.type}</span>
-                  <span className="plan__act">{g.label}</span>
+                  <span className={`plan__kind mono ${k.cls}`} aria-hidden="true">{k.label}</span>
+                  <span className="plan__main">
+                    <span className="mono plan__addr">{c.address}</span>
+                    <span className="plan__type">{c.type}</span>
+                  </span>
+                  <span className="plan__act mono">{g.label}</span>
                 </li>
               );
             })}
           </ul>
         </Card>
 
-        <div className="stack">
-          <Card>
+        <div className="side-col">
+          <Card className="side-card">
             <Eyebrow>Account</Eyebrow>
-            <dl className="kv">
-              <dt>Sandbox</dt><dd className="mono">{account.sandboxId}</dd>
-              <dt>Account</dt><dd className="mono">{account.accountId ?? '—'}</dd>
-              <dt>Region</dt><dd className="mono">{account.region}</dd>
-              <dt>AWS profile</dt><dd className="mono">{account.profile}</dd>
-            </dl>
+            <div className="kv-row"><span>Profile</span><span className="mono">{account.profile}</span></div>
+            <div className="kv-row"><span>Account</span><span className="mono">{mask(account.accountId)}</span></div>
+            <div className="kv-row"><span>Region</span><span className="mono">{account.region}</span></div>
+            <div className="kv-row"><span>Sandbox</span><span className="mono">{account.sandboxId}</span></div>
           </Card>
-          <Card>
+          <Card className="side-card side-card--gap">
             <Eyebrow>Agent limits</Eyebrow>
-            <dl className="kv">
-              <dt>Instance types</dt><dd className="mono">{limits.allowedInstanceTypes.join(', ')}</dd>
-              <dt>Max instances / agent</dt><dd className="mono">{limits.maxInstancesPerAgent}</dd>
-              <dt>Max instance lifetime</dt><dd className="mono">{limits.maxInstanceLifetimeHours} h</dd>
-            </dl>
+            <div className="type-chips">
+              <span className="sr-only">Allowed instance types</span>
+              {limits.allowedInstanceTypes.map((t) => <span key={t} className="chip-tag mono type-chip">{t}</span>)}
+            </div>
+            <div className="limits">
+              <div className="limit-tile"><div className="limit-tile__label">Max instances / agent</div><div className="serif">{limits.maxInstancesPerAgent}</div></div>
+              <div className="limit-tile"><div className="limit-tile__label">Max instance lifetime</div><div className="serif">{limits.maxInstanceLifetimeHours} h</div></div>
+            </div>
+          </Card>
+          <Card className="side-card outputs">
+            <Eyebrow>Outputs · same on every cloud</Eyebrow>
+            {outRows.map(([k, v]) => (
+              <div key={k} className="kv-row mono"><span style={{ color: 'var(--rt-color-text)' }}>{k}</span><span>{v ?? 'after apply'}</span></div>
+            ))}
           </Card>
         </div>
       </section>
-
-      <Card>
-        <Eyebrow>Contract outputs</Eyebrow>
-        {outputs ? (
-          <dl className="kv kv--wide">
-            <dt>artifactsBucket</dt><dd className="mono">{outputs.artifactsBucket}</dd>
-            <dt>sealedBucket</dt><dd className="mono">{outputs.sealedBucket}</dd>
-            <dt>agentBoundaryRef</dt><dd className="mono">{outputs.agentBoundaryRef}</dd>
-            <dt>evalIdentityRef</dt><dd className="mono">{outputs.evalIdentityRef}</dd>
-            <dt>agentRolePath</dt><dd className="mono">{outputs.agentRolePath}</dd>
-            <dt>network.subnetId</dt><dd className="mono">{outputs.network.subnetId}</dd>
-            <dt>network.agentRunnerSecurityGroupId</dt><dd className="mono">{outputs.network.agentRunnerSecurityGroupId}</dd>
-            <dt>network.benchSecurityGroupId</dt><dd className="mono">{outputs.network.benchSecurityGroupId}</dd>
-          </dl>
-        ) : (
-          <p className="muted">The sandbox has not been applied yet.</p>
-        )}
-      </Card>
     </>
   );
 }

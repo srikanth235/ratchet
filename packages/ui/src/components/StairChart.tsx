@@ -86,7 +86,7 @@ export function StairChart({
   const lo = Math.min(...vals);
   const hi = Math.max(...vals);
   const pad = (hi - lo) * 0.18 || 1;
-  const grid = niceTicks(lo - pad, hi + pad, 4);
+  const grid = niceTicks(lo - pad, hi + pad, 5);
   const vMin = grid[0]!;
   const vMax = grid.at(-1)!;
   const base = height - PAD.b;
@@ -106,7 +106,7 @@ export function StairChart({
 
   const wins = steps.slice(1).map((s) => {
     const p = points.find((q) => q.verified && Math.abs(q.t - s.t) < 0.5 && Math.abs(q.value - s.value) < 1e-6);
-    return { ...s, agent: p?.agent, label: p?.label };
+    return { ...s, agent: p?.agent, label: p?.label?.replace(/^[0-9a-f]{6,12}\s*[·-]\s*/i, '') };
   });
 
   const body = (
@@ -189,7 +189,7 @@ export function StairChart({
           {annotate && (
             <text x={x(w.t) + 8} y={y(w.value) - 6} className="rt-chart__label">
               {formatTick(w.value)}
-              {w.label ? ` · ${clip(w.label, 24)}` : ''}
+              {w.label ? ` · ${clip(w.label, 22)}` : ''}
             </text>
           )}
         </g>

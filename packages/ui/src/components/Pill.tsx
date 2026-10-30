@@ -59,7 +59,7 @@ export type Verdict = 'pending' | 'verified' | 'rejected' | 'failed_confirm' | '
 
 const VERDICT: Record<Verdict, { tone: PillTone; label: string }> = {
   pending: { tone: 'neutral', label: 'Pending' },
-  verified: { tone: 'mint', label: 'Verified' },
+  verified: { tone: 'mint', label: 'Verified win' },
   rejected: { tone: 'neutral', label: 'Rejected' },
   failed_confirm: { tone: 'outline', label: 'Failed confirm' },
   blocked: { tone: 'rose', label: 'Blocked' },

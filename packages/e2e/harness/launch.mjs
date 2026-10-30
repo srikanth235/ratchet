@@ -69,12 +69,19 @@ export async function screenshotScreen(app, win, name, dir = join(ARTIFACTS, 'ap
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${name}.png`);
   await win.evaluate(() => document.fonts.ready);
-  const height = await win.evaluate(() => {
-    const c = document.querySelector('.content');
-    return Math.max(c ? c.scrollHeight : 0, document.documentElement.scrollHeight);
-  });
-  await setContentSize(app, VIEWPORT.width, Math.max(VIEWPORT.height, Math.min(height, 5000)));
-  await win.waitForTimeout(250);
+  // Grow the window until `.content` no longer scrolls (growing can reflow charts and change the height).
+  let target = VIEWPORT.height;
+  for (let i = 0; i < 4; i++) {
+    const need = await win.evaluate(() => {
+      const c = document.querySelector('.content');
+      return c ? c.scrollHeight : document.documentElement.scrollHeight;
+    });
+    const next = Math.min(Math.max(VIEWPORT.height, need), 5000);
+    if (next <= target && i > 0) break;
+    target = Math.max(target, next);
+    await setContentSize(app, VIEWPORT.width, target);
+    await win.waitForTimeout(250);
+  }
   await win.screenshot({ path });
   await setContentSize(app, VIEWPORT.width, VIEWPORT.height);
   await win.waitForTimeout(100);
@@ -83,24 +90,29 @@ export async function screenshotScreen(app, win, name, dir = join(ARTIFACTS, 'ap
 
 /** Sidebar navigation by visible label. */
 export async function goTo(win, label) {
-  await win.getByRole('navigation', { name: 'Primary' }).getByRole('button', { name: label, exact: true }).click();
+  await win.getByRole('navigation', { name: 'Primary' }).getByRole('button', { name: new RegExp(`^${label}( \\d+| \\d+ live)?$`) }).click();
 }
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Screens in sidebar order → screenshot file names. */
+/** Screens in sidebar order: screenshot name, sidebar label, route id (`main[data-screen]`). */
 export const SCREENS = [
-  { name: 'optimizations', nav: 'Optimizations', ready: 'Optimizations' },
-  { name: 'live-agents', nav: 'Live agents', ready: 'Live agents' },
-  { name: 'benchmarks', nav: 'Benchmark history', ready: 'Benchmark history' },
-  { name: 'result', nav: 'Result', ready: 'Result' },
-  { name: 'sandbox', nav: 'AWS sandbox', ready: 'AWS sandbox' },
-  { name: 'settings', nav: 'Settings', ready: 'Settings' },
+  { name: 'optimizations', nav: 'Optimizations', route: 'optimizations' },
+  { name: 'benchmarks', nav: 'Benchmarks', route: 'benchmarks' },
+  { name: 'live-agents', nav: 'Agents', route: 'agents' },
+  { name: 'sandbox', nav: 'Environments', route: 'sandbox' },
+  { name: 'result', nav: 'Result', route: 'result' },
+  { name: 'settings', nav: 'Settings', route: 'settings' },
 ];
+
+/** Wait until the main column shows the given route and its first heading has rendered. */
+export async function waitForScreen(win, route) {
+  await win.locator(`main[data-screen="${route}"] h1`).first().waitFor({ timeout: 15_000 });
+}
 
 /** Open the "New optimization" screen from the Optimizations header button. */
 export async function openNewOptimization(win) {
   await goTo(win, 'Optimizations');
   await win.getByRole('button', { name: /New optimization/ }).click();
-  await win.getByRole('heading', { level: 1, name: 'New optimization' }).waitFor();
+  await waitForScreen(win, 'new');
 }
