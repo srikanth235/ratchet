@@ -17,7 +17,7 @@ import { execFileSync } from 'node:child_process';
 import YAML from 'yaml';
 import { parseConfig, type AgentKind, type Clock, type Ledger, type RatchetConfig, type SandboxProvider } from '@ratchet/core';
 import { Engine, type EngineSettings } from '@ratchet/engine';
-import { FsArtifactStore, MockCloudCompute, MockSandboxProvider, StaticPriceBook } from '@ratchet/aws';
+import { FsArtifactStore, MockCloudCompute, MockSandboxProvider, StaticPriceBook, type AwsSandboxOutputs } from '@ratchet/aws';
 import { LocalGitHost, createBareRemote } from '@ratchet/github';
 import { LocalBenchRunner } from '@ratchet/bench';
 import { LocalRunnerControl, ScriptedAgent, loadDemoForecastScript, loadDemoSearchScript, type AgentScript } from '@ratchet/agents';
@@ -155,7 +155,14 @@ export async function createSimulationRuntime(opts: SimulationOptions): Promise<
   mkdirSync(benchScratch, { recursive: true });
   const artifacts = new FsArtifactStore(join(root, 'artifacts'));
   const compute = new MockCloudCompute({ clock });
-  const sandbox = new MockSandboxProvider();
+  // The ledger outlives the process but the mock does not: sandboxes it recorded as applied stay applied.
+  const initial = Object.fromEntries(
+    opts.ledger
+      .listSandboxes()
+      .filter((r) => r.status === 'applied' && r.provider === 'mock' && r.outputs)
+      .map((r) => [r.id, r.outputs as unknown as AwsSandboxOutputs]),
+  );
+  const sandbox = new MockSandboxProvider({ initial });
 
   const scripts: Record<string, AgentScript> = {
     'claude-code': opts.scripts?.['claude-code'] ?? SIMULATION_PROJECTS[project].scripts('cc'),
