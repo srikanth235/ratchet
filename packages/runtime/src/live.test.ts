@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openLedger, type Ledger, type SandboxInput } from '@ratchet/core';
 import type { AwsSandboxOutputs, ProcessResult, ProcessRunner, ProcessSpec } from '@ratchet/aws';
-import { createLiveRuntime, type LiveOptions, type LiveRuntime } from './live.js';
+import { FakeSpawner, type HarnessInfo } from '@ratchet/agents';
+import { createHybridRuntime, createLiveRuntime, type HybridOptions, type LiveOptions, type LiveRuntime } from './live.js';
 
 const ACCT = '123456789012';
 const identity = (n: string) => ({
@@ -128,5 +129,72 @@ describe('createLiveRuntime', () => {
     expect(rt.missing.join(' ')).toMatch(/apply the sandbox/);
     expect(rt.missing.join(' ')).toMatch(/bench AMI/);
     expect(rt.repoUrl).toBe('https://github.com/acme/api.git');
+  });
+});
+
+describe('createHybridRuntime (agents on this machine, evaluator in the cloud)', () => {
+  const ok = (kind: HarnessInfo['kind'], over: Partial<HarnessInfo> = {}): HarnessInfo => ({ kind, installed: true, version: '1.0.0', path: `/usr/local/bin/${kind === 'codex' ? 'codex' : 'claude'}`, auth: 'signed-in', hint: '', ...over });
+  const hybrid = async (ledger: Ledger, over: Partial<HybridOptions> = {}) => {
+    const stateRoot = mkdtempSync(join(tmpdir(), 'ratchet-hybrid-'));
+    roots.push(stateRoot);
+    const rt = await createHybridRuntime({ ledger, region: 'us-east-1', sandbox: null, sandboxId: 'sbx', tofuBinary: '/opt/tofu', moduleDir: '/repo/infra/aws', stateRoot, tofuRunner: new FakeTofu(), harnesses: [ok('claude-code'), ok('codex')], loginPath: '/usr/local/bin:/usr/bin', ...over });
+    runtimes.push(rt);
+    return { rt, stateRoot };
+  };
+
+  it('defaults to local agents and an invisible sandbox: no apply step, no runner AMI needed', async () => {
+    const { rt } = await hybrid(openLedger(':memory:'));
+    expect(rt.agentsWhere).toBe('local');
+    expect(rt.localRunners).not.toBeNull();
+    expect(rt.harnesses.map((h) => h.kind)).toEqual(['claude-code', 'codex']);
+    expect(rt.missing.join(' ')).not.toMatch(/apply the sandbox|runner AMI/);
+    expect(rt.missing).toEqual([expect.stringMatching(/GitHub/), expect.stringMatching(/bench AMI/)]);
+  });
+
+  it('is ready once GitHub and the bench image are set', async () => {
+    const { rt } = await hybrid(openLedger(':memory:'), { githubRepo: 'acme/api', githubToken: 'ghp_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE12', benchImageRef: 'ami-0fedcba9876543210' });
+    expect(rt.missing).toEqual([]);
+    expect(rt.repoUrl).toBe('https://github.com/acme/api.git');
+  });
+
+  it('without an applied sandbox a draft can be created: the sandbox is made at the first start, so only GitHub is missing', async () => {
+    const { rt } = await hybrid(openLedger(':memory:'));
+    await expect(rt.engine.createOptimization({ repoUrl: 'x', baseRef: 'main', agents: ['codex'], budgetUsd: 1, timeLimitSeconds: 60, plateauEvals: 1 })).rejects.toMatchObject({
+      code: 'not_configured',
+      message: expect.stringMatching(/GitHub is not ready/), // not `sandbox_not_applied`
+    });
+  });
+
+  it('runs the detection probes when no harnesses are given, and says what is missing when none is usable', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ratchet-hybrid-bin-'));
+    roots.push(root);
+    const spawner = new FakeSpawner(() => ({ exitCode: 127, stderr: 'not found' })).spawner;
+    const { rt } = await hybrid(openLedger(':memory:'), { harnesses: undefined, loginPath: undefined, detect: { spawner, env: { PATH: root, HOME: root, SHELL: '/bin/sh' }, home: root, platform: 'linux', timeoutMs: 200, shellTimeoutMs: 200 } });
+    expect(rt.harnesses.map((h) => [h.kind, h.installed])).toEqual([['claude-code', false], ['codex', false]]);
+    expect(rt.missing.join(' ')).toMatch(/install and sign in to Claude Code or Codex/);
+  });
+
+  it('a signed-out harness does not count as usable; a signed-in one does', async () => {
+    const out = await hybrid(openLedger(':memory:'), { harnesses: [ok('claude-code', { auth: 'signed-out' })] });
+    expect(out.rt.missing.join(' ')).toMatch(/sign in to Claude Code or Codex/);
+    const usable = await hybrid(openLedger(':memory:'), { harnesses: [ok('claude-code', { auth: 'signed-out' }), ok('codex', { auth: 'api-key' })] });
+    expect(usable.rt.missing.join(' ')).not.toMatch(/sign in to Claude Code/);
+  });
+
+  it('agentsWhere cloud keeps the SSM path: the runner AMI is required again', async () => {
+    const { rt } = await hybrid(openLedger(':memory:'), { agentsWhere: 'cloud' });
+    expect(rt.agentsWhere).toBe('cloud');
+    expect(rt.missing.join(' ')).toMatch(/runner AMI/);
+  });
+
+  it('createLiveRuntime without localAgents is unchanged (cloud, no local control) and refuses agentsWhere local without them', () => {
+    const ledger = openLedger(':memory:');
+    const { rt } = build(ledger);
+    expect(rt.agentsWhere).toBe('cloud');
+    expect(rt.localRunners).toBeNull();
+    expect(rt.harnesses).toEqual([]);
+    const stateRoot = mkdtempSync(join(tmpdir(), 'ratchet-live-'));
+    roots.push(stateRoot);
+    expect(() => createLiveRuntime({ ledger, region: 'us-east-1', sandbox: null, sandboxId: 'sbx', tofuBinary: 't', moduleDir: 'm', stateRoot, agentsWhere: 'local' })).toThrow(/no localAgents/);
   });
 });

@@ -405,7 +405,11 @@ export type EngineEventVM =
   | { type: 'candidate'; optimizationId: string; candidateId: string; verdict: Verdict }
   | { type: 'ratchet'; optimizationId: string; from: number; to: number }
   | { type: 'spend'; optimizationId: string; totalUsd: number }
-  | { type: 'notice'; optimizationId: string; level: 'info' | 'warning' | 'error'; text: string };
+  | { type: 'notice'; optimizationId: string; level: 'info' | 'warning' | 'error'; text: string }
+  /** True while any run is active. The main process turns it into `powerSaveBlocker` start / stop (no UI involved). */
+  | { type: 'run-active'; active: boolean; optimizationIds: string[] }
+  /** The automatic environment (sandbox) changing phase. */
+  | { type: 'sandbox'; sandboxId: string; phase: 'creating' | 'ready' | 'idle' | 'destroying' | 'destroyed' | 'failed'; region: string | null; text: string };
 
 // ------------------------------------------------------------------ inputs (renderer → main), validated by zod in shared/ipc.ts
 

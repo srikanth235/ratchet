@@ -87,7 +87,7 @@ export function errMsg(e: unknown): string {
 export const forOptimization =
   (id: string | null) =>
   (e: EngineEventVM): boolean =>
-    id !== null && e.optimizationId === id;
+    id !== null && 'optimizationId' in e && e.optimizationId === id;
 
 // ------------------------------------------------------------------ shared snapshot
 
