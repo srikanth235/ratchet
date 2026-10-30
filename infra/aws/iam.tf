@@ -48,19 +48,29 @@ resource "aws_iam_policy" "agent_boundary" {
 
 # ---- Trusted bench identities ----
 #
-# Two identities, because candidate code runs on the instance that holds them:
+# Three identities. Candidate code runs on the instances that hold the first
+# two; the third runs on an instance that HAS internet egress and never sees
+# candidate code:
 #
 #   bench_runner    baseline / bench phases. Reads staged candidates
-#                   (bench-inputs/), writes bench-results/. NO sealed access -
-#                   and the sealed bucket policy denies it explicitly - so a
-#                   candidate that steals these credentials finds nothing hidden.
+#                   (bench-inputs/), reads dependency snapshots (bench-deps/),
+#                   writes bench-results/. NO sealed access - and the sealed
+#                   bucket policy denies it explicitly - so a candidate that
+#                   steals these credentials finds nothing hidden.
 #   confirm_runner  confirm phase only. Same, plus read of the holdout prefix
 #                   (var.sealed_confirm_prefix) of the sealed bucket.
+#   deps_runner     dependency-snapshot builds only (purpose "deps"). Runs in the
+#                   AGENT subnet (the only place with egress, through the proxy
+#                   when enabled) and executes no candidate code: it fetches the
+#                   package store for the trusted base ref's lockfile. It reads
+#                   ONLY the staged base tree (bench-inputs/*/deps-base.tgz) and
+#                   writes ONLY bench-deps/. No sealed access (the sealed bucket
+#                   policy denies it explicitly), no bench-results/.
 #
-# Both sit outside the agent path, so the sealed bucket's agent deny does not
-# apply and the agent boundary does not cover them. Agents cannot assume them
-# (trust is ec2.amazonaws.com only) nor pass them to an instance (iam:* denied).
-# The app picks the profile from BenchLaunchSpec.purpose.
+# All three sit outside the agent path, so the sealed bucket's agent deny does
+# not apply and the agent boundary does not cover them. Agents cannot assume
+# them (trust is ec2.amazonaws.com only) nor pass them to an instance (iam:*
+# denied). The app picks the profile from BenchLaunchSpec.purpose.
 
 data "aws_iam_policy_document" "bench_trust" {
   statement {
@@ -95,6 +105,28 @@ resource "aws_iam_role_policy" "bench_runner" {
   name = "bench-runner"
   role = aws_iam_role.bench_runner.id
   policy = templatefile("${path.module}/policies/bench_runner_policy.json.tftpl", {
+    artifacts_bucket_arn = aws_s3_bucket.artifacts.arn
+  })
+}
+
+resource "aws_iam_role" "deps_runner" {
+  name                 = "${local.name_prefix}-deps-runner"
+  path                 = local.bench_role_path
+  description          = "Dependency-snapshot builder (has egress, runs no candidate code): reads the staged base tree, writes bench-deps/ only; no sealed bucket access"
+  assume_role_policy   = data.aws_iam_policy_document.bench_trust.json
+  max_session_duration = 3600
+}
+
+resource "aws_iam_instance_profile" "deps_runner" {
+  name = "${local.name_prefix}-deps-runner"
+  path = local.bench_role_path
+  role = aws_iam_role.deps_runner.name
+}
+
+resource "aws_iam_role_policy" "deps_runner" {
+  name = "deps-runner"
+  role = aws_iam_role.deps_runner.id
+  policy = templatefile("${path.module}/policies/deps_runner_policy.json.tftpl", {
     artifacts_bucket_arn = aws_s3_bucket.artifacts.arn
   })
 }

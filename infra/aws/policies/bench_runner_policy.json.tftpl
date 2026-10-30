@@ -8,6 +8,12 @@
       "Resource": "${artifacts_bucket_arn}/bench-inputs/*"
     },
     {
+      "Sid": "ReadBenchDeps",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "${artifacts_bucket_arn}/bench-deps/*"
+    },
+    {
       "Sid": "WriteBenchResults",
       "Effect": "Allow",
       "Action": ["s3:PutObject", "s3:AbortMultipartUpload"],

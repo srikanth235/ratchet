@@ -7,6 +7,7 @@ const acct = fixture.account_id;
 const agentRole = `arn:aws:iam::${acct}:role/ratchet/agent/ratchet-opt1-claude-1`;
 const benchRole = fixture.bench_runner_role_arn;
 const confirmRole = fixture.confirm_runner_role_arn;
+const depsRole = fixture.deps_runner_role_arn;
 const adminRole = `arn:aws:iam::${acct}:role/Admin`;
 
 describe("sealed bucket policy", () => {
@@ -33,6 +34,11 @@ describe("sealed bucket policy", () => {
   it("explicitly denies the bench runner (no sealed access in baseline/bench phases)", () => {
     for (const action of ["s3:GetObject", "s3:ListBucket", "s3:PutObject", "s3:DeleteObject"]) {
       expect(decide(benchRole, {}, action)).toBe("ExplicitDeny");
+    }
+  });
+  it("explicitly denies the dependency-snapshot builder too (it has egress, so it must hold nothing hidden)", () => {
+    for (const action of ["s3:GetObject", "s3:ListBucket", "s3:PutObject", "s3:DeleteObject"]) {
+      expect(decide(depsRole, {}, action)).toBe("ExplicitDeny");
     }
   });
   it("does not deny the confirm runner or an untagged admin (their access comes from identity policy)", () => {
@@ -64,6 +70,12 @@ describe.each([
     expect(decide("s3:GetObject", `${a}/artifacts/opt1/claude-1/x`)).toBe("ImplicitDeny");
     expect(decide("s3:GetObject", `${a}/bench-results/opt1/r.json`)).toBe("ImplicitDeny");
     expect(decide("s3:PutObject", `${a}/bench-inputs/opt1/job1/code.tgz`)).toBe("ImplicitDeny");
+  });
+  it("reads dependency snapshots from bench-deps/ but can never write them", () => {
+    expect(decide("s3:GetObject", `${a}/bench-deps/pnpm-abc/1234.tar.zst`)).toBe("Allow");
+    expect(decide("s3:GetObject", `${a}/bench-deps/pnpm-abc.json`)).toBe("Allow");
+    expect(decide("s3:PutObject", `${a}/bench-deps/pnpm-abc/1234.tar.zst`)).toBe("ImplicitDeny");
+    expect(decide("s3:DeleteObject", `${a}/bench-deps/pnpm-abc.json`)).toBe("ImplicitDeny");
   });
   it("writes results only under bench-results/ and cannot read or overwrite agent prefixes", () => {
     expect(decide("s3:PutObject", `${a}/bench-results/opt1/r.json`)).toBe("Allow");
@@ -111,6 +123,47 @@ describe.each([
   }
 });
 
+describe("deps_runner_policy (dependency-snapshot builder: has egress, runs no candidate code)", () => {
+  const policy = renderPolicy("deps_runner_policy");
+  const decide = (action: string, resource: string, context: Record<string, string> = {}) => evaluate(policy, { action, resource, context });
+  const a = fixture.artifacts_bucket_arn;
+
+  it("writes only under bench-deps/", () => {
+    expect(decide("s3:PutObject", `${a}/bench-deps/pnpm-abc/1234.tar.zst`)).toBe("Allow");
+    expect(decide("s3:PutObject", `${a}/bench-deps/pnpm-abc.json`)).toBe("Allow");
+    expect(decide("s3:AbortMultipartUpload", `${a}/bench-deps/pnpm-abc/1234.tar.zst`)).toBe("Allow");
+    for (const key of ["bench-inputs/opt1/job1/deps-base.tgz", "bench-inputs/opt1/job1/code.tgz", "bench-results/opt1/r.json", "artifacts/opt1/claude-1/x", "engine/opt1/teardown.json", "x"]) {
+      expect(decide("s3:PutObject", `${a}/${key}`), key).toBe("ImplicitDeny");
+    }
+    expect(decide("s3:DeleteObject", `${a}/bench-deps/pnpm-abc.json`)).toBe("ImplicitDeny");
+  });
+  it("reads only the staged base tree, never the candidate archive, other snapshots, results or agent prefixes", () => {
+    expect(decide("s3:GetObject", `${a}/bench-inputs/opt1/0f5e2c6a-aaaa/deps-base.tgz`)).toBe("Allow");
+    for (const key of ["bench-inputs/opt1/job1/code.tgz", "bench-inputs/opt1/job1/bench.tgz", "bench-deps/pnpm-abc.json", "bench-results/opt1/r.json", "artifacts/opt1/claude-1/x"]) {
+      expect(decide("s3:GetObject", `${a}/${key}`), key).toBe("ImplicitDeny");
+    }
+  });
+  it("cannot list the bucket", () => {
+    expect(decide("s3:ListBucket", a)).toBe("ImplicitDeny");
+  });
+  it("has no sealed bucket access whatsoever", () => {
+    for (const action of ["s3:GetObject", "s3:ListBucket", "s3:PutObject", "s3:GetObjectVersion"]) {
+      expect(decide(action, `${sealed}/holdout/trace.json`)).toBe("ImplicitDeny");
+      expect(decide(action, sealed, { "s3:prefix": "holdout/x" })).toBe("ImplicitDeny");
+    }
+    expect(JSON.stringify(policy)).not.toContain("sealed");
+  });
+  it("has no IAM/organizations/sts/ec2, no wildcard actions and no secrets access", () => {
+    for (const s of policy.Statement) {
+      for (const act of [s.Action].flat() as string[]) expect(act).not.toMatch(/^(\*|iam:|organizations:|sts:|ec2:Run|ec2:Terminate|ssm:Get|s3:\*)/);
+    }
+    expect(decide("ssm:GetParameter", `arn:aws:ssm:${fixture.region}:${acct}:parameter/ratchet/opt1/claude-1/anthropic-key`)).toBe("ImplicitDeny");
+  });
+  it("keeps the SSM managed-instance channel", () => {
+    for (const act of channel) expect(decide(act, "*")).toBe("Allow");
+  });
+});
+
 describe("bench / confirm policies stay in lock-step", () => {
   const bench = renderPolicy("bench_runner_policy");
   const confirm = renderPolicy("confirm_runner_policy");
@@ -128,6 +181,7 @@ describe("S3 gateway endpoint policy", () => {
     expect(decide("s3:GetObject", `${fixture.artifacts_bucket_arn}/bench-inputs/x`)).toBe("Allow");
     expect(decide("s3:PutObject", `${fixture.artifacts_bucket_arn}/bench-results/x`)).toBe("Allow");
     expect(decide("s3:GetObject", `${sealed}/holdout/t.json`)).toBe("Allow");
+    expect(decide("s3:PutObject", `${fixture.artifacts_bucket_arn}/bench-deps/pnpm-abc.json`)).toBe("Allow");
     expect(decide("s3:PutObject", "arn:aws:s3:::attacker-bucket/loot")).toBe("ImplicitDeny");
     expect(decide("s3:GetObject", "arn:aws:s3:::ratchet-demo-artifacts-123456789012-evil/x")).toBe("ImplicitDeny");
     expect(decide("s3:GetObject", "arn:aws:s3:::al2023-repos-us-east-1/x")).toBe("ImplicitDeny");

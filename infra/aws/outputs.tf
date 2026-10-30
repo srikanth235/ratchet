@@ -35,6 +35,16 @@ output "confirm_identity_ref" {
   }
 }
 
+output "deps_identity_ref" {
+  description = "Dependency-snapshot builder identity (purpose=deps): runs in the agent subnet (egress), reads only the staged base tree, writes only bench-deps/. NO sealed access. Never runs candidate code."
+  value = {
+    role_arn              = aws_iam_role.deps_runner.arn
+    role_name             = aws_iam_role.deps_runner.name
+    instance_profile_arn  = aws_iam_instance_profile.deps_runner.arn
+    instance_profile_name = aws_iam_instance_profile.deps_runner.name
+  }
+}
+
 output "sealed_confirm_prefix" {
   description = "Key prefix in sealed_bucket that holds the confirm traces."
   value       = var.sealed_confirm_prefix

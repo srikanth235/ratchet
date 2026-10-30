@@ -143,6 +143,100 @@ run "bench_roles_split_sealed_access" {
   }
 }
 
+run "deps_runner_is_a_third_identity_that_only_writes_bench_deps" {
+  command = apply
+
+  assert {
+    condition     = aws_iam_role.deps_runner.path == "/ratchet/bench/" && aws_iam_role.deps_runner.name != aws_iam_role.bench_runner.name && aws_iam_role.deps_runner.name != aws_iam_role.confirm_runner.name
+    error_message = "the deps runner is a separate role outside the agent path"
+  }
+
+  assert {
+    condition     = aws_iam_instance_profile.deps_runner.role == aws_iam_role.deps_runner.name && aws_iam_instance_profile.deps_runner.name != aws_iam_instance_profile.bench_runner.name
+    error_message = "the deps runner has its own instance profile"
+  }
+
+  # Every S3 write the deps runner holds is on bench-deps/ and nothing else.
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role_policy.deps_runner.policy).Statement :
+      endswith(s.Resource, "/bench-deps/*")
+      if try(contains(flatten([s.Action]), "s3:PutObject"), false)
+    ])
+    error_message = "the deps runner may write only under bench-deps/"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.deps_runner.policy).Statement :
+      s.Sid == "WriteBenchDeps" && s.Effect == "Allow" && endswith(s.Resource, "/bench-deps/*")
+    ])
+    error_message = "the deps runner can write bench-deps/"
+  }
+
+  # Reads: only the staged base tree, never the candidate archive.
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role_policy.deps_runner.policy).Statement :
+      endswith(s.Resource, "/bench-inputs/*/deps-base.tgz")
+      if try(contains(flatten([s.Action]), "s3:GetObject"), false)
+    ])
+    error_message = "the deps runner may read only the staged base tree (deps-base.tgz), not the candidate's code.tgz"
+  }
+
+  assert {
+    condition     = !strcontains(aws_iam_role_policy.deps_runner.policy, "sealed") && !strcontains(aws_iam_role_policy.deps_runner.policy, "bench-results") && !strcontains(aws_iam_role_policy.deps_runner.policy, "artifacts/")
+    error_message = "the deps runner policy mentions neither the sealed bucket, bench-results/ nor the agent prefixes"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_iam_role_policy.deps_runner.policy).Statement :
+      !anytrue([for a in flatten([s.Action]) : startswith(a, "iam:") || startswith(a, "sts:") || startswith(a, "ssm:Get") || startswith(a, "ec2:") || a == "*" || a == "s3:*"])
+    ])
+    error_message = "the deps runner has no IAM, STS, EC2, parameter or wildcard actions"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_s3_bucket_policy.sealed_deny_agents.policy).Statement :
+      s.Sid == "DenyDepsRunner" && s.Effect == "Deny"
+    ])
+    error_message = "the sealed bucket must explicitly deny the deps runner"
+  }
+
+  assert {
+    condition = alltrue([
+      for k in ["role_arn", "role_name", "instance_profile_arn", "instance_profile_name"] :
+      contains(keys(output.deps_identity_ref), k)
+    ])
+    error_message = "deps_identity_ref has the same shape as eval_identity_ref"
+  }
+}
+
+run "bench_and_confirm_read_dependency_snapshots_but_cannot_write_them" {
+  command = apply
+
+  assert {
+    condition = alltrue([
+      for p in [aws_iam_role_policy.bench_runner.policy, aws_iam_role_policy.confirm_runner.policy] :
+      anytrue([for s in jsondecode(p).Statement : s.Sid == "ReadBenchDeps" && s.Action == "s3:GetObject" && endswith(s.Resource, "/bench-deps/*")])
+    ])
+    error_message = "bench and confirm runners read bench-deps/"
+  }
+
+  assert {
+    condition = alltrue([
+      for p in [aws_iam_role_policy.bench_runner.policy, aws_iam_role_policy.confirm_runner.policy] :
+      alltrue([
+        for s in jsondecode(p).Statement :
+        !strcontains(s.Resource, "bench-deps") if try(contains(flatten([s.Action]), "s3:PutObject"), false)
+      ])
+    ])
+    error_message = "candidate-facing identities must not be able to write dependency snapshots"
+  }
+}
+
 run "custom_confirm_prefix_is_used" {
   command = apply
 

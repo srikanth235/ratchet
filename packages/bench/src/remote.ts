@@ -8,31 +8,33 @@ import type {
   GitHost,
   InstanceInfo,
   RatchetConfig,
-  RemoteCommandResult,
 } from '@ratchet/core';
-import { BenchAbortedError, BenchError } from './errors.js';
+import { dependencyChangeGuardrail, lockfileChanges, offlineSetupHint, type DepsPlan } from './deps.js';
+import { BenchError } from './errors.js';
 import type { BenchLog } from './log.js';
 import {
   DEFAULT_TIMEOUTS,
   runBenchJob,
   type BenchProgress,
+  type CheckoutVeto,
   type PipelineExecutor,
   type ProgressBenchRunner,
   type StepOutcome,
   type StepSpec,
   type StepTimeouts,
 } from './pipeline.js';
+import { DepsSnapshots } from './remote-deps.js';
 import {
   checkoutScript,
+  depsPaths,
   HOLDOUT_FETCH_EXIT,
   parseSentinels,
-  pingScript,
   stepScript,
-  stripSentinels,
-  wrapStep,
+  type DepsRestore,
   type Isolation,
   type Layout,
 } from './remote-scripts.js';
+import { InstanceSession, tail } from './remote-session.js';
 import { stageSource, type StagedSource } from './stage.js';
 
 export interface RemoteBenchRunnerOptions {
@@ -60,10 +62,18 @@ export interface RemoteBenchRunnerOptions {
   isolation?: Isolation;
   /** Path of the candidate launcher on the image. Default `/usr/local/bin/ratchet-candidate` (installed by the bench user-data). Test seam. */
   candidateLauncher?: string;
+  /**
+   * Candidate setup, e.g. `pnpm install --frozen-lockfile && pnpm build`. The bench has no network, so when it is set the
+   * dependencies come from a SNAPSHOT of the lockfile at `bench.ref` (see deps.ts and `evaluator.deps`): built once per
+   * lockfile by a `deps` instance with egress before the first job, restored read-only before setup, and setup runs with the
+   * package manager offline. A candidate whose lockfile differs is blocked. Without `setup` nothing is snapshotted.
+   */
   setup?: string;
   artifacts?: ArtifactStore;
-  /** Default: `config.bench.hardware`. */
+  /** The bench instance type. Default: `config.bench.hardware`. */
   instanceType?: string;
+  /** Instance type of the dependency-snapshot job (must have the bench's architecture). Default: the bench's. */
+  depsInstanceType?: string;
   /** Per-job working directories are created under here on the instance. Default `/var/tmp/ratchet-bench`. */
   workRoot?: string;
   timeouts?: Partial<StepTimeouts>;
@@ -82,15 +92,36 @@ export interface RemoteBenchRunnerOptions {
  * generated script per step through `CloudCompute.runCommand`, and ALWAYS terminates the instance
  * in a `finally`. See remote-scripts.ts for the scripts and the sentinel protocol.
  *
- * Steps: stage on the controller (candidate + bench.ref tarballs into the artifacts bucket) -> ping (wait
- * for SSM) -> checkout (download from S3, verify digest, overlay, check the isolation) -> setup ->
- * guardrails (both as the candidate user) -> bench x N (the harness as the holdout user). For a confirm job
- * the sealed holdout is fetched by root inside each bench run, after the build is over, and wiped when the run
- * ends: nothing candidate-controlled ever runs while it exists as a file the candidate user could open.
- * Aborting stops waiting immediately and terminates the instance, which kills whatever is running there.
+ * Steps: [dependency snapshot, first job per lockfile only: a separate `deps` instance with egress builds the package store
+ * from bench.ref's lockfile; see remote-deps.ts] -> stage on the controller (candidate + bench.ref tarballs into the artifacts
+ * bucket; a changed lockfile blocks the candidate here) -> ping (wait for SSM) -> checkout (download from S3, verify digest,
+ * overlay, check the isolation, restore the snapshot read-only) -> setup (offline) -> guardrails (both as the candidate
+ * user) -> bench x N (the harness as the holdout user). For a confirm job the sealed holdout is fetched by root inside each
+ * bench run, after the build is over, and wiped when the run ends: nothing candidate-controlled ever runs while it exists as
+ * a file the candidate user could open. Aborting stops waiting immediately and terminates the instance, which kills whatever
+ * is running there.
  */
 export class RemoteBenchRunner implements ProgressBenchRunner {
-  constructor(private readonly o: RemoteBenchRunnerOptions) {}
+  private readonly snapshots: DepsSnapshots;
+
+  constructor(private readonly o: RemoteBenchRunnerOptions) {
+    this.snapshots = new DepsSnapshots({
+      compute: o.compute,
+      git: o.git,
+      clock: o.clock,
+      imageRef: o.imageRef,
+      bucket: o.stagingBucket,
+      store: o.stagingStore ?? o.artifacts,
+      isolation: o.isolation ?? 'user',
+      workRoot: o.workRoot ?? '/var/tmp/ratchet-bench',
+      depsMs: { ...DEFAULT_TIMEOUTS, ...o.timeouts }.depsMs,
+      readyAttempts: o.readyAttempts,
+      readyDelayMs: o.readyDelayMs,
+      onWarning: o.onWarning,
+      benchInstanceType: o.instanceType,
+      instanceType: o.depsInstanceType,
+    });
+  }
 
   async run(
     job: BenchJob,
@@ -113,6 +144,9 @@ export class RemoteBenchRunner implements ProgressBenchRunner {
       signal,
       onProgress,
       async (log) => {
+        // Before the first job of a lockfile (the baseline, in practice) a separate instance with egress fetches the
+        // packages; it is gone again before this job's instance exists. Without setup there is nothing to install.
+        const deps = this.o.setup ? await this.snapshots.ensure({ job, config, log, signal, onProgress }) : undefined;
         const instance = await this.o.compute.launchBenchInstance({
           optimizationId: job.optimizationId,
           instanceType: this.o.instanceType ?? config.bench.hardware,
@@ -120,7 +154,7 @@ export class RemoteBenchRunner implements ProgressBenchRunner {
           purpose: job.phase,
         });
         log.line(`bench instance ${instance.id} (${instance.instanceType}) launched for ${job.phase}`);
-        return new RemoteExecutor(this.o, job, config, log, instance, signal);
+        return new RemoteExecutor(this.o, job, config, log, instance, signal, deps);
       },
     );
   }
@@ -129,18 +163,21 @@ export class RemoteBenchRunner implements ProgressBenchRunner {
 class RemoteExecutor implements PipelineExecutor {
   private readonly layout: Layout;
   private readonly timeouts: StepTimeouts;
+  private readonly session: InstanceSession;
 
   constructor(
     private readonly o: RemoteBenchRunnerOptions,
     private readonly job: BenchJob,
     private readonly config: RatchetConfig,
     private readonly log: BenchLog,
-    private readonly instance: InstanceInfo,
-    private readonly signal: AbortSignal | undefined,
+    instance: InstanceInfo,
+    signal: AbortSignal | undefined,
+    private readonly deps: DepsPlan | undefined,
   ) {
     const id = `${job.optimizationId.replace(/[^A-Za-z0-9._-]/g, '_')}-${randomUUID().slice(0, 8)}`;
     this.layout = { work: `${o.workRoot ?? '/var/tmp/ratchet-bench'}/${id}` };
     this.timeouts = { ...DEFAULT_TIMEOUTS, ...o.timeouts };
+    this.session = new InstanceSession(o, instance, log, signal);
   }
 
   private get isolation(): Isolation {
@@ -158,23 +195,54 @@ class RemoteExecutor implements PipelineExecutor {
       bucket: this.o.stagingBucket,
       optimizationId: this.job.optimizationId,
       sha: this.job.sha,
-      benchRef: this.config.bench.ref,
+      // With a snapshot, the bench tree is the exact commit the snapshot's lockfile hashes were computed from.
+      benchRef: this.deps?.baseCommit ?? this.config.bench.ref,
+      ...(this.deps ? { hashFiles: this.deps.strategy.lockfiles } : {}),
     });
     this.log.line(`staged candidate ${staged.code.commit} and bench.ref ${staged.bench.commit} for the instance (no GitHub access from the bench)`);
     return staged;
   }
 
-  async checkout(opts: { trace?: string }): Promise<void> {
+  /** What the checkout script restores before setup, from the manifest the snapshot job wrote. */
+  private restore(plan: DepsPlan): DepsRestore {
+    const bucket = this.o.stagingBucket!;
+    return {
+      strategy: plan.strategy,
+      uri: `s3://${bucket}/${plan.manifest.archive}`,
+      sha256: plan.manifest.sha256,
+      compression: plan.manifest.compression,
+      node: plan.manifest.node,
+      pm: plan.manifest.pm,
+    };
+  }
+
+  async checkout(opts: { trace?: string }): Promise<CheckoutVeto | void> {
     // Staging overlaps with the instance booting (it was launched before checkout started).
     const staged = await this.stage();
-    await this.waitReady();
-    const res = await this.call(
+
+    // Dependencies cannot change in v0: the bench has no network. Decided here, on the controller, from the trees it just
+    // archived, so a candidate that touches the lockfile never gets as far as running anything.
+    if (this.deps) {
+      const base = lockfileChanges(this.deps.lockfiles, staged.bench.files ?? {});
+      if (base.length > 0) {
+        throw new BenchError(`bench.ref ${this.config.bench.ref} moved while the job was starting: ${base.join(', ')} no longer matches the dependency snapshot ${this.deps.key}`);
+      }
+      const changed = lockfileChanges(this.deps.lockfiles, staged.code.files ?? {});
+      if (changed.length > 0) {
+        this.log.line(`!!! dependency change: ${changed.join(', ')} differs from bench.ref ${this.config.bench.ref}`);
+        return { guardrail: dependencyChangeGuardrail(changed, this.config.bench.ref) };
+      }
+    }
+
+    await this.session.waitReady();
+    const res = await this.session.call(
       'checkout',
       checkoutScript({
         layout: this.layout,
         code: staged.code,
         bench: staged.bench,
         globs: this.config.protected,
+        ...(this.deps ? { pinned: this.deps.strategy.lockfiles, deps: this.restore(this.deps) } : {}),
         prune: this.o.pruneExtraProtected ?? true,
         isolation: this.isolation,
         ...(this.o.candidateLauncher ? { candidateLauncher: this.o.candidateLauncher } : {}),
@@ -185,23 +253,32 @@ class RemoteExecutor implements PipelineExecutor {
     if (res.exitCode !== 0 || !s) {
       throw new BenchError(`checkout on the bench instance failed (exit ${res.exitCode}): ${tail(res.stderr || res.stdout)}`);
     }
-    const copied = Number(s.data.copied);
-    if (!(copied > 0)) {
+    const matched = Number(s.data.matched ?? s.data.copied);
+    if (!(matched > 0)) {
       throw new BenchError(
         `bench.ref ${this.config.bench.ref} contains no files matching the protected globs [${this.config.protected.join(', ')}]; ` +
           'refusing to benchmark with an unprotected bench',
       );
     }
-    this.log.line(`overlay: ${copied} protected file(s) from ${this.config.bench.ref}, ${String(s.data.removed)} candidate-only protected file(s) removed`);
+    this.log.line(`overlay: ${String(s.data.copied)} protected file(s) from ${this.config.bench.ref}, ${String(s.data.removed)} candidate-only protected file(s) removed`);
+    if (this.deps) this.log.line(`dependencies restored read-only from snapshot ${this.deps.key}; setup runs offline`);
 
     // The holdout is NOT fetched here: setup and guardrails (candidate code) run before the first bench
     // step, and nothing sealed may exist on the instance while they do. Each bench step fetches it.
     if (opts.trace !== undefined) this.log.line('holdout is fetched by each bench run, after setup and guardrails, and wiped when the run ends');
   }
 
+  setupFailureHint(): string | undefined {
+    return this.deps ? offlineSetupHint(this.deps.strategy, this.config.bench.ref) : undefined;
+  }
+
   async runStep(spec: StepSpec): Promise<StepOutcome> {
     this.log.section(spec.name);
-    const res = await this.call(
+    // Setup and the command guardrails (candidate code, as the candidate user) install from the restored store with the
+    // package manager offline. The evaluator harness does not.
+    const depsEnv =
+      this.deps && spec.kind !== 'bench' ? this.deps.strategy.setupEnv(depsPaths(this.layout).store, depsPaths(this.layout).scratch) : {};
+    const res = await this.session.call(
       spec.name,
       stepScript({
         layout: this.layout,
@@ -209,7 +286,7 @@ class RemoteExecutor implements PipelineExecutor {
         name: spec.name,
         command: spec.command,
         timeoutMs: spec.timeoutMs,
-        env: { ...spec.env },
+        env: { ...spec.env, ...depsEnv },
         isolation: this.isolation,
         ...(spec.trace !== undefined ? { holdout: { uri: spec.trace } } : {}),
         ...(this.o.candidateLauncher ? { candidateLauncher: this.o.candidateLauncher } : {}),
@@ -248,64 +325,7 @@ class RemoteExecutor implements PipelineExecutor {
   }
 
   async dispose(): Promise<void> {
-    try {
-      await this.o.compute.terminate([this.instance.id]);
-      this.log.line(`bench instance ${this.instance.id} terminated`);
-    } catch (err) {
-      const msg = `FAILED to terminate bench instance ${this.instance.id}: ${(err as Error).message} (the reaper must clean it up)`;
-      this.log.line(msg);
-      this.o.onWarning?.(msg);
-    }
-  }
-
-  private async waitReady(): Promise<void> {
-    const attempts = this.o.readyAttempts ?? 30;
-    for (let i = 1; ; i++) {
-      try {
-        const r = await this.call('ping', pingScript(), 60_000);
-        if (r.exitCode === 0) return;
-        throw new Error(`exit ${r.exitCode}`);
-      } catch (err) {
-        if (err instanceof BenchAbortedError) throw err;
-        if (i >= attempts) throw new BenchError(`bench instance ${this.instance.id} never became ready: ${(err as Error).message}`);
-        await this.o.clock.sleep(this.o.readyDelayMs ?? 10_000, this.signal);
-      }
-    }
-  }
-
-  /** One runCommand, raced against the abort signal; the output (minus sentinel lines) goes to the log. */
-  private async call(name: string, script: string, timeoutMs: number): Promise<RemoteCommandResult> {
-    if (this.signal?.aborted) throw new BenchAbortedError();
-    const pending = this.o.compute.runCommand(this.instance.id, {
-      script: wrapStep(script),
-      timeoutSeconds: Math.ceil(timeoutMs / 1000) + 120,
-    });
-    pending.catch(() => undefined);
-    let onAbort: (() => void) | undefined;
-    const aborted = new Promise<never>((_, reject) => {
-      if (!this.signal) return;
-      onAbort = () => reject(new BenchAbortedError());
-      this.signal.addEventListener('abort', onAbort, { once: true });
-    });
-    let res: RemoteCommandResult;
-    try {
-      res = await Promise.race([pending, aborted]);
-    } catch (err) {
-      if (err instanceof BenchAbortedError) throw err;
-      throw new BenchError(`runCommand "${name}" on ${this.instance.id} failed: ${(err as Error).message}`, { cause: err });
-    } finally {
-      if (onAbort) this.signal?.removeEventListener('abort', onAbort);
-    }
-    if (name !== 'ping') {
-      this.log.section(`remote step: ${name} (exit ${res.exitCode})`);
-      this.log.line(stripSentinels(res.stdout));
-      if (res.stderr.trim()) this.log.line(`[stderr]\n${res.stderr}`);
-    }
-    return res;
+    await this.session.terminate();
   }
 }
 
-function tail(s: string, n = 600): string {
-  const t = s.trim();
-  return t.length > n ? '...' + t.slice(-n) : t;
-}

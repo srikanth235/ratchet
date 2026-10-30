@@ -42,6 +42,12 @@ describe('buildContext', () => {
     expect(text).toContain('`bench/**`, `ratchet.yaml`');
     expect(text).toContain('`pnpm test` must pass; `error_rate` < 0.001');
   });
+  it('tells the agent that dependencies are fixed (a lockfile change is blocked), unless the evaluator declares none', () => {
+    expect(text).toContain('Dependencies are fixed');
+    expect(text).toContain('lockfile');
+    const none = { ...config, config: { ...config.config, evaluator: { ...config.config.evaluator, deps: 'none' as const } } };
+    expect(buildContext({ config: none, bestValue: 20, history: [], now: 0, spendUsd: 0, turn: 1 })).not.toContain('Dependencies are fixed');
+  });
   it('says so when there is no history yet', () => {
     expect(buildContext({ config, bestValue: 20, history: [], now: 0, spendUsd: 0, turn: 1 })).toContain('None yet.');
   });

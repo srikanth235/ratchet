@@ -249,6 +249,17 @@ describe("bench image", () => {
     expect(stripComments(read("scripts", "00-base.sh"))).toMatch(/procps-ng/);
     expect(stripComments(read("scripts", "70-bench-user.sh"))).toMatch(/dnf_install iptables-nft/);
   });
+  it("provides what the dependency-snapshot job and restore need: zstd (gzip is the fallback), tar --sort, node, pnpm and npm for the unprivileged user", () => {
+    const deps = readRepo("packages", "bench", "src", "deps-scripts.ts") + readRepo("packages", "bench", "src", "remote-scripts.ts");
+    expect(deps).toContain("zstd");
+    expect(deps).toContain("--sort=name");
+    expect(stripComments(read("scripts", "00-base.sh"))).toMatch(/\bzstd\b/);
+    const verify = read("scripts", "90-verify-bench.sh");
+    expect(verify).toMatch(/\bzstd\b/);
+    expect(verify).toMatch(/\bnpm\b/);
+    // the snapshot job needs no extra OS user on the image: its user data creates `ratchet-deps` like the bench users
+    expect(stripComments(read("scripts", "70-bench-user.sh"))).not.toContain("ratchet-deps");
+  });
   it("creates the ratchet-bench and ratchet-holdout users exactly like the instance user data does", () => {
     const name = /BENCH_OS_USER = '([^']+)'/.exec(awsTs)![1]!;
     expect(name).toBe("ratchet-bench");

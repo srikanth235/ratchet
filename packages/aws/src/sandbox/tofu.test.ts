@@ -47,6 +47,14 @@ const OUTPUTS_JSON = JSON.stringify({
       instance_profile_name: 'ratchet-demo-confirm-runner',
     },
   },
+  deps_identity_ref: {
+    value: {
+      role_arn: 'arn:aws:iam::1:role/ratchet/bench/ratchet-demo-deps-runner',
+      role_name: 'ratchet-demo-deps-runner',
+      instance_profile_arn: 'arn:aws:iam::1:instance-profile/ratchet/bench/ratchet-demo-deps-runner',
+      instance_profile_name: 'ratchet-demo-deps-runner',
+    },
+  },
   sealed_confirm_prefix: { value: 'holdout/' },
   network_ref: {
     value: {
@@ -204,6 +212,17 @@ describe('apply', () => {
     // two identities: eval_identity_ref has NO sealed access, confirm_identity_ref does
     expect(out.confirmIdentity.instanceProfileArn).toBe('arn:aws:iam::1:instance-profile/ratchet/bench/ratchet-demo-confirm-runner');
     expect(out.confirmIdentity.roleArn).not.toBe(out.evalIdentity.roleArn);
+    // ... and a third for dependency snapshots: it writes bench-deps/ and has no sealed access
+    expect(out.depsIdentity?.instanceProfileArn).toBe('arn:aws:iam::1:instance-profile/ratchet/bench/ratchet-demo-deps-runner');
+    expect(new Set([out.evalIdentity.roleArn, out.confirmIdentity.roleArn, out.depsIdentity?.roleArn]).size).toBe(3);
+  });
+
+  it('parses outputs of a sandbox applied before dependency snapshots (no deps_identity_ref): the identity is simply absent', () => {
+    const doc = JSON.parse(OUTPUTS_JSON) as Record<string, unknown>;
+    delete doc.deps_identity_ref;
+    const out = parseTofuOutputs(JSON.stringify(doc), 'us-east-1')!;
+    expect(out.depsIdentity).toBeUndefined();
+    expect(out.confirmIdentity.roleName).toBe('ratchet-demo-confirm-runner');
   });
 
   it('stops after a failed apply', async () => {

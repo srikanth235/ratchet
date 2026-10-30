@@ -5,7 +5,7 @@ Packer definitions for the two machine images that live mode launches. Nothing e
 | Image | Launched by | Passed to live mode as | Contains |
 |---|---|---|---|
 | **runner** | `AwsCloudCompute.launchRunner` | `runnerImageRef` | Node 22, pnpm, git, AWS CLI v2, SSM agent, `claude` and `codex` (pinned), perf/strace/sysstat, hyperfine, k6, gcc/make/python3, the `ratchet-runner` bin from this repository |
-| **bench** | `AwsCloudCompute.launchBenchInstance` | `benchImageRef` | Node 22, pnpm, git, AWS CLI v2, SSM agent, k6, hyperfine, iptables, the unprivileged `ratchet-bench` user. **No agent CLIs, no model keys, no runner bin** |
+| **bench** | `AwsCloudCompute.launchBenchInstance` | `benchImageRef` | Node 22, pnpm, git, AWS CLI v2, SSM agent, k6, hyperfine, iptables, zstd, the unprivileged `ratchet-bench` user (the dependency-snapshot job boots this image too, as `purpose: 'deps'`; its `ratchet-deps` user is created by that instance's user data). **No agent CLIs, no model keys, no runner bin** |
 
 Both are Amazon Linux 2023 (`x86_64` by default, `arm64` with `-var arch=arm64`; build the architecture of the instance types you launch).
 

@@ -100,7 +100,11 @@ export interface BenchLaunchSpec {
   optimizationId: OptimizationId;
   instanceType: string;
   imageRef: string;
-  purpose: 'baseline' | 'bench' | 'confirm';
+  /**
+   * `deps` is the dependency-snapshot job: it runs on an instance that HAS egress (the agent subnet, through the
+   * proxy when enabled) under its own minimal identity, and never executes candidate code.
+   */
+  purpose: 'baseline' | 'bench' | 'confirm' | 'deps';
 }
 
 export interface RemoteCommand {

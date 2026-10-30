@@ -47,6 +47,12 @@ export interface LiveOptions {
   /** AMIs built for agent runners and bench instances. */
   runnerImageRef?: string | undefined;
   benchImageRef?: string | undefined;
+  /**
+   * Candidate setup run on the bench before the guardrails, e.g. `pnpm install --frozen-lockfile && pnpm build`. The bench has no
+   * network: when this is set, dependencies come from a snapshot of the lockfile at `evaluator.ref` that a separate instance with
+   * egress builds once (`evaluator.deps`, docs/real-env/bench.md), and a candidate that changes the lockfile is blocked.
+   */
+  benchSetup?: string | undefined;
   /** Pinned `tofu` binary and the infra/aws module directory. */
   tofuBinary: string;
   moduleDir: string;
@@ -131,6 +137,7 @@ export function createLiveRuntime(opts: LiveOptions): LiveRuntime {
           artifacts,
           // Bench instances have no internet: inputs are staged as tarballs under bench-inputs/ in the artifacts bucket.
           stagingBucket: out.artifactsBucket,
+          ...(opts.benchSetup ? { setup: opts.benchSetup } : {}),
         })
       : unready<RemoteBenchRunner>('bench runner', [!out ? needSandbox : '', !haveGit ? 'set the GitHub repository and token (Settings)' : '', !opts.benchImageRef ? 'set the bench AMI (Settings)' : ''].filter(Boolean));
   const runners = out

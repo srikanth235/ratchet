@@ -1,7 +1,7 @@
 # Ratchet AWS sandbox module (v0). Implements infra/contract.md.
 #
-# Layout: s3.tf (artifacts + sealed buckets), iam.tf (agent boundary, bench and
-# confirm runners), network.tf (VPC, endpoints, security groups), proxy.tf
+# Layout: s3.tf (artifacts + sealed buckets), iam.tf (agent boundary, bench, confirm and
+# deps runners), network.tf (VPC, endpoints, security groups), proxy.tf
 # (optional egress proxy), outputs.tf (contract outputs).
 #
 # Created at RUNTIME by the app, not here (see infra/README.md): per-agent IAM

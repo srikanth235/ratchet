@@ -67,6 +67,9 @@ export function buildContext(input: ContextInput): string {
   lines.push(`- Protected paths (a candidate touching them is blocked): ${config.config.protected.length ? config.config.protected.map((p) => `\`${p}\``).join(', ') : 'none'}`);
   const guardrails = config.config.guardrails.map((g) => (g.kind === 'command' ? `\`${g.run}\` must pass` : `\`${g.metric}\` ${g.raw}`));
   lines.push(`- Guardrails checked on every candidate: ${guardrails.length ? guardrails.join('; ') : 'none'}`);
+  if (config.config.evaluator.deps !== 'none') {
+    lines.push('- Dependencies are fixed: the trusted benchmark has no network and installs from the lockfile of the base ref. A candidate that changes the lockfile (pnpm-lock.yaml, package-lock.json) is blocked, so do not add or upgrade packages.');
+  }
   lines.push('- The trusted benchmark runs on pinned hardware and a hidden trace; your own measurements only guide you.');
   lines.push('');
   lines.push('## How to submit');

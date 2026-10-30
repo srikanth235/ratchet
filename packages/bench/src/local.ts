@@ -9,16 +9,18 @@ import type {
   GitHost,
   RatchetConfig,
 } from '@ratchet/core';
+import { dependencyChangeGuardrail, hashNamedFiles, lockfileChanges, resolveDepsStrategy, rootEntries } from './deps.js';
 import { BenchAbortedError, BenchError } from './errors.js';
 import { runProcess } from './exec.js';
 import type { BenchLog } from './log.js';
 import { currentNodeRuntime, withNodeOnPath, type NodeRuntimeInfo } from './node-path.js';
-import { applyOverlay, restoreProtected } from './overlay.js';
+import { applyOverlay, isProtected, restoreProtected } from './overlay.js';
 import {
   DEFAULT_TIMEOUTS,
   runBenchJob,
   withLimits,
   type BenchProgress,
+  type CheckoutVeto,
   type PipelineExecutor,
   type StepOutcome,
   type StepSpec,
@@ -31,7 +33,12 @@ export interface LocalBenchRunnerOptions {
   /** Fresh job directories are created under here and deleted afterwards. */
   scratchRoot: string;
   clock: Clock;
-  /** Run in the candidate checkout before the guardrails, e.g. `pnpm install --frozen-lockfile && pnpm build`. */
+  /**
+   * Run in the candidate checkout before the guardrails, e.g. `pnpm install --frozen-lockfile && pnpm build`. When it is set,
+   * a candidate whose lockfile differs from `bench.ref`'s is BLOCKED exactly as on the real bench (which has no network, so a
+   * dependency change cannot be installed there), and the lockfile counts as protected. This machine has a network and needs no
+   * snapshot; the rule is applied for parity, so a simulation does not accept what live mode would refuse.
+   */
   setup?: string;
   /** Combined logs go to `bench/<optimization>/<candidate|baseline>/<phase>.log`. */
   artifacts?: ArtifactStore;
@@ -119,7 +126,7 @@ class LocalExecutor implements PipelineExecutor {
     this.timeouts = { ...DEFAULT_TIMEOUTS, ...o.timeouts };
   }
 
-  async checkout(opts: { trace?: string }): Promise<void> {
+  async checkout(opts: { trace?: string }): Promise<CheckoutVeto | void> {
     void opts;
     await mkdir(this.codeDir);
     await mkdir(this.benchDir);
@@ -136,13 +143,27 @@ class LocalExecutor implements PipelineExecutor {
     await checkout(this.config.bench.ref, this.benchDir, `checkout of bench.ref ${this.config.bench.ref}`);
     await rm(join(this.codeDir, '.git'), { recursive: true, force: true });
     await rm(join(this.benchDir, '.git'), { recursive: true, force: true });
+    // Dependencies cannot change in v0 (the real bench is offline). Decided before anything runs, from the trees as checked out.
+    let pinned: readonly string[] = [];
+    if (this.o.setup) {
+      const { strategy, note } = resolveDepsStrategy(this.config.evaluator.deps, await rootEntries(this.benchDir));
+      if (note) this.log.line(`dependencies: ${note}`);
+      if (strategy.id !== 'none') {
+        pinned = strategy.lockfiles;
+        const changed = lockfileChanges(await hashNamedFiles(this.benchDir, pinned), await hashNamedFiles(this.codeDir, pinned));
+        if (changed.length > 0) {
+          this.log.line(`!!! dependency change: ${changed.join(', ')} differs from bench.ref ${this.config.bench.ref}`);
+          return { guardrail: dependencyChangeGuardrail(changed, this.config.bench.ref) };
+        }
+      }
+    }
     const res = await applyOverlay({
       codeDir: this.codeDir,
       benchDir: this.benchDir,
-      globs: this.config.protected,
+      globs: [...this.config.protected, ...pinned],
       prune: this.o.pruneExtraProtected ?? true,
     });
-    if (res.copied.length === 0) {
+    if (!res.copied.some((p) => isProtected(p, this.config.protected))) {
       throw new BenchError(
         `bench.ref ${this.config.bench.ref} contains no files matching the protected globs [${this.config.protected.join(', ')}]; ` +
           'refusing to benchmark with an unprotected bench',

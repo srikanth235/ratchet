@@ -40,12 +40,14 @@ import {
   CANDIDATE_LAUNCHER_PATH,
   CANDIDATE_LAUNCHER_SCRIPT,
   CANDIDATE_SUDOERS,
+  DEPS_OS_USER,
   HOLDOUT_OS_USER,
   KILL_SWITCH_POLICY_NAME,
   agentRoleName,
   awsComputeConfigFromOutputs,
   benchProfileFor,
   benchUserData,
+  depsUserData,
   listAgentRoles,
   runnerUserData,
   secretPrefix,
@@ -66,6 +68,7 @@ const cfg: AwsComputeConfig = {
   benchSecurityGroupId: 'sg-bench',
   benchInstanceProfile: 'arn:aws:iam::123456789012:instance-profile/ratchet/bench/ratchet-demo-bench-runner',
   confirmInstanceProfile: 'arn:aws:iam::123456789012:instance-profile/ratchet/bench/ratchet-demo-confirm-runner',
+  depsInstanceProfile: 'arn:aws:iam::123456789012:instance-profile/ratchet/bench/ratchet-demo-deps-runner',
   artifactsBucket: 'ratchet-demo-artifacts',
   maxInstanceLifetimeHours: 2,
 };
@@ -119,7 +122,7 @@ describe('id validation (security requirement)', () => {
     identity: { ...identity, optimizationId: opt, agentId: agent },
     secrets: [],
   });
-  const bench = (opt: string, purpose: 'baseline' | 'bench' | 'confirm' = 'bench') => ({ ...spec, optimizationId: opt, purpose });
+  const bench = (opt: string, purpose: 'baseline' | 'bench' | 'confirm' | 'deps' = 'bench') => ({ ...spec, optimizationId: opt, purpose });
   const untouched = () => {
     expect(iam.calls()).toHaveLength(0);
     expect(ssm.calls()).toHaveLength(0);
@@ -137,6 +140,7 @@ describe('id validation (security requirement)', () => {
     await expect(compute.launchRunner(runner('opt1', bad) as never)).rejects.toThrow(/invalid agent id/);
     await expect(compute.launchBenchInstance(bench(bad))).rejects.toThrow(/invalid optimization id/);
     await expect(compute.launchBenchInstance(bench(bad, 'confirm'))).rejects.toThrow(/invalid optimization id/);
+    await expect(compute.launchBenchInstance(bench(bad, 'deps'))).rejects.toThrow(/invalid optimization id/);
     await expect(compute.listTagged(bad)).rejects.toThrow(/invalid optimization id/);
     expect(() => agentRoleName(bad, 'a1')).toThrow(/invalid optimization id/);
     expect(() => agentRoleName('opt1', bad)).toThrow(/invalid agent id/);
@@ -461,6 +465,104 @@ describe('launch', () => {
     expect(ec2.commandCalls(RunInstancesCommand)[0]!.args[0].input.IamInstanceProfile).toEqual({ Name: 'bench-profile' });
   });
 
+  describe("dependency snapshots (purpose 'deps')", () => {
+    const depsSpec = { optimizationId: 'opt1', instanceType: 'c7i.2xlarge', imageRef: 'ami-bench', purpose: 'deps' as const };
+    const launch = async (c: AwsCloudCompute = compute) => {
+      ec2.on(RunInstancesCommand).resolves({ Instances: [{ InstanceId: 'i-d' }] });
+      const info = await c.launchBenchInstance(depsSpec);
+      return { info, input: ec2.commandCalls(RunInstancesCommand)[0]!.args[0].input };
+    };
+
+    it('runs in the AGENT subnet (the only one with egress) with the agent runner group and its own profile, never the bench or confirm ones', async () => {
+      const { info, input } = await launch();
+      expect(info.role).toBe('bench');
+      expect(info.agentId).toBeUndefined();
+      expect(input.SubnetId).toBe('subnet-agent');
+      expect(input.SecurityGroupIds).toEqual(['sg-runner']);
+      expect(input.IamInstanceProfile).toEqual({ Arn: cfg.depsInstanceProfile });
+      const json = JSON.stringify(input);
+      expect(json).not.toContain('subnet-bench');
+      expect(json).not.toContain('sg-bench');
+      expect(json).not.toContain('bench-runner');
+      expect(json).not.toContain('confirm-runner');
+    });
+
+    it('keeps IMDSv2, terminate-on-shutdown and the tags the reaper and the teardown orphan check rely on', async () => {
+      const { input } = await launch();
+      expect(input.MetadataOptions).toEqual({ HttpTokens: 'required', HttpEndpoint: 'enabled', HttpPutResponseHopLimit: 1 });
+      expect(input.InstanceInitiatedShutdownBehavior).toBe('terminate');
+      const tags = input.TagSpecifications!.find((t) => t.ResourceType === 'instance')!.Tags!;
+      expect(tags).toEqual(
+        expect.arrayContaining([
+          { Key: 'ratchet:opt', Value: 'opt1' },
+          { Key: 'ratchet:role', Value: 'bench' },
+          { Key: 'ratchet:purpose', Value: 'deps' },
+          { Key: 'ratchet:sandbox', Value: 'demo' },
+        ]),
+      );
+      expect(tags.find((t) => t.Key === 'ratchet:agent')).toBeUndefined();
+    });
+
+    it('fails closed without a deps profile: no launch, no fallback to the bench identity or subnet', async () => {
+      const { depsInstanceProfile: _drop, ...noDeps } = cfg;
+      const c = new AwsCloudCompute(noDeps, { clients: { ec2: new EC2Client({}) }, clock });
+      await expect(c.launchBenchInstance(depsSpec)).rejects.toThrow(/depsInstanceProfile is not configured/);
+      expect(ec2.commandCalls(RunInstancesCommand)).toHaveLength(0);
+    });
+
+    it('needs no bench subnet (it is not a bench), and a bench launch still needs one', async () => {
+      const { benchSubnetId: _drop, ...noBench } = cfg;
+      const c = new AwsCloudCompute(noBench, { clients: { ec2: new EC2Client({}) }, clock });
+      const { input } = await launch(c);
+      expect(input.SubnetId).toBe('subnet-agent');
+      await expect(c.launchBenchInstance(benchSpec('bench'))).rejects.toThrow(/benchSubnetId is not configured/);
+    });
+
+    it('refuses to share a profile between the snapshot builder and the benches', () => {
+      expect(() => new AwsCloudCompute({ ...cfg, depsInstanceProfile: cfg.benchInstanceProfile }, { clients: {} })).toThrow(/depsInstanceProfile must differ/);
+      expect(() => new AwsCloudCompute({ ...cfg, depsInstanceProfile: cfg.confirmInstanceProfile }, { clients: {} })).toThrow(/depsInstanceProfile must differ/);
+    });
+
+    it('picks the deps profile for deps and for nothing else', () => {
+      expect(benchProfileFor(cfg, 'deps')).toBe(cfg.depsInstanceProfile);
+      for (const p of ['baseline', 'bench', 'confirm'] as const) expect(benchProfileFor(cfg, p)).not.toBe(cfg.depsInstanceProfile);
+      expect(() => benchProfileFor({ benchInstanceProfile: 'b', confirmInstanceProfile: 'c' }, 'deps')).toThrow(/depsInstanceProfile is not configured/);
+    });
+
+    describe('user data', () => {
+      const ud = depsUserData(depsSpec, 2);
+      it('creates the unprivileged fetch user and blocks instance metadata for it (v4 and v6) before anything else runs', () => {
+        expect(DEPS_OS_USER).toBe('ratchet-deps');
+        expect(ud).toContain(`id -u ${DEPS_OS_USER} >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin ${DEPS_OS_USER}`);
+        expect(ud).toContain(`iptables -I OUTPUT 1 -m owner --uid-owner ${DEPS_OS_USER} -d 169.254.169.254 -j REJECT`);
+        expect(ud).toContain(`ip6tables -I OUTPUT 1 -m owner --uid-owner ${DEPS_OS_USER} -d fd00:ec2::254 -j REJECT`);
+        expect(ud.indexOf('iptables -I OUTPUT')).toBeLessThan(ud.indexOf('touch /run/ratchet/user-data.done'));
+      });
+      it('has none of the bench machinery: no candidate launcher, no sudo rule, no bench or holdout user', () => {
+        for (const needle of ['ratchet-bench', 'ratchet-holdout', 'sudoers', CANDIDATE_LAUNCHER_PATH, CANDIDATE_EXEC_PATH]) expect(ud).not.toContain(needle);
+      });
+      it('has a shorter lifetime guard than a bench: a snapshot build is minutes', () => {
+        expect(ud).toContain('shutdown -h +60');
+        expect(depsUserData(depsSpec, 0.5)).toContain('shutdown -h +30');
+      });
+      it('without a proxy writes no proxy variables; with one, the agent-subnet proxy variables and nothing sensitive', () => {
+        expect(ud).not.toMatch(/PROXY|proxy/);
+        const proxied = depsUserData(depsSpec, 2, { region: 'us-east-1', proxyUrl: 'http://10.42.3.10:3128' });
+        expect(proxied).toContain("HTTPS_PROXY='http://10.42.3.10:3128'");
+        expect(proxied).toContain("NO_PROXY='localhost,127.0.0.1,169.254.169.254,ssm.us-east-1.amazonaws.com");
+        expect(proxied).toContain("RATCHET_BENCH_PURPOSE='deps'");
+        expect(() => depsUserData(depsSpec, 2, { region: 'us-east-1', proxyUrl: "http://10.0.0.1:3128'; rm -rf /" })).toThrow(/invalid egress proxy url/);
+      });
+      it('reaches the launched instance (proxy from the sandbox outputs)', async () => {
+        const c = new AwsCloudCompute({ ...cfg, egressProxyUrl: 'http://10.42.3.10:3128' }, { clients: { ec2: new EC2Client({}) }, clock });
+        const { input } = await launch(c);
+        const data = Buffer.from(input.UserData!, 'base64').toString();
+        expect(data).toContain("HTTPS_PROXY='http://10.42.3.10:3128'");
+        expect(data).toContain(`--uid-owner ${DEPS_OS_USER}`);
+      });
+    });
+  });
+
   describe('bench user-data: candidate / holdout split', () => {
     const ud = benchUserData({ optimizationId: 'opt1', instanceType: 'c7i.large', imageRef: 'ami', purpose: 'confirm' }, 2);
     const idx = (needle: string) => {
@@ -553,6 +655,8 @@ describe('launch', () => {
     expect(derived.benchInstanceProfile).not.toBe(derived.confirmInstanceProfile);
     expect(derived.benchSubnetId).toBe(out.network.benchSubnetId);
     expect(derived.benchSubnetId).not.toBe(derived.subnetId);
+    expect(derived.depsInstanceProfile).toBe(out.depsIdentity!.instanceProfileArn);
+    expect(new Set([derived.benchInstanceProfile, derived.confirmInstanceProfile, derived.depsInstanceProfile]).size).toBe(3);
   });
 
   it('retries while the fresh instance profile propagates, then succeeds', async () => {

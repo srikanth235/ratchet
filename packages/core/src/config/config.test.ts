@@ -274,3 +274,39 @@ agent: { instructions: RATCHET.md, allowed_instance_types: [m7i.xlarge] }
     if (!r.ok) expect(r.errors[0]!.path).toBe('objective.value.usd_per_unit');
   });
 });
+
+describe('evaluator.deps', () => {
+  const base = `
+version: 0
+objective: { metric: p95, direction: minimize, min_gain: 0.03 }
+evaluator:
+  ref: ratchet/bench
+  run: node bench.mjs
+  repeats: 3
+  hardware: c7i.xlarge
+agent: { instructions: RATCHET.md, allowed_instance_types: [c7i.xlarge] }
+`;
+  const withDeps = (value: string) => base.replace('  hardware: c7i.xlarge', `  hardware: c7i.xlarge\n  deps: ${value}`);
+  it('defaults to auto (detect the package manager from the lockfile at evaluator.ref)', () => {
+    const r = parseConfig(base);
+    expect(r.ok && r.config.evaluator.deps).toBe('auto');
+    expect(r.ok && r.config.bench.deps).toBe('auto');
+  });
+  it.each(['auto', 'pnpm', 'npm', 'none'])('accepts %s, also under the legacy bench: key', (mode) => {
+    const r = parseConfig(withDeps(mode));
+    expect(r.ok && r.config.evaluator.deps).toBe(mode);
+    const legacy = parseConfig(withDeps(mode).replace('evaluator:', 'bench:'));
+    expect(legacy.ok && legacy.config.bench.deps).toBe(mode);
+  });
+  it('rejects other package managers with the list of valid ones', () => {
+    const r = parseConfig(withDeps('yarn'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.errors[0]!.path).toBe('evaluator.deps');
+      expect(r.errors[0]!.message).toContain('auto, pnpm, npm, none');
+    }
+  });
+  it('rejects a boolean (deps: false is not a way to say none)', () => {
+    expect(parseConfig(withDeps('false')).ok).toBe(false);
+  });
+});

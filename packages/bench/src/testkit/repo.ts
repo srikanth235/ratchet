@@ -111,7 +111,8 @@ export interface FixtureRepo {
   cleanup(): void;
 }
 
-export function makeFixtureRepo(): FixtureRepo {
+/** `extra` files are part of the base commit (and of the trusted `ratchet/bench` branch), e.g. a lockfile. */
+export function makeFixtureRepo(extra: Record<string, string> = {}): FixtureRepo {
   const dir = tmp();
   const repo = join(dir, 'repo');
   mkdirSync(repo);
@@ -119,7 +120,7 @@ export function makeFixtureRepo(): FixtureRepo {
   git(repo, 'config', 'user.email', 'test@example.invalid');
   git(repo, 'config', 'user.name', 'Test');
   git(repo, 'config', 'commit.gpgsign', 'false');
-  for (const [f, c] of Object.entries(BASE_FILES)) {
+  for (const [f, c] of Object.entries({ ...BASE_FILES, ...extra })) {
     mkdirSync(dirname(join(repo, f)), { recursive: true });
     writeFileSync(join(repo, f), c);
   }
@@ -162,6 +163,8 @@ export interface ConfigOptions {
   repeats?: number;
   run?: string;
   confirmTrace?: string;
+  /** `evaluator.deps` (default: leave it to the schema default, auto). */
+  deps?: string;
 }
 
 export function makeConfig(o: ConfigOptions = {}): RatchetConfig {
@@ -177,7 +180,7 @@ bench:
   run: ${JSON.stringify(o.run ?? 'node bench/bench.mjs')}
   repeats: ${o.repeats ?? 3}
   hardware: c7i.2xlarge
-${o.confirmTrace ? `  confirm_trace: ${o.confirmTrace}\n` : ''}guardrails:${guardrails.length ? '\n' + guardrails.map((g) => '  ' + g).join('\n') : ' []'}
+${o.deps ? `  deps: ${o.deps}\n` : ''}${o.confirmTrace ? `  confirm_trace: ${o.confirmTrace}\n` : ''}guardrails:${guardrails.length ? '\n' + guardrails.map((g) => '  ' + g).join('\n') : ' []'}
 protected:
 ${globs.map((g) => `  - "${g}"`).join('\n')}
 agent:
@@ -243,7 +246,21 @@ export class DirStore implements ArtifactStore {
       return null;
     }
   }
+  /** Everything under `root` (also objects the fake `aws s3 cp` uploaded), not just what `put` wrote. */
   async list(prefix: string): Promise<string[]> {
-    return this.puts.filter((k) => k.startsWith(prefix)).sort();
+    const out: string[] = [];
+    const walk = (rel: string): void => {
+      for (const e of readdirSync(join(this.root, rel), { withFileTypes: true })) {
+        const r = rel === '' ? e.name : `${rel}/${e.name}`;
+        if (e.isDirectory()) walk(r);
+        else out.push(r);
+      }
+    };
+    try {
+      walk('');
+    } catch {
+      // nothing written yet
+    }
+    return out.filter((k) => k.startsWith(prefix)).sort();
   }
 }

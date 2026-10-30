@@ -54,7 +54,7 @@ export const baseConfig = (sb: Sandbox, over: Partial<RunnerConfig> = {}): Runne
     version: 0,
     objective: { metric: 'http_req_duration.p95', direction: 'minimize', min_gain: 0.03 },
     ...(() => {
-      const evaluator = { kind: 'benchmark' as const, ref: 'ratchet/bench', run: 'k6 run bench/k6/search.js', repeats: 5, hardware: 'c7i.2xlarge' };
+      const evaluator = { kind: 'benchmark' as const, ref: 'ratchet/bench', run: 'k6 run bench/k6/search.js', repeats: 5, hardware: 'c7i.2xlarge', deps: 'auto' as const };
       return { evaluator, bench: evaluator };
     })(),
     guardrails: [{ kind: 'command', run: 'pnpm test' }, { kind: 'threshold', metric: 'error_rate', op: '<', value: 0.001, relative: false, raw: '< 0.001' }],
