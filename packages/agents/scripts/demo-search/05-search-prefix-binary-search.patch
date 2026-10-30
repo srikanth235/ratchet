@@ -1,0 +1,30 @@
+diff --git a/src/search.ts b/src/search.ts
+index bd2463d..ccb70f0 100644
+--- a/src/search.ts
++++ b/src/search.ts
+@@ -29,2 +29,10 @@ export function tokenizeQuery(q: string): string[] {
+ 
++/** Indexed words in code-unit order, built once per catalog, so prefix lookups can binary-search. */
++const sortedWordsCache = new WeakMap<Catalog, string[]>();
++function sortedWords(catalog: Catalog): string[] {
++  let words = sortedWordsCache.get(catalog);
++  if (!words) sortedWordsCache.set(catalog, (words = [...catalog.index.keys()].sort()));
++  return words;
++}
++
+ /** Position -> score for every product with a word starting with `term` (name 3, tag 1). */
+@@ -32,4 +40,12 @@ function termScores(catalog: Catalog, term: string): Map<number, number> {
+   const scores = new Map<number, number>();
+-  for (const [word, postings] of catalog.index) {
+-    if (!word.startsWith(term)) continue;
++  const words = sortedWords(catalog);
++  let lo = 0;
++  let hi = words.length;
++  while (lo < hi) {
++    const mid = (lo + hi) >> 1;
++    if ((words[mid] as string) < term) lo = mid + 1;
++    else hi = mid;
++  }
++  for (let i = lo; i < words.length && (words[i] as string).startsWith(term); i++) {
++    const postings = catalog.index.get(words[i] as string)!;
+     for (const position of postings.tags) if (!scores.has(position)) scores.set(position, TAG_WEIGHT);
