@@ -22,6 +22,13 @@ export interface RunnerLoopDeps extends RunnerLoopOptions {
   /** Remote branch where the engine keeps the ratchet best. Default `ratchet/best`. */
   bestRef?: string;
   remote?: string;
+  /**
+   * Local ref the loop uses to remember the last verified commit. Default `refs/ratchet/accepted`. Agents that share one
+   * clone (git worktrees) need one ref each, because refs outside `HEAD` are shared by all worktrees.
+   */
+  acceptedRef?: string;
+  /** Local tracking ref the best is fetched into. Default `refs/remotes/<remote>/<bestRef>`; per agent for shared clones, like `acceptedRef`. */
+  bestTrackingRef?: string;
   /** Consecutive turns without a change before the loop gives up. Default 2. */
   maxIdleTurns?: number;
   /** Consecutive crashed agent turns before the loop gives up. Default 3. */
@@ -147,7 +154,8 @@ export async function runRunnerLoop(opts: RunnerLoopDeps): Promise<RunnerLoopRes
   const { config, adapter, workdir, inbox, clock } = opts;
   const remote = opts.remote ?? 'origin';
   const bestBranch = opts.bestRef ?? 'ratchet/best';
-  const bestTracking = `refs/remotes/${remote}/${bestBranch}`;
+  const bestTracking = opts.bestTrackingRef ?? `refs/remotes/${remote}/${bestBranch}`;
+  const acceptedRef = opts.acceptedRef ?? 'refs/ratchet/accepted';
   const maxIdle = opts.maxIdleTurns ?? 2;
   const maxFailures = opts.maxConsecutiveFailures ?? 3;
   const git = new Git(workdir, opts.git ?? execGit, opts.gitEnv);
@@ -200,7 +208,7 @@ export async function runRunnerLoop(opts: RunnerLoopDeps): Promise<RunnerLoopRes
     await mkdir(dirname(excludeFile), { recursive: true });
     await appendFile(excludeFile, '\n.ratchet/\n');
     const baseHead = await git.head();
-    await git.run(['update-ref', 'refs/ratchet/accepted', baseHead]);
+    await git.run(['update-ref', acceptedRef, baseHead]);
     const known = new Set<string>([baseHead]);
 
     const preflight = await adapter.preflight();
@@ -251,7 +259,7 @@ export async function runRunnerLoop(opts: RunnerLoopDeps): Promise<RunnerLoopRes
       const sha = await git.head();
       if (known.has(sha)) return null;
       const parent = (await git.revParse('HEAD~1')) ?? sha;
-      const accepted = (await git.revParse('refs/ratchet/accepted')) ?? parent;
+      const accepted = (await git.revParse(acceptedRef)) ?? parent;
       const files = await git.changedFiles(accepted, sha).catch(() => []);
       return { sha, files, subject: firstLine(await git.message(), 100) };
     };
@@ -285,7 +293,7 @@ export async function runRunnerLoop(opts: RunnerLoopDeps): Promise<RunnerLoopRes
       }
       if (!bestSha) return [];
       state.bestSha = bestSha;
-      await git.run(['update-ref', 'refs/ratchet/accepted', bestSha]);
+      await git.run(['update-ref', acceptedRef, bestSha]);
       if (await git.isAncestor(bestSha, 'HEAD')) return [];
       const before = await git.head();
       const mine = (await git.run(['rev-list', '--count', `${bestSha}..HEAD`])).trim();
@@ -390,7 +398,7 @@ export async function runRunnerLoop(opts: RunnerLoopDeps): Promise<RunnerLoopRes
       state.history.push(entry);
       emit({ type: 'verdict', text: `${verdict.verdict}`, data: { sha: candidate.sha, verdict: verdict.verdict, reasons: verdict.reasons, currentBest: verdict.currentBest } });
       if (verdict.verdict === 'verified') {
-        await git.run(['update-ref', 'refs/ratchet/accepted', candidate.sha]);
+        await git.run(['update-ref', acceptedRef, candidate.sha]);
         mailbox.latestBest = { sha: candidate.sha, branch: config.branch, value: verdict.currentBest };
       }
 

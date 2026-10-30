@@ -13,5 +13,7 @@ export * from './workdir.js';
 export * from './artifacts.js';
 export * from './runner-loop.js';
 export * from './runner-main.js';
+export * from './detect.js';
+export * from './local-agents.js';
 export * from './control/local.js';
 export * from './control/ssm.js';

@@ -166,6 +166,8 @@ export interface CodexOptions extends CliAgentOptions {
   promptVia?: 'stdin' | 'arg';
   /** Set as OPENAI_API_KEY and CODEX_API_KEY for the child. */
   apiKey?: string;
+  /** Skip the API-key preflight check: the CLI is signed in with a ChatGPT account (`codex login`) on this machine. */
+  allowSubscriptionAuth?: boolean;
 }
 
 export class CodexAdapter extends CliAgentBase implements AgentAdapter {
@@ -182,7 +184,7 @@ export class CodexAdapter extends CliAgentBase implements AgentAdapter {
     const problems: string[] = [];
     const binaryProblem = await this.probeBinary();
     if (binaryProblem) problems.push(binaryProblem);
-    if (!this.baseEnv['OPENAI_API_KEY'] && !this.baseEnv['CODEX_API_KEY']) problems.push('OPENAI_API_KEY is not set');
+    if (!this.options.allowSubscriptionAuth && !this.baseEnv['OPENAI_API_KEY'] && !this.baseEnv['CODEX_API_KEY']) problems.push('OPENAI_API_KEY is not set');
     return { ok: problems.length === 0, problems };
   }
 
