@@ -150,6 +150,12 @@ describe('baseline', () => {
 });
 
 describe('agents', () => {
+  it('lists agents created together in the order they were added, whatever their ids', () => {
+    const o = mkOpt();
+    for (const id of ['agt-z', 'agt-a', 'agt-m']) ledger.addAgent({ id, optimizationId: o.id, kind: 'mock', branch: `ratchet/${id}`, createdAt: 5 });
+    expect(ledger.listAgents(o.id).map((a) => a.id)).toEqual(['agt-z', 'agt-a', 'agt-m']);
+  });
+
   it('adds, lists and updates agents', () => {
     const o = mkOpt();
     const a = ledger.addAgent({ optimizationId: o.id, kind: 'claude-code', branch: 'ratchet/x/claude' });

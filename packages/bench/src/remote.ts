@@ -9,7 +9,7 @@ import type {
   InstanceInfo,
   RatchetConfig,
 } from '@ratchet/core';
-import { dependencyChangeGuardrail, lockfileChanges, offlineSetupHint, type DepsPlan } from './deps.js';
+import { dependencyChangeGuardrail, lockfileChanges, offlineSetupHint, pinnedDepsFiles, type DepsPlan } from './deps.js';
 import { BenchError } from './errors.js';
 import type { BenchLog } from './log.js';
 import {
@@ -197,7 +197,7 @@ class RemoteExecutor implements PipelineExecutor {
       sha: this.job.sha,
       // With a snapshot, the bench tree is the exact commit the snapshot's lockfile hashes were computed from.
       benchRef: this.deps?.baseCommit ?? this.config.bench.ref,
-      ...(this.deps ? { hashFiles: this.deps.strategy.lockfiles } : {}),
+      ...(this.deps ? { hashFiles: pinnedDepsFiles(this.deps.strategy) } : {}),
     });
     this.log.line(`staged candidate ${staged.code.commit} and bench.ref ${staged.bench.commit} for the instance (no GitHub access from the bench)`);
     return staged;
@@ -242,7 +242,7 @@ class RemoteExecutor implements PipelineExecutor {
         code: staged.code,
         bench: staged.bench,
         globs: this.config.protected,
-        ...(this.deps ? { pinned: this.deps.strategy.lockfiles, deps: this.restore(this.deps) } : {}),
+        ...(this.deps ? { pinned: pinnedDepsFiles(this.deps.strategy), deps: this.restore(this.deps) } : {}),
         prune: this.o.pruneExtraProtected ?? true,
         isolation: this.isolation,
         ...(this.o.candidateLauncher ? { candidateLauncher: this.o.candidateLauncher } : {}),

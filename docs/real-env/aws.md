@@ -356,7 +356,7 @@ proxy on 3128, the interface endpoints and the S3 prefix list.
 | AWS endpoints | `aws sts get-caller-identity`, `aws ec2 describe-instances`, `aws s3 ls s3://<artifacts>/artifacts/opt1/a1/` | work (STS/EC2 via the proxy, S3 via the gateway endpoint; if they hang, `NO_PROXY` in `/etc/ratchet/runner.env` is wrong for that service) |
 | SSM | `cloud.runCommand(runner.id, ...)` | works (SSM agent uses the interface endpoints, not the proxy) |
 | agent CLIs | start `claude -p` and `codex exec` with the runner env | both honor `HTTPS_PROXY` (the runner env sets `NODE_USE_ENV_PROXY=1` for Node's fetch; if a CLI still ignores the proxy, calls time out and it needs its own proxy flag) |
-| package installs | `pnpm install` in the runner | fails unless the registry is in `egress_proxy_extra_domains`; decide per project, do not allow `*` |
+| package installs | `pnpm install` in the runner | works against `registry.npmjs.org` (a default); any other registry fails unless it is in `egress_proxy_extra_domains`; decide per project, do not allow `*` |
 | failure mode | stop the proxy instance | runners lose model/GitHub access, SSM and S3 keep working; `tofu apply` replaces it |
 
 ## 10. DNS Firewall and the `bench-inputs/` lifecycle
@@ -371,8 +371,9 @@ blocks everything else with NXDOMAIN. It fails closed (`firewall_fail_open = DIS
 its own VPC would mean a second set of the four interface endpoints (about $29/month each copy), a second S3 gateway endpoint and
 new security-group and boundary references for every path agents use to reach SSM and S3. The shared-VPC consequence is accepted:
 agent runners resolve only the allow-list too, with or without the proxy. That is a domain allow-list below squid, but it
-changes the default behaviour of an unproxied runner from "HTTPS to anywhere": `pnpm install` / `pip install` need their
-registries in `dns_firewall_extra_domains` (`registry.npmjs.org`, `*.pythonhosted.org`, `pypi.org`, ...), and the runner AMI must not
+changes the default behaviour of an unproxied runner from "HTTPS to anywhere": `registry.npmjs.org` is allowed by default (agents
+and the deps snapshot install from it); other registries go in `dns_firewall_extra_domains` (`*.pythonhosted.org`, `pypi.org`, ...),
+and the runner AMI must not
 resolve other hosts at boot. If that is wrong for an environment, set `enable_dns_firewall=false` and accept DNS tunnelling
 (see `bench.md`).
 
@@ -384,17 +385,18 @@ resolve other hosts at boot. If that is wrong for an environment, set `enable_dn
 | allow-list | `aws route53resolver list-firewall-domains --firewall-domain-list-id <allowed>` | the regional service names, `*.s3.<region>.amazonaws.com`, `*.ec2.internal`, `*.<region>.compute.internal`, `*.<b>.<a>.in-addr.arpa`, `api.anthropic.com`, `github.com` + `*.github.com`, ...; never `*` or a bare suffix |
 | bench blocked | on a bench instance: `getent hosts example.com`; `dig +short x.attacker.example`; `dig +short TXT a.b.example.org` | no answer / NXDOMAIN, as root and as `ratchet-bench` / `ratchet-holdout` |
 | bench works | `getent hosts ssm.<region>.amazonaws.com`; `aws s3 cp s3://<artifacts>/bench-inputs/... .`; one SSM `RunCommand`; a full bench job | resolves (private endpoint addresses for `ssm`/`logs`); everything succeeds. If SSM registration breaks after enabling it, the SSM agent needs another name: read the blocked names (enable Resolver query logging on the VPC for a test run), add them to `dns_firewall_extra_domains`, and add the name to `dns_bench_domains` in `dns_firewall.tf` |
-| agent runner | on a runner: `getent hosts api.anthropic.com`, `api.github.com`, `ec2.<region>.amazonaws.com`, `sts.<region>.amazonaws.com`; then `getent hosts registry.npmjs.org` | the first four resolve; the registry does not until added to `dns_firewall_extra_domains`; `claude -p` / `codex exec` and `git clone` over HTTPS still work |
+| agent runner | on a runner: `getent hosts api.anthropic.com`, `api.github.com`, `ec2.<region>.amazonaws.com`, `sts.<region>.amazonaws.com`; then `getent hosts registry.npmjs.org` and `pypi.org` | all but `pypi.org` resolve (npm is a default; other registries need `dns_firewall_extra_domains`); `claude -p` / `codex exec` and `git clone` over HTTPS still work |
 | with proxy | `-var enable_egress_proxy=true` | the proxy instance still boots (`dnf install squid` needs `cdn.amazonlinux.com` and `*.s3.dualstack.<region>.amazonaws.com`, both added automatically) and `curl -x $HTTPS_PROXY https://api.anthropic.com` works |
 | fail closed | `aws route53resolver get-firewall-config --resource-id <vpc>` | `FirewallFailOpen: DISABLED` |
 | toggle | `tofu apply -var enable_dns_firewall=false` in a scratch sandbox | the association and rules are destroyed (no mutation-protection error), `getent hosts example.com` resolves again |
 | cost | Cost Explorer after a day | about $0.60/month for the association plus $0.60 per million queries |
 
-**The deps job and the allow-list.** `purpose: 'deps'` instances live in the agent subnet, so the package registry has to be allowed
-there and nowhere else changes: with `enable_egress_proxy = true` add it to `egress_proxy_extra_domains` (it feeds squid and the DNS Firewall
-allow-list), without the proxy to `dns_firewall_extra_domains`. Verify from a deps instance that `registry.npmjs.org` resolves and the fetch
-works, that `example.com` does not, and, from a bench instance, that the registry still does **not** resolve (the bench subnet, its security
-group and route table are untouched; `tofu test` asserts it).
+**The deps job and the allow-list.** `purpose: 'deps'` instances live in the agent subnet. `registry.npmjs.org` is in the default
+`egress_proxy_domains` (squid and the DNS Firewall allow-list); another registry goes in `egress_proxy_extra_domains` with the proxy, or
+`dns_firewall_extra_domains` without it. The DNS Firewall is per VPC, so an allowed name also *resolves* from a bench instance; the bench
+still cannot *reach* it (no route out of the bench subnet; its security group and route table are untouched, and `tofu test` asserts
+it). Verify from a deps instance that `registry.npmjs.org` resolves and the fetch works and that `example.com` does not; from a bench
+instance, that `curl -m 5 https://registry.npmjs.org/` fails.
 
 **`bench-inputs/` lifecycle.** The artifacts bucket has two rules: `expire-artifacts` (whole bucket, `artifacts_retention_days`, default 30)
 and `expire-bench-inputs` (prefix `bench-inputs/`, `bench_inputs_retention_days`, default 7, plus noncurrent versions and a

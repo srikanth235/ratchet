@@ -545,7 +545,8 @@ export class Ledger {
       .select()
       .from(agents)
       .where(eq(agents.optimizationId, optimizationId))
-      .orderBy(asc(agents.createdAt), asc(agents.id))
+      // Agents of one optimization share a timestamp; insertion order (rowid) keeps the order they were chosen in.
+      .orderBy(asc(agents.createdAt), sql`rowid`)
       .all();
   }
 

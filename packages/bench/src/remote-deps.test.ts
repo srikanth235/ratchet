@@ -395,6 +395,15 @@ describe('dependency snapshots (RemoteBenchRunner)', () => {
       expect(outLink.guardrails[0]).toMatchObject({ name: 'dependencies unchanged', passed: false });
     });
 
+    it('blocks a candidate that adds or edits install-steering config (.npmrc, pnpm-workspace.yaml)', async () => {
+      const r = rig(fx);
+      for (const files of [{ '.npmrc': 'registry=https://evil.example/\n' }, { 'pnpm-workspace.yaml': 'onlyBuiltDependencies: [evil]\n' }]) {
+        const out = await r.runner.run(job(fx.candidate(files)), cfg(), null);
+        expect(out.guardrails[0]).toMatchObject({ name: 'dependencies unchanged', passed: false });
+        expect(out.guardrails[0]!.detail).toContain(Object.keys(files)[0]!);
+      }
+    });
+
     it('lets a candidate through that changes everything except the dependencies', async () => {
       const r = rig(fx);
       const sha = fx.candidate({ 'src/p95.txt': '10', 'package.json': '{"name":"fx","scripts":{"build":"true"}}\n' });

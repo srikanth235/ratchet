@@ -121,16 +121,21 @@ run "dns_firewall_shared_vpc_keeps_agent_domains" {
   command = apply
 
   variables {
-    egress_proxy_extra_domains = ["registry.npmjs.org"]
+    egress_proxy_extra_domains = ["registry.yarnpkg.com"]
     dns_firewall_extra_domains = ["*.pythonhosted.org", "pypi.org"]
   }
 
   assert {
     condition = alltrue([
-      for d in ["api.anthropic.com", "api.openai.com", "github.com", "*.github.com", "githubusercontent.com", "*.githubusercontent.com", "registry.npmjs.org", "pypi.org", "*.pythonhosted.org", "ec2.us-east-1.amazonaws.com", "sts.us-east-1.amazonaws.com"] :
+      for d in ["api.anthropic.com", "api.openai.com", "github.com", "*.github.com", "githubusercontent.com", "*.githubusercontent.com", "registry.npmjs.org", "registry.yarnpkg.com", "pypi.org", "*.pythonhosted.org", "ec2.us-east-1.amazonaws.com", "sts.us-east-1.amazonaws.com"] :
       contains(aws_route53_resolver_firewall_domain_list.allowed[0].domains, d)
     ])
-    error_message = "agent runners share the VPC, so the model APIs, GitHub, the AWS APIs they call and the extras stay resolvable"
+    error_message = "agent runners share the VPC, so the model APIs, GitHub, the npm registry (default: agents and the deps snapshot install from it), the AWS APIs they call and the extras stay resolvable"
+  }
+
+  assert {
+    condition     = !contains(aws_route53_resolver_firewall_domain_list.allowed[0].domains, "*.npmjs.org")
+    error_message = "the registry is allowed by exact name, not its whole domain"
   }
 
   assert {
@@ -295,8 +300,8 @@ run "deps_snapshots_leave_the_bench_subnet_offline" {
   }
 
   assert {
-    condition     = !anytrue([for d in aws_route53_resolver_firewall_domain_list.allowed[0].domains : strcontains(d, "npmjs")])
-    error_message = "no package registry is allowed by default: it is an explicit operator choice (egress_proxy_extra_domains / dns_firewall_extra_domains)"
+    condition     = [for d in aws_route53_resolver_firewall_domain_list.allowed[0].domains : d if strcontains(d, "npmjs")] == ["registry.npmjs.org"]
+    error_message = "the npm registry is allowed by default (the deps job and agents install from it), by exact name only: no subdomain wildcard that could carry data out over DNS"
   }
 
   assert {

@@ -41,6 +41,11 @@ export interface DepsStrategy {
    */
   readonly lockfiles: readonly string[];
   /**
+   * Root-relative files that steer how the package manager installs (registry, hooks, workspace settings). Pinned, hashed
+   * and blocked on change exactly like the lockfiles, but they never select the strategy.
+   */
+  readonly configFiles: readonly string[];
+  /**
    * Shell, run by the snapshot job as the unprivileged user in the base tree. It must fill the store/cache named by
    * `fetchEnv` WITHOUT running lifecycle scripts of the packages (`pnpm fetch` only populates the store; `npm ci --ignore-scripts`).
    */
@@ -63,6 +68,7 @@ export const PNPM: DepsStrategy = {
   id: 'pnpm',
   rev: 1,
   lockfiles: ['pnpm-lock.yaml'],
+  configFiles: ['pnpm-workspace.yaml', '.npmrc', '.pnpmfile.cjs'],
   // `pnpm fetch` is lockfile-only (the manifests are ignored) and, unlike `pnpm install`, populates just the content-addressable
   // store: no node_modules, no lifecycle scripts. It has no --frozen-lockfile flag because it never resolves anything.
   fetch: 'pnpm fetch',
@@ -96,6 +102,7 @@ export const NPM: DepsStrategy = {
   id: 'npm',
   rev: 1,
   lockfiles: ['package-lock.json', 'npm-shrinkwrap.json'],
+  configFiles: ['.npmrc'],
   // Installs into a throwaway node_modules (discarded with the tree); what is kept is the download cache.
   fetch: 'npm ci --ignore-scripts --no-audit --no-fund',
   version: 'npm --version',
@@ -110,11 +117,17 @@ export const NPM: DepsStrategy = {
   }),
 };
 
+/** Every file pinned to bench.ref and hashed into the snapshot key: the lockfiles plus the install-steering config. */
+export function pinnedDepsFiles(s: DepsStrategy): string[] {
+  return [...s.lockfiles, ...s.configFiles];
+}
+
 /** No lockfile, or the evaluator declared `deps: none`: nothing to snapshot, nothing pinned, nothing blocked. */
 export const NO_DEPS: DepsStrategy = {
   id: 'none',
   rev: 1,
   lockfiles: [],
+  configFiles: [],
   fetch: 'true',
   version: 'true',
   fetchEnv: () => ({}),

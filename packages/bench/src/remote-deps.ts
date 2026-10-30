@@ -7,6 +7,7 @@ import {
   archFromInstanceType,
   depsKey,
   hashNamedFiles,
+  pinnedDepsFiles,
   manifestKey,
   parseDepsManifest,
   resolveDepsStrategy,
@@ -127,7 +128,7 @@ export class DepsSnapshots {
               throw new BenchError(`cannot check out bench.ref ${config.bench.ref}: ${(err as Error).message}`, { cause: err });
             }
             const resolved = resolveDepsStrategy(mode, await rootEntries(tree));
-            const lockfiles = await hashNamedFiles(tree, resolved.strategy.lockfiles);
+            const lockfiles = await hashNamedFiles(tree, pinnedDepsFiles(resolved.strategy));
             return { commit, strategy: resolved.strategy, lockfiles, note: resolved.note };
           } finally {
             await rm(dir, { recursive: true, force: true });

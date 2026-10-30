@@ -101,9 +101,9 @@ Strategies (`DepsStrategy`; `evaluator.deps: auto|pnpm|npm|none`, default `auto`
 `pnpm` / `npm` without its lockfile at `bench.ref` is a `BenchError`. To add a package manager, implement `DepsStrategy` (five shell
 snippets and two environments) and add it to `DEPS_STRATEGIES`; the key, manifest, job and restore are shared.
 
-What the deps job needs from the sandbox (not on by default, an explicit operator choice): it runs in the agent subnet, so the package
-registry must be reachable from there. With `enable_egress_proxy = true` add the registry to `egress_proxy_extra_domains` (it feeds both
-squid and the DNS Firewall); without the proxy add it to `dns_firewall_extra_domains` (agent subnet is public, port 443 open). The
+What the deps job needs from the sandbox: it runs in the agent subnet, so the package registry must be reachable from there.
+`registry.npmjs.org` is allowed by default (exact name, in `egress_proxy_domains`, which feeds squid and the DNS Firewall); another
+registry goes in `egress_proxy_extra_domains` with the proxy, or `dns_firewall_extra_domains` without it (agent subnet is public, port 443 open). The
 bench subnet, its security group, route table and DNS allow-list are unchanged. Sandboxes applied before this change have no
 `deps_identity_ref`: re-apply (`aws.md` section 1), otherwise a job with a lockfile and a setup fails with
 "depsInstanceProfile is not configured" before launching anything. Unhandled today: private registries and auth tokens (the job has no
@@ -432,7 +432,7 @@ Pass criteria, on a real bench instance (via SSM):
 ### 4b. Dependency snapshots on a real sandbox
 
 Prerequisites: sandbox re-applied with `deps_identity_ref` (aws.md section 1); the bench AMI rebuilt with `zstd` (or accept gzip);
-the package registry allowed for the agent path (`egress_proxy_extra_domains` with the proxy, else `dns_firewall_extra_domains`);
+the package registry allowed for the agent path (npm is a default; others via `egress_proxy_extra_domains` / `dns_firewall_extra_domains`);
 a throwaway repo (or `examples/demo-search` plus a lockfile) with `evaluator.deps: auto`, a runner `setup` of
 `pnpm install --frozen-lockfile && pnpm build`, and `bench.ref` carrying the lockfile.
 

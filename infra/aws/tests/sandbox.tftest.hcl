@@ -360,7 +360,7 @@ run "proxy_enabled_removes_runner_internet" {
 
   variables {
     enable_egress_proxy        = true
-    egress_proxy_extra_domains = ["registry.npmjs.org"]
+    egress_proxy_extra_domains = ["registry.yarnpkg.com"]
   }
 
   assert {
@@ -379,7 +379,7 @@ run "proxy_enabled_removes_runner_internet" {
   }
 
   assert {
-    condition     = strcontains(aws_instance.egress_proxy[0].user_data, "api.anthropic.com") && strcontains(aws_instance.egress_proxy[0].user_data, "registry.npmjs.org") && strcontains(aws_instance.egress_proxy[0].user_data, "http_access deny all")
+    condition     = strcontains(aws_instance.egress_proxy[0].user_data, "api.anthropic.com") && strcontains(aws_instance.egress_proxy[0].user_data, "registry.npmjs.org") && strcontains(aws_instance.egress_proxy[0].user_data, "registry.yarnpkg.com") && strcontains(aws_instance.egress_proxy[0].user_data, "http_access deny all")
     error_message = "squid config carries the allow-list, the extra domains and a final deny"
   }
 

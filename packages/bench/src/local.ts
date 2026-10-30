@@ -9,7 +9,7 @@ import type {
   GitHost,
   RatchetConfig,
 } from '@ratchet/core';
-import { dependencyChangeGuardrail, hashNamedFiles, lockfileChanges, resolveDepsStrategy, rootEntries } from './deps.js';
+import { dependencyChangeGuardrail, hashNamedFiles, lockfileChanges, pinnedDepsFiles, resolveDepsStrategy, rootEntries } from './deps.js';
 import { BenchAbortedError, BenchError } from './errors.js';
 import { runProcess } from './exec.js';
 import type { BenchLog } from './log.js';
@@ -149,7 +149,7 @@ class LocalExecutor implements PipelineExecutor {
       const { strategy, note } = resolveDepsStrategy(this.config.evaluator.deps, await rootEntries(this.benchDir));
       if (note) this.log.line(`dependencies: ${note}`);
       if (strategy.id !== 'none') {
-        pinned = strategy.lockfiles;
+        pinned = pinnedDepsFiles(strategy);
         const changed = lockfileChanges(await hashNamedFiles(this.benchDir, pinned), await hashNamedFiles(this.codeDir, pinned));
         if (changed.length > 0) {
           this.log.line(`!!! dependency change: ${changed.join(', ')} differs from bench.ref ${this.config.bench.ref}`);

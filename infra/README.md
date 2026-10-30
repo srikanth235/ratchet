@@ -105,8 +105,8 @@ These are short-lived and per optimization, so they use the AWS SDK
    `HTTPS_PROXY` (with `NO_PROXY` for IMDS and the private service endpoints).
 3. **Dependency-snapshot instance** (`purpose: deps`), one short-lived machine per lockfile in `network_ref.subnet_id` (the agent subnet, so it has egress; through
    `egress_proxy_url` when set) with the `agent_runner` security group and `deps_identity_ref`'s profile. It never runs candidate code: it fetches the package store for the base
-   ref's lockfile as an unprivileged user and uploads it to `bench-deps/`. Add the package registry to `egress_proxy_extra_domains` (proxy on) or
-   `dns_firewall_extra_domains` (proxy off); the bench subnet is untouched.
+   ref's lockfile as an unprivileged user and uploads it to `bench-deps/`. `registry.npmjs.org` is allowed by default; add
+   other registries to `egress_proxy_extra_domains` (proxy on) or `dns_firewall_extra_domains` (proxy off). The bench subnet is untouched.
 4. **Bench instances**, one fresh machine per job in `network_ref.bench_subnet_id` with the
    `bench` security group. `purpose: baseline|bench` -> `eval_identity_ref` profile (no sealed
    access); `purpose: confirm` -> `confirm_identity_ref` profile. The bench image's user-data

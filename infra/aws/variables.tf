@@ -153,7 +153,7 @@ variable "egress_proxy_instance_type" {
 variable "egress_proxy_domains" {
   description = "Domains agent runners may reach through the proxy (squid dstdomain syntax: a leading dot also matches subdomains)."
   type        = list(string)
-  default     = ["api.anthropic.com", "api.openai.com", ".github.com", ".githubusercontent.com"]
+  default     = ["api.anthropic.com", "api.openai.com", ".github.com", ".githubusercontent.com", "registry.npmjs.org"]
 
   validation {
     condition     = alltrue([for d in var.egress_proxy_domains : can(regex("^\\.?[a-z0-9][a-z0-9.-]*\\.[a-z]{2,}$", d))])
