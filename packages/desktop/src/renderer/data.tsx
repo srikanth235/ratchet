@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, type DependencyList } from 'react';
-import type { EngineEventVM, OptimizationsSnapshot } from '../shared/types';
+import type { EngineEventVM, KpiRange, OptimizationsSnapshot } from '../shared/types';
 import type { NavId } from './nav';
 
 // ------------------------------------------------------------------ navigation
@@ -91,8 +91,11 @@ export const forOptimization =
 
 // ------------------------------------------------------------------ shared snapshot
 
-export const SnapshotContext = createContext<Query<OptimizationsSnapshot>>({ data: null, error: null, loading: true, refresh: () => undefined });
-export const useSnapshot = (): Query<OptimizationsSnapshot> => useContext(SnapshotContext);
+/** The Optimizations snapshot, plus the KPI window it was loaded for (the range switch changes it). */
+export type SnapshotQuery = Query<OptimizationsSnapshot> & { range: KpiRange; setRange(r: KpiRange): void };
+
+export const SnapshotContext = createContext<SnapshotQuery>({ data: null, error: null, loading: true, refresh: () => undefined, range: '30d', setRange: () => undefined });
+export const useSnapshot = (): SnapshotQuery => useContext(SnapshotContext);
 
 // ------------------------------------------------------------------ background start errors
 

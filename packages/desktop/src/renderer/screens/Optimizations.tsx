@@ -5,11 +5,11 @@ import { Icon } from '../components/icons';
 import { KpiCard } from '../components/KpiCard';
 import { OptimizationsTable } from '../components/OptimizationsTable';
 import { forOptimization, useNav, useQuery, useSnapshot } from '../data';
-import { fmtDuration, fmtNum, gainLabel, repoLabel } from '../format';
-import { fmtUsdCompact, valueOf } from '../value';
+import { KPI_RANGES } from '../../shared/types';
+import { fmtDuration, fmtNum, fmtUsdCompact, gainLabel, repoLabel } from '../format';
 
 export function Optimizations() {
-  const { data, error } = useSnapshot();
+  const { data, error, range, setRange } = useSnapshot();
   const { go, open } = useNav();
   const featured = data?.optimizations.find((o) => o.id === data.featuredId);
   const detail = useQuery(() => window.ratchet.getOptimization(featured!.id), [featured?.id], {
@@ -28,7 +28,7 @@ export function Optimizations() {
   const rate = d && d.elapsedS > 60 ? (evals / d.elapsedS) * 3600 : null;
   const locks = series ? Math.max(0, series.steps.length - 1) : 0;
   const gain = featured ? gainLabel(featured, 1) : null;
-  const value = d && featured ? valueOf(d.configYaml, featured.direction, featured.baseline, featured.best, featured.spendUsd) : null;
+  const value = featured?.value ?? null;
   const spendPct = featured && featured.budgetUsd > 0 ? Math.min(100, (featured.spendUsd / featured.budgetUsd) * 100) : 0;
 
   return (
@@ -37,11 +37,21 @@ export function Optimizations() {
         eyebrow={<span>Local workspace · {repos} repo{repos === 1 ? '' : 's'}</span>}
         title="Optimizations"
         sub={<>Agents propose changes. The evaluator decides. <span className="tagline">Only verified wins ratchet forward.</span></>}
-        actions={<Button onClick={() => go('new')}><Icon name="plus" size={13} /> New optimization</Button>}
+        actions={
+          <>
+            <div className="range-switch" role="radiogroup" aria-label="KPI range">
+              {KPI_RANGES.map((r) => (
+                <button key={r} type="button" role="radio" aria-checked={range === r} className={range === r ? 'range-switch__on' : ''} onClick={() => setRange(r)}>{r}</button>
+              ))}
+            </div>
+            <Button onClick={() => go('new')}><Icon name="plus" size={13} /> New optimization</Button>
+          </>
+        }
       />
 
-      <section className="kpis" aria-label="Key metrics">
-        {data.kpis.map((k) => <KpiCard key={k.id} kpi={k} />)}
+      {/* Five cards (with the value KPI) still fit one row: narrower columns, shorter sparklines. */}
+      <section className={`kpis${data.kpis.length > 4 ? ' kpis--5' : ''}`} aria-label="Key metrics">
+        {data.kpis.map((k) => <KpiCard key={k.id} kpi={k} sparkWidth={data.kpis.length > 4 ? 72 : 112} />)}
       </section>
 
       {data.optimizations.length === 0 ? (
@@ -80,7 +90,7 @@ export function Optimizations() {
                     {featured.baseline !== null ? `baseline ${fmtNum(featured.baseline)} ${featured.unit}`.trim() : 'baseline pending'}
                     {series?.noiseFloor != null ? ` · noise ±${fmtNum(series.noiseFloor)} ${featured.unit}`.trimEnd() : ''}
                     {` · ${locks} lock${locks === 1 ? '' : 's'}`}
-                  {value ? ` · ≈ ${fmtUsdCompact(value.usdPerYear)} / year` : ''}
+                    {value ? ` · ≈ ${fmtUsdCompact(value.usdPerYear)} / year` : ''}
                   </span>
                 </div>
                 <div className="chart-legend">

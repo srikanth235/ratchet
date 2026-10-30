@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { NavContext, SnapshotContext, useQuery, type NavState } from './data';
 import type { NavId } from './nav';
+import type { KpiRange } from '../shared/types';
 import { Benchmarks } from './screens/Benchmarks';
 import { LiveAgents } from './screens/LiveAgents';
 import { NewOptimization } from './screens/NewOptimization';
@@ -13,7 +14,9 @@ import { Settings } from './screens/Settings';
 export function App({ initialRoute = 'optimizations' }: { initialRoute?: NavId }) {
   const [route, setRoute] = useState<NavId>(initialRoute);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const snapshot = useQuery(() => window.ratchet.listOptimizations(), [], { intervalMs: 10_000 });
+  const [range, setRange] = useState<KpiRange>('30d');
+  const query = useQuery(() => window.ratchet.listOptimizations({ range }), [range], { intervalMs: 10_000 });
+  const snapshot = useMemo(() => ({ ...query, range, setRange }), [query, range]);
 
   const refreshRef = useRef(snapshot.refresh);
   refreshRef.current = snapshot.refresh;

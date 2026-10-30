@@ -15,7 +15,12 @@ describe('Optimizations (real ledger data)', () => {
     expect(await screen.findByRole('heading', { name: 'search-api p95 latency', level: 2 })).toBeTruthy();
     const kpis = within(screen.getByRole('region', { name: 'Key metrics' }));
     expect(kpis.getByText('Verified wins')).toBeTruthy();
-    expect(kpis.getByText('8')).toBeTruthy();
+    // default range 30d: 7 wins, +6 vs the 30 days before (one win, the edge worker run)
+    const wins = within(document.querySelector('[data-kpi="wins"]') as HTMLElement);
+    expect(wins.getByText('7')).toBeTruthy();
+    expect(wins.getByText('+6')).toBeTruthy();
+    expect(within(document.querySelector('[data-kpi="value"]') as HTMLElement).getByText('$61.2k')).toBeTruthy();
+    expect(screen.getByTestId('featured').textContent).toContain('≈ $61.2k / year');
     expect(screen.getByRole('img', { name: /Ratchet chart, best down from 182 to 131/ })).toBeTruthy();
     const table = within(screen.getByRole('table'));
     expect(table.getByText('Ingest throughput')).toBeTruthy();
@@ -23,6 +28,21 @@ describe('Optimizations (real ledger data)', () => {
     expect(table.getByText('182 ms')).toBeTruthy();
     expect(table.getAllByText('131 ms').length).toBeGreaterThan(0);
     expect(screen.getByText(/Dev engine/)).toBeTruthy();
+  });
+
+  it('the range switch reloads the KPIs for that window; no chip without data in the window before', async () => {
+    installApi();
+    render(<App />);
+    const wins = () => document.querySelector('[data-kpi="wins"]') as HTMLElement;
+    await waitFor(() => expect(within(wins()).getByText('7')).toBeTruthy());
+    fireEvent.click(screen.getByRole('radio', { name: '90d' }));
+    await waitFor(() => expect(within(wins()).getByText('8')).toBeTruthy());
+    expect(within(wins()).getByText('last 90d')).toBeTruthy();
+    expect(document.querySelectorAll('.kpi__badge')).toHaveLength(0);
+    expect(screen.getByRole('radio', { name: '90d' }).getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByRole('radio', { name: '7d' }));
+    await waitFor(() => expect(within(wins()).getByText('last 7d')).toBeTruthy());
+    expect(document.body.textContent).not.toMatch(/NaN|undefined/);
   });
 
   it('clicking a finished optimization opens its Result; New optimization opens the form', async () => {
@@ -66,6 +86,52 @@ describe('New optimization', () => {
     await waitFor(() => expect(screen.getByLabelText('Generated ratchet.yaml').textContent).toContain('direction: maximize'));
     fireEvent.change(screen.getByLabelText('Budget'), { target: { value: '250' } });
     expect(screen.getByText('Budget · $250')).toBeTruthy();
+  });
+
+  it('evaluator cards, guardrail ticks and the value fields edit the yaml; yaml edits update the form', async () => {
+    await openForm();
+    const yamlText = () => screen.getByLabelText('Generated ratchet.yaml').textContent ?? '';
+    expect(yamlText()).toMatch(/^evaluator:\n {2}kind: benchmark/m);
+    expect(yamlText()).not.toMatch(/^bench:/m);
+    const kinds = within(screen.getByRole('radiogroup', { name: 'Evaluator kind' }));
+    expect(kinds.getAllByRole('radio')).toHaveLength(4);
+    fireEvent.click(kinds.getByRole('radio', { name: 'Backtest' }));
+    await waitFor(() => expect(yamlText()).toContain('kind: backtest'));
+
+    const guards = within(screen.getByRole('list', { name: 'Guardrails' }));
+    fireEvent.click(guards.getByRole('checkbox', { name: 'peak_rss: < 1.2x' }));
+    await waitFor(() => expect(yamlText()).not.toContain('peak_rss'));
+    expect((guards.getByRole('checkbox', { name: 'peak_rss: < 1.2x' }) as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(guards.getByRole('checkbox', { name: 'peak_rss: < 1.2x' }));
+    await waitFor(() => expect(yamlText()).toContain('peak_rss: < 1.2x'));
+    fireEvent.change(screen.getByLabelText('New guardrail'), { target: { value: 'run: pnpm lint' } });
+    fireEvent.click(guards.getByRole('button', { name: /Add/ }));
+    await waitFor(() => expect(yamlText()).toContain('run: pnpm lint'));
+
+    fireEvent.change(screen.getByLabelText('USD per unit of improvement'), { target: { value: '1200' } });
+    fireEvent.change(screen.getByLabelText(/^Unit/), { target: { value: 'ms' } });
+    await waitFor(() => expect(yamlText()).toMatch(/value:\n {4}usd_per_unit: 1200\n {4}period: year\n {4}basis: estimated\n {4}unit: ms/));
+    expect(await screen.findByText('$1,200 per ms / year · estimated')).toBeTruthy();
+
+    // the other way: edit the text, the form follows
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const editor = screen.getByLabelText('ratchet.yaml') as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: editor.value.replace('kind: backtest', 'kind: simulation').replace('metric: http_req_duration.p95', 'metric: cost_usd') } });
+    await waitFor(() => expect((kinds.getByRole('radio', { name: 'Simulation' }) as HTMLInputElement).checked).toBe(true));
+    expect((screen.getByDisplayValue('cost_usd') as HTMLInputElement).tagName).toBe('INPUT');
+    await screen.findByText('Valid config');
+  });
+
+  it('locks the form while the yaml does not parse, and unlocks once it does', async () => {
+    await openForm();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const editor = screen.getByLabelText('ratchet.yaml') as HTMLTextAreaElement;
+    const good = editor.value;
+    fireEvent.change(editor, { target: { value: 'objective: [unclosed' } });
+    expect(await screen.findByText(/does not parse as YAML/)).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'Backtest' }).matches(':disabled')).toBe(true);
+    fireEvent.change(editor, { target: { value: good } });
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'Backtest' }).matches(':disabled')).toBe(false));
   });
 
   it('shows path-qualified validation errors from the main process and blocks submit', async () => {
@@ -125,7 +191,7 @@ describe('Live agents', () => {
     const cards = await screen.findAllByRole('generic', { name: /agent$/ });
     expect(cards).toHaveLength(2);
     const cc = within(screen.getByLabelText('Claude Code agent'));
-    expect(cc.getByTestId('hypothesis').textContent).toBe('“Short-circuit empty queries before the index”');
+    expect(cc.getByTestId('hypothesis').textContent).toBe('“Binary-search the sorted vocabulary for prefix terms”');
     expect(cc.getByText(/Recent evals/)).toBeTruthy();
     await waitFor(() => expect(cc.getAllByText(/Ratchet-Candidate/).length).toBeGreaterThan(0));
     expect(screen.getByText('Trusted evaluator')).toBeTruthy();
@@ -212,7 +278,30 @@ describe('Benchmark history', () => {
     expect(table.getAllByRole('row')).toHaveLength(2);
     expect(table.getByText(/protected path changed/)).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Baseline vs best' })).toBeTruthy();
-    expect(screen.getAllByTestId('pct-row').length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId('pct-row').map((r) => r.querySelector('.pct-row__k')!.textContent)).toEqual(['p50', 'p95', 'p99', 'error_rate', 'peak_rss_mb']);
+  });
+
+  it('the metric switch lists the objective family and re-plots the chart for the picked metric', async () => {
+    installApi();
+    render(<App initialRoute="benchmarks" />);
+    const sw = within(await screen.findByRole('radiogroup', { name: 'Metric' }));
+    expect(sw.getAllByRole('radio').map((b) => b.textContent)).toEqual(['p50', 'p95', 'p99']);
+    expect(sw.getByRole('radio', { name: 'p95' }).getAttribute('aria-checked')).toBe('true');
+    const hero = () => document.querySelector('.ratchet-card .hero-num')!.textContent;
+    expect(hero()).toBe('131 ms');
+    fireEvent.click(sw.getByRole('radio', { name: 'p99' }));
+    await waitFor(() => expect(hero()).toBe(`${(131 * 1.58).toFixed(0)} ms`));
+    expect(screen.getByText(/Best verified · p99/)).toBeTruthy();
+    expect(document.querySelector('[data-testid="noise-band"]')).toBeNull();
+  });
+
+  it('hides the metric switch when the evaluator reports a single metric of the family', async () => {
+    installApi();
+    render(<App initialRoute="result" />);
+    fireEvent.change(await screen.findByLabelText('Optimization'), { target: { value: 'opt_demo_ingest' } });
+    nav('Benchmarks');
+    await screen.findByRole('img', { name: /Ratchet chart/ });
+    expect(screen.queryByRole('radiogroup', { name: 'Metric' })).toBeNull();
   });
 });
 
@@ -245,6 +334,32 @@ describe('Result', () => {
     fireEvent.click(screen.getByRole('button', { name: /Destroy sandbox/ }));
     await waitFor(() => expect(td).toHaveBeenCalledWith('opt_demo_ingest'));
     await waitFor(() => expect(checklist.getAllByText('done')).toHaveLength(5));
+  });
+
+  it('shows where the time went (evaluator spans) and the winning change: squashed diff of the best commit', async () => {
+    installApi();
+    render(<App initialRoute="result" />);
+    const spans = within(await screen.findByTestId('spans'));
+    expect(spans.getByRole('heading', { name: 'Where the time went' })).toBeTruthy();
+    expect(spans.getByText('p95 request, by span')).toBeTruthy();
+    expect(spans.getAllByTestId('span-row').map((r) => r.querySelector('.span-row__name')!.textContent)).toEqual(['parse', 'search', 'serialize', 'wait']);
+    const change = within(await screen.findByTestId('winning-change', {}, { timeout: 20_000 }));
+    await waitFor(() => expect(change.getAllByTestId('diff-file').length).toBe(2), { timeout: 20_000 });
+    expect(change.getByText(/5 verified commits, squashed/)).toBeTruthy();
+    expect(change.getByText('src/search.ts')).toBeTruthy();
+    expect(change.getByLabelText('Excerpt of src/search.ts')).toBeTruthy();
+    const rows = screen.getAllByTestId('ba-row').map((r) => r.textContent);
+    expect(rows[1]).toMatch(/^p95182 ms→131 ms−28%$/);
+    expect(rows.at(-1)).toMatch(/peak_rss_mb.* ok$/);
+  }, 30_000);
+
+  it('explains a missing diff and hides the span panel without span data', async () => {
+    installApi();
+    render(<App initialRoute="result" />);
+    fireEvent.change(await screen.findByLabelText('Optimization'), { target: { value: 'opt_demo_ingest' } });
+    await waitFor(() => expect(within(screen.getByTestId('winning-change')).getByText(/No diff available for [0-9a-f]{7}\./)).toBeTruthy());
+    expect(screen.queryByTestId('spans')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Verified wins' })).toBeTruthy();
   });
 
   it('disables Open pull request when there are no verified wins, and teardown while still running', async () => {

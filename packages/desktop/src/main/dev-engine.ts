@@ -16,6 +16,18 @@ import {
   type RatchetConfig,
 } from '@ratchet/core';
 import { DEFAULT_CONFIG_YAML } from './default-config.js';
+import { simulatedStats } from './dev-stats.js';
+
+/** Ledger columns that come from ratchet.yaml (pack, objective name, evaluator kind, value model), as the core engine sets them. */
+export function configColumns(cfg: RatchetConfig) {
+  const v = cfg.objective.value;
+  return {
+    pack: cfg.pack ?? null,
+    objectiveName: cfg.objective.name ?? null,
+    evaluatorKind: cfg.evaluator.kind,
+    value: v ? { usdPerUnit: v.usd_per_unit, period: v.period, basis: v.basis, unit: v.unit ?? null } : null,
+  };
+}
 
 export interface DevEngineOptions {
   mode: Mode;
@@ -121,7 +133,7 @@ export class DevEngine implements EngineApi {
     const cfg = parsed.config;
     const repo = repoSlug(input.repoUrl);
     const opt = this.ledger.createOptimization({
-      name: input.name ?? `${repo.split('/').pop()} ${cfg.objective.metric}`,
+      name: input.name ?? cfg.objective.name ?? `${repo.split('/').pop()} ${cfg.objective.metric}`,
       repo,
       baseRef: input.baseRef,
       metric: cfg.objective.metric,
@@ -131,6 +143,7 @@ export class DevEngine implements EngineApi {
       timeLimitS: input.timeLimitSeconds,
       configYaml: input.configYaml ?? DEFAULT_CONFIG_YAML,
       status: 'draft',
+      ...configColumns(cfg),
     });
     input.agents.forEach((kind, i) => {
       this.ledger.addAgent({ optimizationId: opt.id, kind, branch: `ratchet/${opt.id.slice(4, 12)}/${kind}-${i + 1}` });
@@ -246,7 +259,7 @@ export class DevEngine implements EngineApi {
       optimizationId: id,
       samples,
       noiseFloor: noiseFloor(samples),
-      stats: { value: s.median, p50: s.median, p95: round(s.median * 1.18), p99: round(s.median * 1.42), mean: s.mean },
+      stats: simulatedStats(run.config.objective.metric, s.median, { mean: s.mean }),
       recordedAt: t,
     });
     this.ledger.recordSpend({ optimizationId: id, category: 'bench_runner', usd: 0.62, source: 'dev-engine:baseline', at: t });
@@ -294,7 +307,7 @@ export class DevEngine implements EngineApi {
     const protectedViolations = touched.map((path) => ({ path, pattern: path.startsWith('bench') ? 'bench/**' : 'tests/contract/**' }));
     const stats = (xs: number[]) => {
       const s = summarize(xs);
-      return { value: s.median, p50: s.median, p95: round(s.median * 1.18), p99: round(s.median * 1.42), mean: s.mean };
+      return simulatedStats(cfg.objective.metric, s.median, { mean: s.mean });
     };
 
     const input = { direction: dir, minGain: opt.minGain, noiseFloor: baseline.noiseFloor, currentBest: best, candidate: samples, guardrails, protectedViolations };

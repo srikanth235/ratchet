@@ -32,7 +32,11 @@ export interface CreateEngineOptions {
  */
 export function createEngineForApp(ledger: Ledger, mode: Mode, opts: CreateEngineOptions = {}): AppEngine {
   const which = opts.engine ?? (process.env.RATCHET_ENGINE === 'dev' ? 'dev' : 'real');
-  if (which === 'dev') return createDevEngine(ledger, mode, opts);
+  if (which === 'dev') {
+    // RATCHET_DEV_TICK_MS: slow the simulated agents down (design screenshots want a stable ledger).
+    const tick = Number(process.env.RATCHET_DEV_TICK_MS);
+    return createDevEngine(ledger, mode, { ...opts, ...(opts.tickMs === undefined && tick > 0 ? { tickMs: tick } : {}) });
+  }
   if (mode === 'live') return createUnconfiguredLive();
 
   const repoRoot = resolve(opts.repoRoot ?? process.env.RATCHET_REPO_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '../../../..'));
@@ -70,6 +74,8 @@ export function createEngineForApp(ledger: Ledger, mode: Mode, opts: CreateEngin
     kind: 'real',
     engine,
     sandbox,
+    // In simulation every optimization lives in the one prepared repo.
+    diff: ({ baseRef, sha }) => call((rt) => rt.git.diff(baseRef, sha)),
     dispose: () => {
       ac.abort();
       void ready.then((rt) => rt.dispose());

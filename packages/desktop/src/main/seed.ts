@@ -1,5 +1,8 @@
-import type { AgentKind, CandidateVerdict, Direction, Ledger, SpendCategory } from '@ratchet/core';
+import { parseConfig, type AgentKind, type CandidateVerdict, type Direction, type Ledger, type SpendCategory } from '@ratchet/core';
+import { parseDocument } from 'yaml';
 import { DEFAULT_CONFIG_YAML } from './default-config.js';
+import { configColumns } from './dev-engine.js';
+import { simulatedStats } from './dev-stats.js';
 
 const MIN = 60_000;
 
@@ -31,6 +34,8 @@ interface OptSpec {
   endedAgo?: number;
   spendUsd: number;
   budgetUsd: number;
+  /** Keep the demo config's `objective.value` (USD per ms of p95): only meaningful for the search demo. */
+  valued?: boolean;
   candidates: CandSpec[];
 }
 
@@ -51,18 +56,20 @@ const SPECS: OptSpec[] = [
     startedAgo: 224,
     spendUsd: 42.6,
     budgetUsd: 120,
+    valued: true,
+    // Verified wins carry the names of the real demo patches: the dev engine's diffs are those patches (dev-git.ts).
     candidates: [
       { t: 14, agent: 1, value: 179.5, verdict: 'rejected', message: 'Inline hot-path helper in query parser', reason: 'improvement 2.5 does not exceed required gain 5.46 (max of noise floor 3.1 and min_gain 5.46)' },
-      { t: 31, agent: 0, value: 168, verdict: 'verified', confirm: 169.4, message: 'Cache compiled query plans keyed by normalised query', reason: 'bench improvement 14 exceeds required gain 5.46' },
+      { t: 31, agent: 0, value: 168, verdict: 'verified', confirm: 169.4, message: 'Drop the JSON deep-clone; build hits only for the returned page', reason: 'bench improvement 14 exceeds required gain 5.46' },
       { t: 55, agent: 1, value: 171, verdict: 'rejected', message: 'Pool JSON encoder buffers', reason: 'candidate 171 is not better than current best 168 (minimize)' },
-      { t: 78, agent: 1, value: 156, verdict: 'verified', confirm: 158.2, message: 'Batch index reads to cut round trips', reason: 'bench improvement 12 exceeds required gain 5.04' },
+      { t: 78, agent: 1, value: 156, verdict: 'verified', confirm: 158.2, message: 'Memoize parseFilter for repeated filter strings', reason: 'bench improvement 12 exceeds required gain 5.04' },
       { t: 96, agent: 0, value: 148, verdict: 'failed_confirm', confirm: 160.1, message: 'Skip scoring for zero-weight terms', reason: 'confirm run 160.1 does not beat current best 156 on the hidden trace (minimize)' },
-      { t: 112, agent: 0, value: 149, verdict: 'verified', confirm: 150.7, message: 'Memoise tokenizer output per request', reason: 'bench improvement 7 exceeds required gain 4.68' },
+      { t: 112, agent: 0, value: 149, verdict: 'verified', confirm: 150.7, message: 'Bounded top-k selection with a precomputed collation rank', reason: 'bench improvement 7 exceeds required gain 4.68' },
       { t: 125, agent: 1, value: 142, verdict: 'blocked', message: 'Tighten bench warm-up window', reason: 'protected path changed: bench/k6/search.js (matches bench/**)' },
       { t: 140, agent: 0, value: 152, verdict: 'rejected', message: 'Pre-size result arrays', reason: 'candidate 152 is not better than current best 149 (minimize)' },
-      { t: 171, agent: 1, value: 138, verdict: 'verified', confirm: 140.3, message: 'Stream facet counts lazily', reason: 'bench improvement 11 exceeds required gain 4.47' },
+      { t: 171, agent: 1, value: 138, verdict: 'verified', confirm: 140.3, message: 'Category / brand / tag position lists for filter-only queries', reason: 'bench improvement 11 exceeds required gain 4.47' },
       { t: 190, agent: 0, value: 140, verdict: 'rejected', message: 'Typed arrays in the scoring loop', reason: 'candidate 140 is not better than current best 138 (minimize)' },
-      { t: 214, agent: 0, value: 131, verdict: 'verified', confirm: 133.0, message: 'Short-circuit empty queries before the index', reason: 'bench improvement 7 exceeds required gain 4.14' },
+      { t: 214, agent: 0, value: 131, verdict: 'verified', confirm: 133.0, message: 'Binary-search the sorted vocabulary for prefix terms', reason: 'bench improvement 7 exceeds required gain 4.14' },
     ],
   },
   {
@@ -97,8 +104,9 @@ const SPECS: OptSpec[] = [
     noise: 0.05,
     agents: ['claude-code', 'codex'],
     status: 'completed',
-    startedAgo: 48 * 60,
-    endedAgo: 26 * 60,
+    // Finished about six weeks ago: the 30d KPI window compares against it.
+    startedAgo: 41 * 24 * 60,
+    endedAgo: 40 * 24 * 60,
     spendUsd: 38.9,
     budgetUsd: 60,
     candidates: [{ t: 120, agent: 1, value: 1.62, verdict: 'verified', confirm: 1.66, message: 'Lazy-load the template engine', reason: 'bench improvement 0.79 exceeds required gain 0.072' }],
@@ -139,10 +147,14 @@ export function seedDemo(ledger: Ledger, now: number = Date.now()): void {
 
 function seedOne(ledger: Ledger, spec: OptSpec, now: number): void {
   const started = now - spec.startedAgo * MIN;
-  const yaml = DEFAULT_CONFIG_YAML.replace('http_req_duration.p95', spec.metric).replace(
-    'direction: minimize',
-    `direction: ${spec.direction}`,
-  );
+  const doc = parseDocument(DEFAULT_CONFIG_YAML);
+  doc.setIn(['objective', 'name'], spec.name);
+  doc.setIn(['objective', 'metric'], spec.metric);
+  doc.setIn(['objective', 'direction'], spec.direction);
+  if (!spec.valued) doc.deleteIn(['objective', 'value']);
+  const yaml = doc.toString();
+  const cfg = parseConfig(yaml);
+  if (!cfg.ok) throw new Error(`seed config for ${spec.id} is invalid`);
   ledger.createOptimization({
     id: spec.id,
     name: spec.name,
@@ -156,6 +168,7 @@ function seedOne(ledger: Ledger, spec: OptSpec, now: number): void {
     configYaml: yaml,
     status: 'draft',
     createdAt: started - 5 * MIN,
+    ...configColumns(cfg.config),
   });
   if (spec.status === 'draft') return;
 
@@ -165,7 +178,7 @@ function seedOne(ledger: Ledger, spec: OptSpec, now: number): void {
     optimizationId: spec.id,
     samples,
     noiseFloor: spec.noise,
-    stats: { value: spec.baseline, p50: spec.baseline, p95: Number((spec.baseline * 1.18).toFixed(2)), p99: Number((spec.baseline * 1.42).toFixed(2)) },
+    stats: simulatedStats(spec.metric, spec.baseline),
     recordedAt: started + 2 * MIN,
   });
   ledger.setOptimizationStatus(spec.id, 'running', started + 3 * MIN);
@@ -205,7 +218,7 @@ function seedOne(ledger: Ledger, spec: OptSpec, now: number): void {
     ledger.appendAgentEvent({ agentId, type: 'tool', payload: { text: 'edit src/search/index.ts' }, at: at - 3 * MIN });
     ledger.appendAgentEvent({ agentId, type: 'commit', payload: { text: `Ratchet-Candidate: ${sha.slice(0, 7)}`, data: { sha } }, at: at - 1 * MIN });
     const cand = ledger.submitCandidate({ optimizationId: spec.id, agentId, sha, message: c.message, submittedAt: at });
-    const stat = (v: number) => ({ value: v, p50: v, p95: Number((v * 1.18).toFixed(2)), p99: Number((v * 1.42).toFixed(2)) });
+    const stat = (v: number) => simulatedStats(spec.metric, v);
     const blocked = c.verdict === 'blocked';
     ledger.recordBenchResult({
       candidateId: cand.id,

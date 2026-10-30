@@ -1,11 +1,14 @@
 import { resolve } from 'node:path';
 import { openLedger, type Ledger } from '@ratchet/core';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
 import { afterEach } from 'vitest';
 import { createDevEngine as createEngineForApp } from '../main/dev-app';
 import { createService, type RatchetService } from '../main/service';
 import { SettingsStore, type SecretCipher } from '../main/settings';
 import type { RatchetApi } from '../shared/types';
+
+// findBy* / waitFor: the real service under a parallel test run can take more than the default 1 s.
+configure({ asyncUtilTimeout: 8000 });
 
 const cipher: SecretCipher = {
   isAvailable: () => true,

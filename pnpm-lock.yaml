@@ -119,6 +119,9 @@ importers:
       '@ratchet/core':
         specifier: workspace:*
         version: link:../core
+      '@ratchet/github':
+        specifier: workspace:*
+        version: link:../github
       '@ratchet/runtime':
         specifier: workspace:*
         version: link:../runtime

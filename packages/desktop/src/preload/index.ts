@@ -10,7 +10,7 @@ const call =
     ipcRenderer.invoke(IPC[method], ...args);
 
 const methods: Invoke[] = [
-  'listOptimizations', 'getOptimization', 'ratchetHistory', 'candidatesWithResults', 'spendBreakdown',
+  'listOptimizations', 'getOptimization', 'ratchetHistory', 'winningChange', 'candidatesWithResults', 'spendBreakdown',
   'recentActivity', 'agentEvents', 'validateConfig', 'preflight', 'sandboxInfo', 'getSettings',
   'createOptimization', 'startOptimization', 'stopOptimization', 'pauseAgent', 'resumeAgent',
   'messageAgent', 'openPullRequest', 'teardown', 'exportReport', 'setMode', 'setAwsProfile',

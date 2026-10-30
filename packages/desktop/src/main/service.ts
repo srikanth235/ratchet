@@ -10,6 +10,7 @@ import {
   buildSeries,
   buildSpend,
   toOptimization,
+  toWinningChange,
   validateConfigText,
   type MetaView,
 } from './mappers.js';
@@ -87,13 +88,15 @@ export function createService(deps: ServiceDeps): RatchetService {
   });
 
   return {
-    async listOptimizations(): Promise<OptimizationsSnapshot> {
+    async listOptimizations(opts): Promise<OptimizationsSnapshot> {
       const t = now();
+      const range = opts?.range ?? '30d';
       const rows = ledger.listOptimizations();
-      const optimizations = rows.map((r) => toOptimization(r, meta, t));
+      const optimizations = rows.map((r) => toOptimization(r, ledger.getOptimization(r.id)!, meta, t));
       const featured = rows.find((r) => r.status === 'running' || r.status === 'baselining') ?? rows.find((r) => r.baselineValue !== null) ?? null;
       return {
-        kpis: buildKpis(ledger, rows, t),
+        range,
+        kpis: buildKpis(ledger, rows, t, range),
         featuredId: featured?.id ?? null,
         featuredSeries: featured ? buildSeries(ledger, featured.id, t) : null,
         optimizations,
@@ -104,8 +107,21 @@ export function createService(deps: ServiceDeps): RatchetService {
     async getOptimization(id) {
       return buildDetail(ledger, id, meta, now());
     },
-    async ratchetHistory(id) {
-      return buildSeries(ledger, id, now());
+    async ratchetHistory(id, metric) {
+      return buildSeries(ledger, id, now(), metric);
+    },
+    async winningChange(id) {
+      const opt = ledger.getOptimization(id);
+      if (!opt) throw new Error(`optimization ${id} not found`);
+      const best = ledger.ratchetHistory(id).at(-1);
+      if (!best) return toWinningChange(ledger, id, null, null);
+      if (!app.diff) return toWinningChange(ledger, id, null, 'This engine has no git access to diff the winning commit.');
+      try {
+        const files = await app.diff({ optimizationId: id, repo: opt.repo, baseRef: opt.baseRef, sha: best.sha });
+        return toWinningChange(ledger, id, files, files ? null : `No diff available for ${best.sha.slice(0, 7)}.`);
+      } catch (err) {
+        return toWinningChange(ledger, id, null, `Could not diff ${best.sha.slice(0, 7)} against ${opt.baseRef}: ${(err as Error).message.split('\n')[0]}`);
+      }
     },
     async candidatesWithResults(id) {
       return buildCandidates(ledger, id);

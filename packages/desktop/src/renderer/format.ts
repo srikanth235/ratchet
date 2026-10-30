@@ -2,6 +2,7 @@ import type { Optimization } from '../shared/types';
 
 export function fmtNum(v: number): string {
   if (Math.abs(v) >= 100) return v.toFixed(0);
+  if (v !== 0 && Math.abs(v) < 0.01) return String(Number(v.toPrecision(2))); // error rates: 0.0002, not 0.00
   if (Math.abs(v) >= 10) return Number.isInteger(v) ? String(v) : v.toFixed(1);
   return Number.isInteger(v) ? String(v) : v.toFixed(2);
 }
@@ -62,3 +63,15 @@ export function repoLabel(repo: string): string {
   if (repo.startsWith('/') || /^[A-Za-z]:[\\/]/.test(repo)) return `local · ${repo.split(/[\\/]/).filter(Boolean).at(-1) ?? repo}`;
   return repo;
 }
+
+/** `$1,284` / `$18.2k` / `$1.2M`. */
+export function fmtUsdCompact(v: number): string {
+  const a = Math.abs(v);
+  if (a >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
+  if (a >= 10_000) return `$${(v / 1000).toFixed(1)}k`;
+  return `$${Math.round(v).toLocaleString('en-US')}`;
+}
+
+/** Return on spend: `12.4×`, `184×`, `18.2k×`. */
+export const fmtRoi = (x: number): string =>
+  x >= 1_000_000 ? `${(x / 1_000_000).toFixed(1)}M×` : x >= 10_000 ? `${(x / 1000).toFixed(1)}k×` : `${x >= 100 ? x.toFixed(0) : x.toFixed(1)}×`;

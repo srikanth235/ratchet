@@ -22,7 +22,8 @@
     "better-sqlite3": "^13.0.3",
     "yaml": "^2.9.1",
     "zod": "^4.6.7",
-    "@ratchet/runtime": "workspace:*"
+    "@ratchet/runtime": "workspace:*",
+    "@ratchet/github": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

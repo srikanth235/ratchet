@@ -1,6 +1,8 @@
 import {
   parseConfig,
   spendEvents,
+  type FileDiff,
+  type OptimizationRow,
   type ActivityItem as LedgerActivity,
   type AgentRow,
   type CandidateWithResults,
@@ -16,7 +18,7 @@ import type {
   BenchPipelineVM,
   CandidateVM,
   ConfigSummary,
-  Kpi,
+  DiffLine,
   Optimization,
   OptimizationDetail,
   OptimizationStatus,
@@ -26,7 +28,14 @@ import type {
   SpendVM,
   TeardownItem,
   ValidateConfigResult,
+  WinningChangeVM,
 } from '../shared/types.js';
+import { median } from './kpis.js';
+import { compareRows, metricOptions, spanRows, statOf, unitForMetric } from './metrics.js';
+import { valueOf } from './value.js';
+
+export { buildKpis, median } from './kpis.js';
+export { unitForMetric } from './metrics.js';
 
 /** State the ledger does not hold (kept in the settings store by the service). */
 export interface MetaView {
@@ -37,16 +46,6 @@ export interface MetaView {
 const MIN = 60_000;
 
 // ------------------------------------------------------------------ small pure helpers
-
-/** Best-effort display unit from a metric key such as `http_req_duration.p95`. */
-export function unitForMetric(metric: string): string {
-  const m = metric.toLowerCase();
-  if (/(^|[._])(rss|mem|memory|heap)/.test(m) || /_mb$/.test(m)) return 'MB';
-  if (/(throughput|events_per_s|per_s|rps|qps)/.test(m)) return 'k/s';
-  if (/(cold_start|\.s$|_s$|seconds)/.test(m)) return 's';
-  if (/(duration|latency|render|\.p\d+|_ms$|ms)/.test(m)) return 'ms';
-  return '';
-}
 
 export function relTime(at: number, now: number): string {
   const d = Math.max(0, now - at);
@@ -66,13 +65,6 @@ export function uiDirection(d: 'minimize' | 'maximize'): 'lower' | 'higher' {
   return d === 'minimize' ? 'lower' : 'higher';
 }
 
-export function median(xs: readonly number[]): number {
-  if (xs.length === 0) return 0;
-  const s = [...xs].sort((a, b) => a - b);
-  const m = s.length >> 1;
-  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
-}
-
 /** Evenly pick at most `n` values (always keeping the last). */
 export function downsample(xs: readonly number[], n = 8): number[] {
   if (xs.length <= n) return [...xs];
@@ -83,7 +75,7 @@ const optName = (o: { name: string | null; repo: string; metric: string }): stri
 
 // ------------------------------------------------------------------ optimizations
 
-export function toOptimization(s: OptimizationSummary, meta: MetaView, now: number): Optimization {
+export function toOptimization(s: OptimizationSummary, row: OptimizationRow, meta: MetaView, now: number): Optimization {
   const live = s.status === 'running' || s.status === 'baselining';
   return {
     id: s.id,
@@ -103,10 +95,18 @@ export function toOptimization(s: OptimizationSummary, meta: MetaView, now: numb
     candidateCount: s.candidateCount,
     verifiedWins: s.verifiedWins,
     createdAt: s.createdAt,
+    pack: row.pack,
+    evaluatorKind: row.evaluatorKind,
+    value: valueOf(row, s.baselineValue, s.bestValue, s.spendUsd),
   };
 }
 
-export function buildSeries(ledger: Ledger, id: string, now: number): RatchetSeries {
+/**
+ * The ratchet chart. For the objective: baseline step, one step per ratchet move, a point per benched candidate.
+ * For another metric of the objective's family (`metric`): the same commits, plotted by that metric's median
+ * (the "best" line follows the verified commits; there is no noise floor for it).
+ */
+export function buildSeries(ledger: Ledger, id: string, now: number, metric?: string): RatchetSeries {
   const opt = ledger.getOptimization(id);
   if (!opt) throw new Error(`optimization ${id} not found`);
   const t0 = opt.startedAt ?? opt.createdAt;
@@ -114,31 +114,42 @@ export function buildSeries(ledger: Ledger, id: string, now: number): RatchetSer
   const baseline = ledger.getBaseline(id);
   const moves = ledger.ratchetHistory(id);
   const cands = ledger.candidatesWithResults(id);
+  const options = baseline ? metricOptions(opt.metric, opt.configYaml, baseline.stats) : [];
+  const key = metric && options.some((o) => o.key === metric) ? metric : opt.metric;
+  const objective = key === opt.metric;
+  const benchStats = (c: CandidateWithResults) => c.results.filter((r) => r.phase === 'bench').at(-1)?.stats;
+  const valueOfCand = (c: CandidateWithResults) => (objective ? c.benchValue : statOf(benchStats(c), key, opt.metric));
+  const byId = new Map(cands.map((c) => [c.id, c]));
 
   const steps: { t: number; value: number }[] = [];
-  if (baseline) steps.push({ t: 0, value: baseline.value });
-  for (const m of moves) steps.push({ t: minutes(m.at), value: m.toValue });
+  const base = baseline ? (objective ? baseline.value : statOf(baseline.stats, key, opt.metric)) : null;
+  if (base !== null) steps.push({ t: 0, value: base });
+  for (const m of moves) {
+    const v = objective ? m.toValue : (() => {
+      const c = byId.get(m.candidateId);
+      return c ? valueOfCand(c) : null;
+    })();
+    if (v !== null) steps.push({ t: minutes(m.at), value: v });
+  }
 
-  const points: RatchetPoint[] = cands
-    .filter((c) => c.benchValue !== null)
-    .map((c) => ({
-      t: minutes(c.submittedAt),
-      value: c.benchValue!,
-      agent: c.agentKind,
-      verified: c.movedRatchet,
-      label: `${c.sha.slice(0, 7)} · ${c.message || c.verdict}`,
-    }));
+  const points: RatchetPoint[] = cands.flatMap((c) => {
+    const v = valueOfCand(c);
+    return v === null
+      ? []
+      : [{ t: minutes(c.submittedAt), value: v, agent: c.agentKind, verified: c.movedRatchet, label: `${c.sha.slice(0, 7)} · ${c.message || c.verdict}` }];
+  });
 
   const last = Math.max(0, ...steps.map((s) => s.t), ...points.map((p) => p.t));
   const live = opt.status === 'running' || opt.status === 'baselining';
   return {
-    metric: opt.metric,
-    unit: unitForMetric(opt.metric),
+    metric: key,
+    options: options.length ? options : [{ key: opt.metric, label: opt.metric, unit: unitForMetric(opt.metric), objective: true }],
+    unit: unitForMetric(key),
     direction: uiDirection(opt.direction),
-    baseline: baseline?.value ?? null,
+    baseline: base,
     steps,
     points,
-    noiseFloor: baseline?.noiseFloor ?? null,
+    noiseFloor: objective ? baseline?.noiseFloor ?? null : null,
     tMax: live ? Math.max(last, minutes(now)) : last,
   };
 }
@@ -270,42 +281,6 @@ export function buildActivity(ledger: Ledger, now: number, limit = 12, optimizat
 
 function fmtNum(n: number): string {
   return Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)));
-}
-
-// ------------------------------------------------------------------ KPIs
-
-export function buildKpis(ledger: Ledger, rows: OptimizationSummary[], now: number): Kpi[] {
-  const moves = rows.flatMap((r) => ledger.ratchetHistory(r.id)).sort((a, b) => a.at - b.at);
-  const wins = moves.length;
-  const weekAgo = now - 7 * 24 * 60 * MIN;
-  const winsThisWeek = moves.filter((m) => m.at >= weekAgo).length;
-
-  const gains = rows.map((r) => r.gainPct).filter((g): g is number => g !== null && g > 0);
-  const medianGain = median(gains);
-  const gainTrend = downsample(moves.map((_, i) => median(moves.slice(0, i + 1).map((m) => m.gainPct))));
-
-  const spend = rows.reduce((a, r) => a + r.spendUsd, 0);
-  const ids = new Set(rows.map((r) => r.id));
-  const events = ledger.db
-    .select({ at: spendEvents.at, usd: spendEvents.usd, opt: spendEvents.optimizationId })
-    .from(spendEvents)
-    .all()
-    .filter((e) => ids.has(e.opt))
-    .sort((a, b) => a.at - b.at);
-  let cum = 0;
-  const spendTrend = downsample(events.map((e) => (cum += e.usd)));
-  const dayStart = now - 24 * 60 * MIN;
-  const today = events.filter((e) => e.at >= dayStart).reduce((a, e) => a + e.usd, 0);
-
-  const cpw = wins > 0 ? spend / wins : 0;
-  const winTrend = downsample(moves.map((_, i) => i + 1));
-
-  return [
-    { id: 'wins', label: 'Verified wins', value: String(wins), delta: `+${winsThisWeek} this week`, trend: winTrend },
-    { id: 'gain', label: 'Median gain', value: gains.length ? medianGain.toFixed(0) : '—', unit: gains.length ? '%' : '', delta: `${gains.length} optimization${gains.length === 1 ? '' : 's'}`, trend: gainTrend },
-    { id: 'spend', label: 'Spend', value: `$${spend.toFixed(0)}`, delta: `$${today.toFixed(0)} last 24h`, trend: spendTrend },
-    { id: 'cpw', label: 'Cost per win', value: wins ? `$${cpw.toFixed(1)}` : '—', delta: wins ? `${wins} verified win${wins === 1 ? '' : 's'}` : 'no wins yet', trend: downsample(moves.map((_, i) => (i + 1 === 0 ? 0 : spend / (i + 1)))) },
-  ];
 }
 
 // ------------------------------------------------------------------ agents & events
@@ -460,10 +435,13 @@ export function buildDetail(ledger: Ledger, id: string, meta: MetaView, now: num
   const spend = ledger.spendBreakdown(id);
   const agentSpend = new Map(spend.byAgent.map((a) => [a.agentId, a.total]));
   const agents = ledger.listAgents(id).map((a) => toAgentVM(ledger, a, cands, agentSpend.get(a.id) ?? 0));
+  const lastMove = ledger.ratchetHistory(id).at(-1);
+  const bestStats = lastMove ? cands.find((c) => c.id === lastMove.candidateId)?.results.filter((r) => r.phase === 'bench').at(-1)?.stats : undefined;
+  const baseStats = baseline?.stats ?? {};
   const start = opt.startedAt;
   const elapsed = start ? Math.max(0, ((opt.endedAt ?? now) - start) / 1000) : 0;
   return {
-    summary: toOptimization(summary, meta, now),
+    summary: toOptimization(summary, opt, meta, now),
     baseRef: opt.baseRef,
     minGain: opt.minGain,
     timeLimitS: opt.timeLimitS,
@@ -478,6 +456,52 @@ export function buildDetail(ledger: Ledger, id: string, meta: MetaView, now: num
     prUrl: meta.prUrl(id),
     teardown: buildTeardown(opt.status, agents.length, meta.teardownDone(id)),
     configYaml: opt.configYaml,
+    metrics: baseline ? metricOptions(opt.metric, opt.configYaml, baseStats) : [],
+    compare: baseline ? compareRows(opt.metric, opt.direction, opt.configYaml, baseStats, bestStats) : [],
+    spans: spanRows(baseStats, bestStats),
+  };
+}
+
+// ------------------------------------------------------------------ winning change
+
+const EXCERPT_LINES = 14;
+
+/** First hunk of `patch` as typed lines (at most `EXCERPT_LINES`). */
+export function hunkExcerpt(patch: string): DiffLine[] {
+  const lines = patch.split('\n');
+  const start = lines.findIndex((l) => l.startsWith('@@'));
+  if (start < 0) return [];
+  const out: DiffLine[] = [{ kind: 'hunk', text: lines[start]! }];
+  for (const l of lines.slice(start + 1)) {
+    if (l.startsWith('@@') || out.length >= EXCERPT_LINES) break;
+    if (l.startsWith('\\')) continue; // "\ No newline at end of file"
+    out.push({ kind: l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : 'ctx', text: l.slice(1) });
+  }
+  return out;
+}
+
+/**
+ * The squashed result as the pull request will show it. `files` is the diff of the best verified commit against
+ * `baseRef` (GitHost.diff); `unavailable` explains a missing diff instead of inventing one.
+ */
+export function toWinningChange(ledger: Ledger, id: string, files: FileDiff[] | null, unavailable: string | null): WinningChangeVM {
+  const opt = ledger.getOptimization(id);
+  if (!opt) throw new Error(`optimization ${id} not found`);
+  const moves = ledger.ratchetHistory(id);
+  const best = moves.at(-1);
+  const empty = { files: [], additions: 0, deletions: 0, excerpt: null };
+  if (!best) return { commits: 0, sha: null, baseRef: opt.baseRef, ...empty, unavailable: 'No verified win yet.' };
+  if (!files) return { commits: moves.length, sha: best.sha.slice(0, 7), baseRef: opt.baseRef, ...empty, unavailable: unavailable ?? 'Diff unavailable.' };
+  const top = [...files].filter((f) => !f.binary && f.patch).sort((a, b) => b.additions + b.deletions - (a.additions + a.deletions))[0];
+  return {
+    commits: moves.length,
+    sha: best.sha.slice(0, 7),
+    baseRef: opt.baseRef,
+    files: files.map((f) => ({ path: f.path, additions: f.additions, deletions: f.deletions, binary: f.binary })),
+    additions: files.reduce((n, f) => n + f.additions, 0),
+    deletions: files.reduce((n, f) => n + f.deletions, 0),
+    excerpt: top ? { path: top.path, lines: hunkExcerpt(top.patch) } : null,
+    unavailable: null,
   };
 }
 
@@ -487,13 +511,15 @@ export function validateConfigText(text: string): ValidateConfigResult {
   const r = parseConfig(text);
   if (!r.ok) return { ok: false, errors: r.errors };
   const c = r.config;
+  const v = c.objective.value;
   const summary: ConfigSummary = {
+    name: c.objective.name ?? null,
+    pack: c.pack ?? null,
     metric: c.objective.metric,
     direction: c.objective.direction,
     minGain: c.objective.min_gain,
-    benchRun: c.bench.run,
-    repeats: c.bench.repeats,
-    hardware: c.bench.hardware,
+    evaluator: { kind: c.evaluator.kind, ref: c.evaluator.ref, run: c.evaluator.run, repeats: c.evaluator.repeats, hardware: c.evaluator.hardware, holdout: c.evaluator.holdout ?? null },
+    value: v ? { usdPerUnit: v.usd_per_unit, period: v.period, basis: v.basis, unit: v.unit ?? null } : null,
     guardrails: c.guardrails.map((g) => (g.kind === 'command' ? `run: ${g.run}` : `${g.metric} ${g.raw}`)),
     protectedGlobs: c.protected,
     instanceTypes: c.agent.allowed_instance_types,

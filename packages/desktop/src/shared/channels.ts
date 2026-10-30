@@ -7,6 +7,7 @@ export const IPC = {
   listOptimizations: 'ratchet:listOptimizations',
   getOptimization: 'ratchet:getOptimization',
   ratchetHistory: 'ratchet:ratchetHistory',
+  winningChange: 'ratchet:winningChange',
   candidatesWithResults: 'ratchet:candidatesWithResults',
   spendBreakdown: 'ratchet:spendBreakdown',
   recentActivity: 'ratchet:recentActivity',

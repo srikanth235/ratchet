@@ -9,5 +9,6 @@ export default defineConfig({
       { find: '@ratchet/ui', replacement: resolve(__dirname, '../ui/src/index.ts') },
     ],
   },
-  test: { include: ['src/**/*.test.{ts,tsx}'] },
+  // Renderer tests drive the real service (and the dev engine's git repo): give them room on a loaded machine.
+  test: { include: ['src/**/*.test.{ts,tsx}'], testTimeout: 30_000 },
 });

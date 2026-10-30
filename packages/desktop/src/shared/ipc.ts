@@ -8,9 +8,10 @@ const agentKind = z.enum(['claude-code', 'codex', 'mock']);
 
 /** Argument tuples per method, validated in the main process before anything is executed. */
 export const ARGS = {
-  listOptimizations: z.tuple([]),
+  listOptimizations: z.tuple([z.object({ range: z.enum(['7d', '30d', '90d']).optional() }).strict().optional()]),
   getOptimization: z.tuple([id]),
-  ratchetHistory: z.tuple([id]),
+  ratchetHistory: z.tuple([id, z.string().min(1).max(300).optional()]),
+  winningChange: z.tuple([id]),
   candidatesWithResults: z.tuple([id]),
   spendBreakdown: z.tuple([id]),
   recentActivity: z.tuple([z.object({ optimizationId: id.optional(), limit: z.number().int().min(1).max(200).optional() }).strict().optional()]),

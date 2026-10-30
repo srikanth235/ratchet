@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AgentAvatar, Button, Card, Eyebrow, Pill } from '@ratchet/ui';
-import { buildConfigYaml, DEFAULT_FORM, type ConfigForm } from '../../shared/config-yaml';
+import { buildConfigYaml, DEFAULT_FORM, EVALUATOR_KINDS, formFromYaml, patchConfigYaml, type ConfigForm, type EvaluatorKind } from '../../shared/config-yaml';
 import type { AgentKind, PreflightItem, ValidateConfigResult } from '../../shared/types';
 import { Crumbs, ErrorNote, PageHeader } from '../components/common';
 import { Icon } from '../components/icons';
-import { summarizeYaml } from '../config-summary';
 import { errMsg, reportStartError, useNav } from '../data';
-import { fmtUsdCompact } from '../value';
+import { fmtUsdCompact } from '../format';
 
 const AGENT_CHOICES: { kind: AgentKind; label: string; hint: string }[] = [
   { kind: 'claude-code', label: 'Claude Code', hint: 'Anthropic · claude -p headless' },
@@ -22,12 +21,21 @@ const TIME_LIMITS = [
   { label: '24 hours', seconds: 86_400 },
 ];
 
+/** What each evaluator kind is for. `evaluator.kind` is informational for the engine; packs set it. */
+const EVALUATOR_CHOICES: Record<EvaluatorKind, { tag: string; label: string; measures: string; hint: string }> = {
+  benchmark: { tag: 'bm', label: 'Benchmark', measures: 'latency · throughput · memory', hint: 'Load test or micro-benchmark on pinned hardware' },
+  backtest: { tag: 'bt', label: 'Backtest', measures: 'WAPE · MAPE · bias', hint: 'Rolling-origin backtest, sealed recent period as holdout' },
+  eval: { tag: 'ev', label: 'Eval set', measures: 'accuracy · pass rate · score', hint: 'Scored evaluation set, held-out partition as holdout' },
+  simulation: { tag: 'sim', label: 'Simulation', measures: 'cost · reward · service level', hint: 'Simulated environment with a sealed scenario seed' },
+};
+
 export interface NewOptimizationFormState {
   name: string;
   repoUrl: string;
   baseRef: string;
   configPath: string;
-  form: ConfigForm;
+  /** The ratchet.yaml text: the single source of truth the form fields and the editor both edit. */
+  yaml: string;
   agents: AgentKind[];
   budgetUsd: number;
   timeLimitSeconds: number;
@@ -39,7 +47,7 @@ export const INITIAL_STATE: NewOptimizationFormState = {
   repoUrl: 'https://github.com/acme/search-api',
   baseRef: 'main',
   configPath: 'ratchet.yaml',
-  form: DEFAULT_FORM,
+  yaml: buildConfigYaml(DEFAULT_FORM),
   agents: ['claude-code', 'codex'],
   budgetUsd: 100,
   timeLimitSeconds: 28_800,
@@ -70,23 +78,46 @@ function StepHead({ n, title, sub, tone, aside }: { n: number; title: string; su
   );
 }
 
-const lineCount = (s: string) => s.split('\n').filter((l) => l.trim() !== '').length;
+/** `run: pnpm test` / `error_rate: < 0.001` / `peak_rss: < 1.2x` → what the tick list shows. */
+function describeGuardrail(line: string): { title: string; sub: string; tag: string } {
+  const i = line.indexOf(':');
+  const key = i > 0 ? line.slice(0, i).trim() : line.trim();
+  const val = i > 0 ? line.slice(i + 1).trim() : '';
+  if (key === 'run') return { title: val || '(empty command)', sub: 'command must exit 0 on every candidate', tag: 'run' };
+  const rel = /x\s*$/.test(val);
+  return {
+    title: `${key} ${rel ? val.replace(/\s*x\s*$/, '× baseline') : val}`.trim(),
+    sub: rel ? "metric from the evaluator's output, relative to the baseline" : "metric from the evaluator's output, absolute bound",
+    tag: 'threshold',
+  };
+}
 
 export function NewOptimization() {
   const { open, go } = useNav();
   const [s, setS] = useState(INITIAL_STATE);
-  const [override, setOverride] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [validation, setValidation] = useState<ValidateConfigResult | null>(null);
   const [preflight, setPreflight] = useState<PreflightItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [newGuardrail, setNewGuardrail] = useState('');
 
-  const generated = useMemo(() => buildConfigYaml(s.form), [s.form]);
-  const yaml = override ?? generated;
-  const ys = useMemo(() => summarizeYaml(yaml), [yaml]);
+  const yaml = s.yaml;
+  // The form is read from the text; while the text does not parse, the last readable form stays on screen (disabled).
+  const parsed = useMemo(() => formFromYaml(yaml), [yaml]);
+  const lastForm = useRef<ConfigForm>(parsed ?? DEFAULT_FORM);
+  if (parsed) lastForm.current = parsed;
+  const f = parsed ?? lastForm.current;
+  const formLocked = parsed === null;
 
-  const setForm = (patch: Partial<ConfigForm>) => setS((p) => ({ ...p, form: { ...p.form, ...patch } }));
+  // Every guardrail seen in this session stays in the tick list, so unticking one (which removes it from the yaml) can be undone.
+  const [knownGuardrails, setKnownGuardrails] = useState<string[]>(DEFAULT_FORM.guardrails);
+  useEffect(() => {
+    if (parsed) setKnownGuardrails((k) => [...k, ...parsed.guardrails.filter((g) => !k.includes(g))]);
+  }, [parsed]);
+
+  const setYaml = (text: string) => setS((p) => ({ ...p, yaml: text }));
+  const setForm = (patch: Partial<ConfigForm>) => setS((p) => ({ ...p, yaml: patchConfigYaml(p.yaml, patch) }));
   const set = <K extends keyof NewOptimizationFormState>(k: K, v: NewOptimizationFormState[K]) => setS((p) => ({ ...p, [k]: v }));
 
   // Validate through the main process (parseConfig is the single source of truth), debounced while typing.
@@ -105,7 +136,19 @@ export function NewOptimization() {
   const toggleAgent = (k: AgentKind) =>
     set('agents', s.agents.includes(k) ? s.agents.filter((a) => a !== k) : [...s.agents, k]);
 
+  const toggleGuardrail = (g: string) => {
+    if (f.guardrails.includes(g)) setForm({ guardrails: f.guardrails.filter((x) => x !== g) });
+    else setForm({ guardrails: knownGuardrails.filter((x) => x === g || f.guardrails.includes(x)) });
+  };
+  const addGuardrail = () => {
+    const g = newGuardrail.trim();
+    if (!g) return;
+    if (!f.guardrails.includes(g)) setForm({ guardrails: [...f.guardrails, g] });
+    setNewGuardrail('');
+  };
+
   const valid = validation?.ok === true;
+  const summary = validation?.ok ? validation.summary : null;
   const blocked = preflight.some((p) => p.state === 'fail');
   const canSubmit = valid && s.agents.length > 0 && s.repoUrl.trim() !== '' && s.baseRef.trim() !== '' && !blocked && !submitting;
 
@@ -113,8 +156,9 @@ export function NewOptimization() {
     setSubmitting(true);
     setError(null);
     try {
+      const name = s.name.trim() || summary?.name;
       const id = await window.ratchet.createOptimization({
-        ...((s.name.trim() || ys?.name) && { name: s.name.trim() || ys!.name! }),
+        ...(name && { name }),
         repoUrl: s.repoUrl.trim(),
         baseRef: s.baseRef.trim(),
         configPath: s.configPath.trim() || 'ratchet.yaml',
@@ -134,15 +178,14 @@ export function NewOptimization() {
     }
   }
 
-  const f = s.form;
   const targetReady = s.repoUrl.trim() !== '' && s.baseRef.trim() !== '';
-  const summary = validation?.ok ? validation.summary : null;
-  const valueText = ys?.value
-    ? `${fmtUsdCompact(ys.value.usdPerUnit)}${ys.value.unit ? ` per ${ys.value.unit}` : ''} / ${ys.value.period} · ${ys.value.basis}`
+  const valueText = summary?.value
+    ? `${fmtUsdCompact(summary.value.usdPerUnit)}${summary.value.unit ? ` per ${summary.value.unit}` : ''} / ${summary.value.period} · ${summary.value.basis}`
     : null;
   const protectedList = f.protectedGlobs.split('\n').map((l) => l.trim()).filter(Boolean);
   const agentNames = s.agents.map((a) => AGENT_CHOICES.find((c) => c.kind === a)?.label ?? a).join(', ');
   const limitHours = s.timeLimitSeconds / 3600;
+  const guardRows = [...knownGuardrails, ...f.guardrails.filter((g) => !knownGuardrails.includes(g))];
   return (
     <>
       <PageHeader
@@ -164,7 +207,7 @@ export function NewOptimization() {
             <StepHead n={1} title="Target" sub="Where agents start from" tone={targetReady ? 'ready' : 'idle'}
               aside={targetReady ? <Pill tone="mint"><Icon name="check" size={12} /> Ready</Pill> : undefined} />
             <div className="form-grid">
-              <Field label="Name" hint="Optional"><input value={s.name} onChange={(e) => set('name', e.target.value)} placeholder="search-api p95 latency" /></Field>
+              <Field label="Name" hint="Optional"><input value={s.name} onChange={(e) => set('name', e.target.value)} placeholder={summary?.name ?? 'search-api p95 latency'} /></Field>
               <Field label="Repository URL"><input value={s.repoUrl} onChange={(e) => set('repoUrl', e.target.value)} /></Field>
               <Field label="Base ref"><input className="mono" value={s.baseRef} onChange={(e) => set('baseRef', e.target.value)} /></Field>
               <Field label="Config path" hint="Path of ratchet.yaml inside the repo"><input className="mono" value={s.configPath} onChange={(e) => set('configPath', e.target.value)} /></Field>
@@ -175,19 +218,38 @@ export function NewOptimization() {
                 {summary
                   ? [
                       summary.metric,
-                      ys?.evaluator ? `${ys.evaluator.kind} evaluator` : null,
+                      `${summary.evaluator.kind} evaluator`,
                       valueText,
                       `${summary.guardrails.length} guardrail${summary.guardrails.length === 1 ? '' : 's'}`,
                       `${summary.protectedGlobs.length} protected path${summary.protectedGlobs.length === 1 ? '' : 's'}`,
                     ].filter(Boolean).join(' · ')
                   : validation ? 'needs attention — see the review panel' : 'checking…'}
               </span>
-              <button type="button" className="text-link" style={{ marginLeft: 'auto' }} onClick={() => { setEditing(true); setOverride((o) => o ?? generated); }}>View file</button>
+              <button type="button" className="text-link" style={{ marginLeft: 'auto' }} onClick={() => setEditing(true)}>View file</button>
             </div>
           </Card>
 
+          <fieldset className="form-lock" disabled={formLocked}>
+          {formLocked && <p className="error-note" role="status">ratchet.yaml does not parse as YAML: fix it in the editor and the form follows.</p>}
           <Card className="step step--focus">
-            <StepHead n={2} title="Evaluator & metric" sub="The number agents are trying to move" tone="focus" />
+            <StepHead n={2} title="Evaluator & metric" sub="The trusted measurement, and the number agents are trying to move" tone="focus" />
+            <div className="eval-choices" role="radiogroup" aria-label="Evaluator kind">
+              {EVALUATOR_KINDS.map((k) => {
+                const c = EVALUATOR_CHOICES[k];
+                const on = f.evaluatorKind === k;
+                return (
+                  <label key={k} className={`eval-choice${on ? ' eval-choice--on' : ''}`} data-kind={k}>
+                    <span className="eval-choice__top">
+                      <span className="mono eval-choice__tag" aria-hidden="true">{c.tag}</span>
+                      <span className="eval-choice__name">{c.label}</span>
+                      <input type="radio" name="evaluator" value={k} checked={on} onChange={() => setForm({ evaluatorKind: k })} aria-label={c.label} />
+                    </span>
+                    <span className="mono eval-choice__run" title={on ? f.evaluatorRun : undefined}>{on ? f.evaluatorRun || 'no command yet' : c.measures}</span>
+                    <span className="eval-choice__hint">{c.hint}</span>
+                  </label>
+                );
+              })}
+            </div>
             <div className="form-grid">
               <Field label="Metric" hint="Key in the evaluator's JSON output"><input className="mono" value={f.metric} onChange={(e) => setForm({ metric: e.target.value })} /></Field>
               <div className="field">
@@ -203,27 +265,70 @@ export function NewOptimization() {
                 <input className="mono" type="number" min={0} max={100} step={0.5} value={f.minGainPct} onChange={(e) => setForm({ minGainPct: Number(e.target.value) })} />
               </Field>
               <Field label="Runs per eval"><input className="mono" type="number" min={1} value={f.repeats} onChange={(e) => setForm({ repeats: Number(e.target.value) })} /></Field>
-              <Field label="Evaluator command"><input className="mono" value={f.benchRun} onChange={(e) => setForm({ benchRun: e.target.value })} /></Field>
-              <Field label="Evaluator ref" hint="Protected ref holding the trusted evaluator"><input className="mono" value={f.benchRef} onChange={(e) => setForm({ benchRef: e.target.value })} /></Field>
+              <Field label="Evaluator command"><input className="mono" value={f.evaluatorRun} onChange={(e) => setForm({ evaluatorRun: e.target.value })} /></Field>
+              <Field label="Evaluator ref" hint="Protected ref holding the trusted evaluator"><input className="mono" value={f.evaluatorRef} onChange={(e) => setForm({ evaluatorRef: e.target.value })} /></Field>
               <Field label="Evaluator hardware"><input className="mono" value={f.hardware} onChange={(e) => setForm({ hardware: e.target.value })} /></Field>
-              <Field label="Confirm trace" hint="Hidden trace for the confirm run (optional)"><input className="mono" value={f.confirmTrace} onChange={(e) => setForm({ confirmTrace: e.target.value })} placeholder="s3://sealed/trace.json" /></Field>
+              <Field label="Sealed holdout" hint="Hidden trace / unseen period for the confirm run (optional)"><input className="mono" value={f.holdout} onChange={(e) => setForm({ holdout: e.target.value })} placeholder="s3://sealed/trace.json" /></Field>
+            </div>
+            <div className="value-row">
+              <span className="field__label">Business value <span className="faint">· optional, turns the gain into $ / year</span></span>
+              <div className="form-grid">
+                <Field label="USD per unit of improvement">
+                  <input className="mono" type="number" min={0} step="any" value={f.valueUsdPerUnit ?? ''} placeholder="none"
+                    onChange={(e) => setForm({ valueUsdPerUnit: e.target.value === '' || !(Number(e.target.value) > 0) ? null : Number(e.target.value) })} />
+                </Field>
+                <Field label="Unit" hint="e.g. ms, WAPE point"><input className="mono" value={f.valueUnit} disabled={f.valueUsdPerUnit === null} onChange={(e) => setForm({ valueUnit: e.target.value })} /></Field>
+                <Field label="Per">
+                  <select value={f.valuePeriod} disabled={f.valueUsdPerUnit === null} onChange={(e) => setForm({ valuePeriod: e.target.value as 'month' | 'year' })} aria-label="Value period">
+                    <option value="year">year</option>
+                    <option value="month">month</option>
+                  </select>
+                </Field>
+                <Field label="Basis">
+                  <select value={f.valueBasis} disabled={f.valueUsdPerUnit === null} onChange={(e) => setForm({ valueBasis: e.target.value as 'estimated' | 'measured' })} aria-label="Value basis">
+                    <option value="estimated">estimated</option>
+                    <option value="measured">measured</option>
+                  </select>
+                </Field>
+              </div>
             </div>
           </Card>
 
           <Card className="step">
             <StepHead n={3} title="Guardrails" sub="A candidate that fails any of these is blocked, however fast it is" tone="idle" />
+            <ul className="guardrail-list" aria-label="Guardrails">
+              {guardRows.map((g) => {
+                const d = describeGuardrail(g);
+                const on = f.guardrails.includes(g);
+                return (
+                  <li key={g}>
+                    <label className={`guardrail${on ? '' : ' guardrail--off'}`}>
+                      <input type="checkbox" checked={on} onChange={() => toggleGuardrail(g)} aria-label={g} />
+                      <span className="guardrail__text">
+                        <span className={`guardrail__title${d.tag === 'run' ? ' mono' : ''}`}>{d.title}</span>
+                        <span className="guardrail__sub">{d.sub}</span>
+                      </span>
+                      <span className="mono guardrail__tag">{d.tag}</span>
+                    </label>
+                  </li>
+                );
+              })}
+              <li className="guardrail guardrail--add">
+                <input className="mono" value={newGuardrail} onChange={(e) => setNewGuardrail(e.target.value)} placeholder="run: <command>  or  <metric>: < value[x]" aria-label="New guardrail"
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addGuardrail(); } }} />
+                <Button variant="ghost" disabled={!newGuardrail.trim()} onClick={addGuardrail}><Icon name="plus" size={11} /> Add</Button>
+              </li>
+            </ul>
             <div className="form-grid form-grid--wide">
-              <Field label="Guardrails" hint="One per line: run: <command> or <metric>: <op> <value>[x]">
-                <textarea className="textarea-mono" rows={5} value={f.guardrails} onChange={(e) => setForm({ guardrails: e.target.value })} />
-              </Field>
               <Field label="Protected paths" hint="One glob per line; changes here block a candidate">
-                <textarea className="textarea-mono" rows={5} value={f.protectedGlobs} onChange={(e) => setForm({ protectedGlobs: e.target.value })} />
+                <textarea className="textarea-mono" rows={4} value={f.protectedGlobs} onChange={(e) => setForm({ protectedGlobs: e.target.value })} />
               </Field>
             </div>
             {protectedList.length > 0 && (
               <div className="protected-row">Protected from agents{protectedList.map((g) => <span key={g} className="chip-tag mono" style={{ color: '#C3CBD8', padding: '4px 8px', borderRadius: 6 }}>{g}</span>)}</div>
             )}
           </Card>
+          </fieldset>
 
           <Card className="step">
             <StepHead n={4} title="Agents & limits" sub="Each agent runs headless on its own runner and branch" tone="idle" />
@@ -250,6 +355,7 @@ export function NewOptimization() {
               <input id="budget-range" type="range" min={5} max={500} step={5} value={s.budgetUsd} aria-label="Budget" style={{ width: '100%', accentColor: '#D9B26F' }} onChange={(e) => set('budgetUsd', Number(e.target.value))} />
               <span className="budget__scale mono"><span>$5</span><span>warn at 80% · hard stop at 100%</span><span>$500</span></span>
             </div>
+            <fieldset className="form-lock" disabled={formLocked}>
             <div className="form-grid">
               <Field label="Time limit">
                 <select value={s.timeLimitSeconds} onChange={(e) => set('timeLimitSeconds', Number(e.target.value))} aria-label="Time limit">
@@ -262,6 +368,7 @@ export function NewOptimization() {
               <Field label="Allowed instance types" hint="Comma separated"><input className="mono" value={f.instanceTypes} onChange={(e) => setForm({ instanceTypes: e.target.value })} /></Field>
               <Field label="Agent brief" hint="File injected into every session"><input className="mono" value={f.instructions} onChange={(e) => setForm({ instructions: e.target.value })} /></Field>
             </div>
+            </fieldset>
           </Card>
         </div>
 
@@ -271,9 +378,9 @@ export function NewOptimization() {
             <div className="kv-row"><span>Repository</span><span className="mono">{s.repoUrl.replace(/^https?:\/\/github\.com\//, '') || '—'}</span></div>
             <div className="kv-row"><span>Base ref</span><span className="mono">{s.baseRef || '—'}</span></div>
             <div className="kv-row"><span>Metric</span><span className="mono">{f.metric} {f.direction === 'minimize' ? '↓' : '↑'} · min {f.minGainPct}%</span></div>
-            {ys?.evaluator && <div className="kv-row"><span>Evaluator</span><span className="mono">{ys.evaluator.kind}{ys.evaluator.ref ? ` · ${ys.evaluator.ref}` : ''}</span></div>}
+            {summary && <div className="kv-row"><span>Evaluator</span><span className="mono">{summary.evaluator.kind} · {summary.evaluator.ref}</span></div>}
             {valueText && <div className="kv-row"><span>Value</span><span className="mono">{valueText}</span></div>}
-            <div className="kv-row"><span>Guardrails</span><span>{lineCount(f.guardrails)} active</span></div>
+            <div className="kv-row"><span>Guardrails</span><span>{f.guardrails.length} active</span></div>
             <div className="kv-row"><span>Agents</span><span>{agentNames || 'none'}</span></div>
             <div className="kv-row"><span>Limits</span><span className="mono">${s.budgetUsd} · {+limitHours.toFixed(1)} h</span></div>
             <div className="callout">
@@ -287,12 +394,12 @@ export function NewOptimization() {
               <span className="mono yaml-card__title">ratchet.yaml</span>
               <div className="review__tabs">
                 <button type="button" className={!editing ? 'on' : ''} onClick={() => setEditing(false)}>Preview</button>
-                <button type="button" className={editing ? 'on' : ''} onClick={() => { setEditing(true); setOverride((o) => o ?? generated); }}>Edit</button>
-                {override !== null && <button type="button" onClick={() => { setOverride(null); setEditing(false); }}>Reset</button>}
+                <button type="button" className={editing ? 'on' : ''} onClick={() => setEditing(true)}>Edit</button>
+                {yaml !== INITIAL_STATE.yaml && <button type="button" onClick={() => setYaml(INITIAL_STATE.yaml)}>Reset</button>}
               </div>
             </div>
             {editing ? (
-              <textarea className="yaml mono" aria-label="ratchet.yaml" rows={20} spellCheck={false} value={override ?? generated} onChange={(e) => setOverride(e.target.value)} />
+              <textarea className="yaml mono" aria-label="ratchet.yaml" rows={20} spellCheck={false} value={yaml} onChange={(e) => setYaml(e.target.value)} />
             ) : (
               <pre className="yaml mono" aria-label="Generated ratchet.yaml">{yaml}</pre>
             )}

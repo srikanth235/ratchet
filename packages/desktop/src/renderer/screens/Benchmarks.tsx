@@ -2,14 +2,15 @@ import { useMemo, useState } from 'react';
 import { Card, Eyebrow, Histogram, StairChart, VerdictPill, agentColor, agentLabel, agentSoft, type Verdict } from '@ratchet/ui';
 import { Crumbs, Empty, ErrorNote, OptTabs, OptimizationPicker, PageHeader, StateBadge, useSelectedId } from '../components/common';
 import { forOptimization, useQuery } from '../data';
-import { fmtNum } from '../format';
+import { fmtMetric, fmtNum } from '../format';
 
 const FILTERS: (Verdict | 'all')[] = ['all', 'verified', 'rejected', 'failed_confirm', 'blocked', 'pending'];
 
 export function Benchmarks() {
   const id = useSelectedId();
   const opts = { skip: id === null, relevant: forOptimization(id), intervalMs: 8000 };
-  const series = useQuery(() => window.ratchet.ratchetHistory(id!), [id], opts);
+  const [metric, setMetric] = useState<string | null>(null);
+  const series = useQuery(() => window.ratchet.ratchetHistory(id!, metric ?? undefined), [id, metric], opts);
   const cands = useQuery(() => window.ratchet.candidatesWithResults(id!), [id], opts);
   const detail = useQuery(() => window.ratchet.getOptimization(id!), [id], opts);
   const [filter, setFilter] = useState<Verdict | 'all'>('all');
@@ -27,16 +28,19 @@ export function Benchmarks() {
   const s = d.summary;
   const unit = sr.unit;
   const best = [...cands.data].reverse().find((c) => c.movedRatchet) ?? null;
-  const pcts = ['p50', 'p95', 'p99'].filter((k) => k in d.baselineStats);
-  const delta = (a: number | undefined, b: number | undefined) => (a && b !== undefined ? ((b - a) / a) * 100 : null);
-  const locks = Math.max(0, sr.steps.length - 1);
-  const saved = s.baseline !== null && s.best !== null ? s.baseline - s.best : null;
+  const objective = sr.options.find((o) => o.objective) ?? { key: s.metric, label: s.metric, unit, objective: true };
+  const selected = sr.options.find((o) => o.key === sr.metric) ?? objective;
+  const locks = s.verifiedWins;
+  const heroBest = sr.steps.at(-1)?.value ?? null;
+  const saved = sr.baseline !== null && heroBest !== null && sr.steps.length > 1 ? sr.baseline - heroBest : null;
   const kinds = [...new Set(sr.points.map((p) => p.agent))];
   const points = showRejected ? sr.points : sr.points.filter((p) => p.verified);
+  // The histogram is of the objective's per-run samples: mark the objective's baseline and best medians.
   const markers = [
-    d.baselineStats['p95'] !== undefined ? { value: d.baselineStats['p95'], label: `p95 ${fmtNum(d.baselineStats['p95'])}`, dashed: true } : null,
-    best?.stats['p95'] !== undefined ? { value: best.stats['p95'], label: `p95 ${fmtNum(best.stats['p95'])}` } : null,
+    s.baseline !== null ? { value: s.baseline, label: `${objective.label} ${fmtNum(s.baseline)}`, dashed: true } : null,
+    best?.benchValue != null ? { value: best.benchValue, label: `${objective.label} ${fmtNum(best.benchValue)}` } : null,
   ].filter((m): m is { value: number; label: string; dashed?: boolean } => m !== null);
+  const histUnit = objective.unit;
   const cols = { a: 'var(--rt-color-slate)', b: 'var(--rt-color-brass)' };
   const widths = (a: number | undefined, b: number | undefined) => {
     const hi = Math.max(a ?? 0, b ?? 0) || 1;
@@ -57,13 +61,21 @@ export function Benchmarks() {
       <Card className="ratchet-card" data-testid="ratchet-card">
         <div className="ratchet-card__head">
           <div className="ratchet-card__hero">
-            <Eyebrow>Best verified · {sr.direction === 'lower' ? 'lower' : 'higher'} is better</Eyebrow>
+            <Eyebrow>Best verified{selected.objective ? '' : ` · ${selected.label}`} · {sr.direction === 'lower' ? 'lower' : 'higher'} is better</Eyebrow>
             <span className="ratchet-card__num">
-              <span className="hero-num hero-num--xl">{s.best === null ? '—' : `${fmtNum(s.best)}${unit ? ` ${unit}` : ''}`}</span>
+              <span className="hero-num hero-num--xl">{heroBest === null ? '—' : `${fmtNum(heroBest)}${unit ? ` ${unit}` : ''}`}</span>
               <span className="mono gain">{saved !== null ? `${saved >= 0 ? '−' : '+'}${fmtNum(Math.abs(saved))}${unit ? ` ${unit}` : ''} · ` : ''}{locks} lock{locks === 1 ? '' : 's'}</span>
             </span>
           </div>
           <div className="ratchet-card__tools">
+            {sr.options.length > 1 && (
+              <div className="segmented segmented--sm metric-switch" role="radiogroup" aria-label="Metric">
+                {sr.options.map((o) => (
+                  <button key={o.key} type="button" role="radio" aria-checked={o.key === sr.metric} title={o.key}
+                    className={o.key === sr.metric ? 'segmented__on' : ''} onClick={() => setMetric(o.objective ? null : o.key)}>{o.label}</button>
+                ))}
+              </div>
+            )}
             <label className="check-label">
               <input type="checkbox" checked={showRejected} onChange={(e) => setShowRejected(e.target.checked)} />
               Show rejected
@@ -87,7 +99,7 @@ export function Benchmarks() {
       <section className="split">
         <Card className="card-pad" style={{ flex: '3 1 460px', minWidth: 0 }}>
           <div className="card-head">
-            <h2 className="card-title">Latency distribution</h2>
+            <h2 className="card-title">{histUnit === 'ms' || histUnit === 's' ? 'Latency distribution' : 'Run distribution'}</h2>
             <span className="card-head__note">{d.baselineSamples.length} baseline samples</span>
             <span className="chart-legend" style={{ margin: '0 0 0 auto', padding: 0 }}>
               <span><i style={{ display: 'inline-block', width: 12, height: 10, border: '1.4px solid #8592A6', borderRadius: 2 }} aria-hidden="true" />Baseline</span>
@@ -96,7 +108,7 @@ export function Benchmarks() {
           </div>
           {d.baselineSamples.length > 0 && best && best.samples.length > 0 ? (
             <div style={{ overflowX: 'auto' }}>
-              <Histogram unit={unit} markers={markers} series={[{ name: 'baseline', values: d.baselineSamples }, { name: 'best', values: best.samples }]} />
+              <Histogram unit={histUnit} markers={markers} series={[{ name: 'baseline', values: d.baselineSamples }, { name: 'best', values: best.samples }]} />
             </div>
           ) : (
             <p className="muted">Needs a baseline and at least one verified win.</p>
@@ -104,27 +116,25 @@ export function Benchmarks() {
         </Card>
         <Card className="card-pad" style={{ flex: '2 1 340px', minWidth: 0, gap: 6 }}>
           <h2 className="card-title" style={{ marginBottom: 6 }}>Baseline vs best</h2>
-          {pcts.length > 0 && best ? (
-            pcts.map((k) => {
-              const a = d.baselineStats[k];
-              const b = best.stats[k];
-              const dl = delta(a, b);
-              const [wa, wb] = widths(a, b);
+          {d.compare.length > 0 ? (
+            d.compare.map((r) => {
+              const [wa, wb] = widths(r.baseline ?? undefined, r.best ?? undefined);
+              const worse = r.deltaPct !== null && Math.round(r.deltaPct) !== 0 && (r.deltaPct > 0) === (r.better === 'lower');
               return (
-                <div key={k} className="pct-row" data-testid="pct-row">
+                <div key={r.key} className="pct-row" data-testid="pct-row">
                   <div className="pct-row__top">
-                    <span className="pct-row__k">{k}</span>
-                    <span className="mono faint">{a === undefined ? '—' : `${fmtNum(a)}${unit ? ` ${unit}` : ''}`}</span>
+                    <span className="pct-row__k" title={r.key}>{r.label}</span>
+                    <span className="mono faint">{fmtMetric(r.baseline, r.unit)}</span>
                     <span className="pct-row__arrow">→</span>
-                    <span className="mono">{b === undefined ? '—' : `${fmtNum(b)}${unit ? ` ${unit}` : ''}`}</span>
-                    <span className={`mono delta-badge${dl !== null && dl > 0 ? ' delta-badge--rose' : ''}`}>{dl === null ? '—' : `${dl < 0 ? '−' : '+'}${Math.abs(dl).toFixed(0)}%`}</span>
+                    <span className="mono">{fmtMetric(r.best, r.unit)}</span>
+                    <span className={`mono delta-badge${worse ? ' delta-badge--rose' : ''}`}>{r.deltaPct === null ? '—' : `${r.deltaPct < 0 ? '−' : '+'}${Math.abs(r.deltaPct).toFixed(0)}%`}</span>
                   </div>
                   <div className="pct-row__bars"><span style={{ width: wa, background: cols.a }} /><span style={{ width: wb, background: cols.b }} /></div>
                 </div>
               );
             })
           ) : (
-            <p className="muted">No percentile data yet.</p>
+            <p className="muted">Needs a baseline and at least one verified win.</p>
           )}
         </Card>
       </section>
