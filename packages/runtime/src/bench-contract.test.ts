@@ -1,5 +1,5 @@
-import { BENCH_OS_USER, CANDIDATE_LAUNCHER_PATH, HOLDOUT_OS_USER, benchUserData } from '@ratchet/aws';
-import { BENCH_USER, CANDIDATE_LAUNCHER, HOLDOUT_USER } from '@ratchet/bench';
+import { BENCH_OS_USER, CANDIDATE_LAUNCHER_PATH, DEPS_OS_USER, HOLDOUT_OS_USER, benchUserData, depsUserData } from '@ratchet/aws';
+import { BENCH_USER, CANDIDATE_LAUNCHER, DEPS_BASE_ARCHIVE, DEPS_PREFIX, DEPS_USER, HOLDOUT_USER, STAGING_PREFIX } from '@ratchet/bench';
 import { describe, expect, it } from 'vitest';
 
 // The bench scripts (packages/bench) and the instance user-data (packages/aws) are written by different
@@ -18,5 +18,19 @@ describe('bench instance contract between @ratchet/aws and @ratchet/bench', () =
     expect(ud).toContain(`useradd --system --no-create-home --shell /usr/sbin/nologin ${HOLDOUT_USER}`);
     expect(ud).toContain(`install -D -m 755 -o root -g root /dev/null ${CANDIDATE_LAUNCHER}`);
     for (const u of [BENCH_USER, HOLDOUT_USER]) expect(ud).toContain(`--uid-owner ${u} -d 169.254.169.254 -j REJECT`);
+  });
+
+  it('agree on the dependency-snapshot user, and the user-data of a deps instance sets it up and blocks metadata for it', () => {
+    expect(DEPS_OS_USER).toBe(DEPS_USER);
+    const ud = depsUserData({ optimizationId: 'opt1', instanceType: 'c7i.2xlarge', imageRef: 'ami', purpose: 'deps' }, 2);
+    expect(ud).toContain(`useradd --system --no-create-home --shell /usr/sbin/nologin ${DEPS_USER}`);
+    expect(ud).toContain(`--uid-owner ${DEPS_USER} -d 169.254.169.254 -j REJECT`);
+  });
+
+  it('agree on the prefixes the deps identity is scoped to in infra/aws (reads bench-inputs/*/deps-base.tgz, writes bench-deps/*)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const policy = readFileSync(new URL('../../../infra/aws/policies/deps_runner_policy.json.tftpl', import.meta.url), 'utf8');
+    expect(policy).toContain(`/${STAGING_PREFIX}*/${DEPS_BASE_ARCHIVE}`);
+    expect(policy).toContain(`/${DEPS_PREFIX}*`);
   });
 });
