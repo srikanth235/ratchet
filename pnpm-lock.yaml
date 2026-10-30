@@ -21,6 +21,8 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1
 
+  examples/demo-forecast: {}
+
   examples/demo-search:
     devDependencies:
       yaml:

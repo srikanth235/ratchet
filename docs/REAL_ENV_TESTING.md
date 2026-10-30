@@ -38,3 +38,12 @@ The sandbox isolates the bench: it runs in a private subnet with no internet rou
 | Root escape on the bench instance (kernel / sudo misconfig) | Mitigated only by a short instance lifetime and a single-purpose AMI |
 | Egress proxy is a single instance (when `enable_egress_proxy`) | SPOF: if it fails, agents lose model access; off by default |
 | `bench-inputs/` tarballs accumulate | Needs an S3 lifecycle rule; check after the first run |
+
+## Forecasting pack (`examples/demo-forecast`)
+
+Simulated only, on synthetic weekly sales. Scripted agents take WAPE from 43.5 to about 24 with 5 verified wins; a leakage attempt and an evaluator-file edit are `blocked`, and per-window calibration that overfits the backtest is `failed_confirm` on the holdout. Before a real run:
+
+- Use a real dataset: the holdout must be the most recent weeks, staged in the sealed bucket, never in the repo.
+- The leakage guardrail checks feature timestamps. It does not detect target leakage hidden in derived columns of a real dataset; review the dataset's columns first.
+- The `value` model ($ per WAPE point) is a placeholder; set `basis: measured` only once finance signs off on the figure.
+- Backtests are deterministic, so `repeats: 2` is enough; the noise floor comes from fold variance, not machine noise. Check that it stays above zero on real data.
