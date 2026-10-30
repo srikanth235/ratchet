@@ -8,7 +8,7 @@
  * - Agents: LocalRunnerControl running the real runner loop with ScriptedAgent
  *   (real patches from packages/agents/scripts/<demo>)
  *
- * Pack-aware: pick a demo with `project` ('search' = perf pack, 'forecast' = forecasting pack). A demo adapts its
+ * Pack-aware: pick a demo with `project` ('search' and 'cli' = perf pack, 'forecast' = forecasting pack). A demo adapts its
  * ratchet.yaml for local runs with an optional `ratchet.sim.yaml` overlay (see `SimOverlay`).
  */
 import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
@@ -20,15 +20,16 @@ import { Engine, type EngineSettings } from '@ratchet/engine';
 import { FsArtifactStore, MockCloudCompute, MockSandboxProvider, StaticPriceBook } from '@ratchet/aws';
 import { LocalGitHost, createBareRemote } from '@ratchet/github';
 import { LocalBenchRunner } from '@ratchet/bench';
-import { LocalRunnerControl, ScriptedAgent, loadDemoForecastScript, loadDemoSearchScript, type AgentScript } from '@ratchet/agents';
+import { LocalRunnerControl, ScriptedAgent, loadDemoCliScript, loadDemoForecastScript, loadDemoSearchScript, type AgentScript } from '@ratchet/agents';
 import { systemClock } from './clock.js';
 
 /** The shipped demo projects the simulator can optimize. */
-export type SimulationProject = 'search' | 'forecast';
+export type SimulationProject = 'search' | 'forecast' | 'cli';
 
 export const SIMULATION_PROJECTS: Record<SimulationProject, { dir: string; pack: string; scripts: (variant: 'cc' | 'cx') => AgentScript }> = {
   search: { dir: 'examples/demo-search', pack: 'perf', scripts: loadDemoSearchScript },
   forecast: { dir: 'examples/demo-forecast', pack: 'forecasting', scripts: loadDemoForecastScript },
+  cli: { dir: 'examples/demo-cli', pack: 'perf', scripts: loadDemoCliScript },
 };
 
 export interface SimulationOptions {

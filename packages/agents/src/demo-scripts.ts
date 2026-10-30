@@ -45,3 +45,14 @@ export const DEMO_FORECAST_SCRIPT_DIR = fileURLToPath(new URL('../scripts/demo-f
 export function loadDemoForecastScript(variant: 'cc' | 'cx', dir = DEMO_FORECAST_SCRIPT_DIR): AgentScript {
   return loadScript(join(dir, `${variant}.script.json`), dir);
 }
+
+export const DEMO_CLI_SCRIPT_DIR = fileURLToPath(new URL('../scripts/demo-cli/', import.meta.url));
+
+/**
+ * The shipped demo-cli scripts. `cc` and `cx` play the seven real cold-start fixes from examples/demo-cli/SOLUTIONS.md
+ * in different orders, interleaved with deliberate bad attempts (a bench-harness edit, a golden-file edit, an overfit to the
+ * visible invocation set, a noise-level tweak).
+ */
+export function loadDemoCliScript(variant: 'cc' | 'cx', dir = DEMO_CLI_SCRIPT_DIR): AgentScript {
+  return loadScript(join(dir, `${variant}.script.json`), dir);
+}
