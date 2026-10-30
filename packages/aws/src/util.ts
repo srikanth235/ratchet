@@ -23,6 +23,13 @@ export function assertValidId(kind: string, id: string): void {
   }
 }
 
+/** EC2 instance ids end up in API calls and filters (`*` is a wildcard in EC2 filters), so keep them plain. */
+export function assertValidInstanceId(id: string): void {
+  if (typeof id !== 'string' || !/^i-[0-9a-z]{1,40}$/.test(id)) {
+    throw new Error(`invalid instance id ${JSON.stringify(id)}: must match i-[0-9a-z]+`);
+  }
+}
+
 export function assertValidSandboxId(id: string): void {
   if (!/^[a-z0-9-]{2,32}$/.test(id)) {
     throw new Error(`invalid sandbox id ${JSON.stringify(id)}: must match [a-z0-9-], 2-32 chars`);

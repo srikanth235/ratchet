@@ -1,3 +1,4 @@
+import { MockSandboxProvider } from './mock.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -22,7 +23,7 @@ const PLAN_JSON = JSON.stringify({
     { address: 'aws_iam_role.bench_runner', mode: 'managed', type: 'aws_iam_role', change: { actions: ['delete', 'create'] } },
     { address: 'aws_security_group.bench', mode: 'managed', type: 'aws_security_group', change: { actions: ['delete'] } },
     { address: 'aws_iam_policy.agent_boundary', mode: 'managed', type: 'aws_iam_policy', change: { actions: ['no-op'] } },
-    { address: 'data.aws_vpc.selected', mode: 'data', type: 'aws_vpc', change: { actions: ['read'] } },
+    { address: 'data.aws_availability_zones.available', mode: 'data', type: 'aws_availability_zones', change: { actions: ['read'] } },
   ],
 });
 
@@ -38,7 +39,24 @@ const OUTPUTS_JSON = JSON.stringify({
       instance_profile_name: 'ratchet-demo-bench-runner',
     },
   },
-  network_ref: { value: { vpc_id: 'vpc-1', subnet_id: 'subnet-1', security_group_ids: { agent_runner: 'sg-r', bench: 'sg-b' } } },
+  confirm_identity_ref: {
+    value: {
+      role_arn: 'arn:aws:iam::1:role/ratchet/bench/ratchet-demo-confirm-runner',
+      role_name: 'ratchet-demo-confirm-runner',
+      instance_profile_arn: 'arn:aws:iam::1:instance-profile/ratchet/bench/ratchet-demo-confirm-runner',
+      instance_profile_name: 'ratchet-demo-confirm-runner',
+    },
+  },
+  sealed_confirm_prefix: { value: 'holdout/' },
+  network_ref: {
+    value: {
+      vpc_id: 'vpc-1',
+      subnet_id: 'subnet-1',
+      bench_subnet_id: 'subnet-bench',
+      security_group_ids: { agent_runner: 'sg-r', bench: 'sg-b' },
+      egress_proxy_url: null,
+    },
+  },
   agent_role_path: { value: '/ratchet/agent/' },
   limits: { value: { max_instances_per_agent: 4, max_instance_lifetime_hours: 2 } },
 });
@@ -145,6 +163,18 @@ describe('plan', () => {
     expect(runner.calls).toHaveLength(0);
   });
 
+  it.each(['*', '?', '/', '..', 'a/b', 'a*', 'a?', '../x', 'a', 'Demo', 'x'.repeat(33)])('rejects sandbox id %j at every provider entry point', async (bad) => {
+    const i = { ...input, sandboxId: bad };
+    await expect(tofu.plan(i)).rejects.toThrow(/invalid sandbox id/);
+    await expect(tofu.apply(i)).rejects.toThrow(/invalid sandbox id/);
+    await expect(tofu.destroy(i)).rejects.toThrow(/invalid sandbox id/);
+    await expect(tofu.outputs(bad)).rejects.toThrow(/invalid sandbox id/);
+    expect(() => tofu.workDir(bad)).toThrow(/invalid sandbox id/);
+    await expect(new MockSandboxProvider().plan(i)).rejects.toThrow(/invalid sandbox id/);
+    await expect(new MockSandboxProvider().apply(i)).rejects.toThrow(/invalid sandbox id/);
+    expect(runner.calls).toHaveLength(0);
+  });
+
   it('does not put anything secret-shaped in the vars file', async () => {
     await tofu.plan(input);
     expect(await readFile(join(root, 'demo', 'vars.tfvars.json'), 'utf8')).not.toMatch(/key|token|secret/i);
@@ -164,12 +194,16 @@ describe('apply', () => {
       agentBoundaryRef: 'arn:aws:iam::1:policy/ratchet/ratchet-demo-agent-boundary',
       evalIdentityRef: 'arn:aws:iam::1:instance-profile/ratchet/bench/ratchet-demo-bench-runner',
       agentRolePath: '/ratchet/agent/',
-      network: { subnetId: 'subnet-1', agentRunnerSecurityGroupId: 'sg-r', benchSecurityGroupId: 'sg-b' },
+      network: { subnetId: 'subnet-1', benchSubnetId: 'subnet-bench', agentRunnerSecurityGroupId: 'sg-r', benchSecurityGroupId: 'sg-b', egressProxyUrl: null },
+      sealedConfirmPrefix: 'holdout/',
       region: 'us-east-1',
       vpcId: 'vpc-1',
       limits: { maxInstancesPerAgent: 4, maxInstanceLifetimeHours: 2 },
     });
     expect(out.evalIdentity.roleName).toBe('ratchet-demo-bench-runner');
+    // two identities: eval_identity_ref has NO sealed access, confirm_identity_ref does
+    expect(out.confirmIdentity.instanceProfileArn).toBe('arn:aws:iam::1:instance-profile/ratchet/bench/ratchet-demo-confirm-runner');
+    expect(out.confirmIdentity.roleArn).not.toBe(out.evalIdentity.roleArn);
   });
 
   it('stops after a failed apply', async () => {

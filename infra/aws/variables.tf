@@ -61,14 +61,19 @@ variable "tags" {
 
 # ---- AWS-specific optional inputs ----
 
-variable "vpc_id" {
-  description = "VPC to launch into. Null = the account's default VPC."
+variable "vpc_cidr" {
+  description = "CIDR of the dedicated sandbox VPC created by the module (the account's default VPC is never used). /16 or /20; /24 subnets are carved out of it."
   type        = string
-  default     = null
+  default     = "10.42.0.0/16"
+
+  validation {
+    condition     = can(cidrnetmask(var.vpc_cidr)) && tonumber(split("/", var.vpc_cidr)[1]) <= 20 && tonumber(split("/", var.vpc_cidr)[1]) >= 16
+    error_message = "vpc_cidr must be a valid IPv4 CIDR with a prefix length between /16 and /20."
+  }
 }
 
-variable "subnet_id" {
-  description = "Subnet to launch into. Null = first subnet (sorted by id) of the VPC."
+variable "availability_zone" {
+  description = "AZ for every subnet (bench hardware, load generator and endpoints share it). Null = first available AZ of the region."
   type        = string
   default     = null
 }
@@ -85,8 +90,54 @@ variable "force_destroy" {
   default     = true
 }
 
-variable "bench_egress_cidrs" {
-  description = "CIDRs the bench security group may reach on 443 (repo checkout, S3, SSM). WARNING: candidate code runs on the bench machine next to the sealed data; narrow this (VPC endpoints / prefix lists) to limit exfiltration."
+variable "sealed_confirm_prefix" {
+  description = "Key prefix in the sealed bucket that the confirm runner may read (the hidden holdout traces). Ends with \"/\"; lowercase letters, digits, \"-\", \"_\" and \"/\" only - it is substituted into an IAM policy, so no wildcards."
+  type        = string
+  default     = "holdout/"
+
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9_-]*(/[a-z0-9][a-z0-9_-]*)*/$", var.sealed_confirm_prefix))
+    error_message = "sealed_confirm_prefix must look like \"holdout/\" or \"traces/v1/\": lowercase letters, digits, \"-\" and \"_\" segments, each followed by \"/\"; no wildcards, \"..\" or empty segments."
+  }
+}
+
+# ---- Agent runner egress allow-list proxy (default off) ----
+
+variable "enable_egress_proxy" {
+  description = "Put agent runners behind a squid allow-list proxy (domains only) and remove their route to the internet. Default off: runners then have HTTPS egress to anywhere. Costs about $7/month (t4g.nano + public IPv4 + EBS); see docs/real-env/aws.md."
+  type        = bool
+  default     = false
+}
+
+variable "egress_proxy_instance_type" {
+  description = "Instance type of the proxy (arm64 / Graviton, because the AMI looked up is Amazon Linux 2023 arm64)."
+  type        = string
+  default     = "t4g.nano"
+
+  validation {
+    condition     = can(regex("^(t4g|c7g|m7g|c6g|m6g)\\.[a-z0-9]+$", var.egress_proxy_instance_type))
+    error_message = "egress_proxy_instance_type must be a Graviton (arm64) type such as t4g.nano."
+  }
+}
+
+variable "egress_proxy_domains" {
+  description = "Domains agent runners may reach through the proxy (squid dstdomain syntax: a leading dot also matches subdomains)."
   type        = list(string)
-  default     = ["0.0.0.0/0"]
+  default     = ["api.anthropic.com", "api.openai.com", ".github.com", ".githubusercontent.com"]
+
+  validation {
+    condition     = alltrue([for d in var.egress_proxy_domains : can(regex("^\\.?[a-z0-9][a-z0-9.-]*\\.[a-z]{2,}$", d))])
+    error_message = "egress_proxy_domains entries must be lowercase domain names, optionally with one leading dot; no wildcards, spaces or ports."
+  }
+}
+
+variable "egress_proxy_extra_domains" {
+  description = "Additional allowed domains, e.g. a package registry (registry.npmjs.org) the runner image needs."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for d in var.egress_proxy_extra_domains : can(regex("^\\.?[a-z0-9][a-z0-9.-]*\\.[a-z]{2,}$", d))])
+    error_message = "egress_proxy_extra_domains entries must be lowercase domain names, optionally with one leading dot."
+  }
 }

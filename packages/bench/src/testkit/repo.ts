@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { parseConfig, type Clock, type GitHost, type RatchetConfig } from '@ratchet/core';
+import { parseConfig, type ArtifactStore, type Clock, type GitHost, type RatchetConfig } from '@ratchet/core';
 
 /** Test helpers: a tiny git repo with a node bench script, a local GitHost, a Clock and a config. */
 
@@ -223,5 +223,27 @@ export function alive(pid: number): boolean {
     return stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3) !== 'Z';
   } catch {
     return true; // no /proc (not Linux): trust kill(0)
+  }
+}
+
+/** ArtifactStore that writes `<root>/<key>`; point `root` at `<s3Dir>/<bucket>` and the fake `aws s3 cp` finds the objects. */
+export class DirStore implements ArtifactStore {
+  puts: string[] = [];
+  constructor(private readonly root: string) {}
+  async put(key: string, body: string | Uint8Array): Promise<void> {
+    const p = join(this.root, key);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, body);
+    this.puts.push(key);
+  }
+  async get(key: string): Promise<string | null> {
+    try {
+      return readFileSync(join(this.root, key), 'utf8');
+    } catch {
+      return null;
+    }
+  }
+  async list(prefix: string): Promise<string[]> {
+    return this.puts.filter((k) => k.startsWith(prefix)).sort();
   }
 }

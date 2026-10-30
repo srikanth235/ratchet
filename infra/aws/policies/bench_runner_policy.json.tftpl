@@ -2,22 +2,16 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "ReadSealedTraces",
+      "Sid": "ReadBenchInputs",
       "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:ListBucket"],
-      "Resource": ["${sealed_bucket_arn}", "${sealed_bucket_arn}/*"]
+      "Action": "s3:GetObject",
+      "Resource": "${artifacts_bucket_arn}/bench-inputs/*"
     },
     {
       "Sid": "WriteBenchResults",
       "Effect": "Allow",
       "Action": ["s3:PutObject", "s3:AbortMultipartUpload"],
       "Resource": "${artifacts_bucket_arn}/bench-results/*"
-    },
-    {
-      "Sid": "ReadBenchSecrets",
-      "Effect": "Allow",
-      "Action": ["ssm:GetParameter", "ssm:GetParameters"],
-      "Resource": "arn:${partition}:ssm:${region}:${account_id}:parameter/ratchet/bench/*"
     },
     {
       "Sid": "SsmManagedInstanceChannel",

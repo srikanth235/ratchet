@@ -59,6 +59,12 @@
       "Condition": { "StringNotEquals": { "ec2:MetadataHttpTokens": "required" } }
     },
     {
+      "Sid": "DenyRunInstancesInInternalSecurityGroups",
+      "Effect": "Deny",
+      "Action": "ec2:RunInstances",
+      "Resource": ${denied_security_group_arns_json}
+    },
+    {
       "Sid": "DenyInstanceHardeningChanges",
       "Effect": "Deny",
       "Action": [
@@ -94,11 +100,17 @@
       ]
     },
     {
-      "Sid": "AllowRunInstancesNetworkInSandboxVpcOnly",
+      "Sid": "AllowRunInstancesAgentSubnetOnly",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "${agent_subnet_arn}",
+      "Condition": { "ArnEquals": { "ec2:Vpc": "${vpc_arn}" } }
+    },
+    {
+      "Sid": "AllowRunInstancesGroupsAndInterfacesInSandboxVpcOnly",
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
       "Resource": [
-        "arn:${partition}:ec2:${region}:${account_id}:subnet/*",
         "arn:${partition}:ec2:${region}:${account_id}:security-group/*",
         "arn:${partition}:ec2:${region}:${account_id}:network-interface/*"
       ],

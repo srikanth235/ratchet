@@ -5,14 +5,14 @@ import { TeardownBlockedError } from './tofu.js';
 const input = { sandboxId: 'sim', region: 'us-east-1', allowedInstanceTypes: ['c7i.large'], maxInstancesPerAgent: 4, maxInstanceLifetimeHours: 2 };
 
 describe('MockSandboxProvider', () => {
-  it('plans the 8 resources with real addresses', async () => {
+  it('plans every sandbox resource with real addresses', async () => {
     const p = new MockSandboxProvider();
     const r = await p.plan(input);
-    expect(r.changes).toHaveLength(8);
+    expect(r.changes).toHaveLength(SANDBOX_RESOURCES.length);
     expect(r.changes.every((c) => c.action === 'create')).toBe(true);
     expect(r.changes.map((c) => c.address)).toEqual(SANDBOX_RESOURCES.map((x) => x.address));
     expect(r.changes.map((c) => c.address)).toContain('aws_s3_bucket_policy.sealed_deny_agents');
-    expect(r.summary).toBe('Plan: 8 to add, 0 to change, 0 to destroy.');
+    expect(r.summary).toBe(`Plan: ${SANDBOX_RESOURCES.length} to add, 0 to change, 0 to destroy.`);
   });
 
   it('apply produces contract outputs; outputs() and re-plan reflect it', async () => {

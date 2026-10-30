@@ -242,9 +242,10 @@ variable "allowed_instance_types" { type = list(string) }
 
 # Outputs — identical for every cloud
 output "artifacts_bucket"   { value = ... }  # agent read/write, per-agent prefix
-output "sealed_bucket"      { value = ... }  # bench runner only
+output "sealed_bucket"      { value = ... }  # confirm runner only
 output "agent_boundary_ref" { value = ... }  # AWS: permission boundary ARN
-output "eval_identity_ref"  { value = ... }  # AWS: bench runner role / profile
+output "eval_identity_ref"  { value = ... }  # AWS: bench runner role / profile (no sealed access)
+output "confirm_identity_ref" { value = ... } # AWS: confirm-only role / profile (reads the holdout traces)
 output "network_ref"        { value = ... }  # AWS: subnet + security group
 ```
 
@@ -266,21 +267,26 @@ later).
 
 ### AWS sandbox module (v0)
 
-Into a **dedicated sandbox account**, `infra/aws` creates 8 resources:
+Into a **dedicated sandbox account**, `infra/aws` creates its own VPC and these
+resources (the optional proxy is off by default):
 
 | Resource | Purpose |
 |---|---|
-| `aws_s3_bucket.artifacts` | Agent event streams and build outputs, one prefix per agent |
-| `aws_s3_bucket.sealed` | Hidden traffic traces, bench runner only |
-| `aws_s3_bucket_policy.sealed_deny_agents` | Explicit deny for every agent identity |
-| `aws_iam_policy.agent_boundary` | Permission boundary for every agent role |
-| `aws_iam_role.bench_runner` | Trusted re-bench with separate credentials |
-| `aws_iam_instance_profile.bench_runner` | Attached to bench instances |
-| `aws_security_group.agent_runner` | Egress to model APIs, GitHub, AWS endpoints only |
-| `aws_security_group.bench` | Load generator ↔ target inside VPC, no inbound from agents |
+| `aws_s3_bucket.artifacts` | Agent event streams and build outputs, one prefix per agent; `bench-inputs/` (staged candidates, read-only for the bench) and `bench-results/` |
+| `aws_s3_bucket.sealed` | Hidden traffic traces, confirm runner only (holdout prefix) |
+| `aws_s3_bucket_policy.sealed_deny_agents` | Explicit deny for every agent identity and for the bench runner |
+| `aws_iam_policy.agent_boundary` | Permission boundary for every agent role (launch only into the agent subnet, never with bench/endpoint/proxy groups) |
+| `aws_iam_role.bench_runner` + `aws_iam_instance_profile.bench_runner` | Trusted bench for `baseline`/`bench` phases: **no sealed access** |
+| `aws_iam_role.confirm_runner` + `aws_iam_instance_profile.confirm_runner` | Trusted bench for `confirm` only: reads the holdout prefix of the sealed bucket |
+| `aws_vpc.sandbox`, `aws_subnet.bench`, `aws_subnet.agent`, route tables, internet gateway | Dedicated network; the bench subnet has no route to the internet |
+| `aws_vpc_endpoint.s3` (gateway, bucket-restricted policy) + 4 interface endpoints (`ssm`, `ssmmessages`, `ec2messages`, `logs`) | The only ways out of the bench subnet |
+| `aws_security_group.agent_runner` | Egress HTTPS + DNS (or, with the proxy, only proxy / endpoints / S3) |
+| `aws_security_group.bench` | Load generator ↔ target and the endpoints only; no inbound from agents, no internet |
+| `aws_security_group.endpoints` | 443 from the bench and agent subnets to the interface endpoints |
+| `aws_subnet.proxy`, `aws_security_group.egress_proxy`, `aws_instance.egress_proxy` | **Optional** (`enable_egress_proxy`): squid allow-list proxy (~$7.5/month; Network Firewall would be ~$290) |
 
-Per-agent roles, runner instances and SSM secrets are created by the app per
-optimization (below), not by OpenTofu.
+Per-agent roles, runner instances, bench instances and SSM secrets are created
+by the app per optimization (below), not by OpenTofu.
 
 ### Agent credentials (per agent)
 
@@ -300,11 +306,17 @@ optimization (below), not by OpenTofu.
 ### Trusted bench runner
 
 1. Watcher sees a candidate on an agent branch.
-2. App launches pinned hardware (e.g. `c7i.2xlarge`, dedicated host, load
-   generator in the same AZ) with the `bench_runner` role.
-3. Checks out the candidate for code and `bench.ref` for the benchmark.
+2. App stages the candidate (code) and `bench.ref` (benchmark) as archives in
+   the artifacts bucket (`bench-inputs/`), then launches pinned hardware (e.g.
+   `c7i.2xlarge`, load generator in the same AZ) in the **private bench subnet**
+   with the `bench_runner` role (`baseline`/`bench` phases) or the
+   `confirm_runner` role (`confirm` only). The instance has no internet and no
+   git credentials: it downloads the archives through the S3 endpoint.
+3. Setup, guardrails and the benchmark run as an unprivileged OS user that
+   cannot reach instance metadata (iptables owner rule, IMDSv2 hop limit 1).
 4. Runs guardrails, then the benchmark N times; if it beats the best, runs the
-   confirm on a fresh instance against the hidden trace.
+   confirm on a fresh instance against the hidden trace (fetched by a root
+   pre-step; the bench process can read but not replace it).
 5. Writes result JSON to S3; the app updates the ledger and ratchet and
    notifies the agent.
 

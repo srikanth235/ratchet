@@ -1,0 +1,8 @@
+#!/bin/bash
+set -euo pipefail
+dnf install -y squid
+cat > /etc/squid/squid.conf <<'RATCHET_SQUID_EOF'
+${squid_conf}
+RATCHET_SQUID_EOF
+squid -k parse
+systemctl enable --now squid

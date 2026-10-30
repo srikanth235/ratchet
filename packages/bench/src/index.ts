@@ -18,7 +18,8 @@ export {
 } from './pipeline.js';
 export { LocalBenchRunner, type LocalBenchRunnerOptions } from './local.js';
 export { RemoteBenchRunner, type RemoteBenchRunnerOptions } from './remote.js';
-export { protectedPcre } from './remote-scripts.js';
+export { protectedPcre, BENCH_USER, type Isolation, type StagedArchive } from './remote-scripts.js';
+export { stageSource, STAGING_PREFIX, type StagedSource, type StageInput } from './stage.js';
 export { BenchQueue, stateLabel, type BenchQueueOptions, type BenchRequest, type BenchTicket, type QueueEvent } from './queue.js';
 export {
   benchResultRecord,

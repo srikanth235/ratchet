@@ -11,7 +11,7 @@ or production account).
 | Implementation | Unit tests prove | Only a real account proves |
 |---|---|---|
 | `TofuSandboxProvider` | CLI sequence, args, vars file, plan/output parsing, destroy guard, per-sandbox locking | `-state`/`TF_DATA_DIR` behave as assumed with a saved plan, the module applies cleanly, outputs shape |
-| `AwsCloudCompute` | Exact request params: role path, boundary, tags, IMDSv2, terminate-on-shutdown, profile, deletion order, SSM paths | IAM eventual-consistency retry is enough, the boundary really permits/denies as intended, SSM agent reachability |
+| `AwsCloudCompute` | Exact request params: role path, boundary, tags, IMDSv2, terminate-on-shutdown, profile (bench profile for `baseline`/`bench`, confirm profile only for `confirm`, fail closed otherwise), subnet (bench subnet for bench), deletion order, SSM paths; that `*`, `?`, `/`, `..` are rejected as ids at every entry point | IAM eventual-consistency retry is enough, the boundary really permits/denies as intended, SSM agent reachability, that the iptables/user bootstrap works on the AMI |
 | `AwsPriceBook` | Filters sent, price parsing, cache | Filters match real Pricing API attribute values |
 | `S3ArtifactStore` | Request params, paging, NoSuchKey | Bucket policy / SSE / the agent prefix restriction |
 | `CostMeter`, `BudgetGuard`, `Reaper` | Math, rules, idempotency (against `MockCloudCompute`) | Tag filters return what we expect; `StateTransitionReason` parsing; real instance lifetimes |
@@ -21,7 +21,9 @@ or production account).
 - A dedicated AWS account with an SSO profile; `export AWS_PROFILE=ratchet-sandbox AWS_REGION=us-east-1`.
 - A pinned `tofu` binary (`tofu version`) and this repo built: `pnpm install && pnpm build`.
 - A runner AMI and a bench AMI (Node, git, agent CLIs, AWS CLI, SSM agent, a `ratchet` binary
-  on PATH providing `ratchet runner` / `ratchet bench-agent`). Until those exist, use any
+  on PATH providing `ratchet runner` / `ratchet bench-agent`). The bench AMI additionally needs `iptables`,
+  `setpriv`, `pkill`, GNU `find`/`grep -P`/`sha256sum` and a world-readable toolchain (see `bench.md`); it does not
+  need git. Until those exist, use any
   SSM-enabled Amazon Linux AMI: instances will launch, tag, accrue cost and be SSM-reachable,
   which is all steps 2-6 need.
 - Billing alarms on the account (the kill switch is a backstop, not a substitute).
@@ -47,12 +49,16 @@ console.log(await sandbox.plan(input));   // then apply, outputs, destroy
 
 | Step | Command | Expected |
 |---|---|---|
-| plan | `sandbox.plan(input)` | 8 resources + `aws_iam_role_policy.bench_runner` with action `create`; summary `Plan: 9 to add, 0 to change, 0 to destroy.` (count may differ by the extra policy/public-access-block resources; every `create`) |
+| plan | `sandbox.plan(input)` | every change is `create`: buckets and their hardening, the boundary, **two** runner identities (`bench_runner`, `confirm_runner`: role, profile, policy each), the VPC, subnets, route tables, the S3 gateway endpoint, 4 interface endpoints (`ssm`, `ssmmessages`, `ec2messages`, `logs`), the endpoint/agent-runner/bench security groups. Roughly 50 resources; no proxy resources unless `enable_egress_proxy`. (`SANDBOX_RESOURCES` in `sandbox/mock.ts` lists the headline ones.) |
 | state location | `ls /tmp/ratchet-sandboxes/rt-test` | `vars.tfvars.json`, `plan.tfplan`, `.terraform-data/`; and **no** `terraform.tfstate` or `.terraform*` in `infra/aws/` (`git status infra/` clean) |
-| apply | `sandbox.apply(input)` | resolves with `artifactsBucket`, `sealedBucket`, `agentBoundaryRef` (ARN), `agentRolePath: '/ratchet/agent/'`, network ids, `limits` `{4, 2}`; `terraform.tfstate` now present under the sandbox dir; `plan.tfplan` removed |
+| apply | `sandbox.apply(input)` | resolves with `artifactsBucket`, `sealedBucket`, `agentBoundaryRef` (ARN), `agentRolePath: '/ratchet/agent/'`, network ids incl. `benchSubnetId` (different from `subnetId`) and `egressProxyUrl: null`, `evalIdentity` **and** `confirmIdentity` (different profiles), `sealedConfirmPrefix: 'holdout/'`, `limits` `{4, 2}`; `terraform.tfstate` now present under the sandbox dir; `plan.tfplan` removed |
 | idempotent | `sandbox.plan(input)` again | every change `no-op` |
 | outputs | `sandbox.outputs('rt-test')` (new process) | same values; `region` restored from `vars.tfvars.json`; unknown id -> `null` |
 | console check | `aws s3api get-public-access-block --bucket <sealed>` | all four true |
+| network | `aws ec2 describe-route-tables --filters Name=vpc-id,Values=<vpc>` | the route table of the bench subnet has only the `local` route and the S3 prefix list; the only `0.0.0.0/0` route (to the internet gateway) is on the public table; `describe-vpc-endpoints` lists one gateway and four interface endpoints, all `available`, private DNS enabled; the default security group has no rules |
+| endpoint policy | `aws ec2 describe-vpc-endpoints --filters Name=service-name,Values=com.amazonaws.<region>.s3 --query 'VpcEndpoints[0].PolicyDocument'` | only the two sandbox buckets |
+| sealed policy | `aws s3api get-bucket-policy --bucket <sealed>` | statements `DenyAgentRolesByPath`, `DenyAnyPrincipalTaggedAsAgent`, `DenyBenchRunner`, `DenyInsecureTransport` |
+| roles | `aws iam simulate-principal-policy --policy-source-arn <bench_runner role> --action-names s3:GetObject --resource-arns arn:aws:s3:::<sealed>/holdout/x` | `implicitDeny` (and explicit deny from the bucket policy); the same for the confirm runner role is `allowed`, and `.../other/x` is `implicitDeny` |
 
 **Unverified assumption to check first:** we pass `-state=<path>` to both `plan` and
 `apply <planfile>`. If `tofu apply` rejects `-state` with a saved plan, drop it from
@@ -98,12 +104,15 @@ const runner = await cloud.launchRunner({ optimizationId: 'opt1', agentId: 'a1',
 
 | Check | Command | Expected |
 |---|---|---|
-| launch | `aws ec2 describe-instances --instance-ids <id>` | `MetadataOptions.HttpTokens=required`, `InstanceInitiatedShutdownBehavior` = `terminate` (`aws ec2 describe-instance-attribute --attribute instanceInitiatedShutdownBehavior`), subnet = `network_ref.subnet_id`, SG = agent_runner SG, profile = agent profile, tags `ratchet:opt/agent/role=agent_runner/sandbox`, volume tagged too |
+| launch | `aws ec2 describe-instances --instance-ids <id>` | `MetadataOptions.HttpTokens=required`, `InstanceInitiatedShutdownBehavior` = `terminate` (`aws ec2 describe-instance-attribute --attribute instanceInitiatedShutdownBehavior`), subnet = `network_ref.subnet_id` (agent subnet), SG = agent_runner SG, profile = agent profile, tags `ratchet:opt/agent/role=agent_runner/sandbox`, volume tagged too |
 | IAM propagation | launch immediately after `createAgentIdentity` | succeeds, possibly after retries (log the number; if >6 retries are needed, raise `iamPropagationRetries`) |
-| user-data | `aws ec2 describe-instance-attribute --attribute userData` (base64 decode) | contains refs (`RATCHET_SECRET_REFS`), **no secret values**, `shutdown -h +120` |
+| user-data | `aws ec2 describe-instance-attribute --attribute userData` (base64 decode) | contains refs (`RATCHET_SECRET_REFS`), **no secret values**, `shutdown -h +120`; with the proxy enabled also `HTTPS_PROXY`, `NO_PROXY` and `/etc/profile.d/ratchet-proxy.sh` |
 | list | `cloud.listTagged('opt1')` | the runner with `role: 'agent_runner'`, `state` pending->running |
 | SSM | `cloud.runCommand(runner.id, { script: 'echo $X; id -un', env: { X: "a'b" } })` | `{exitCode:0, stdout:"a'b\n..."}`; `exit 7` -> `exitCode 7`; a `sleep` beyond `timeoutSeconds` -> exit 124. Note: SSM truncates stdout at 24000 chars |
-| bench | `cloud.launchBenchInstance({ optimizationId:'opt1', instanceType:'c7i.2xlarge', imageRef:'ami-...', purpose:'baseline' })` | eval instance profile, bench SG, no `ratchet:agent` tag, role=`bench` |
+| bench | `cloud.launchBenchInstance({ optimizationId:'opt1', instanceType:'c7i.2xlarge', imageRef:'ami-...', purpose:'baseline' })` | eval (bench-runner) instance profile, **bench subnet** (`network_ref.bench_subnet_id`), bench SG, no public IP, `HttpPutResponseHopLimit=1`, no `ratchet:agent` tag, role=`bench`, `ratchet:purpose=baseline` |
+| bench (confirm) | the same with `purpose:'confirm'` | the `...-confirm-runner` instance profile; every other attribute identical. With `confirmInstanceProfile` unset the call throws and launches nothing |
+| bench user-data | decode the bench instance's user-data | creates `ratchet-bench`, installs `iptables -I OUTPUT 1 -m owner --uid-owner ratchet-bench -d 169.254.169.254 -j REJECT` before starting `ratchet bench-agent`. On the instance: `sudo -u ratchet-bench curl -m 3 http://169.254.169.254/latest/meta-data/` fails, `curl` as root works |
+| boundary network | from the runner: `run-instances` into the bench subnet, into the proxy subnet, and with `--security-group-ids <bench sg>` (each separately) | all explicitly denied (`DenyRunInstancesInInternalSecurityGroups`, subnet not in `AllowRunInstancesAgentSubnetOnly`); into the agent subnet with the agent_runner SG it succeeds |
 | experiment role | from the runner (`aws ec2 run-instances ... --tag-specifications` with only opt+agent tags, IMDSv2, no profile) | succeeds under the agent role; `listTagged` classifies it `experiment`. The same call without tags, with other tags, with `HttpTokens=optional`, or with a non-allow-listed type must be denied |
 | terminate | `cloud.terminate([ids])`, twice | no error the second time; `describe-instances` shows `shutting-down` -> `terminated` |
 
@@ -199,6 +208,37 @@ aws s3api list-buckets --query "Buckets[?starts_with(Name,'ratchet-rt-test')].Na
 ```
 
 Also confirm Cost Explorer shows no spend growth the next day.
+
+## 9. Egress proxy (only if `enable_egress_proxy = true`)
+
+Default is off; do this section only when you turn it on (`-var enable_egress_proxy=true`). Cost is about
+$7.5/month on top of the always-on network (about $29/month for the four interface endpoints); see
+`infra/README.md`. With the proxy the agent subnet has **no route to the internet**: the only ways out are the
+proxy on 3128, the interface endpoints and the S3 prefix list.
+
+| Check | Command (on an agent runner, via SSM) | Expected |
+|---|---|---|
+| plan/apply | `tofu plan -var enable_egress_proxy=true` | adds `aws_subnet.proxy`, its security group, `aws_instance.egress_proxy`; the agent subnet's route-table association changes to the private table; `network_ref.egress_proxy_url` is `http://10.42.3.10:3128` |
+| proxy up | `systemctl status squid` on the proxy (no SSM profile: use EC2 serial console or a temporary key) / `curl -x $HTTPS_PROXY -I https://api.anthropic.com` | squid listening; `HTTP/1.1 200 Connection established` then the upstream answer |
+| allow-list | `curl -m 8 -x $HTTPS_PROXY https://example.com` and `https://api.github.com` | `example.com` -> `403`/`CONNECT` denied (`TCP_DENIED`); `api.github.com`, `api.anthropic.com`, `api.openai.com`, `raw.githubusercontent.com` work |
+| no direct route | `curl -m 5 --noproxy '*' https://api.anthropic.com` | times out (no route, and the SG has no 443 rule to the internet) |
+| non-443 / plain HTTP | `curl -x $HTTPS_PROXY http://example.com`, `CONNECT example.com:22` | denied |
+| AWS endpoints | `aws sts get-caller-identity`, `aws ec2 describe-instances`, `aws s3 ls s3://<artifacts>/artifacts/opt1/a1/` | work (STS/EC2 via the proxy, S3 via the gateway endpoint; if they hang, `NO_PROXY` in `/etc/ratchet/runner.env` is wrong for that service) |
+| SSM | `cloud.runCommand(runner.id, ...)` | works (SSM agent uses the interface endpoints, not the proxy) |
+| agent CLIs | start `claude -p` and `codex exec` with the runner env | both honor `HTTPS_PROXY` (Node fetch does not by default: if a CLI ignores it, calls time out and the CLI needs a proxy flag or `NODE_USE_ENV_PROXY=1`, or add it to the runner image) |
+| package installs | `pnpm install` in the runner | fails unless the registry is in `egress_proxy_extra_domains`; decide per project, do not allow `*` |
+| failure mode | stop the proxy instance | runners lose model/GitHub access, SSM and S3 keep working; `tofu apply` replaces it |
+
+## 10. Input-validation drill (tag/prefix injection)
+
+The unit tests prove ids with `*`, `?`, `/`, `..` are rejected before any API call at every
+`AwsCloudCompute` entry point, `TofuSandboxProvider`/`MockSandboxProvider` (sandbox id), and
+`RemoteBenchRunner` (optimization id in the `bench-inputs/` prefix). For real, check that nothing else in the
+app builds those names from user input: grep for `ratchet/${`, `artifacts/${` and `/ratchet/` in
+`packages/*/src` and confirm each id passes `assertValidId` first. And on the account: create an agent
+role by hand with `ratchet:agent` = `*` and confirm the boundary's `ratchet:agent` match does not widen
+(the principal tag is substituted literally in `Resource`, but `StringLike`/ARN patterns do glob, which is
+why ids must be validated).
 
 ## Mock/real parity checks
 

@@ -19,8 +19,8 @@ checkout candidate sha + bench.ref  ->  protected overlay  ->  setup  ->  comman
 | | `LocalBenchRunner` | `RemoteBenchRunner` |
 |---|---|---|
 | Used for | simulation mode, `ratchet bench`, development | live mode |
-| Where candidate code runs | this machine, current user, current env (**not a security boundary**) | a fresh bench instance per job (`CloudCompute.launchBenchInstance`), terminated in a `finally` |
-| Checkout | `GitHost.checkout(sha)` and `GitHost.checkout(bench.ref)`, `.git` removed | the instance runs `git fetch <remoteUrl> <sha>` and `<bench.ref>`, then `git archive` |
+| Where candidate code runs | this machine, current user, current env (**not a security boundary**) | a fresh bench instance per job (`CloudCompute.launchBenchInstance`, private subnet with no internet route), as the unprivileged `ratchet-bench` OS user, terminated in a `finally` |
+| Checkout | `GitHost.checkout(sha)` and `GitHost.checkout(bench.ref)`, `.git` removed | **pre-staged**: the controller materializes both trees (`GitHost.resolveRef` + `checkout`), uploads them as `code.tgz` / `bench.tgz` under `bench-inputs/<opt>/<job>/` in the artifacts bucket, and the instance downloads them from S3 (sha256 verified). No git, no GitHub, no token on the instance |
 | Steps | child processes in their own process group | one generated bash script per step through `CloudCompute.runCommand` |
 | Abort | `AbortSignal` kills the process groups | `AbortSignal` stops waiting and terminates the instance |
 
@@ -80,15 +80,19 @@ before any bench time is spent.
 
 ### Remote protocol (what to look at when it breaks)
 
-Steps are separate `runCommand` calls: `ping` (retried while SSM registers), `checkout`, optional
-`trace`, `setup`, `guardrail i/n`, `bench run i/n`. Each script is wrapped so it runs under bash even
+Before any command the controller stages the candidate and `bench.ref` (see `stage.ts`). Steps are
+separate `runCommand` calls: `ping` (retried while SSM registers), `checkout` (download, verify,
+overlay, check the isolation), optional `trace` (root only),  `setup`, `guardrail i/n`, `bench run i/n`. Each script is wrapped so it runs under bash even
 if the SSM document uses `sh`. Results come back as sentinel lines `@@RATCHET@@ <kind> <json>` on
 stdout; SSM returns at most about 24,000 characters per command, so the bench JSON travels as the last
 12,000 bytes of stdout, base64 encoded, one command per run. Consequences: the stored log has only
 output tails for remote runs (full output stays on the instance in `<work>/logs/` until it is terminated),
 and a bench whose final JSON object is larger than 12 kB will not parse. Requirements on the AMI: bash,
-git, tar, GNU coreutils (`timeout`, `realpath -m`, `date +%s%N`), GNU grep with `-P`, the `aws` CLI for
-`s3://` traces, plus the repo's toolchain (node, pnpm, k6).
+tar, GNU coreutils (`timeout`, `realpath -m`, `date +%s%N`, `sha256sum`), GNU findutils (`find -printf`),
+GNU grep with `-P`, util-linux `setpriv`, `pkill`, `iptables` (the instance user-data installs the rule),
+the `aws` CLI (staged archives and `s3://` traces), plus the repo's toolchain (node, pnpm, k6),
+installed world-readable and executable (the bench runs as an unprivileged user, so nothing under `/root`).
+`git` is **not** needed on the bench instance any more.
 
 ## 2. Noise on pinned hardware (PLAN spike B)
 
@@ -140,95 +144,129 @@ Pass: CV recorded, A/A produces no false win in 20 jobs, the chosen `min_gain` i
 
 Flow for a candidate that wins the bench phase (`evaluateCandidate` returns `needsConfirm: true`):
 
-1. Engine submits a `phase: 'confirm'` job (`trace` = the sealed object, e.g. `s3://<sealed>/demo-search-trace.json`,
-   or omit it to use `bench.confirm_trace`). A new instance is launched for it, so the confirm is on
-   fresh hardware by construction.
-2. The instance downloads the trace with the bench-runner instance profile (`ReadSealedTraces` in
-   `infra/aws/policies/bench_runner_policy.json.tftpl`; agents are explicitly denied on the bucket), then runs
-   setup and `bench.run` with `RATCHET_TRACE` pointing at the file. Threshold guardrails (error rate,
-   peak RSS against the baseline) are evaluated on the confirm runs.
-3. The engine calls `evaluateCandidate({ bench, confirm, confirmBest, ... })`. `confirmBest` must be
+1. Engine submits a `phase: 'confirm'` job (`trace` = the sealed object under the holdout prefix, e.g.
+   `s3://<sealed>/holdout/demo-search-trace.json`, or omit it to use `bench.confirm_trace`). A new instance is
+   launched for it, so the confirm is on fresh hardware by construction.
+2. **The profile follows the phase** (`AwsCloudCompute.launchBenchInstance` -> `benchProfileFor`): `baseline` and
+   `bench` instances get `eval_identity_ref` (the `bench_runner` role: reads `bench-inputs/`, writes
+   `bench-results/`, **no sealed access**, and the sealed bucket policy denies it explicitly); only `confirm`
+   gets `confirm_identity_ref` (the `confirm_runner` role: the same plus `s3:GetObject` on
+   `<sealed>/<sealed_confirm_prefix>*`, default `holdout/`). A missing confirm profile makes the launch fail
+   instead of falling back to the bench profile.
+3. The trace is fetched by a **pre-step that runs as root** (the SSM agent's user, the only user that can use
+   the instance-profile credentials) into `<work>/trace/`, as `root:ratchet-bench` mode `0440` (directory `0750`).
+   The bench process can read it (it needs `RATCHET_TRACE`) but cannot replace it. Setup, guardrails and
+   `bench.run` then run as the unprivileged `ratchet-bench` user, with `setpriv --no-new-privs`, a scrubbed
+   `AWS_*` environment, its own `HOME`/`TMPDIR`, and a `pkill -u ratchet-bench` before and after every step.
+   Threshold guardrails (error rate, peak RSS against the baseline) are evaluated on the confirm runs.
+4. The engine calls `evaluateCandidate({ bench, confirm, confirmBest, ... })`. `confirmBest` must be
    the current best's value **on the hidden trace**; the engine gets it by running the baseline (and
    each new best) once in the confirm phase. Without it core falls back to `currentBest`, which is only
    right if bench and trace share a scale.
-4. The instance is terminated; the trace file never leaves it. Only numbers are returned.
+5. The instance is terminated; the trace file never leaves it. Only numbers are returned.
 
 Checks:
 
 - [ ] Trace generated with a seed the agents never saw (`bench/traces/generate.ts --seed <hidden>`),
-      uploaded to the sealed bucket by an admin identity; agents' roles get `AccessDenied` on it (this is
-      also `aws.md` territory; repeat it from a runner here).
+      uploaded under the holdout prefix of the sealed bucket by an admin identity; agents' roles get
+      `AccessDenied` on it (this is also `aws.md` territory; repeat it from a runner here).
+- [ ] **Profile split**: `aws ec2 describe-instances` on a `baseline`/`bench` instance shows the
+      `...-bench-runner` profile, a `confirm` instance the `...-confirm-runner` profile; from a `bench`
+      instance (as root) `aws s3 cp s3://<sealed>/holdout/<trace> -` fails `AccessDenied` (identity policy has
+      nothing, and the bucket policy denies the role); from a `confirm` instance it works, but
+      `s3://<sealed>/other/x` and `aws s3 ls s3://<sealed>/` (no prefix) fail.
 - [ ] A confirm job with `s3://` trace: the instance log shows the `trace` step with `bytes` equal to the
       object size; bench output shows the workload from the trace (request count differs from the bench phase).
 - [ ] A bench-phase job never has `RATCHET_TRACE` (bench output / `env` dump in a test bench).
 - [ ] `confirmBest` flow: baseline measured on the trace once, a candidate that beats the bench mix but
       regresses on the trace ends `failed_confirm`.
 
-### The trust problem you must close before this is real
+### Trust gaps and what closes them
 
-The candidate's server and the load generator run on the **same instance**, in the same trust domain,
-and that instance's profile can read the sealed bucket. Candidate code can therefore try to: read
-`RATCHET_TRACE` (environment inherited by the server the bench script spawns; the file is readable by the
-same user), fetch instance-profile credentials from IMDS and read the sealed bucket directly, or send what
-it finds out over any allowed egress. The demo's `bench/local.ts` spawns the server with the full
-environment; a real bench must not. Required before trusting a confirm result against a hostile agent:
+The candidate's server and the load generator run on the **same instance**, in the same trust domain.
+Candidate code can try to read `RATCHET_TRACE` and the trace file, fetch instance-profile credentials
+from IMDS and read the sealed bucket directly, or send what it finds out over any allowed egress.
+Status of the five mitigations from the review:
 
-1. **Egress lockdown** (below).
-2. **Split identities by phase.** Only `confirm` instances need the sealed bucket. Give `bench` and
-   `baseline` instances a profile without `ReadSealedTraces` (`BenchLaunchSpec.purpose` carries the
-   phase, so the AWS `CloudCompute` can pick the profile), so a candidate running in the bench phase has
-   nothing to steal.
-3. **IMDS**: require IMDSv2 with hop limit 1 and block 169.254.169.254 for the candidate's user (or run
-   the candidate server in a container/network namespace without a route to it).
-4. **Separate users**: run the candidate server as an unprivileged user; the load generator (which needs the
-   trace) as another; trace file 0600 owned by the load generator. Scrub `RATCHET_TRACE` and all
-   `AWS_*` from the server's environment in the bench script (it is in `bench.ref`, so trusted).
-5. The instance lives only for one job; do not reuse it across candidates.
+| # | Gap | Status | Where |
+|---|---|---|---|
+| 1 | Egress lockdown | **Closed in code** (verify for real, below) | `infra/aws/network.tf`: dedicated VPC, bench subnet without a default route, bench SG egress only to itself / endpoint SG / S3 prefix list / DNS |
+| 2 | Split identities by phase | **Closed in code** | `bench_runner` vs `confirm_runner` roles (`infra/aws/iam.tf`), `AwsCloudCompute.launchBenchInstance`, explicit sealed-bucket deny for `bench_runner` |
+| 3 | IMDS | **Closed in code, depends on the image** | launch: IMDSv2 required, hop limit 1; `benchUserData`: iptables owner rule rejecting 169.254.169.254 for `ratchet-bench`; `checkoutScript` verifies the rule *and* probes it as that user, refusing the job otherwise |
+| 4 | Separate users | **Closed in code, depends on the image** | trace fetched as root, file `root:ratchet-bench 0440`; candidate commands via `setpriv` as `ratchet-bench`; leftovers killed between steps. Not done: scrubbing `RATCHET_TRACE` from the server's env is up to `bench.run` in `bench.ref` (the load generator needs it) |
+| 5 | One job per instance | Closed (already) | `RemoteBenchRunner` launches and terminates per job |
 
-The runner implements 5 and the 0600 trace file only. The rest is image/infra work, listed here so the
-real test can fail loudly if it is missing:
+Not solved by any of this (accept or fix before a hostile agent):
 
-- [ ] Exfiltration drill: a candidate whose server tries (a) `curl https://example.com`, (b) `aws s3 ls`
-      / `aws s3 cp s3://<sealed>/...` using IMDS credentials, (c) reading `/proc/<loadgen>/environ`
-      and the trace file, (d) `curl` to a webhook with the trace. In `bench` phase all must fail; in
-      `confirm` phase (a), (b), (d) must fail and (c) must fail once users are split.
+- **Same-user file read.** The load generator and the candidate server share `ratchet-bench`, so candidate
+  code can read the trace file. It has nowhere to send it (no egress), so the remaining channel is the result
+  itself: a candidate can encode trace content in metric values, stdout or its bench output. The stored log keeps
+  stdout tails. Splitting the load generator into a second OS user would need a bench-script change.
+- **DNS.** Security groups do not filter traffic to the VPC resolver, so DNS tunnelling out of the bench
+  subnet works. Close with Route 53 Resolver DNS Firewall (block all, allow the endpoint names).
+- **Privilege escalation** from `ratchet-bench` to root (kernel bugs, a setuid binary on the AMI) defeats
+  the IMDS rule. Keep the AMI minimal; `--no-new-privs` already blocks setuid.
+- **Credentials on the instance** are `bench_runner` (non-confirm) or `confirm_runner`; both can write
+  `bench-results/*`, so a root compromise can forge results for any optimization.
+- Timing side channels and the bench's own HTTP traffic between server and load generator are out of scope.
+
+Exfiltration drill (run it, do not assume it): a candidate whose server tries (a) `curl https://example.com`,
+(b) `aws s3 ls` / `aws s3 cp s3://<sealed>/...` using IMDS credentials, (c) reading the trace file and
+`/proc/<loadgen>/environ`, (d) `curl` to a webhook with the trace, (e) `curl http://169.254.169.254/latest/meta-data/`
+and `PUT /latest/api/token`, (f) `sudo`/`su`/a setuid binary, (g) a DNS lookup of `<trace-bytes>.attacker.example`.
+In `bench` phase (a) to (f) must fail. In `confirm` phase (a), (b), (d), (e), (f) must fail; (c) for the trace *file*
+succeeds by design (same user) and for the *credentials* must fail; (g) is the known residual.
 
 ## 4. Egress lockdown
 
-`infra/aws/network.tf`: the bench security group allows 443 to `var.bench_egress_cidrs`, default
-`0.0.0.0/0`, so today candidate code can reach any HTTPS endpoint on the internet from a box that has
-sealed-bucket credentials. Needed for the pipeline: SSM (`ssm`, `ssmmessages`, `ec2messages`), S3 (trace,
-results), and the candidate/bench fetch. Lock down by:
+What `infra/aws` builds (all in the module, no manual steps):
 
-1. Interface VPC endpoints for SSM, SSM messages and EC2 messages; an S3 gateway endpoint **with an
-   endpoint policy** that allows only the artifacts and sealed buckets (an unrestricted S3 endpoint
-   lets the candidate write to its own bucket).
-2. Remove GitHub from the allowed set: have the controller push the candidate and `bench.ref` to the
-   artifacts bucket (e.g. `git bundle`) and let the instance fetch from S3 via the endpoint. Until then, if
-   GitHub stays reachable, it is an exfiltration channel too (push to any public repo needs credentials the
-   instance does not have, but `curl` to a gist-like service does not).
-3. `bench_egress_cidrs` narrowed to the endpoint/prefix-list CIDRs; DNS to the VPC resolver only
-   (DNS tunnelling is still possible; Route 53 Resolver DNS Firewall closes it).
-4. Setup needs packages (`pnpm install`): either bake `node_modules`/store into the AMI and run
-   `pnpm install --offline --frozen-lockfile`, or allow a package mirror inside the VPC. Do **not**
-   reopen the internet for setup; if you must, run setup in a separate, earlier instance and ship the
-   result (not done today).
+- A **dedicated VPC** (`vpc_cidr`, default `10.42.0.0/16`). The account's default VPC is never used.
+- **Bench subnet**: associated with a route table that has only the implicit local route. No NAT gateway, no
+  internet gateway route.
+- **S3 gateway endpoint** on that route table, with an endpoint policy that admits only the artifacts and
+  sealed buckets (an unrestricted endpoint would let a process write to its own bucket).
+- **Interface endpoints** for `ssm`, `ssmmessages`, `ec2messages` and `logs` (private DNS on), behind a
+  security group that accepts 443 only from the bench and agent subnets.
+- **Bench security group**: ingress only from itself; egress to itself, to the endpoint security group on 443,
+  to the S3 prefix list on 443, and DNS. There is no `0.0.0.0/0` rule and `bench_egress_cidrs` is gone.
+- The candidate arrives as a staged archive in S3 (above); GitHub is not in the allowed set, so it is no
+  exfiltration channel.
+- Setup needs packages (`pnpm install`): bake `node_modules`/the store into the AMI and run
+  `pnpm install --offline --frozen-lockfile`. Do **not** reopen the internet for setup; if you must, run
+  setup in a separate, earlier instance and ship the result (not done today).
 
-Pass: from a bench instance, `curl -m 5 https://example.com` and `https://github.com` fail, SSM and the
-allowed S3 prefixes work, a full bench + confirm job succeeds.
+Pass criteria, on a real bench instance (via SSM):
+
+- [ ] `curl -m 5 https://example.com`, `https://github.com` and `https://s3.amazonaws.com` (no endpoint
+      match) fail, as root and as `ratchet-bench`; `getent hosts example.com` resolves (DNS is allowed).
+- [ ] `aws ssm get-parameter` is not needed; SSM Run Command works (this is the only control channel),
+      and `aws s3 cp s3://<artifacts>/bench-inputs/... .` works from the instance.
+- [ ] `aws s3 cp x s3://<some-other-bucket>/` fails even with credentials that would allow it elsewhere
+      (endpoint policy); `aws s3 ls s3://<artifacts>/artifacts/` fails (identity policy).
+- [ ] `ip route` shows no default route; `aws ec2 describe-route-tables` for the bench subnet has no `0.0.0.0/0`.
+- [ ] From an agent runner: connecting to a bench instance's ports fails (no inbound from agents).
+- [ ] An agent role cannot `run-instances` into the bench subnet or with the bench/endpoint/proxy security
+      groups (explicit deny; see `aws.md` section 3).
+- [ ] A full bench + confirm job succeeds end to end.
 
 ## 5. Live smoke checklist for `RemoteBenchRunner`
 
 Run against a real instance with a throwaway repo first, then `examples/demo-search`.
 
+- [ ] Staging: `bench-inputs/<opt>/<job>/{code,bench}.tgz` appear in the artifacts bucket before the instance
+      is used; an agent role cannot read or overwrite them (`AccessDenied`); the instance's `checkout` output
+      reports `"isolation":"user"`; a hand-edited object (same key, other bytes) fails with `sha256 mismatch`.
+- [ ] Isolation refusal: on an AMI without the `ratchet-bench` user, or with the iptables rule removed
+      (`iptables -D OUTPUT ...`), the job fails in `checkout` (exit 12/13/14) and the candidate never runs.
 - [ ] `launchBenchInstance` -> `ping` succeeds within `readyAttempts * readyDelayMs`; tune the defaults
       (30 x 10 s) to the real SSM registration time.
-- [ ] Checkout of a private repo works: the instance needs git credentials (instance profile + credential
-      helper reading SSM `/ratchet/bench/*`, or a short-lived token in `repoUrl`). A token in `repoUrl`
-      is visible in SSM command history; prefer the credential helper.
-- [ ] `git fetch <url> <full sha>` of a commit that is not a branch tip works (GitHub allows it; the
-      script falls back to fetching all branches and tags otherwise).
-- [ ] `grep -P`, `realpath -m`, `timeout -k`, `date +%s%N` exist on the AMI.
+- [ ] Staging of a private repo works: the **controller's** `GitHost` (token on the Mac, not on the instance)
+      materializes `sha` and `bench.ref`; a sha that is not a branch tip works (`resolveRef` + `checkout`).
+      `tar` archives with symlinks and the executable bit survive the round trip (compare `find -ls` of a
+      checkout with the repo).
+- [ ] `grep -P`, `realpath -m`, `timeout -k`, `date +%s%N`, `find -printf`, `sha256sum`, `setpriv`, `pkill`,
+      `iptables` exist on the AMI; the toolchain is runnable by `ratchet-bench` (`sudo -u ratchet-bench node -v`).
 - [ ] Output limit: a bench that prints 5 MB of logs still parses (only the stdout tail travels);
       `runCommand` does not throw on large output; stored log shows the tails.
 - [ ] Timeouts: `timeoutSeconds` (step timeout + 120 s) is honoured by the real `runCommand`; a hung
@@ -246,8 +284,9 @@ Run against a real instance with a throwaway repo first, then `examples/demo-sea
 
 | Real thing | Test stand-in | What that does *not* prove |
 |---|---|---|
-| EC2 bench instance + SSM `RunShellScript` | `LocalFakeCompute`: runs each generated script with local `bash`, truncates stdout to 24,000 characters, an `aws` shim copies `s3://b/k` from a directory | SSM latency and registration, the document's shell, real command timeouts and polling, IAM, IMDS, security groups, AMI contents, that the instance's `git` can reach the repo; `terminate` there kills the process tree, which a real termination does by destroying the machine |
-| GitHub / git remote | `LocalGitHost` (`git archive` of a local repo) | auth, rate limits, fetch-by-sha policy of the host |
+| EC2 bench instance + SSM `RunShellScript` | `LocalFakeCompute`: runs each generated script with local `bash`, truncates stdout to 24,000 characters, an `aws` shim copies `s3://b/k` from a directory | SSM latency and registration, the document's shell, real command timeouts and polling, IAM, IMDS, security groups and endpoints, AMI contents; `terminate` there kills the process tree, which a real termination does by destroying the machine |
+| GitHub / git remote | `LocalGitHost` (`git archive` of a local repo) feeding `stageSource`; the staging store is a directory the `aws` shim reads | auth, rate limits of the real `GitHubGitHost`, real S3 puts, the instance-side download through the gateway endpoint |
+| Unprivileged user, IMDS block | `setpriv`/`iptables`/`pkill`/`chown`/`id` are shims that log their arguments (`isolation: 'user'` tests); most tests run `isolation: 'none'` | that the user and the iptables rule exist on the image, that the rule really rejects IMDS for that uid, that `setpriv --no-new-privs` blocks escalation, that the toolchain is usable by that user |
 | Hidden trace in the sealed bucket | a local file / shimmed `s3://` path | bucket policy, KMS, that agents cannot read it |
 | k6 | not used; the demo test runs `node dist/bench/local.js --duration 3 --warmup 1` | k6 JSON output (`RESULT_FILE`) and the k6 script's own contract |
 | Noise | tests assert logic, not variance | everything in section 2 |
