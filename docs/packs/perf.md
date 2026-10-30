@@ -36,6 +36,13 @@ The agents can run the benchmark on `bench/query-mix.json` as often as they like
 only) on a fresh instance. A win must also beat the best's own score on that mix, so special-casing the visible queries
 (a cache keyed on the benchmark's strings, a precomputed answer table) shows up as a `failed_confirm`.
 
+On a live bench instance the load generator (`bench.run`, trusted code) runs as `ratchet-holdout` and is the only
+reader of the trace; the candidate's server runs as `ratchet-bench`, started through `$RATCHET_CANDIDATE_EXEC`, and never
+sees the file or `RATCHET_TRACE` (it does see each request the load generator sends it, which is inherent). Keep the load
+generator in `protected` paths and not compiled by `setup`: the k6 script (`bench/k6/search.js`) qualifies; the Node
+fallback `dist/bench/local.js` is built from the candidate's checkout and so is only a development tool (it already uses
+the launcher when `RATCHET_CANDIDATE_EXEC` is set). See `docs/real-env/bench.md`, "The harness / candidate split".
+
 ## Guardrails
 
 - `pnpm test:unit`, `pnpm test:contract`: the contract suite validates responses against `openapi.yaml` and pins result
