@@ -80,4 +80,5 @@ export const K = {
   launch: (agent: string) => `agent:${agent}:launch_step`,
   revoked: (agent: string) => `agent:${agent}:revoked`,
   acct: (instance: string) => `acct:${instance}`,
+  sandboxInput: (sandbox: string) => `sandbox:${sandbox}:input`,
 } as const;

@@ -6,4 +6,5 @@ export * from './ratchet/index.js';
 export * from './protected.js';
 export * from './value.js';
 export * from './ledger/index.js';
+export * from './sandbox/index.js';
 export type * from './ports/index.js';

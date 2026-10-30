@@ -1,4 +1,4 @@
-import { openLedger, type AgentKind, type Ledger } from '@ratchet/core';
+import { openLedger, type AgentKind, type Ledger, type Mode } from '@ratchet/core';
 import { Engine } from '../engine.js';
 import type { EngineSettings } from '../settings.js';
 import {
@@ -45,6 +45,7 @@ export interface Harness {
   bench: FakeBench;
   runners: FakeRunners;
   compute: FakeCompute;
+  sandbox: FakeSandbox;
   prices: FakePrices;
   artifacts: FakeArtifacts;
   engine: Engine;
@@ -66,6 +67,7 @@ export interface BeginOptions {
   plateauEvals?: number;
   baseline?: number[];
   confirmBaseline?: number[];
+  sandboxId?: string;
 }
 
 export interface HarnessOptions {
@@ -73,6 +75,7 @@ export interface HarnessOptions {
   hourly?: number;
   settings?: EngineSettings;
   configYaml?: string;
+  mode?: Mode;
 }
 
 export function makeHarness(opts: HarnessOptions = {}): Harness {
@@ -85,6 +88,7 @@ export function makeHarness(opts: HarnessOptions = {}): Harness {
   const compute = new FakeCompute(log, clock);
   const prices = new FakePrices({}, opts.hourly ?? 1);
   const artifacts = new FakeArtifacts();
+  const sandbox = new FakeSandbox(log);
   const settings: EngineSettings = {
     tickIntervalMs: TICK_MS,
     secrets: (_kind, name) => `value-of-${name}`,
@@ -96,9 +100,9 @@ export function makeHarness(opts: HarnessOptions = {}): Harness {
   const build = (): Engine => {
     const e = new Engine({
       ledger,
-      mode: 'simulation',
+      mode: opts.mode ?? 'simulation',
       clock,
-      ports: { sandbox: new FakeSandbox(), compute, prices, artifacts, git, runners, bench },
+      ports: { sandbox, compute, prices, artifacts, git, runners, bench },
       settings,
     });
     e.subscribe((ev) => events.push(ev));
@@ -106,7 +110,7 @@ export function makeHarness(opts: HarnessOptions = {}): Harness {
   };
 
   const h: Harness = {
-    log, clock, ledger, git, bench, runners, compute, prices, artifacts, settings, events,
+    log, clock, ledger, git, bench, runners, compute, sandbox, prices, artifacts, settings, events,
     engine: build(),
     restart(reopenLedger = false) {
       void h.engine.close();
@@ -143,6 +147,7 @@ export function makeHarness(opts: HarnessOptions = {}): Harness {
         budgetUsd: b.budgetUsd ?? 100,
         timeLimitSeconds: b.timeLimitSeconds ?? 8 * 3600,
         plateauEvals: b.plateauEvals ?? 50,
+        ...(b.sandboxId ? { sandboxId: b.sandboxId } : {}),
       });
       await h.engine.start(id);
       const agents = Object.fromEntries(ledger.listAgents(id).map((a) => [a.kind, a.id]));

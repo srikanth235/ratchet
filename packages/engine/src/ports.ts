@@ -10,7 +10,7 @@ import type {
 
 /** Everything the engine talks to, as the port interfaces from @ratchet/core. */
 export interface EnginePorts {
-  /** Held for the app's setup flow; the engine itself does not apply or destroy the sandbox. */
+  /** Plan / apply / destroy go through the engine (planSandbox, applySandbox, destroySandbox) so the ledger records them. */
   sandbox: SandboxProvider;
   compute: CloudCompute;
   prices: PriceBook;

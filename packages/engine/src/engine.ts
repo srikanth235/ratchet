@@ -31,7 +31,13 @@ import {
   type RatchetOutcome,
   type RunnerHandle,
   type RunnerMessage,
+  type SandboxInput,
+  type SandboxOutputs,
+  type SandboxPlan,
+  type SandboxState,
   type SecretRef,
+  SandboxLifecycle,
+  SandboxLifecycleError,
 } from '@ratchet/core';
 import { metricsFromStats, samplesOf, statsOf } from './bench-stats.js';
 import { CostMeter } from './cost.js';
@@ -109,6 +115,7 @@ export class Engine implements EngineApi {
   private readonly modeValue: Mode;
   private readonly deps: Deps;
   private readonly meter: CostMeter;
+  private readonly sandboxes: SandboxLifecycle;
 
   private readonly listeners = new Set<(e: EngineEvent) => void>();
   private readonly rt = new Map<string, Runtime>();
@@ -138,6 +145,18 @@ export class Engine implements EngineApi {
       reportError: (err, context) => this.reportError(err, context),
     };
     this.meter = new CostMeter(this.deps);
+    this.sandboxes = new SandboxLifecycle({
+      ledger: this.ledger,
+      provider: this.ports.sandbox,
+      kind: this.modeValue === 'live' ? 'aws' : 'mock',
+      blockers: (id, opts) => this.sandboxBlockers(id, opts),
+      inputs: {
+        get: (id) => this.kv.getJson<SandboxInput>(K.sandboxInput(id)),
+        set: (id, input) => this.kv.setJson(K.sandboxInput(id), input),
+      },
+    });
+    // An apply / destroy that a crash cut short left unknown infrastructure: surface it as `failed`.
+    for (const id of this.sandboxes.recover()) this.reportError(new Error('interrupted by a restart'), `sandbox ${id}`);
     this.resumed = this.resume().catch((err) => {
       this.reportError(err, 'resume');
       return { attached: [] };
@@ -171,11 +190,88 @@ export class Engine implements EngineApi {
     return this.kv.getJson<TeardownReport>(K.teardown(optimizationId));
   }
 
+  // ------------------------------------------------------------------ sandbox lifecycle
+
+  async sandboxState(sandboxId: string): Promise<SandboxState> {
+    return this.sandboxes.state(sandboxId);
+  }
+
+  /** `tofu plan` (or the mock's): what an apply would change. Records the sandbox as `planned` the first time. */
+  planSandbox(input: SandboxInput): Promise<SandboxPlan> {
+    return this.sandboxCall(() => this.sandboxes.plan(input));
+  }
+
+  /** planned -> applying -> applied (or failed); the contract outputs are stored in the ledger. */
+  applySandbox(input: SandboxInput): Promise<SandboxOutputs> {
+    return this.sandboxCall(() => this.sandboxes.apply(input));
+  }
+
+  /**
+   * applied -> destroying -> destroyed. Refused while an optimization in the sandbox is baselining, running or
+   * stopping, while agent identities of its optimizations were not torn down, and while any tagged instance is alive.
+   */
+  destroySandbox(sandboxId: string): Promise<void> {
+    return this.sandboxCall(() => this.sandboxes.destroy(sandboxId));
+  }
+
+  private async sandboxCall<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err instanceof SandboxLifecycleError) throw new EngineError(err.code, err.message, err.details);
+      throw err;
+    }
+  }
+
+  /** The teardown guard for `destroySandbox`: the same orphan check `teardown()` ends with, plus leftover identities. */
+  private async sandboxBlockers(_sandboxId: string, optimizations: OptimizationRow[]): Promise<string[]> {
+    const reasons: string[] = [];
+    for (const o of optimizations) {
+      const left = this.ledger.listAgents(o.id).filter((a) => this.kv.has(K.identity(a.id)));
+      if (left.length > 0) reasons.push(`optimization ${o.id} still has ${left.length} agent identit${left.length === 1 ? 'y' : 'ies'}: run its teardown first`);
+    }
+    try {
+      const alive = (await this.ports.compute.listTagged()).filter((i) => i.state !== 'terminated');
+      if (alive.length > 0) reasons.push(`${alive.length} tagged instance(s) still alive (${alive.map((i) => i.id).join(', ')})`);
+    } catch (err) {
+      // No compute without sandbox outputs: nothing can have been launched. Any other failure blocks (fail closed).
+      if (!(err instanceof EngineError && err.code === 'not_configured')) throw err;
+    }
+    return reasons;
+  }
+
+  /**
+   * Live optimizations need an applied sandbox and are linked to it. In simulation an applied sandbox is linked
+   * when there is one, so the Environments screen and the ledger agree; otherwise the optimization stays unlinked.
+   */
+  private sandboxForNewOptimization(requested: string | undefined): string | null {
+    if (requested !== undefined) assertValidId('sandbox id', requested);
+    const row = requested ? this.ledger.getSandbox(requested) : undefined;
+    if (this.modeValue === 'live') {
+      this.assertSandboxApplied(requested ?? null);
+      return requested!;
+    }
+    return row?.status === 'applied' ? row.id : null;
+  }
+
+  /** Live mode only: an optimization may start only inside an applied sandbox. */
+  private assertSandboxApplied(sandboxId: string | null): void {
+    if (this.modeValue !== 'live') return;
+    if (!sandboxId) {
+      throw new EngineError('sandbox_not_applied', 'live optimizations run inside a sandbox: apply one first (Environments)');
+    }
+    const row = this.ledger.getSandbox(sandboxId);
+    if (row?.status !== 'applied') {
+      throw new EngineError('sandbox_not_applied', `sandbox ${sandboxId} is ${row?.status ?? 'not set up'}: apply it first (Environments)`);
+    }
+  }
+
   // ------------------------------------------------------------------ createOptimization
 
   async createOptimization(input: CreateOptimizationInput): Promise<string> {
     await this.resumed;
     this.validateCreateInput(input);
+    const sandboxId = this.sandboxForNewOptimization(input.sandboxId);
     const id = input.id ?? this.settings.newId?.() ?? `opt-${randomBytes(4).toString('hex')}`;
     assertValidId('optimization id', id);
     if (this.ledger.getOptimization(id)) throw new EngineError('invalid_input', `optimization ${id} already exists`);
@@ -220,6 +316,7 @@ export class Engine implements EngineApi {
         value: config.objective.value
           ? { usdPerUnit: config.objective.value.usd_per_unit, period: config.objective.value.period, basis: config.objective.value.basis, unit: config.objective.value.unit ?? null }
           : null,
+        sandboxId,
       });
       for (const s of slots) {
         this.ledger.addAgent({ id: s.agentId, optimizationId: id, kind: s.kind, branch: s.branch, status: 'pending', createdAt: now });
@@ -303,6 +400,7 @@ export class Engine implements EngineApi {
     if (opt.status !== 'draft' && !resumable) {
       throw new EngineError('invalid_state', `optimization ${id} is ${opt.status}; only a draft can be started`);
     }
+    this.assertSandboxApplied(opt.sandboxId);
     await this.beginStart(id);
   }
 

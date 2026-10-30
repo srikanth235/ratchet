@@ -346,14 +346,44 @@ export class FakeArtifacts implements ArtifactStore {
 }
 
 export class FakeSandbox implements SandboxProvider {
-  async plan(_i: SandboxInput): Promise<{ changes: PlanChange[]; summary: string }> {
-    return { changes: [], summary: 'no changes' };
+  readonly applied = new Map<string, SandboxOutputs>();
+  /** Set to make the next apply / destroy fail. */
+  failApply: Error | null = null;
+  failDestroy: Error | null = null;
+  /** Called at the start of apply (tests observe the ledger status there). */
+  onApply: ((i: SandboxInput) => void) | null = null;
+
+  constructor(private readonly log: CallLog = []) {}
+
+  async plan(i: SandboxInput): Promise<{ changes: PlanChange[]; summary: string }> {
+    this.log.push(`sandbox.plan:${i.sandboxId}`);
+    const exists = this.applied.has(i.sandboxId);
+    return {
+      changes: [{ action: exists ? 'no-op' : 'create', address: 'aws_s3_bucket.artifacts', type: 'aws_s3_bucket' }],
+      summary: exists ? 'Plan: 0 to add, 0 to change, 0 to destroy.' : 'Plan: 1 to add, 0 to change, 0 to destroy.',
+    };
   }
-  async apply(_i: SandboxInput): Promise<SandboxOutputs> {
-    throw new Error('not used by the engine');
+  async apply(i: SandboxInput): Promise<SandboxOutputs> {
+    this.log.push(`sandbox.apply:${i.sandboxId}`);
+    this.onApply?.(i);
+    if (this.failApply) throw this.failApply;
+    const out: SandboxOutputs = {
+      artifactsBucket: `ratchet-${i.sandboxId}-artifacts`,
+      sealedBucket: `ratchet-${i.sandboxId}-sealed`,
+      agentBoundaryRef: 'arn:aws:iam::123456789012:policy/ratchet/boundary',
+      evalIdentityRef: 'arn:aws:iam::123456789012:instance-profile/ratchet/bench/eval',
+      agentRolePath: '/ratchet/agent/',
+      network: { subnetId: 'subnet-1', agentRunnerSecurityGroupId: 'sg-1', benchSecurityGroupId: 'sg-2' },
+    };
+    this.applied.set(i.sandboxId, out);
+    return out;
   }
-  async destroy(_i: SandboxInput): Promise<void> {}
-  async outputs(_id: string): Promise<SandboxOutputs | null> {
-    return null;
+  async destroy(i: SandboxInput): Promise<void> {
+    this.log.push(`sandbox.destroy:${i.sandboxId}`);
+    if (this.failDestroy) throw this.failDestroy;
+    this.applied.delete(i.sandboxId);
+  }
+  async outputs(id: string): Promise<SandboxOutputs | null> {
+    return this.applied.get(id) ?? null;
   }
 }

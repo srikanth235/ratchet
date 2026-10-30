@@ -355,14 +355,22 @@ export class Ledger {
     return this.db.select().from(sandboxes).orderBy(desc(sandboxes.createdAt)).all();
   }
 
-  /** Move a sandbox through apply/destroy, stamping times; `outputs` is stored on apply. */
-  setSandboxStatus(id: string, status: SandboxStatus, opts: { outputs?: Record<string, unknown>; at?: number } = {}): SandboxRow {
+  /**
+   * Move a sandbox through apply/destroy, stamping times. `outputs` is stored on apply (`null` clears them on
+   * destroy); `accountId` is filled in once the account is known.
+   */
+  setSandboxStatus(
+    id: string,
+    status: SandboxStatus,
+    opts: { outputs?: Record<string, unknown> | null; accountId?: string | null; at?: number } = {},
+  ): SandboxRow {
     if (!this.getSandbox(id)) throw new LedgerError('not_found', `sandbox ${id} not found`);
     const at = opts.at ?? this.now();
     const patch: Partial<SandboxRow> = { status };
     if (status === 'applied') patch.appliedAt = at;
     if (status === 'destroyed') patch.destroyedAt = at;
     if (opts.outputs !== undefined) patch.outputs = opts.outputs;
+    if (opts.accountId !== undefined) patch.accountId = opts.accountId;
     return this.db.update(sandboxes).set(patch).where(eq(sandboxes.id, id)).returning().get();
   }
 

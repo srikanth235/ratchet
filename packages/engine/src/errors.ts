@@ -8,7 +8,10 @@ export type EngineErrorCode =
   | 'no_verified'
   | 'orphans'
   | 'teardown_incomplete'
-  | 'aborted';
+  | 'aborted'
+  | 'sandbox_not_applied'
+  | 'sandbox_in_use'
+  | 'not_configured';
 
 export class EngineError extends Error {
   constructor(
