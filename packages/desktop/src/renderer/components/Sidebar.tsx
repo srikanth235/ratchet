@@ -1,8 +1,14 @@
 import { Card, Eyebrow, Pill } from '@ratchet/ui';
-import { NAV, type NavId } from '../nav';
+import { useNav, useSnapshot } from '../data';
+import { fmtMetric } from '../format';
+import { NAV } from '../nav';
 import { Icon } from './icons';
 
-export function Sidebar({ active, onNavigate }: { active: NavId; onNavigate: (id: NavId) => void }) {
+export function Sidebar() {
+  const { route, go } = useNav();
+  const snap = useSnapshot().data;
+  const live = snap?.optimizations.find((o) => o.id === snap.featuredId && (o.status === 'running' || o.status === 'baselining'));
+  const repos = new Set(snap?.optimizations.map((o) => o.repo) ?? []).size;
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -10,23 +16,22 @@ export function Sidebar({ active, onNavigate }: { active: NavId; onNavigate: (id
         <span className="brand__name">Ratchet</span>
       </div>
 
-      <button className="workspace" type="button">
-        <span className="workspace__avatar">A</span>
+      <div className="workspace">
+        <span className="workspace__avatar">R</span>
         <span className="workspace__text">
-          <span className="workspace__name">Acme Platform</span>
-          <span className="workspace__sub">3 repos</span>
+          <span className="workspace__name">Local workspace</span>
+          <span className="workspace__sub">{repos} repo{repos === 1 ? '' : 's'}</span>
         </span>
-        <Icon name="chevron" size={16} />
-      </button>
+      </div>
 
       <nav className="nav" aria-label="Primary">
         {NAV.map((n) => (
           <button
             key={n.id}
             type="button"
-            className={`nav__item${n.id === active ? ' nav__item--active' : ''}`}
-            aria-current={n.id === active ? 'page' : undefined}
-            onClick={() => onNavigate(n.id)}
+            className={`nav__item${n.id === route ? ' nav__item--active' : ''}`}
+            aria-current={n.id === route ? 'page' : undefined}
+            onClick={() => go(n.id)}
           >
             <Icon name={n.id} />
             {n.label}
@@ -36,20 +41,21 @@ export function Sidebar({ active, onNavigate }: { active: NavId; onNavigate: (id
 
       <div className="sidebar__spacer" />
 
-      <Card className="live-card">
-        <Eyebrow>Live now</Eyebrow>
-        <div className="live-card__title">search-api p95</div>
-        <Pill tone="brass" dot live>2 agents running</Pill>
-        <div className="mono live-card__meta">3h 34m · $42.60</div>
-      </Card>
+      {snap?.engine.kind === 'dev' && (
+        <div className="dev-banner" role="note">
+          <Pill tone="neutral">Dev engine</Pill>
+          <span>Simulated results · {snap.engine.mode}</span>
+        </div>
+      )}
 
-      <div className="user">
-        <span className="user__avatar">SR</span>
-        <span className="user__text">
-          <span className="user__name">Srikanth</span>
-          <span className="user__sub">Owner</span>
-        </span>
-      </div>
+      {live && (
+        <Card className="live-card">
+          <Eyebrow>Live now</Eyebrow>
+          <div className="live-card__title">{live.name}</div>
+          <Pill tone="brass" dot live>{live.agents.length} agent{live.agents.length === 1 ? '' : 's'} running</Pill>
+          <div className="mono live-card__meta">{fmtMetric(live.best, live.unit)} · ${live.spendUsd.toFixed(2)}</div>
+        </Card>
+      )}
     </aside>
   );
 }

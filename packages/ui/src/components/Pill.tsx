@@ -19,10 +19,25 @@ export function Pill({ tone = 'neutral', dot = false, live = false, children }: 
   );
 }
 
-export type OptimizationStatus = 'running' | 'pr-open' | 'merged' | 'draft' | 'blocked';
+export type OptimizationStatus =
+  | 'running'
+  | 'baselining'
+  | 'stopping'
+  | 'completed'
+  | 'stopped'
+  | 'failed'
+  | 'pr-open'
+  | 'merged'
+  | 'draft'
+  | 'blocked';
 
 const STATUS: Record<OptimizationStatus, { tone: PillTone; label: string; live?: boolean }> = {
   running: { tone: 'brass', label: 'Running', live: true },
+  baselining: { tone: 'brass', label: 'Baselining', live: true },
+  stopping: { tone: 'rose', label: 'Stopping', live: true },
+  completed: { tone: 'mint', label: 'Completed' },
+  stopped: { tone: 'neutral', label: 'Stopped' },
+  failed: { tone: 'rose', label: 'Failed' },
   'pr-open': { tone: 'mint', label: 'PR open' },
   merged: { tone: 'mint', label: 'Merged' },
   draft: { tone: 'neutral', label: 'Draft' },
@@ -36,4 +51,19 @@ export function StatusPill({ status }: { status: OptimizationStatus }) {
       {s.label}
     </Pill>
   );
+}
+
+export type Verdict = 'pending' | 'verified' | 'rejected' | 'failed_confirm' | 'blocked';
+
+const VERDICT: Record<Verdict, { tone: PillTone; label: string }> = {
+  pending: { tone: 'neutral', label: 'Pending' },
+  verified: { tone: 'mint', label: 'Verified' },
+  rejected: { tone: 'neutral', label: 'Rejected' },
+  failed_confirm: { tone: 'rose', label: 'Failed confirm' },
+  blocked: { tone: 'rose', label: 'Blocked' },
+};
+
+export function VerdictPill({ verdict }: { verdict: Verdict }) {
+  const v = VERDICT[verdict];
+  return <Pill tone={v.tone}>{v.label}</Pill>;
 }

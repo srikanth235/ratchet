@@ -50,7 +50,7 @@
   display: inline-flex; align-items: center; gap: 6px;
   padding: 3px 10px; border-radius: var(--rt-radius-pill);
   font: 500 12px/1.4 var(--rt-font-sans);
-  border: 1px solid currentColor;
+  border: 1px solid currentColor; white-space: nowrap;
   background: color-mix(in srgb, currentColor 12%, transparent);
 }
 .rt-pill--brass { color: var(--rt-color-brass); }
@@ -85,3 +85,10 @@
   display: inline-grid; place-items: center; border-radius: 50%;
   font: 700 10px/1 var(--rt-font-mono); color: #0B1019;
 }
+
+/* charts */
+.rt-chart { display: block; }
+.rt-stair { width: 100%; height: auto; }
+.rt-chart__tick { fill: var(--rt-color-text-tertiary); font: 10px var(--rt-font-mono); }
+.rt-legend { display: flex; gap: 14px; margin-top: 6px; color: var(--rt-color-text-tertiary); font-size: 12px; }
+.rt-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
