@@ -282,7 +282,7 @@ describe('the product engine: demos', () => {
     expect(b.sims[0]).toMatchObject({ project: 'search', settings: { sandbox: { auto: true } } });
     expect(b.live).toHaveLength(0);
     expect(b.ledger.getOptimization(id)?.repo).toBe('/work/search/remote.git');
-    expect(b.sims[0]!.engine.calls[0]).toBe('create:/work/search/remote.git:local');
+    expect(b.sims[0]!.engine.calls[0]).toBe('create:/work/search/remote.git:-');
     await b.app.createDemo!('demo-search', input('x'));
     expect(b.sims).toHaveLength(1);
     await b.app.createDemo!('demo-cli', input('x'));
@@ -301,7 +301,7 @@ describe('the product engine: demos', () => {
     const id = await b.app.createDemo!('demo-cli', input('x'));
     await b.app.engine.start(id);
     await b.app.engine.stop(id);
-    expect(b.sims[0]!.engine.calls).toEqual([`create:/work/cli/remote.git:local`, `start:${id}`, `stop:${id}`]);
+    expect(b.sims[0]!.engine.calls).toEqual([`create:/work/cli/remote.git:-`, `start:${id}`, `stop:${id}`]);
     const diff = await b.app.diff!({ optimizationId: id, repo: '/work/cli/remote.git', baseRef: 'main', sha: 'abc' });
     expect(diff?.[0]?.path).toBe('a.ts');
     b.app.dispose();

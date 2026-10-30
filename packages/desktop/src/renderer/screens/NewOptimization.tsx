@@ -135,7 +135,10 @@ function RepoStep({ source, onSource, onNext }: { source: Source | null; onSourc
         <div className="repo-found" data-testid="repo-found">
           {ins.problem && <p role="alert" className="error-note">{ins.problem}</p>}
           {!ins.problem && ins.config && (
-            <p className="ok-note" role="status"><Icon name="check" size={13} /> Found <span className="mono">ratchet.yaml</span> on <span className="mono">{ins.baseRef}</span> of <span className="mono">{ins.repo}</span>: {ins.config.metric} ({ins.config.direction === 'minimize' ? 'lower' : 'higher'} is better).</p>
+            <p className="ok-note" role="status">
+              <Icon name="check" size={13} />
+              <span>Found <span className="mono">ratchet.yaml</span> on <span className="mono">{ins.baseRef}</span> of <span className="mono">{ins.repo}</span>: {ins.config.metric} ({ins.config.direction === 'minimize' ? 'lower' : 'higher'} is better).</span>
+            </p>
           )}
           {!ins.problem && ins.configYaml !== null && !ins.config && (
             <div role="alert" className="error-note">
@@ -204,7 +207,7 @@ function ReviewStep({ source, agents, setAgents, where, setWhere, harnesses, mis
           <>
             <Fact label="Measured">
               <span className="mono">{cfg.metric}</span> {cfg.direction === 'minimize' ? '↓ lower is better' : '↑ higher is better'}
-              <span className="fact__sub">{cfg.evaluator.template ? <>evaluator template <span className="mono">{cfg.evaluator.template}</span></> : <>evaluator <span className="mono">{cfg.evaluator.run}</span></>}{cfg.evaluator.holdout ? ' · hidden holdout re-checks every win' : ''}</span>
+              <span className="fact__sub">{cfg.evaluator.template ? <>evaluator template <span className="mono">{cfg.evaluator.template}</span></> : <>evaluator <span className="mono">{cfg.evaluator.run}</span></>}{cfg.evaluator.holdout ? (cfg.evaluator.template ? ` · hidden holdout (${cfg.evaluator.holdout}) re-checks every win` : ' · hidden holdout re-checks every win') : ''}</span>
             </Fact>
             <Fact label="Toolchain">
               {cfg.environment.image ? <span className="mono">{cfg.environment.image}</span> : <>host</>}
@@ -244,11 +247,11 @@ function ReviewStep({ source, agents, setAgents, where, setWhere, harnesses, mis
         <span className="field__label">Agents</span>
         <div className="agent-choices" role="group" aria-label="Agents">
           {AGENT_CHOICES.map((a) => {
-            const on = agents.includes(a.kind);
+            const on = demo || agents.includes(a.kind);
             const h = detected(a.kind);
             const hint = demo ? 'scripted demo agent' : h ? (h.installed ? `${h.version ? `v${h.version} · ` : ''}${h.auth === 'signed-out' ? 'signed out' : h.auth === 'api-key' ? 'API key' : 'signed in'}` : 'not installed') : a.hint;
             return (
-              <button key={a.kind} type="button" aria-pressed={on} className={`agent-choice agent-choice--${a.kind}${on ? ' agent-choice--on' : ''}`} onClick={() => toggle(a.kind)}>
+              <button key={a.kind} type="button" aria-pressed={on} disabled={demo} className={`agent-choice agent-choice--${a.kind}${on ? ' agent-choice--on' : ''}`} onClick={() => toggle(a.kind)}>
                 <AgentAvatar agent={a.kind} size={38} />
                 <span className="agent-choice__text">
                   <span className="agent-choice__name">{a.label}</span>
@@ -286,12 +289,12 @@ function ReviewStep({ source, agents, setAgents, where, setWhere, harnesses, mis
             <div><Button variant="subtle" onClick={() => go('settings')}>Open Settings</Button></div>
           </>
         ) : (
-          <p className="ok-note" role="status"><Icon name="check" size={13} /> Everything this run needs is in place.</p>
+          <p className="ok-note" role="status"><Icon name="check" size={13} /><span>Everything this run needs is in place.</span></p>
         )}
       </div>
       <div className="step__foot">
         <Button variant="ghost" onClick={onBack}>Back</Button>
-        <Button disabled={blocking.length > 0 || agents.length === 0} onClick={onNext}>Continue to budget</Button>
+        <Button disabled={blocking.length > 0 || (!demo && agents.length === 0)} onClick={onNext}>Continue to budget</Button>
       </div>
     </Card>
   );

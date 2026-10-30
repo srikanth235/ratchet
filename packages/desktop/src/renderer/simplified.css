@@ -117,3 +117,5 @@
 .receipt__list li { display: flex; justify-content: space-between; gap: 10px; }
 .receipt__list li > span { display: inline-flex; align-items: center; gap: 6px; }
 .receipt__problems { margin: 0; padding-left: 18px; color: var(--rt-color-rose); font-size: 12.5px; }
+
+.agent-choice:disabled { cursor: default; }

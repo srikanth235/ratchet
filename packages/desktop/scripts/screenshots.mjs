@@ -19,6 +19,8 @@ const userData = mkdtempSync(join(tmpdir(), 'ratchet-userdata-'));
 const app = await electron.launch({
   executablePath: electronBin,
   args: [resolve(here, '..'), '--no-sandbox', `--user-data-dir=${userData}`],
+  // The seeded dev engine: screens with data, no cloud, no network.
+  env: { ...process.env, RATCHET_ENGINE: 'dev', RATCHET_DEV_TICK_MS: '3600000', RATCHET_USER_DATA_DIR: userData },
 });
 const page = await app.firstWindow();
 page.on('pageerror', (e) => console.error('pageerror:', e.message));
@@ -37,38 +39,35 @@ await page.waitForSelector('.featured');
 await shot('01-optimizations');
 
 await page.getByRole('button', { name: /New optimization/ }).click();
-await page.waitForSelector('.yaml');
-await page.waitForSelector('text=Valid config');
-await shot('02-new-optimization');
+await page.getByRole('heading', { name: 'Repo', level: 2 }).waitFor();
+await shot('02-new-optimization-repo');
+await page.getByRole('group', { name: 'Demos' }).getByRole('button').first().click();
+await page.getByRole('button', { name: 'Continue to review' }).click();
+await page.getByRole('heading', { name: 'Review', level: 2 }).waitFor();
+await shot('03-new-optimization-review');
 
-await nav('AWS sandbox');
-await page.waitForSelector('.plan');
-await shot('03-aws-sandbox');
+await nav('Environments');
+await page.getByRole('heading', { name: 'Environments', level: 1 }).waitFor();
+await shot('04-environments');
 
-await nav('Live agents');
+await nav('Agents');
 await page.waitForSelector('.agent-card');
 await page.waitForSelector('.log__line');
-await shot('04-live-agents');
+await shot('05-agents');
 
-await nav('Benchmark history');
+await nav('Benchmarks');
 await page.waitForSelector('.rt-stair');
-await shot('05-benchmark-history');
+await shot('06-benchmark-history');
+await page.getByRole('radio', { name: 'Templates' }).click();
+await page.getByRole('region', { name: 'Evaluator templates' }).waitFor();
+await shot('07-benchmark-templates');
 
 await nav('Result');
 await page.waitForSelector('.headline');
-await shot('06-result');
+await shot('08-result');
 
 await nav('Settings');
-await page.waitForSelector('.secret-row');
-await shot('07-settings');
-
-// End-to-end: create + start through the real IPC, land on Live agents.
-await nav('Optimizations');
-await page.getByRole('button', { name: /New optimization/ }).click();
-await page.waitForSelector('text=Valid config');
-await page.getByRole('button', { name: 'Run baseline & start' }).click();
-await page.waitForSelector('.agent-card');
-await page.waitForTimeout(9000);
-await shot('08-new-run-live');
+await page.getByTestId('row-agents').waitFor();
+await shot('09-settings');
 
 await app.close();

@@ -79,7 +79,13 @@ app.whenReady().then(() => {
   // Agent CLIs on this machine: probed in the main process on launch, again on "Re-detect".
   const harnesses = new HarnessCache();
   void harnesses.get();
-  const github = createGithubApi({ clientId: process.env['RATCHET_GITHUB_CLIENT_ID'] });
+  // RATCHET_GITHUB_CLIENT_ID: the OAuth app for "Sign in with GitHub" (device flow). RATCHET_GITHUB_API_URL / _WEB_URL: GitHub
+  // Enterprise, and the fake GitHub the end-to-end tests run against.
+  const github = createGithubApi({
+    clientId: process.env['RATCHET_GITHUB_CLIENT_ID'],
+    ...(process.env['RATCHET_GITHUB_API_URL'] ? { apiUrl: process.env['RATCHET_GITHUB_API_URL'] } : {}),
+    ...(process.env['RATCHET_GITHUB_WEB_URL'] ? { webUrl: process.env['RATCHET_GITHUB_WEB_URL'] } : {}),
+  });
   const stateRoot = join(userData, 'sandboxes');
 
   const service = createService({

@@ -54,7 +54,7 @@ function TemplateCard({ t, onUse, active }: { t: TemplateVM; onUse(): void; acti
         <span className="template-card__title">{t.title}</span>
         <Pill>{CATEGORY[t.category]}</Pill>
       </div>
-      <p className="muted template-card__desc">Make it better: {t.description}.</p>
+      <p className="muted template-card__desc">Use it to {t.description}.</p>
       <div className="specs">
         <Spec label="Measures">{t.measures}</Spec>
         <Spec label="Holdout">{t.holdout ?? 'none'}</Spec>

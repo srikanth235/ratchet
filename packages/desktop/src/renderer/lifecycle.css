@@ -1,4 +1,4 @@
-/* Sandbox lifecycle (Environments) and live settings: styles for the controls added with the apply / destroy flow. */
+/* Confirmation cards (End sandbox now) and the Settings form controls. */
 
 .confirm-card { padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; border-color: rgba(217, 178, 111, 0.45); }
 .confirm-card--danger { border-color: rgba(240, 138, 147, 0.5); }
@@ -7,29 +7,16 @@
 .confirm-card__facts { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12.5px; color: var(--rt-color-text-secondary); }
 .confirm-card__actions { display: flex; flex-wrap: wrap; gap: 10px; }
 
-.plan-empty { padding: 22px 20px; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; border-top: 1px solid var(--rt-color-hairline-soft); }
-.plan-empty p { margin: 0; }
 
-.setup-note { margin: 0; padding: 10px 14px; border-radius: 10px; background: rgba(217, 178, 111, 0.08); border: 1px solid rgba(217, 178, 111, 0.28); color: var(--rt-color-text-secondary); }
-.setup-note ul { margin: 6px 0 0; padding-left: 18px; }
 
 /* ---------------------------------------------------------------- Settings: live mode */
 .live-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px 18px; align-items: start; }
 .live-form { display: flex; flex-direction: column; gap: 16px; }
-.live-form .field input.invalid, .live-form .field select.invalid { border-color: var(--rt-color-rose); }
+.field input.invalid, .field select.invalid { border-color: var(--rt-color-rose); }
 .field__error { color: var(--rt-color-rose); font-size: 12px; }
 .live-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .test-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .test-result { font-size: 12.5px; display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .test-result--ok { color: var(--rt-color-mint); }
 .test-result--fail { color: var(--rt-color-rose); }
-.readiness { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.readiness li { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
-.readiness__label { font-weight: 600; min-width: 200px; }
-.readiness__detail { color: var(--rt-color-text-tertiary); min-width: 0; overflow-wrap: anywhere; }
-.readiness [data-state='ok'] .readiness__label { color: var(--rt-color-text); }
-.readiness [data-state='fail'] .readiness__label { color: var(--rt-color-brass-highlight); }
 .secret-test { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; grid-column: 1 / -1; }
-.segmented { display: inline-flex; border: 1px solid var(--rt-color-hairline-mid); border-radius: 10px; overflow: hidden; width: fit-content; }
-.segmented button { background: transparent; border: 0; color: var(--rt-color-text-secondary); padding: 8px 14px; cursor: pointer; font: inherit; }
-.segmented button[aria-checked='true'] { background: rgba(217, 178, 111, 0.16); color: var(--rt-color-brass-highlight); }

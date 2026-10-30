@@ -367,7 +367,9 @@ class ProductEngine {
       engine,
       createDemo: async (demo, input) => {
         const rt = await this.sim(DEMO_PROJECTS[demo]);
-        return rt.engine.createOptimization({ ...input, repoUrl: rt.repoUrl, baseRef: rt.baseRef, agentsWhere: 'local' });
+        // The simulation's scripted agents are its runner port; the engine picks that, there is no real local control to choose.
+        const { agentsWhere: _ignored, ...rest } = input;
+        return rt.engine.createOptimization({ ...rest, repoUrl: rt.repoUrl, baseRef: rt.baseRef });
       },
       missingFor: (slug) => this.missingFor(slug),
       invalidate: () => this.invalidate(),
