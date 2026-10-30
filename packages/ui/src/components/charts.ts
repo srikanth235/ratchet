@@ -38,3 +38,16 @@ export function histogramBins(values: readonly number[], lo: number, hi: number,
   }
   return out;
 }
+
+/** "Nice" tick values (1/2/2.5/5 × 10^n steps) covering [lo, hi], roughly `count` of them. */
+export function niceTicks(lo: number, hi: number, count = 4): number[] {
+  const span = hi - lo || 1;
+  const raw = span / Math.max(1, count - 1);
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  const norm = raw / mag;
+  const step = (norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10) * mag;
+  const start = Math.floor(lo / step) * step;
+  const out: number[] = [];
+  for (let v = start; v < hi + step - 1e-9 && out.length < 12; v += step) out.push(+v.toFixed(10));
+  return out.length >= 2 ? out : [lo, hi];
+}

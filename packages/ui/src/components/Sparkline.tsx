@@ -24,8 +24,6 @@ export function sparklinePoints(values: readonly number[], width: number, height
   });
 }
 
-let gradientSeq = 0;
-
 export function Sparkline({
   values,
   width = 96,
@@ -34,30 +32,23 @@ export function Sparkline({
   fill = true,
 }: SparklineProps) {
   const pts = sparklinePoints(values, width, height);
-  const gid = `rt-spark-${++gradientSeq}`;
   return (
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Trend">
       {pts.length > 1 && (
         <>
           {fill && (
-            <>
-              <defs>
-                <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={color} stopOpacity=".28" />
-                  <stop offset="100%" stopColor={color} stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              <polygon
-                points={`${pts.join(' ')} ${width - 2},${height} 2,${height}`}
-                fill={`url(#${gid})`}
-              />
-            </>
+            <polygon
+              data-testid="spark-area"
+              points={`${pts.join(' ')} ${(width - 2).toFixed(1)},${height} 2,${height}`}
+              fill={color}
+              fillOpacity=".12"
+            />
           )}
           <polyline
             points={pts.join(' ')}
             fill="none"
             stroke={color}
-            strokeWidth="1.5"
+            strokeWidth="1.6"
             strokeLinecap="round"
             strokeLinejoin="round"
           />

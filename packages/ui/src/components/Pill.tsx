@@ -1,16 +1,18 @@
 import type { ReactNode } from 'react';
 
-export type PillTone = 'brass' | 'mint' | 'rose' | 'neutral';
+export type PillTone = 'brass' | 'mint' | 'rose' | 'neutral' | 'quiet' | 'outline';
 
 export interface PillProps {
   tone?: PillTone;
   dot?: boolean;
   live?: boolean;
+  /** 26px header-size pill instead of the 24px status pill. */
+  large?: boolean;
   children?: ReactNode;
 }
 
-export function Pill({ tone = 'neutral', dot = false, live = false, children }: PillProps) {
-  const cls = ['rt-pill', `rt-pill--${tone}`, live && 'rt-pill--live'].filter(Boolean).join(' ');
+export function Pill({ tone = 'neutral', dot = false, live = false, large = false, children }: PillProps) {
+  const cls = ['rt-pill', `rt-pill--${tone}`, live && 'rt-pill--live', large && 'rt-pill--lg'].filter(Boolean).join(' ');
   return (
     <span className={cls}>
       {dot && <span className="rt-pill__dot" aria-hidden="true" />}
@@ -40,15 +42,15 @@ const STATUS: Record<OptimizationStatus, { tone: PillTone; label: string; live?:
   failed: { tone: 'rose', label: 'Failed' },
   'pr-open': { tone: 'mint', label: 'PR open' },
   merged: { tone: 'mint', label: 'Merged' },
-  draft: { tone: 'neutral', label: 'Draft' },
+  draft: { tone: 'quiet', label: 'Draft' },
   blocked: { tone: 'rose', label: 'Blocked' },
 };
 
-export function StatusPill({ status }: { status: OptimizationStatus }) {
+export function StatusPill({ status, large = false, label }: { status: OptimizationStatus; large?: boolean; label?: string }) {
   const s = STATUS[status];
   return (
-    <Pill tone={s.tone} dot live={s.live}>
-      {s.label}
+    <Pill tone={s.tone} dot live={s.live} large={large}>
+      {label ?? s.label}
     </Pill>
   );
 }
@@ -59,7 +61,7 @@ const VERDICT: Record<Verdict, { tone: PillTone; label: string }> = {
   pending: { tone: 'neutral', label: 'Pending' },
   verified: { tone: 'mint', label: 'Verified' },
   rejected: { tone: 'neutral', label: 'Rejected' },
-  failed_confirm: { tone: 'rose', label: 'Failed confirm' },
+  failed_confirm: { tone: 'outline', label: 'Failed confirm' },
   blocked: { tone: 'rose', label: 'Blocked' },
 };
 

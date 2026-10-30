@@ -14,6 +14,28 @@ export const tokens = {
     rose: '#F08A93',
     claudeCode: '#B8A6FF',
     codex: '#7CC4F2',
+    // Surfaces & lines beyond the three layers (from the screen designs).
+    raised: '#151D2B',
+    inset: '#0C121D',
+    code: '#0A0F18',
+    segmentOn: '#1E2738',
+    hairlineSoft: 'rgba(148,163,190,.08)',
+    hairlineMid: 'rgba(148,163,190,.10)',
+    hairlineStrong: 'rgba(148,163,190,.20)',
+    // Accent variants.
+    brassLight: '#F4E3C0',
+    brassTop: '#E6C487',
+    brassBottom: '#C99C55',
+    onBrass: '#1A1408',
+    roseLight: '#F5A8AF',
+    // Neutrals for tracks, ticks and idle bars.
+    slate: '#3A4558',
+    dim: '#5F6B7E',
+    // Agent avatar pairs (background / text), distinct from the chart colours above.
+    claudeCodeSoft: '#2A2547',
+    claudeCodeInk: '#CFC2FF',
+    codexSoft: '#1A3042',
+    codexInk: '#A9DBFA',
   },
   font: {
     serif: "'Instrument Serif', Georgia, serif",
