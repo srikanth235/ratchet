@@ -1,17 +1,16 @@
-import type { EngineApi, FileDiff, Ledger, Mode, SandboxProvider } from '@ratchet/core';
+import type { EngineApi, FileDiff, Ledger, Mode } from '@ratchet/core';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DevEngine } from './dev-engine.js';
 import { DevGit } from './dev-git.js';
-import { DevSandboxProvider } from './dev-sandbox.js';
 import { isLedgerEmpty, seedDemo } from './seed.js';
 
 /** Everything the main process needs from "the engine side". */
 export interface AppEngine {
   /** `dev` = the in-repo stub with seeded demo data; `real` = the core engine. Shown in the UI. */
   kind: 'dev' | 'real';
+  /** Includes the sandbox lifecycle (plan / apply / destroy); there is no separate provider handle. */
   engine: EngineApi;
-  sandbox: SandboxProvider;
   /**
    * Diff of a verified commit against the optimization's base ref (GitHost.diff), for the Result screen's
    * "Winning change". Resolves null when the commit is unknown to this engine's git; absent without git access.
@@ -38,7 +37,6 @@ export function createDevEngine(ledger: Ledger, mode: Mode, opts: DevEngineOptio
   return {
     kind: 'dev',
     engine,
-    sandbox: new DevSandboxProvider(),
     diff: (req) => git.diff(req),
     dispose: () => {
       engine.dispose();

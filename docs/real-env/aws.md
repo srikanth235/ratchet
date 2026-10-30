@@ -70,6 +70,41 @@ confirm `init -backend=false` with `TF_DATA_DIR` re-initialises cleanly on each 
 (step 2), `sandbox.destroy(input)` must throw `TeardownBlockedError` listing the role and
 must not run `tofu destroy` (`aws s3 ls` still shows the buckets).
 
+### 1b. Sandbox lifecycle through the engine (what the desktop app does)
+
+The app never calls the provider directly: `engine.planSandbox / applySandbox / destroySandbox` wrap it in `SandboxLifecycle`
+(`packages/core/src/sandbox`) and write the ledger. Run the same thing from a script to check the recorded state:
+
+```js
+import { Engine } from '@ratchet/engine';
+import { createLiveRuntime } from '@ratchet/runtime';
+// ledger = openLedger('/tmp/rt.db'); rt = createLiveRuntime({ ledger, region, sandbox: null, sandboxId: 'rt-test',
+//   tofuBinary, moduleDir, stateRoot, awsProfile: 'ratchet-sandbox' })   // no outputs yet: only the sandbox ports work
+await rt.engine.planSandbox(input);      // sandboxes row: planned
+await rt.engine.applySandbox(input);     // applying -> applied; outputs + account_id stored
+await rt.engine.sandboxState('rt-test'); // { status: 'applied', outputs, accountId, optimizations: [] }
+await rt.engine.destroySandbox('rt-test');
+```
+
+| Check | Expected |
+|---|---|
+| after `plan` | `select status,provider from sandboxes` -> `planned|aws`; nothing in `<stateRoot>/rt-test` except vars and the plan file |
+| during `apply` (second shell) | status `applying`; a second `applySandbox` fails fast with "busy" (and tofu's own per-sandbox lock) |
+| after `apply` | status `applied`, `account_id` = the account, `outputs` JSON has `network.benchSubnetId`, `evalIdentity`, `confirmIdentity` (what `createLiveRuntime` feeds to `awsComputeConfigFromOutputs`) |
+| kill the process mid-apply, start a new engine | the row is `failed` (message "interrupted"); `applySandbox` again converges to `applied` |
+| `apply` with a bad profile / no credentials | `failed`, the error text carries tofu's stderr tail; retry after fixing succeeds |
+| `destroy` with a running optimization linked to the sandbox | refused (`sandbox_in_use`), status unchanged, no `tofu destroy` |
+| `destroy` with an agent identity left (optimization stopped, no teardown) | refused (`orphans`), status unchanged |
+| `destroy` with a tagged instance alive | refused (`orphans`) listing the instance ids; this is the same `listTagged` check `teardown()` ends with |
+| `destroy` with a runtime agent role still present but no engine record (created by hand, step 2) | the provider throws `TeardownBlockedError`; status goes back to `applied` (not `failed`) |
+| clean `destroy` | `destroying` -> `destroyed`, `outputs` NULL, `destroyed_at` set; `tofu state list` empty; zero-orphan list in §8 is empty |
+| `destroy` where `tofu destroy` itself fails | `failed` (real state unknown); retry after fixing the cause |
+
+Named profiles: `AwsCloudCompute`, `S3ArtifactStore` and `AwsPriceBook` take `profile` (the SDK's own profile resolution, so SSO and
+assume-role profiles work without touching `process.env`); tofu gets `AWS_PROFILE`. With an SSO profile, run `aws sso login` first
+and check that a long apply does not outlive the session. `checkAwsCredentials({ region, profile, expectedAccountId })` is the "Test
+connection" for AWS: it must fail for another account id and surface an expired SSO session.
+
 ## 2. `AwsCloudCompute`: identity, secrets
 
 ```js

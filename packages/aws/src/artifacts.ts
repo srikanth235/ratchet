@@ -14,6 +14,8 @@ export interface S3ArtifactStoreOptions {
   bucket: string;
   region?: string;
   client?: S3Client;
+  /** Named profile in ~/.aws/config (static, SSO or assume-role); default credential chain when unset. */
+  profile?: string;
   /** Prepended to every key (hidden from callers). */
   prefix?: string;
 }
@@ -23,7 +25,7 @@ export class S3ArtifactStore implements ArtifactStore {
   private readonly prefix: string;
 
   constructor(private readonly opts: S3ArtifactStoreOptions) {
-    this.client = opts.client ?? new S3Client({ region: opts.region });
+    this.client = opts.client ?? new S3Client({ region: opts.region, ...(opts.profile ? { profile: opts.profile } : {}) });
     this.prefix = opts.prefix ?? '';
   }
 

@@ -128,7 +128,7 @@ describe('createEngineForApp', () => {
       expect(app.kind).toBe('dev');
       expect(app.engine.mode()).toBe('simulation');
       expect(l.listOptimizations()).toHaveLength(4);
-      expect((await app.sandbox.plan({ sandboxId: 's', region: 'us-east-1', allowedInstanceTypes: [], maxInstancesPerAgent: 1, maxInstanceLifetimeHours: 1 })).changes.length).toBeGreaterThan(0);
+      expect((await app.engine.planSandbox({ sandboxId: 'ratchet-sim', region: 'us-east-1', allowedInstanceTypes: ['c7i.large'], maxInstancesPerAgent: 1, maxInstanceLifetimeHours: 1 })).changes.length).toBeGreaterThan(0);
     } finally {
       app.dispose();
     }

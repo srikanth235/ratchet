@@ -6,7 +6,7 @@
  */
 import type { RatchetConfig } from '../config/schema.js';
 import type { GuardrailResult } from '../config/guardrails.js';
-import type { AgentKind, CandidateVerdict, SpendCategory } from '../ledger/schema.js';
+import type { AgentKind, CandidateVerdict, SandboxProviderKind, SandboxStatus, SpendCategory } from '../ledger/schema.js';
 
 export type OptimizationId = string;
 export type AgentId = string;
@@ -45,8 +45,13 @@ export interface PlanChange {
   type: string;
 }
 
+export interface SandboxPlan {
+  changes: PlanChange[];
+  summary: string;
+}
+
 export interface SandboxProvider {
-  plan(input: SandboxInput): Promise<{ changes: PlanChange[]; summary: string }>;
+  plan(input: SandboxInput): Promise<SandboxPlan>;
   apply(input: SandboxInput): Promise<SandboxOutputs>;
   destroy(input: SandboxInput): Promise<void>;
   outputs(sandboxId: string): Promise<SandboxOutputs | null>;
@@ -364,6 +369,28 @@ export interface EngineCreateOptimizationInput {
   budgetUsd: number;
   timeLimitSeconds: number;
   plateauEvals: number;
+  /**
+   * The sandbox this optimization runs in. Live mode requires an applied sandbox and links it
+   * (`optimizations.sandbox_id`); in simulation an applied one is linked, otherwise the field stays null.
+   */
+  sandboxId?: string;
+}
+
+/** What the ledger knows about one sandbox, plus the optimizations linked to it. */
+export interface SandboxState {
+  sandboxId: string;
+  /** `absent` = never planned or applied. */
+  status: SandboxStatus | 'absent';
+  provider: SandboxProviderKind | null;
+  region: string | null;
+  accountId: string | null;
+  /** Contract outputs, from the ledger (set on apply, cleared on destroy). */
+  outputs: SandboxOutputs | null;
+  appliedAt: number | null;
+  destroyedAt: number | null;
+  /** Why the last apply / destroy failed (this process only). */
+  lastError: string | null;
+  optimizations: Array<{ id: string; status: string }>;
 }
 
 export type EngineEvent =
@@ -391,6 +418,12 @@ export interface EngineApi {
    * existing implementations keep compiling.
    */
   reconcileCosts?(id: OptimizationId): Promise<CostReconcileReport>;
+  /** Sandbox lifecycle: planned -> applying -> applied -> destroying -> destroyed / failed, recorded in the ledger. */
+  sandboxState(sandboxId: string): Promise<SandboxState>;
+  planSandbox(input: SandboxInput): Promise<SandboxPlan>;
+  applySandbox(input: SandboxInput): Promise<SandboxOutputs>;
+  /** Refuses while an optimization in the sandbox is running, or while tagged instances / agent identities remain. */
+  destroySandbox(sandboxId: string): Promise<void>;
   subscribe(listener: (e: EngineEvent) => void): () => void;
 }
 

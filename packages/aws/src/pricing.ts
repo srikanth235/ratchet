@@ -47,6 +47,8 @@ export interface AwsPriceBookOptions {
   region: string;
   /** The Pricing API only exists in us-east-1 / ap-south-1 / eu-central-1. */
   client?: PricingClient;
+  /** Named profile in ~/.aws/config; default credential chain when unset. */
+  profile?: string;
   clock?: Clock;
   /** Cache lifetime. Default 24h. */
   ttlMs?: number;
@@ -62,7 +64,7 @@ export class AwsPriceBook implements PriceBook {
   private readonly inflight = new Map<string, Promise<number>>();
 
   constructor(private readonly opts: AwsPriceBookOptions) {
-    this.client = opts.client ?? new PricingClient({ region: 'us-east-1' });
+    this.client = opts.client ?? new PricingClient({ region: 'us-east-1', ...(opts.profile ? { profile: opts.profile } : {}) });
     this.clock = opts.clock ?? systemClock;
     this.ttl = opts.ttlMs ?? 24 * 3600_000;
   }

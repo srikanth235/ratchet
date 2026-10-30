@@ -536,6 +536,14 @@ describe('sandboxes', () => {
     expect(ledger.listSandboxes()).toHaveLength(1);
   });
 
+  it('fills in the account on apply and clears outputs on destroy', () => {
+    ledger.recordSandbox({ id: 'sbx-2', provider: 'mock', region: 'us-east-1' });
+    const applied = ledger.setSandboxStatus('sbx-2', 'applied', { outputs: { artifactsBucket: 'b' }, accountId: '000000000000' });
+    expect(applied).toMatchObject({ accountId: '000000000000', outputs: { artifactsBucket: 'b' } });
+    expect(ledger.setSandboxStatus('sbx-2', 'destroying')).toMatchObject({ outputs: { artifactsBucket: 'b' } });
+    expect(ledger.setSandboxStatus('sbx-2', 'destroyed', { outputs: null })).toMatchObject({ outputs: null, accountId: '000000000000' });
+  });
+
   it('rejects unknown sandboxes and bad statuses', () => {
     expect(() => mkOpt({ sandboxId: 'nope' })).toThrow(/FOREIGN KEY/);
     expect(() => ledger.setSandboxStatus('nope', 'applied')).toThrow(LedgerError);

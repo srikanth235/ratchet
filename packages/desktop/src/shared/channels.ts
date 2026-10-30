@@ -16,6 +16,9 @@ export const IPC = {
   preflight: 'ratchet:preflight',
   sandboxInfo: 'ratchet:sandboxInfo',
   getSettings: 'ratchet:getSettings',
+  planSandbox: 'ratchet:planSandbox',
+  applySandbox: 'ratchet:applySandbox',
+  destroySandbox: 'ratchet:destroySandbox',
   createOptimization: 'ratchet:createOptimization',
   startOptimization: 'ratchet:startOptimization',
   stopOptimization: 'ratchet:stopOptimization',
@@ -29,6 +32,8 @@ export const IPC = {
   setAwsProfile: 'ratchet:setAwsProfile',
   setSecret: 'ratchet:setSecret',
   clearSecret: 'ratchet:clearSecret',
+  saveLiveSettings: 'ratchet:saveLiveSettings',
+  testConnection: 'ratchet:testConnection',
   event: 'ratchet:event',
 } as const satisfies Record<keyof Omit<RatchetApi, 'onEvent'> | 'event', string>;
 

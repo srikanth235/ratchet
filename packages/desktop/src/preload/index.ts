@@ -12,9 +12,10 @@ const call =
 const methods: Invoke[] = [
   'listOptimizations', 'getOptimization', 'ratchetHistory', 'winningChange', 'candidatesWithResults', 'spendBreakdown',
   'recentActivity', 'agentEvents', 'validateConfig', 'preflight', 'sandboxInfo', 'getSettings',
+  'planSandbox', 'applySandbox', 'destroySandbox',
   'createOptimization', 'startOptimization', 'stopOptimization', 'pauseAgent', 'resumeAgent',
   'messageAgent', 'openPullRequest', 'teardown', 'exportReport', 'setMode', 'setAwsProfile',
-  'setSecret', 'clearSecret',
+  'setSecret', 'clearSecret', 'saveLiveSettings', 'testConnection',
 ];
 
 const api = {

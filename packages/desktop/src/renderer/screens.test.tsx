@@ -374,19 +374,89 @@ describe('Result', () => {
 });
 
 describe('AWS sandbox', () => {
-  it('lists plan changes, contract outputs, account and limits from the SandboxProvider', async () => {
+  it('shows the plan, account and limits before anything is applied', async () => {
     installApi();
     render(<App initialRoute="sandbox" />);
     const plan = within(await screen.findByRole('list', { name: 'Plan changes' }));
     expect(plan.getByText('aws_s3_bucket.artifacts')).toBeTruthy();
     expect(plan.getByText('~ update')).toBeTruthy();
     expect(screen.getByText(/Plan: 9 to add, 1 to change, 0 to destroy/)).toBeTruthy();
-    expect(screen.getByText('ratchet-ratchet-sandbox-sealed')).toBeTruthy();
+    expect(screen.getByText('Plan ready · 9 to add')).toBeTruthy();
+    expect(screen.getAllByText('after apply')).toHaveLength(5);
     for (const t of ['c7i.2xlarge', 'c7i.xlarge', 'm7i.large']) expect(screen.getByText(t)).toBeTruthy();
     expect(screen.getByText('Simulated sandbox')).toBeTruthy();
     expect(screen.getByRole('img', { name: /Sandbox architecture/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Destroy sandbox' })).toBeNull();
+  });
+
+  it('applies after a confirmation, shows the real outputs, then destroys after a confirmation', async () => {
+    const h = installApi();
+    render(<App initialRoute="sandbox" />);
+    await screen.findByRole('list', { name: 'Plan changes' });
+
+    // Apply asks first and shows the plan being applied; cancelling changes nothing.
+    fireEvent.click(screen.getByRole('button', { name: 'Apply sandbox' }));
+    const confirm = within(await screen.findByRole('group', { name: 'Confirm apply' }));
+    expect(confirm.getByText(/Plan: 9 to add, 1 to change, 0 to destroy/)).toBeTruthy();
+    fireEvent.click(confirm.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('group', { name: 'Confirm apply' })).toBeNull();
+    expect(h.ledger.getSandbox('ratchet-sim')?.status).toBe('planned');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply sandbox' }));
+    fireEvent.click(within(await screen.findByRole('group', { name: 'Confirm apply' })).getByRole('button', { name: 'Confirm apply' }));
+    expect(await screen.findByText('Applied')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('ratchet-ratchet-sim-sealed')).toBeTruthy());
+    expect(screen.queryByText('after apply')).toBeNull();
+    expect(screen.getByText('0000 ···· 0000')).toBeTruthy();
+    expect(h.ledger.getSandbox('ratchet-sim')).toMatchObject({ status: 'applied', provider: 'mock' });
+    expect(within(screen.getByRole('list', { name: 'Plan changes' })).getAllByText('no change').length).toBeGreaterThan(5);
+    expect(screen.queryByRole('button', { name: 'Apply sandbox' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Destroy sandbox' }));
+    const destroy = within(await screen.findByRole('group', { name: 'Confirm destroy' }));
+    fireEvent.click(destroy.getByRole('button', { name: 'Confirm destroy' }));
+    expect(await screen.findByText('Destroyed')).toBeTruthy();
+    expect(h.ledger.getSandbox('ratchet-sim')).toMatchObject({ status: 'destroyed', outputs: null });
+    await waitFor(() => expect(screen.getAllByText('after apply')).toHaveLength(5));
+    expect(screen.getByRole('button', { name: 'Apply sandbox' })).toBeTruthy();
+  });
+
+  it('disables Destroy while an optimization in the sandbox is running and says why', async () => {
+    const h = installApi();
+    await h.service.applySandbox();
+    h.ledger.createOptimization({ id: 'opt-live', name: 'Running one', repo: 'acme/x', baseRef: 'main', metric: 'm', direction: 'minimize', minGain: 0.1, budgetUsd: 10, timeLimitS: 600, configYaml: 'x', status: 'running', sandboxId: 'ratchet-sim' });
+    render(<App initialRoute="sandbox" />);
+    const destroy = (await screen.findByRole('button', { name: 'Destroy sandbox' })) as HTMLButtonElement;
+    expect(destroy.disabled).toBe(true);
+    expect(screen.getByText(/Destroy unavailable: Stop optimization opt-live first/)).toBeTruthy();
+    // and the service refuses even if asked directly
+    await expect(h.service.destroySandbox()).rejects.toThrow(/still running/);
+  });
+
+  it('shows a failed apply with its reason, and a real plan only when asked for', async () => {
+    const h = installApi();
+    const base = await h.service.sandboxInfo();
+    let planned = false;
+    window.ratchet.sandboxInfo = async () => ({ ...base, plan: planned ? base.plan : null, account: { ...base.account, simulated: false } });
+    window.ratchet.planSandbox = async () => ((planned = true), { ...base, plan: base.plan, account: { ...base.account, simulated: false } });
+    window.ratchet.applySandbox = async () => {
+      throw new Error('tofu apply failed (exit 1): Error: AccessDenied');
+    };
+    render(<App initialRoute="sandbox" />);
+    expect(await screen.findByText(/A real plan runs/)).toBeTruthy();
+    expect(screen.getByText('Live account')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Apply sandbox' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Run plan' }));
+    await screen.findByRole('list', { name: 'Plan changes' });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply sandbox' }));
+    fireEvent.click(within(await screen.findByRole('group', { name: 'Confirm apply' })).getByRole('button', { name: 'Confirm apply' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('AccessDenied');
+    expect(screen.queryByRole('group', { name: 'Confirm apply' })).toBeNull();
   });
 });
+
+/** The Save button of the live-settings form (the secret rows have their own Save buttons). */
+const liveSave = () => within(screen.getByLabelText('AWS profile').closest('form') as HTMLElement).getByRole('button', { name: 'Save' }) as HTMLButtonElement;
 
 describe('Settings', () => {
   it('shows only configured yes/no; saving a key stores it and never echoes it back', async () => {
@@ -417,6 +487,82 @@ describe('Settings', () => {
     fireEvent.change(profile, { target: { value: 'ratchet-sandbox' } });
     fireEvent.click(within(profile.closest('form') as HTMLElement).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(h.settings.awsProfile).toBe('ratchet-sandbox'));
+  });
+
+  it('lists what a live run still needs and updates as settings are saved', async () => {
+    const h = installApi();
+    render(<App initialRoute="settings" />);
+    const list = within(await screen.findByRole('list', { name: 'Live readiness' }));
+    expect(screen.getByText('Not ready')).toBeTruthy();
+    for (const label of ['AWS sign-in', 'GitHub repository and token', 'Model API key', 'Runner and bench AMIs', 'Sandbox applied']) expect(list.getByText(new RegExp(label))).toBeTruthy();
+    expect(list.getByText(/OpenTofu/).closest('li')?.getAttribute('data-state')).toBe('ok');
+
+    fireEvent.change(screen.getByLabelText('AWS profile'), { target: { value: 'ratchet-sandbox' } });
+    fireEvent.click(liveSave());
+    await waitFor(() => expect(h.settings.awsProfile).toBe('ratchet-sandbox'));
+    await waitFor(() => expect(list.getByText(/AWS sign-in/).closest('li')?.getAttribute('data-state')).toBe('ok'));
+  });
+
+  it('validates live settings as you type and only saves valid ones', async () => {
+    const h = installApi();
+    render(<App initialRoute="settings" />);
+    const region = (await screen.findByLabelText('AWS region')) as HTMLInputElement;
+    const save = liveSave();
+    expect(save.disabled).toBe(true); // nothing changed
+
+    fireEvent.change(region, { target: { value: 'moon-base-1' } });
+    expect((await screen.findAllByRole('alert')).some((a) => /region id such as us-east-1/.test(a.textContent ?? ''))).toBe(true);
+    expect(save.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText('Runner AMI'), { target: { value: 'ami-123' } });
+    expect(screen.getByText(/AMI id such as ami-0123456789abcdef0/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('GitHub repository'), { target: { value: 'not a repo' } });
+    expect(screen.getByText('Use owner/name, for example acme/search-api')).toBeTruthy();
+
+    fireEvent.change(region, { target: { value: 'eu-west-2' } });
+    fireEvent.change(screen.getByLabelText('Runner AMI'), { target: { value: 'ami-0123456789abcdef0' } });
+    fireEvent.change(screen.getByLabelText('GitHub repository'), { target: { value: 'acme/search-api' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'SSO' }));
+    await waitFor(() => expect(save.disabled).toBe(false));
+    fireEvent.click(save);
+    await waitFor(() => expect(h.settings.live).toMatchObject({ awsRegion: 'eu-west-2', runnerImageRef: 'ami-0123456789abcdef0', githubRepo: 'acme/search-api', awsAuth: 'sso' }));
+    await waitFor(() => expect(liveSave().disabled).toBe(true));
+  });
+
+  it('checks the key format before storing, and tests a stored connection without ever showing the secret', async () => {
+    const calls: unknown[] = [];
+    const ok = (target: string) => async (i: unknown) => (calls.push([target, i]), { target, ok: true, detail: `${target} is fine` }) as never;
+    const h = installApi({ connectionTester: { aws: ok('aws'), github: ok('github'), anthropic: ok('anthropic'), openai: ok('openai'), tofu: ok('tofu') } });
+    render(<App initialRoute="settings" />);
+    const row = within(await screen.findByTestId('secret-anthropicApiKey'));
+    const input = row.getByLabelText('Anthropic API key value') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'sk-proj-this-is-the-wrong-kind-of-key' } });
+    expect(row.getByText('Anthropic keys start with sk-ant-')).toBeTruthy();
+    expect((row.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(input, { target: { value: 'sk-ant-api03-VERYSECRET' } });
+    fireEvent.click(row.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(row.getByText('Configured')).toBeTruthy());
+    fireEvent.click(row.getByRole('button', { name: 'Test connection' }));
+    expect(await row.findByText(/anthropic is fine/)).toBeTruthy();
+    expect(calls).toEqual([['anthropic', { apiKey: 'sk-ant-api03-VERYSECRET' }]]); // read in the main process, not typed again
+    expect(document.body.textContent).not.toContain('VERYSECRET');
+    expect(h.settings.getSecret('anthropicApiKey')).toBe('sk-ant-api03-VERYSECRET');
+
+    // OpenTofu check has no secret at all and reports through the same path
+    fireEvent.click(screen.getAllByRole('button', { name: 'Test connection' }).at(-1)!);
+    expect(await screen.findByText(/tofu is fine/)).toBeTruthy();
+  });
+
+  it('shows a failed connection test as a failure', async () => {
+    installApi({ connectionTester: { aws: async () => ({ target: 'aws', ok: false, detail: 'The SSO session associated with this profile has expired' }), github: async () => ({ target: 'github', ok: true, detail: '' }), anthropic: async () => ({ target: 'anthropic', ok: true, detail: '' }), openai: async () => ({ target: 'openai', ok: true, detail: '' }), tofu: async () => ({ target: 'tofu', ok: true, detail: '' }) } });
+    render(<App initialRoute="settings" />);
+    fireEvent.change(await screen.findByLabelText('AWS profile'), { target: { value: 'corp' } });
+    fireEvent.click(liveSave());
+    await waitFor(() => expect((screen.getAllByRole('button', { name: 'Test connection' })[0] as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getAllByRole('button', { name: 'Test connection' })[0]!);
+    const result = await screen.findByTestId('test-aws');
+    expect(result.textContent).toContain('SSO session');
+    expect(result.className).toContain('test-result--fail');
   });
 
   it('disables secret entry and explains when the OS keychain is unavailable', async () => {

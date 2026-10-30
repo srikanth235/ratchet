@@ -10,3 +10,4 @@ export * from './cost.js';
 export * from './reaper.js';
 export * from './cost-explorer.js';
 export * from './cost-explorer.mock.js';
+export * from './identity.js';

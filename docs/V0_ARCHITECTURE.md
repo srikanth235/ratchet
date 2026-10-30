@@ -483,7 +483,7 @@ erDiagram
 | `bench_results` | `phase = bench` (visible trace) or `confirm` (holdout) |
 | `ratchet_moves` | **Append-only** (triggers reject UPDATE/DELETE); one per verified win, strictly improving |
 | `spend_events` | **Append-only**; corrections are new rows, possibly negative |
-| `sandboxes` | `planned → applying → applied → destroying → destroyed / failed`; tofu outputs stored on apply |
+| `sandboxes` | `planned → applying → applied → destroying → destroyed / failed`, driven by the engine (`planSandbox`, `applySandbox`, `destroySandbox`); tofu outputs stored on apply and the live runtime is built from them. Live optimizations are linked via `optimizations.sandbox_id` and need an applied sandbox; destroy is refused while one is running or any tagged instance remains |
 | `engine_kv` | Crash-safe engine bookkeeping (stop mode, plateau counters), keys `opt:<id>:…` |
 
 Enums (statuses, verdicts, agent kinds, evaluator kinds, value period/basis)

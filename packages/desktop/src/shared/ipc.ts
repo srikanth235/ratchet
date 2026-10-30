@@ -1,10 +1,19 @@
 import { z } from 'zod';
 import { type InvokeMethod } from './channels.js';
+import { SETTING_LABELS, validateLiveSetting, validateSecretFormat, type LiveSettingKey } from './live-settings.js';
 
 // ------------------------------------------------------------------ input schemas
 
 const id = z.string().min(1).max(200);
 const agentKind = z.enum(['claude-code', 'codex', 'mock']);
+const secretName = z.enum(['anthropicApiKey', 'openaiApiKey', 'githubToken']);
+
+/** A live setting: a string that passes the same format check the Settings screen shows while typing. */
+const liveField = (key: LiveSettingKey) =>
+  z.string().max(600).superRefine((v, ctx) => {
+    const problem = validateLiveSetting(key, v);
+    if (problem) ctx.addIssue({ code: 'custom', message: `${SETTING_LABELS[key]}: ${problem}` });
+  });
 
 /** Argument tuples per method, validated in the main process before anything is executed. */
 export const ARGS = {
@@ -20,6 +29,9 @@ export const ARGS = {
   preflight: z.tuple([z.object({ agents: z.array(agentKind).max(8), configYaml: z.string().max(200_000) }).strict()]),
   sandboxInfo: z.tuple([]),
   getSettings: z.tuple([]),
+  planSandbox: z.tuple([]),
+  applySandbox: z.tuple([]),
+  destroySandbox: z.tuple([]),
   createOptimization: z.tuple([
     z
       .object({
@@ -45,6 +57,28 @@ export const ARGS = {
   exportReport: z.tuple([id]),
   setMode: z.tuple([z.enum(['live', 'simulation'])]),
   setAwsProfile: z.tuple([z.string().trim().max(120).regex(/^[A-Za-z0-9_.@:-]*$/, 'profile names may only contain letters, digits and _ . @ : -')]),
-  setSecret: z.tuple([z.enum(['anthropicApiKey', 'openaiApiKey', 'githubToken']), z.string().min(8).max(4096)]),
-  clearSecret: z.tuple([z.enum(['anthropicApiKey', 'openaiApiKey', 'githubToken'])]),
+  setSecret: z.tuple([
+    secretName,
+    z.string().min(8).max(4096),
+  ]).superRefine(([name, value], ctx) => {
+    const problem = validateSecretFormat(name, value);
+    if (problem) ctx.addIssue({ code: 'custom', path: [1], message: problem });
+  }),
+  clearSecret: z.tuple([secretName]),
+  saveLiveSettings: z.tuple([
+    z
+      .object({
+        awsProfile: liveField('awsProfile'),
+        awsRegion: liveField('awsRegion'),
+        awsAuth: z.enum(['profile', 'sso']),
+        githubRepo: liveField('githubRepo'),
+        runnerImageRef: liveField('runnerImageRef'),
+        benchImageRef: liveField('benchImageRef'),
+        tofuBinary: liveField('tofuBinary'),
+        moduleDir: liveField('moduleDir'),
+      })
+      .partial()
+      .strict(),
+  ]),
+  testConnection: z.tuple([z.enum(['aws', 'github', 'anthropic', 'openai', 'tofu'])]),
 } as const satisfies Record<InvokeMethod, z.ZodType>;

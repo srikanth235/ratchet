@@ -1,13 +1,27 @@
 import { mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { EngineApi, EngineEvent, Ledger, Mode, SandboxProvider } from '@ratchet/core';
-import { createSimulationRuntime, type SimulationRuntime } from '@ratchet/runtime';
+import { SandboxLifecycle, type EngineApi, type EngineEvent, type Ledger, type Mode, type SandboxProvider } from '@ratchet/core';
+import { createLiveRuntime, createSimulationRuntime, type AwsSandboxOutputs, type LiveRuntime, type SimulationRuntime } from '@ratchet/runtime';
+import { sandboxIdFor } from './constants.js';
 import { createDevEngine } from './dev-app.js';
+import { effectivePaths, secretSource, type LivePaths } from './live-config.js';
+import type { SettingsStore } from './settings.js';
 
 /** Everything the main process needs from "the engine side". */
 export type { AppEngine } from './dev-app.js';
 import type { AppEngine } from './dev-app.js';
+
+/** What live mode is built from: Settings (non-secret values and, in the main process only, the secrets). */
+export interface LiveAppConfig {
+  settings: SettingsStore;
+  /** Where per-sandbox OpenTofu state, the git cache and scratch dirs live (userData/sandboxes). */
+  stateRoot: string;
+  /** What empty tofu settings resolve to (bundled infra/aws in a packaged app). */
+  defaults: LivePaths;
+  /** Test seam: replaces `createLiveRuntime`. */
+  createRuntime?: typeof createLiveRuntime;
+}
 
 export interface CreateEngineOptions {
   tickMs?: number;
@@ -20,6 +34,8 @@ export interface CreateEngineOptions {
   repoRoot?: string;
   /** Scratch root for simulation runs. Default: <repoRoot>/.ratchet-app-sim */
   workRoot?: string;
+  /** Needed for live mode; without it live mode reports that it is not configured. */
+  live?: LiveAppConfig;
 }
 
 /**
@@ -27,8 +43,9 @@ export interface CreateEngineOptions {
  *
  * - `simulation` mode: the real Engine on mock AWS + local git + local bench + scripted agents
  *   (@ratchet/runtime createSimulationRuntime) against examples/demo-search.
- * - `live` mode: needs sandbox outputs, GitHub and API keys from Settings; until those flows land
- *   it reports a clear error instead of pretending (see docs/REAL_ENV_TESTING.md).
+ * - `live` mode: the real Engine on real AWS + GitHub, built from Settings (createLiveRuntime). Before the sandbox
+ *   is applied only plan / apply / destroy work; after the apply the service builds the app again with the
+ *   outputs from the ledger. See docs/REAL_ENV_TESTING.md.
  */
 export function createEngineForApp(ledger: Ledger, mode: Mode, opts: CreateEngineOptions = {}): AppEngine {
   const which = opts.engine ?? (process.env.RATCHET_ENGINE === 'dev' ? 'dev' : 'real');
@@ -37,7 +54,7 @@ export function createEngineForApp(ledger: Ledger, mode: Mode, opts: CreateEngin
     const tick = Number(process.env.RATCHET_DEV_TICK_MS);
     return createDevEngine(ledger, mode, { ...opts, ...(opts.tickMs === undefined && tick > 0 ? { tickMs: tick } : {}) });
   }
-  if (mode === 'live') return createUnconfiguredLive();
+  if (mode === 'live') return createLiveApp(ledger, opts.live);
 
   const repoRoot = resolve(opts.repoRoot ?? process.env.RATCHET_REPO_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '../../../..'));
   const workRoot = resolve(opts.workRoot ?? join(repoRoot, '.ratchet-app-sim', String(Date.now())));
@@ -62,18 +79,15 @@ export function createEngineForApp(ledger: Ledger, mode: Mode, opts: CreateEngin
     messageAgent: (id, text) => call((rt) => rt.engine.messageAgent(id, text)),
     openPullRequest: (id) => call((rt) => rt.engine.openPullRequest(id)),
     teardown: (id) => call((rt) => rt.engine.teardown(id)),
+    sandboxState: (id) => call((rt) => rt.engine.sandboxState(id)),
+    planSandbox: (i) => call((rt) => rt.engine.planSandbox(i)),
+    applySandbox: (i) => call((rt) => rt.engine.applySandbox(i)),
+    destroySandbox: (id) => call((rt) => rt.engine.destroySandbox(id)),
     subscribe: (l) => (listeners.add(l), () => listeners.delete(l)),
-  };
-  const sandbox: SandboxProvider = {
-    plan: (i) => call((rt) => rt.sandbox.plan(i)),
-    apply: (i) => call((rt) => rt.sandbox.apply(i)),
-    destroy: (i) => call((rt) => rt.sandbox.destroy(i)),
-    outputs: (id) => call((rt) => rt.sandbox.outputs(id)),
   };
   return {
     kind: 'real',
     engine,
-    sandbox,
     // In simulation every optimization lives in the one prepared repo.
     diff: ({ baseRef, sha }) => call((rt) => rt.git.diff(baseRef, sha)),
     dispose: () => {
@@ -83,10 +97,62 @@ export function createEngineForApp(ledger: Ledger, mode: Mode, opts: CreateEngin
   };
 }
 
-function createUnconfiguredLive(): AppEngine {
-  const fail = async (): Promise<never> => {
-    throw new Error('Live mode needs a sandbox, GitHub token and API keys (Settings). Use simulation mode until the real-environment setup in docs/REAL_ENV_TESTING.md is done.');
+/**
+ * Live mode from Settings. Never throws: when the settings cannot build a runtime (or there are none) the returned
+ * engine fails every command with the reason, and the Settings screen shows what to fix.
+ */
+function createLiveApp(ledger: Ledger, live: LiveAppConfig | undefined): AppEngine {
+  if (!live) return createUnconfiguredLive(ledger, 'Live mode is not configured: open Settings and fill in the AWS, GitHub and image settings.');
+  const { settings } = live;
+  const settingsNow = settings.live;
+  const paths = effectivePaths(settingsNow, live.defaults);
+  const sandboxId = sandboxIdFor('live');
+
+  // Only a sandbox that the real provider applied: a mock row (from simulation) must never reach the AWS clients.
+  const row = ledger.getSandbox(sandboxId);
+  const outputs = row && row.status === 'applied' && row.provider === 'aws' && row.outputs ? (row.outputs as unknown as AwsSandboxOutputs) : null;
+
+  let rt: LiveRuntime;
+  try {
+    mkdirSync(live.stateRoot, { recursive: true });
+    rt = (live.createRuntime ?? createLiveRuntime)({
+      ledger,
+      region: settingsNow.awsRegion || 'us-east-1',
+      sandbox: outputs,
+      sandboxId,
+      githubRepo: settingsNow.githubRepo || undefined,
+      githubToken: settings.getSecret('githubToken') ?? undefined,
+      runnerImageRef: settingsNow.runnerImageRef || undefined,
+      benchImageRef: settingsNow.benchImageRef || undefined,
+      tofuBinary: paths.tofuBinary,
+      moduleDir: paths.moduleDir,
+      stateRoot: live.stateRoot,
+      secrets: secretSource(settings),
+      awsProfile: settingsNow.awsProfile || undefined,
+    });
+  } catch (err) {
+    return createUnconfiguredLive(ledger, `Live mode could not start: ${(err as Error).message}`);
+  }
+
+  const ac = new AbortController();
+  void rt.engine.run(ac.signal);
+  return {
+    kind: 'real',
+    engine: rt.engine,
+    dispose: () => {
+      ac.abort();
+      void rt.dispose();
+    },
   };
+}
+
+/** Every command fails with `reason`; the sandbox state is still readable from the ledger. */
+function createUnconfiguredLive(ledger: Ledger, reason: string): AppEngine {
+  const fail = async (): Promise<never> => {
+    throw new Error(reason);
+  };
+  const provider: SandboxProvider = { plan: fail, apply: fail, destroy: fail, outputs: async () => null };
+  const lifecycle = new SandboxLifecycle({ ledger, provider, kind: 'aws' });
   const engine: EngineApi = {
     mode: () => 'live',
     createOptimization: fail,
@@ -97,7 +163,11 @@ function createUnconfiguredLive(): AppEngine {
     messageAgent: fail,
     openPullRequest: fail,
     teardown: fail,
+    sandboxState: async (id) => lifecycle.state(id),
+    planSandbox: fail,
+    applySandbox: fail,
+    destroySandbox: fail,
     subscribe: () => () => {},
   };
-  return { kind: 'real', engine, sandbox: { plan: fail, apply: fail, destroy: fail, outputs: async () => null }, dispose: () => {} };
+  return { kind: 'real', engine, dispose: () => {} };
 }

@@ -9,7 +9,10 @@ export type EngineErrorCode =
   | 'orphans'
   | 'teardown_incomplete'
   | 'unavailable'
-  | 'aborted';
+  | 'aborted'
+  | 'sandbox_not_applied'
+  | 'sandbox_in_use'
+  | 'not_configured';
 
 export class EngineError extends Error {
   constructor(

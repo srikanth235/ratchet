@@ -14,8 +14,15 @@ import {
   type Mode,
   type OptimizationId,
   type RatchetConfig,
+  type SandboxInput,
+  type SandboxOutputs,
+  type SandboxPlan,
+  type SandboxProvider,
+  type SandboxState,
+  SandboxLifecycle,
 } from '@ratchet/core';
 import { DEFAULT_CONFIG_YAML } from './default-config.js';
+import { DevSandboxProvider } from './dev-sandbox.js';
 import { simulatedStats } from './dev-stats.js';
 
 /** Ledger columns that come from ratchet.yaml (pack, objective name, evaluator kind, value model), as the core engine sets them. */
@@ -40,6 +47,8 @@ export interface DevEngineOptions {
   now?: () => number;
   /** Set false to drive the simulation manually with `tick()`. Default true. */
   autoRun?: boolean;
+  /** The sandbox the lifecycle API drives. Default: a DevSandboxProvider. */
+  sandbox?: SandboxProvider;
 }
 
 /** `EngineCreateOptimizationInput` plus the reviewed config text the dev engine can use in place of reading the repo. */
@@ -94,6 +103,7 @@ export class DevEngine implements EngineApi {
   private readonly autoRun: boolean;
   private readonly modeValue: Mode;
   private pending: ReturnType<typeof setTimeout>[] = [];
+  private readonly sandboxes: SandboxLifecycle;
 
   constructor(
     private readonly ledger: Ledger,
@@ -105,6 +115,22 @@ export class DevEngine implements EngineApi {
     this.tickMs = opts.tickMs ?? 2500;
     this.baselineMs = opts.baselineMs ?? 1200;
     this.autoRun = opts.autoRun ?? true;
+    // Same lifecycle rules as the real engine (statuses in the ledger, destroy refused while running), no cloud behind it.
+    this.sandboxes = new SandboxLifecycle({ ledger, provider: opts.sandbox ?? new DevSandboxProvider(), kind: 'mock' });
+    this.sandboxes.recover();
+  }
+
+  async sandboxState(sandboxId: string): Promise<SandboxState> {
+    return this.sandboxes.state(sandboxId);
+  }
+  planSandbox(input: SandboxInput): Promise<SandboxPlan> {
+    return this.sandboxes.plan(input);
+  }
+  applySandbox(input: SandboxInput): Promise<SandboxOutputs> {
+    return this.sandboxes.apply(input);
+  }
+  destroySandbox(sandboxId: string): Promise<void> {
+    return this.sandboxes.destroy(sandboxId);
   }
 
   mode(): Mode {
@@ -144,6 +170,7 @@ export class DevEngine implements EngineApi {
       configYaml: input.configYaml ?? DEFAULT_CONFIG_YAML,
       status: 'draft',
       ...configColumns(cfg),
+      sandboxId: input.sandboxId && this.ledger.getSandbox(input.sandboxId)?.status === 'applied' ? input.sandboxId : null,
     });
     input.agents.forEach((kind, i) => {
       this.ledger.addAgent({ optimizationId: opt.id, kind, branch: `ratchet/${opt.id.slice(4, 12)}/${kind}-${i + 1}` });
