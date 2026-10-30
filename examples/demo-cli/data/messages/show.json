@@ -1,0 +1,10 @@
+{
+ "show.status": "status",
+ "show.priority": "priority",
+ "show.assignee": "assignee",
+ "show.labels": "labels",
+ "show.estimate": "estimate",
+ "show.created": "created",
+ "show.due": "due",
+ "show.hours": "{n, plural, one {# hour} other {# hours}}"
+}

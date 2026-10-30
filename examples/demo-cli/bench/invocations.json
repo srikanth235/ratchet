@@ -1,0 +1,103 @@
+{
+ "seed": 1,
+ "invocations": [
+  {
+   "args": [
+    "list",
+    "--assignee",
+    "ivan.petrov",
+    "--sort",
+    "estimate",
+    "--limit",
+    "15"
+   ]
+  },
+  {
+   "args": [
+    "show",
+    "1839"
+   ]
+  },
+  {
+   "args": [
+    "stats",
+    "--by",
+    "label",
+    "--top",
+    "9"
+   ]
+  },
+  {
+   "args": [
+    "search",
+    "last",
+    "log",
+    "--limit",
+    "5"
+   ]
+  },
+  {
+   "args": [
+    "export",
+    "--format",
+    "json",
+    "--limit",
+    "129",
+    "--status",
+    "doing"
+   ]
+  },
+  {
+   "args": [
+    "due",
+    "--within",
+    "6",
+    "--tz",
+    "Europe/London"
+   ]
+  },
+  {
+   "args": [
+    "list",
+    "--status",
+    "todo",
+    "--assignee",
+    "omar.haddad",
+    "--sort",
+    "estimate",
+    "--limit",
+    "15"
+   ]
+  },
+  {
+   "args": [
+    "search",
+    "rate",
+    "--limit",
+    "12"
+   ]
+  },
+  {
+   "args": [
+    "due",
+    "--within",
+    "46",
+    "--tz",
+    "America/Los_Angeles"
+   ]
+  },
+  {
+   "args": [
+    "config",
+    "--format",
+    "json"
+   ]
+  },
+  {
+   "args": [
+    "verison"
+   ],
+   "expect": 2
+  }
+ ]
+}

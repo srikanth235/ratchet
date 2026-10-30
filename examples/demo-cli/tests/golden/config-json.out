@@ -1,0 +1,21 @@
+{
+  "root": ".",
+  "sources": [
+    "packages/web/package.json",
+    ".taskrrc.json"
+  ],
+  "dataFile": "data/tasks.json",
+  "tz": "Europe/Berlin",
+  "pageSize": 12,
+  "columns": 80,
+  "plugins": [
+    {
+      "name": "@taskr/plugin-burndown",
+      "version": "1.2.0"
+    },
+    {
+      "name": "taskr-plugin-gantt",
+      "version": "0.4.1"
+    }
+  ]
+}
