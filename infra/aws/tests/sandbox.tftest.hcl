@@ -156,14 +156,22 @@ run "deps_runner_is_a_third_identity_that_only_writes_bench_deps" {
     error_message = "the deps runner has its own instance profile"
   }
 
-  # Every S3 write the deps runner holds is on bench-deps/ and nothing else.
+  # Every S3 write the deps runner holds is on bench-deps/ (snapshots) or bench-images/ (container images) and nothing else.
   assert {
     condition = alltrue([
       for s in jsondecode(aws_iam_role_policy.deps_runner.policy).Statement :
-      endswith(s.Resource, "/bench-deps/*")
+      endswith(s.Resource, "/bench-deps/*") || endswith(s.Resource, "/bench-images/*")
       if try(contains(flatten([s.Action]), "s3:PutObject"), false)
     ])
-    error_message = "the deps runner may write only under bench-deps/"
+    error_message = "the deps runner may write only under bench-deps/ and bench-images/"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.deps_runner.policy).Statement :
+      s.Sid == "WriteBenchImages" && s.Effect == "Allow" && endswith(s.Resource, "/bench-images/*")
+    ])
+    error_message = "the deps runner can write bench-images/"
   }
 
   assert {
@@ -174,14 +182,15 @@ run "deps_runner_is_a_third_identity_that_only_writes_bench_deps" {
     error_message = "the deps runner can write bench-deps/"
   }
 
-  # Reads: only the staged base tree, never the candidate archive.
+  # Reads: only the staged base tree (never the candidate archive) and the images it saved itself (to load one when only the
+  # dependency snapshot is missing).
   assert {
     condition = alltrue([
       for s in jsondecode(aws_iam_role_policy.deps_runner.policy).Statement :
-      endswith(s.Resource, "/bench-inputs/*/deps-base.tgz")
+      endswith(s.Resource, "/bench-inputs/*/deps-base.tgz") || endswith(s.Resource, "/bench-images/*")
       if try(contains(flatten([s.Action]), "s3:GetObject"), false)
     ])
-    error_message = "the deps runner may read only the staged base tree (deps-base.tgz), not the candidate's code.tgz"
+    error_message = "the deps runner may read only the staged base tree (deps-base.tgz) and bench-images/, not the candidate's code.tgz"
   }
 
   assert {
@@ -234,6 +243,35 @@ run "bench_and_confirm_read_dependency_snapshots_but_cannot_write_them" {
       ])
     ])
     error_message = "candidate-facing identities must not be able to write dependency snapshots"
+  }
+}
+
+run "bench_and_confirm_read_container_images_but_cannot_write_them" {
+  command = apply
+
+  assert {
+    condition = alltrue([
+      for p in [aws_iam_role_policy.bench_runner.policy, aws_iam_role_policy.confirm_runner.policy] :
+      anytrue([for s in jsondecode(p).Statement : s.Sid == "ReadBenchImages" && s.Action == "s3:GetObject" && endswith(s.Resource, "/bench-images/*")])
+    ])
+    error_message = "bench and confirm runners read bench-images/ (the repo's container is loaded offline from there)"
+  }
+
+  assert {
+    condition = alltrue([
+      for p in [aws_iam_role_policy.bench_runner.policy, aws_iam_role_policy.confirm_runner.policy] :
+      alltrue([
+        for s in jsondecode(p).Statement :
+        !strcontains(s.Resource, "bench-images") if try(contains(flatten([s.Action]), "s3:PutObject"), false)
+      ])
+    ])
+    error_message = "candidate-facing identities must not be able to write container images"
+  }
+
+  # Agents live under artifacts/<opt>/<agent>/ only: no way to reach bench-images/.
+  assert {
+    condition     = !strcontains(aws_iam_policy.agent_boundary.policy, "bench-images")
+    error_message = "the agent boundary never mentions bench-images/"
   }
 }
 

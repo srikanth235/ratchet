@@ -15,7 +15,9 @@ case "$which" in runner | bench | both) shift ;; *) echo "usage: $0 runner|bench
 
 commit="$(git -C "$repo" rev-parse --short=9 HEAD 2>/dev/null || echo unknown)"
 if [ -n "$(git -C "$repo" status --porcelain 2>/dev/null)" ]; then commit="${commit}-dirty"; fi
-version="${RATCHET_IMAGE_VERSION:-$(date -u +%Y%m%d)-${commit}}"
+# The tag the app matches (ratchet:image_version): the app version, then a build suffix (packages/aws findRatchetImages).
+app_version="${RATCHET_APP_VERSION:-$(node -p "require('$repo/packages/desktop/package.json').version" 2>/dev/null || echo 0.0.0)}"
+version="${RATCHET_IMAGE_VERSION:-${app_version}-$(date -u +%Y%m%d)-${commit}}"
 
 packer init "$here"
 

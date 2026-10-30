@@ -77,6 +77,12 @@ describe.each([
     expect(decide("s3:PutObject", `${a}/bench-deps/pnpm-abc/1234.tar.zst`)).toBe("ImplicitDeny");
     expect(decide("s3:DeleteObject", `${a}/bench-deps/pnpm-abc.json`)).toBe("ImplicitDeny");
   });
+  it("reads saved container images from bench-images/ but can never write them", () => {
+    expect(decide("s3:GetObject", `${a}/bench-images/img-abc/1234.tar.zst`)).toBe("Allow");
+    expect(decide("s3:GetObject", `${a}/bench-images/img-abc.json`)).toBe("Allow");
+    expect(decide("s3:PutObject", `${a}/bench-images/img-abc/1234.tar.zst`)).toBe("ImplicitDeny");
+    expect(decide("s3:DeleteObject", `${a}/bench-images/img-abc.json`)).toBe("ImplicitDeny");
+  });
   it("writes results only under bench-results/ and cannot read or overwrite agent prefixes", () => {
     expect(decide("s3:PutObject", `${a}/bench-results/opt1/r.json`)).toBe("Allow");
     expect(decide("s3:PutObject", `${a}/artifacts/opt1/claude-1/x`)).toBe("ImplicitDeny");
@@ -137,6 +143,16 @@ describe("deps_runner_policy (dependency-snapshot builder: has egress, runs no c
     }
     expect(decide("s3:DeleteObject", `${a}/bench-deps/pnpm-abc.json`)).toBe("ImplicitDeny");
   });
+  it("writes container images only under bench-images/ and reads them back from there", () => {
+    expect(decide("s3:PutObject", `${a}/bench-images/img-abc/1234.tar.zst`)).toBe("Allow");
+    expect(decide("s3:PutObject", `${a}/bench-images/img-abc.json`)).toBe("Allow");
+    expect(decide("s3:AbortMultipartUpload", `${a}/bench-images/img-abc/1234.tar.zst`)).toBe("Allow");
+    expect(decide("s3:GetObject", `${a}/bench-images/img-abc.json`)).toBe("Allow");
+    expect(decide("s3:DeleteObject", `${a}/bench-images/img-abc.json`)).toBe("ImplicitDeny");
+    // the other prefixes stay as closed as before
+    expect(decide("s3:PutObject", `${a}/bench-inputs/opt1/job1/deps-base.tgz`)).toBe("ImplicitDeny");
+    expect(decide("s3:PutObject", `${a}/bench-image/x`)).toBe("ImplicitDeny");
+  });
   it("reads only the staged base tree, never the candidate archive, other snapshots, results or agent prefixes", () => {
     expect(decide("s3:GetObject", `${a}/bench-inputs/opt1/0f5e2c6a-aaaa/deps-base.tgz`)).toBe("Allow");
     for (const key of ["bench-inputs/opt1/job1/code.tgz", "bench-inputs/opt1/job1/bench.tgz", "bench-deps/pnpm-abc.json", "bench-results/opt1/r.json", "artifacts/opt1/claude-1/x"]) {
@@ -182,6 +198,7 @@ describe("S3 gateway endpoint policy", () => {
     expect(decide("s3:PutObject", `${fixture.artifacts_bucket_arn}/bench-results/x`)).toBe("Allow");
     expect(decide("s3:GetObject", `${sealed}/holdout/t.json`)).toBe("Allow");
     expect(decide("s3:PutObject", `${fixture.artifacts_bucket_arn}/bench-deps/pnpm-abc.json`)).toBe("Allow");
+    expect(decide("s3:PutObject", `${fixture.artifacts_bucket_arn}/bench-images/img-abc.json`)).toBe("Allow");
     expect(decide("s3:PutObject", "arn:aws:s3:::attacker-bucket/loot")).toBe("ImplicitDeny");
     expect(decide("s3:GetObject", "arn:aws:s3:::ratchet-demo-artifacts-123456789012-evil/x")).toBe("ImplicitDeny");
     expect(decide("s3:GetObject", "arn:aws:s3:::al2023-repos-us-east-1/x")).toBe("ImplicitDeny");

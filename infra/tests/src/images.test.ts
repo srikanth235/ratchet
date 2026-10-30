@@ -50,6 +50,8 @@ const allPins = { ...pins(versions), ...pins(agentVersions) };
 const runnerScripts = hclList(runnerHcl, "runner_scripts");
 const runnerSupport = hclList(runnerHcl, "runner_support_files");
 const benchScripts = hclList(benchHcl, "bench_scripts");
+/** Added by -var host_toolchain=true (the legacy no-container path). */
+const benchHostScripts = hclList(benchHcl, "bench_host_scripts");
 const benchSupport = hclList(benchHcl, "bench_support_files");
 
 describe("images: layout", () => {
@@ -57,20 +59,31 @@ describe("images: layout", () => {
     expect(hclFiles.sort()).toEqual(["bench.pkr.hcl", "common.pkr.hcl", "runner.pkr.hcl"]);
   });
   it("lists only scripts that exist, and every step script is used by an image", () => {
-    for (const f of [...runnerScripts, ...runnerSupport, ...benchScripts, ...benchSupport]) expect(scriptFiles, f).toContain(f);
-    for (const f of stepScripts) expect([...runnerScripts, ...benchScripts], `${f} is not used by any image`).toContain(f);
+    const present = readdirSync(scriptsDir);
+    for (const f of [...runnerScripts, ...runnerSupport, ...benchScripts, ...benchHostScripts, ...benchSupport]) expect(present, f).toContain(f);
+    for (const f of stepScripts) expect([...runnerScripts, ...benchScripts, ...benchHostScripts], `${f} is not used by any image`).toContain(f);
   });
   it("runs the steps in numeric order and ends with verification and cleanup", () => {
     for (const list of [runnerScripts, benchScripts]) {
       expect([...list].sort()).toEqual(list);
       expect(list.slice(-2).map((s) => s.slice(0, 2))).toEqual(["90", "99"]);
     }
+    // the bench template merges the optional host-toolchain steps back in by sorting
+    expect(benchHcl).toMatch(/bench_run_scripts\s*=\s*sort\(concat\(local\.bench_scripts, var\.host_toolchain \? local\.bench_host_scripts : \[\]\)\)/);
+    expect(benchHcl).toMatch(/for f in concat\(local\.bench_support_files, local\.bench_run_scripts\)/);
+    expect(benchHcl).toMatch(/for s in local\.bench_run_scripts : "bash/);
   });
-  it("shares the base, node, aws cli, load-tool, shim and cleanup steps between both images", () => {
-    for (const s of ["00-base.sh", "10-node.sh", "20-aws-cli.sh", "30-bench-tools.sh", "99-cleanup.sh"]) {
+  it("shares the base, aws cli and cleanup steps between both images; node and the load tools are the runner's (the bench only with host_toolchain)", () => {
+    for (const s of ["00-base.sh", "20-aws-cli.sh", "99-cleanup.sh"]) {
       expect(runnerScripts).toContain(s);
       expect(benchScripts).toContain(s);
     }
+    for (const s of ["10-node.sh", "30-bench-tools.sh"]) {
+      expect(runnerScripts).toContain(s);
+      expect(benchScripts).not.toContain(s);
+      expect(benchHostScripts).toContain(s);
+    }
+    expect(common).toMatch(/variable "host_toolchain"[\s\S]*?default\s*=\s*false/);
   });
 });
 
@@ -169,7 +182,8 @@ describe("images: pinned versions and checksums", () => {
 describe("images: AMI tags", () => {
   it("tags the runner AMI ratchet:image=runner and the bench AMI ratchet:image=bench, with a version", () => {
     expect(runnerHcl).toMatch(/"ratchet:image"\s*=\s*"runner"/);
-    expect(benchHcl).toMatch(/"ratchet:image"\s*=\s*"bench"/);
+    // the generic image is the one the tag lookup finds; the host-toolchain variant has its own tag so it is never picked
+    expect(benchHcl).toMatch(/"ratchet:image"\s*=\s*var\.host_toolchain \? "bench-host" : "bench"/);
     expect(runnerHcl).not.toMatch(/"ratchet:image"\s*=\s*"bench"/);
     expect(benchHcl).not.toMatch(/"ratchet:image"\s*=\s*"runner"/);
     expect(common).toMatch(/"ratchet:image_version"\s*=\s*var\.image_version/);
@@ -184,7 +198,9 @@ describe("images: AMI tags", () => {
       expect(hcl).toMatch(new RegExp(`\\btags\\s*=\\s*merge\\(local\\.${kind}_tags`));
       expect(hcl).toMatch(new RegExp(`snapshot_tags\\s*=\\s*local\\.${kind}_tags`));
       expect(hcl).toMatch(new RegExp(`ami_name\\s*=\\s*local\\.${kind}_name`));
-      expect(hcl).toMatch(new RegExp(`${kind}_name\\s*=\\s*"ratchet-${kind}-\\$\\{var\\.image_version\\}-\\$\\{var\\.arch\\}"`));
+      expect(hcl).toMatch(
+        new RegExp(`${kind}_name\\s*=\\s*"ratchet-${kind}(\\$\\{var\\.host_toolchain \\? "-host" : ""\\})?-\\$\\{var\\.image_version\\}-\\$\\{var\\.arch\\}"`),
+      );
     }
   });
   it("does not let extra_tags override the reserved ratchet:* tags", () => {
@@ -232,11 +248,53 @@ describe("bench image", () => {
     expect(verify).toMatch(/for c in claude codex ratchet-runner/);
     expect(verify).toMatch(/ANTHROPIC_\* \| OPENAI_\* \| CODEX_\*\) die/);
   });
-  it("installs the tools the issue asks for: node, pnpm, git, k6, hyperfine, aws cli, the SSM agent", () => {
+  it("is generic: git, the AWS CLI, the SSM agent, zstd and the Docker engine; node, pnpm, k6 and hyperfine only with host_toolchain", () => {
     expect(stripComments(read("scripts", "00-base.sh"))).toMatch(/\bgit\b[\s\S]*amazon-ssm-agent/);
     expect(stripComments(read("scripts", "00-base.sh"))).toContain("systemctl enable amazon-ssm-agent");
+    expect(stripComments(read("scripts", "00-base.sh"))).toMatch(/\bzstd\b/);
+    expect(benchScripts).toContain("25-docker.sh");
+    expect(benchScripts).not.toContain("10-node.sh");
+    const verify = read("scripts", "90-verify-bench.sh");
+    expect(verify).toContain('if [ "$HOST_TOOLCHAIN" = 1 ]');
+    expect(verify).toContain("must not be on the generic bench image");
+    expect(benchHcl).toContain("RATCHET_HOST_TOOLCHAIN=");
     expect(read("scripts", "10-node.sh")).toContain("pnpm");
     expect(read("scripts", "30-bench-tools.sh")).toMatch(/k6[\s\S]*hyperfine/);
+  });
+  it("installs Docker without opening it up: no group members, no tcp socket, no seccomp or no-new-privileges override, no pulled images", () => {
+    const docker = stripComments(read("scripts", "25-docker.sh"));
+    expect(docker).toContain("dnf_install docker");
+    expect(docker).toContain("systemctl enable docker");
+    expect(docker).not.toMatch(/usermod|gpasswd|groupadd|--group|docker\s+(pull|run|build)/);
+    const daemon = /cat > "\$ETC\/docker\/daemon.json" <<'EOF'\n([\s\S]*?)\nEOF/.exec(docker)![1]!;
+    const cfg = JSON.parse(daemon) as Record<string, unknown>;
+    expect(cfg["icc"]).toBe(false);
+    expect(cfg["userland-proxy"]).toBe(false);
+    for (const k of ["hosts", "tls", "tlsverify", "seccomp-profile", "no-new-privileges", "privileged", "userns-remap", "insecure-registries"]) expect(Object.keys(cfg), k).not.toContain(k);
+    const verify = stripComments(read("scripts", "90-verify-bench.sh"));
+    expect(verify).toContain("the docker group must have no members");
+    expect(verify).toContain("the docker daemon runs without its default seccomp profile");
+    expect(verify).toContain("docker-init");
+    expect(stripComments(read("scripts", "99-cleanup.sh"))).toContain("rm -rf /var/lib/docker");
+  });
+  it("installs the setuid launcher in a root-only directory from source, then removes the compiler", () => {
+    const script = stripComments(read("scripts", "35-candidate-launcher.sh"));
+    expect(script).toContain("dnf_install gcc glibc-static");
+    expect(script).toMatch(/gcc -O2 -static -s -Wall -Wextra -Werror/);
+    expect(script).toContain('install -d -m 0700 -o root -g root "$dest"');
+    expect(script).toContain('install -m 4755 -o root -g root');
+    expect(script).toContain("dnf remove -y gcc glibc-static");
+    // the path and name the bench scripts mount into the container
+    const ts = readRepo("packages", "bench", "src", "image-scripts.ts");
+    expect(/CANDIDATE_HELPER = '([^']+)'/.exec(ts)![1]).toBe("/usr/local/libexec/ratchet/ratchet-candidate-ctr");
+    expect(script).toContain('dest="$PREFIX/libexec/ratchet"');
+    expect(script).toContain("ratchet-candidate-ctr");
+    const verify = stripComments(read("scripts", "90-verify-bench.sh"));
+    expect(verify).toContain("root:root 4755");
+    expect(verify).toContain("root:root 700");
+    expect(verify).toContain("must be statically linked");
+    expect(verify).toMatch(/for c in gcc cc make/);
+    expect(benchSupport).toContain("ratchet-candidate-ctr.c");
   });
   it("provides what remote-scripts.ts needs: setpriv, pkill, GNU grep -P, find -printf, iptables and ip6tables", () => {
     const remote = readRepo("packages", "bench", "src", "remote-scripts.ts");
@@ -265,7 +323,7 @@ describe("bench image", () => {
     expect(name).toBe("ratchet-bench");
     const holdout = /HOLDOUT_OS_USER = '([^']+)'/.exec(awsTs)![1]!;
     expect(holdout).toBe("ratchet-holdout");
-    expect(/BENCH_USER = '([^']+)'/.exec(readRepo("packages", "bench", "src", "remote-scripts.ts"))![1]).toBe(name);
+    expect(/BENCH_USER = '([^']+)'/.exec(readRepo("packages", "bench", "src", "shell.ts"))![1]).toBe(name);
     // The user data loops over both users: `id -u ${u} ... || useradd <flags> ${u}`.
     const userData = /useradd ([^\\`]*?)\$\{u\}/.exec(awsTs)![1]!.trim();
     expect(userData).toBe("--system --no-create-home --shell /usr/sbin/nologin");

@@ -110,6 +110,78 @@ bench subnet, its security group, route table and DNS allow-list are unchanged. 
 credentials for them), git/url dependencies, and a candidate changing `.npmrc` / `pnpm-workspace.yaml` (those are not pinned; they cannot
 fetch anything either, so the effect is an offline install failure at worst).
 
+### The repo's container (`environment.image`)
+
+`environment.image: <path to a Dockerfile or a devcontainer.json>` in `ratchet.yaml` makes the repo's own container the toolchain
+of the bench (node, python, k6, a compiler, whatever the evaluator needs). It replaces per-repo AMIs: the bench AMI is generic
+(Docker engine, SSM, zstd, git, the AWS CLI, iptables, the two users and the launcher below; `infra/images`). Without
+`environment.image` nothing below applies and the steps run directly on the instance as before, which then needs an AMI that
+carries the toolchain (`-var host_toolchain=true`, or your own; there is no container fallback). Code: `src/image.ts` (config read, Dockerfile /
+devcontainer parsing, key, manifest, the change guard), `src/image-scripts.ts` (image job, restore, probes, the `docker run` line),
+`src/remote-deps.ts` (orchestration), `src/remote-scripts.ts` (the steps).
+
+```
+resolve environment.image at bench.ref (the controller; never the candidate)  ->  key = hash(Dockerfile, devcontainer fields,
+  every context file the Dockerfile COPYs/ADDs, .dockerignore, pinned base digests, architecture)
+  bench-images/<key>.json present, valid for this key, archive still in the bucket?  --- yes --->  reuse
+  no:  the SAME egress instance as the dependency snapshot (purpose=deps, agent subnet, deps_runner profile):
+         root: download deps-base.tgz (bench.ref only), verify, `docker build --pull` (or `docker pull` for a devcontainer `image`)
+         `docker save | zstd`  ->  bench-images/<key>/<sha256>.tar.zst, THEN bench-images/<key>.json (manifest last)
+       the dependency fetch (`pnpm fetch`, `npm ci --ignore-scripts`) then runs INSIDE the image (the host has no node):
+         `docker run --user ratchet-deps --cap-drop ALL --security-opt no-new-privileges --read-only`, with network, no AWS credentials
+bench / confirm instance (offline): root downloads the archive through the S3 endpoint, verifies its sha256, `docker load`,
+  checks that the loaded image id equals the manifest's, checks `docker info` has seccomp, then PROBES the container exactly as
+  the steps will run it (below). Only then do setup, guardrails and the evaluator run, each as one `docker run` of that image.
+```
+
+**Never candidate code.** The image is built from `bench.ref` only, on an instance that applies no candidate input. A candidate
+whose Dockerfile, devcontainer.json, `.dockerignore` or any file the Dockerfile copies in differs from `bench.ref` is **blocked**
+before an instance runs anything, with `environment changes are not allowed in v0` (guardrail `environment unchanged`), exactly like
+the lockfile rule. Those files are also protected paths (overlaid from `bench.ref`, tamper-checked before every step). A Dockerfile
+that copies the repository itself into the image (`COPY . /app`) is refused when the configuration is read: the environment must be
+a toolchain, not the code under optimization; keep the context to something like `.devcontainer/`, or copy only a manifest.
+The build context is the Dockerfile's directory, or a devcontainer's `build.context`; only the files the Dockerfile copies are hashed.
+Supported devcontainer properties: `build.dockerfile` / `dockerFile`, `build.context`, `build.args`, `build.target`, or `image`
+(pulled and saved); `features`, lifecycle commands, mounts and `runArgs` are ignored and listed in the log. A base image not pinned
+by digest is noted in the log: the key is then the Dockerfile's, so the saved image can lag behind upstream.
+
+**`docker build` runs as root** on the throwaway egress instance. That is acceptable because the Dockerfile is protected-ref input
+(as trusted as the lockfile and the evaluator), no candidate code exists there, the build's `RUN` steps run in containers with no
+credentials (`DOCKER_CONFIG` points at an empty directory plus the proxy settings, `AWS_*` is not in the environment) and no route to
+instance metadata (the deps user data adds `DOCKER-USER` / `FORWARD` reject rules for forwarded traffic; the host owner rule does not cover
+forwarded packets; IMDSv2 hop limit 1 is the third net). A rootless daemon was not used: it needs a login session, `newuidmap` and
+a user-space network stack on a throwaway box for no extra boundary, since a user in group `docker` is root anyway.
+**Registries**: the Dockerfile's `FROM` and `RUN` steps need the registries (`registry-1.docker.io`, `auth.docker.io`,
+`production.cloudflare.docker.com`, `ghcr.io`, `public.ecr.aws`, OS package mirrors, ...) from the agent subnet. The default
+allow-list does not include them; adding them is an operator / `environment.network` decision
+(`egress_proxy_extra_domains` with the proxy, `dns_firewall_extra_domains` without). The bench subnet, its security group and the DNS
+allow-list are unchanged.
+
+**How the isolation maps** (the same two uids in both paths; `ratchet-bench` runs setup, guardrails and every candidate process,
+`ratchet-holdout` runs the harness and owns the holdout):
+
+| Property | Host path (no `environment.image`) | Container path |
+|---|---|---|
+| Candidate identity | `setpriv --reuid=ratchet-bench --clear-groups --no-new-privs` | `docker run --user <bench uid>:<gid>` (numeric, resolved on the instance), `--cap-drop ALL`, `--security-opt no-new-privileges` |
+| Harness identity | `setpriv --reuid=ratchet-holdout` | `--user <holdout uid>:<gid>`, `--cap-drop ALL --cap-add SETUID --cap-add SETGID`, no `no-new-privileges` (its launcher is setuid) |
+| Harness starts candidate processes | sudo rule + launcher script | `/ratchet/candidate`: a static **setuid-root** launcher (`infra/images/scripts/ratchet-candidate-ctr.c`) installed in a root-only host directory and bind-mounted read-only into the harness container only. It works only for the caller uid named in the root-owned `launcher.conf` (written by the step script, also mounted read-only), drops to the bench uid with no groups, sets `no_new_privs`, closes every fd above 2, enters the checkout and runs the command with a clean environment; it refuses `RATCHET_TRACE` and `AWS_*` |
+| Network | no route out; S3 / SSM endpoints only | `--network none`: loopback only, not even the endpoints (setup is offline by construction) |
+| Instance metadata | iptables owner rule + hop limit 1 | no network interface at all; the host owner rule still applies to the host users |
+| Process visibility | `hidepid=2` | the build's processes are invisible (own PID namespace); harness and candidate share it, as different uids without `CAP_SYS_PTRACE` (`/proc/<pid>/environ`, `mem` are unreadable across uids; **`/proc/<pid>/cmdline` of the harness is world-readable**, which only holds the public `evaluator.run` command) |
+| Filesystem | the whole instance | `--read-only` root (switch off with `container.readOnlyRoot: false`), `--tmpfs /tmp` (exec, nosuid, 2 GB), only the checkout, homes, tmp and out dir bind-mounted; the dependency store read-only for setup and guardrails; nothing under `$W` else (logs, `bench.match`, the harness snapshot is the harness's alone) |
+| Holdout | fetched by root into a 0700 holdout-user-owned directory after setup, wiped after the run | the same, and the directory is mounted **read-only into the confirm harness container only**, which exists only after setup and guardrails; never into setup / guardrail containers, never in baseline or bench phases |
+| Docker socket | n/a | never mounted; the users are not in group `docker` (checked, exit 66); the daemon has no TCP socket |
+| `--privileged`, host namespaces, devices | n/a | none; Docker's default seccomp profile (checked in `docker info`, exit 61); `--pids-limit 4096`; `--init` |
+| What the container adds | | the toolchain is the repo's, versioned with the repo and identical for baseline and every candidate; a candidate cannot see other files of the instance |
+| What the container changes | | processes run from the image's libc and filesystem layout (a measurement baseline of its own: re-run section 2 with the container); a tool that needs to write outside the mounts fails with the read-only root; `bash` is used when the image has it, else `sh`; the image needs `sh` |
+
+`imageRestoreFragment` fails closed with exit codes 60 to 69 (no docker / daemon, no seccomp, download, digest, load, image id,
+privileged group, container probe, harness probe, launcher not setuid root). The probes run containers with the very flags of the
+steps and check from inside: the uid, no docker socket, `CapEff` zero, `NoNewPrivs`, only `lo`, a read-only root, and for the harness
+that the launcher yields the bench uid with `no_new_privs` and that a candidate process cannot open a 0600 file in the holdout directory.
+Costs: the image archive travels through S3 once per bench instance (`docker load` of a 1 to 3 GB image takes tens of seconds);
+a fresh instance per job is unchanged.
+
 ### The protected-path rule (what comes from `bench.ref`)
 
 A path is *protected* iff it matches a glob in `ratchet.yaml` `protected:` (core's `matchesGlob`; the
@@ -469,6 +541,33 @@ a throwaway repo (or `examples/demo-search` plus a lockfile) with `evaluator.dep
 - [ ] **Cost/timing.** Record the deps job duration (instance boot + fetch + pack + upload) and the snapshot size for a real lockfile; the fetch
       runs once per lockfile, not per candidate. Restore time on the bench (download + extract) is added to every job's `checkout`.
 
+### 4c. The repo container on a real sandbox
+
+Prerequisites: sandbox re-applied (the deps identity writes `bench-images/`, the bench identities read it); the **generic** bench AMI
+from `infra/images` (Docker engine, `ratchet-candidate-ctr` setuid launcher); a repo with `environment.image: .devcontainer/Dockerfile`
+(a small Dockerfile on a digest-pinned base, `COPY` of one file) and the registries of its `FROM` allowed from the agent subnet.
+
+- [ ] **Image build.** The baseline logs `container image img-<key>`; one `deps`-purpose instance in the agent subnet builds and saves it;
+      `aws s3 ls s3://<artifacts>/bench-images/ --recursive` lists `<key>.json` and `<key>/<sha256>.tar.zst`; the manifest has the
+      `imageId`, the file hashes and the sha256. The instance is gone afterwards (`listTagged`). With a dependency snapshot, ONE instance
+      builds both and the fetch ran in a container (`docker ps -a` during the job; `pnpm fetch` as uid of `ratchet-deps`).
+- [ ] **Metadata from a build container.** On the build instance, `docker run --rm curlimages/curl -m 3 http://169.254.169.254/` fails
+      (the DOCKER-USER rule), and `iptables -S DOCKER-USER FORWARD` shows the REJECT rules before docker's own.
+- [ ] **Offline load.** On the bench instance after `checkout`: `docker images` shows `ratchet-env:img-<key>` and nothing else;
+      `docker info --format '{{.SecurityOptions}}'` has seccomp; the checkout log shows the `container` sentinel. Pulling fails (no route).
+- [ ] **The launcher is the only way across uids.** `stat /usr/local/libexec/ratchet/ratchet-candidate-ctr` is `root:root 4755` in a `0700` directory;
+      `sudo -u ratchet-bench /usr/local/libexec/ratchet/ratchet-candidate-ctr true` fails (permission denied on the directory).
+      During a confirm run, `docker inspect <harness container>` shows `CapAdd [SETUID SETGID]`, `CapDrop [ALL]`, `NetworkMode none`,
+      `ReadonlyRootfs true`, `Privileged false`, a read-only mount of the holdout directory, and no `/var/run/docker.sock` mount.
+- [ ] **The split still holds.** From a candidate process (a `bench.run` that starts one through `$RATCHET_CANDIDATE_EXEC sh -c ...`):
+      `id` is the bench uid with `NoNewPrivs: 1`; `cat $RATCHET_TRACE` and `ls <work>/holdout` fail; `kill`/`cat /proc/<harness pid>/environ` fail;
+      `ip addr` shows only `lo`; a setuid binary in the image gives no root.
+- [ ] **Environment change is blocked.** A candidate that edits the Dockerfile, `.devcontainer/tools.txt` (copied in) or adds a file to a copied
+      directory is `blocked` with `environment changes are not allowed in v0`; no instance ran setup. Editing an unrelated file is fine.
+- [ ] **Reuse and expiry.** The second job logs `reusing container image`; no build instance. Deleting the archive makes the next job rebuild;
+      flipping one byte of it makes the bench instance refuse (`sha256 mismatch for the container image`, exit 63).
+- [ ] **Numbers.** Re-run the section 2 noise drill with the container: record the median and CV against the host path for the same bench.
+
 ## 5. Live smoke checklist for `RemoteBenchRunner`
 
 Run against a real instance with a throwaway repo first, then `examples/demo-search`.
@@ -511,6 +610,7 @@ Run against a real instance with a throwaway repo first, then `examples/demo-sea
 | Unprivileged users, IMDS block, launcher | `setpriv`/`iptables`/`pkill`/`chown`/`id` and the launcher are shims that log their arguments (`isolation: 'user'` tests); most tests run `isolation: 'none'`. The sudo rule, launcher and file modes were run once by hand on a real Linux host (users, `sudo`, `setpriv`), not in CI | that the users, the iptables rules, the sudoers rule and the launcher exist on the image, that the rule really rejects IMDS for those uids, that `setpriv --no-new-privs` blocks escalation, that the toolchain is usable by both users, that the real kernel denies the cross-user reads (run the split drill) |
 | Hidden trace in the sealed bucket | a local file / shimmed `s3://` path; the tests check order (fetch only in confirm bench steps, after setup and guardrails), wiping on success, crash and timeout, and the generated modes (`chown HU`, `chmod 600`) | bucket policy, KMS, that agents cannot read it, that the real file modes keep `ratchet-bench` out |
 | Package manager + registry + deps instance | `pnpm` / `npm` shims behind the same generated scripts: `fetch` fills a store from the lockfile, `install` refuses to run unless the network is switched off and every package is in the store; the deps "instance" is a second local bash; `aws s3 cp` also uploads (directory copy). One throwaway run used the real pnpm 10.28 against the real registry (fetch -> pack -> restore -> offline install -> `require('is-odd')`), and a fully read-only store failing with `EACCES` plus the `projects` symlink fix was checked by hand as an unprivileged user | the agent subnet / proxy / DNS path to the registry, the `deps` instance profile and its S3 scope, the real `ratchet-deps` user and its IMDS block, `zstd` on the AMI (shimmed), root-owned store modes enforced by the kernel for `ratchet-bench`, timings and sizes of a real lockfile, native optional dependencies per architecture |
+| Docker, the repo container, the setuid launcher | a `docker` shim (testkit/docker.ts) with one image store per fake instance: `build` hashes the Dockerfile into an id, `save`/`load` round-trip a tiny archive, `run` parses the flags, refuses an image that was not loaded and executes the command locally with `env -i`, the `-e` values and `--workdir`; the probe scripts are answered by the shim. The scripts, the flags, the order (build, save, upload, manifest last; load, verify, probe, setup), the mounts (holdout only in the confirm harness, read-only), the uids and the refusal paths are asserted on the generated text and on the shim's log. The launcher C source is compiled and exercised by `infra/tests` as root with `setpriv` | any real Docker behavior: `docker build` / `save` / `load` of a real image, seccomp, that `--cap-add SETUID` plus a setuid bind mount works under the real runtime, `--read-only` with the real toolchains, `--network none` and loopback between harness and candidate, bind-mount modes, userland effects on the numbers, GB-sized images through S3 |
 | k6 | not used; the demo test runs `node dist/bench/local.js --duration 3 --warmup 1` | k6 JSON output (`RESULT_FILE`) and the k6 script's own contract |
 | Noise | tests assert logic, not variance | everything in section 2 |
 

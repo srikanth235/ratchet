@@ -2,6 +2,18 @@ import { extname } from 'node:path';
 import { globToRegExp } from '@ratchet/core';
 import type { DepsStrategy } from './deps.js';
 import { BenchError } from './errors.js';
+import { assertSafeRef, BENCH_USER, HOLDOUT_USER, sq, SENTINEL } from './shell.js';
+import {
+  containerRun,
+  assertContainerRuntime,
+  helperMounts,
+  HELPER_IN_CONTAINER,
+  idsFragment,
+  imageRestoreFragment,
+  launcherConfFragment,
+  type ContainerRuntime,
+  type ImageRestore,
+} from './image-scripts.js';
 
 /**
  * Shell scripts for the remote (bench instance) pipeline. One script per step; every script is
@@ -12,17 +24,8 @@ import { BenchError } from './errors.js';
  * stdout, base64 encoded, and each bench run is its own command so the budget is per run.
  */
 
-export const SENTINEL = '@@RATCHET@@';
-/**
- * Unprivileged OS user that runs setup, guardrails and every process of the CANDIDATE (its server, its build).
- * Created and IMDS-blocked by the instance's user-data (packages/aws `benchUserData`).
- */
-export const BENCH_USER = 'ratchet-bench';
-/**
- * Second unprivileged user: the evaluator harness (`evaluator.run`, trusted code from bench.ref) runs as this
- * user and is the only one that can open the holdout (file mode 0600). Also IMDS-blocked by the user-data.
- */
-export const HOLDOUT_USER = 'ratchet-holdout';
+// SENTINEL, BENCH_USER, HOLDOUT_USER, sq and assertSafeRef live in shell.ts (shared with the other script builders).
+export { assertSafeRef, BENCH_USER, HOLDOUT_USER, sq, SENTINEL };
 /**
  * Root-installed launcher (packages/aws `benchUserData`): the harness runs `$RATCHET_CANDIDATE_EXEC <cmd...>`
  * to start a candidate process as BENCH_USER, in the candidate's checkout, with a clean environment (no
@@ -40,6 +43,8 @@ export interface StagedArchive {
   commit: string;
   /** sha256 of the requested root-level files of the staged tree (lockfiles), computed on the controller before archiving. */
   files?: Record<string, string>;
+  /** sha256 per file of the repo's container environment in the staged tree (see image.ts `environmentFilesOf`), when the job runs in a container. */
+  env?: Record<string, string>;
 }
 
 /** A dependency snapshot to restore before setup (see deps.ts). */
@@ -61,24 +66,10 @@ export const depsPaths = (l: Layout): { store: string; scratch: string } => ({ s
 export type Isolation = 'user' | 'none';
 const HEREDOC = '__RATCHET_STEP_EOF__';
 
-/** POSIX single-quote a string. */
-export function sq(s: string): string {
-  if (s.includes('\0')) throw new BenchError('NUL byte in a shell argument');
-  return `'${s.replace(/'/g, `'\\''`)}'`;
-}
-
 /** Make a bash script safe to hand to a shell that may not be bash: write it to a file and run it with bash. */
 export function wrapStep(body: string): string {
   if (body.includes(HEREDOC)) throw new BenchError('script contains the step delimiter');
   return `f=$(mktemp)\ncat > "$f" <<'${HEREDOC}'\n${body}\n${HEREDOC}\nbash "$f"\nrc=$?\nrm -f "$f"\nexit $rc\n`;
-}
-
-const SAFE_REF = /^[A-Za-z0-9][A-Za-z0-9._\/@{}~^+-]*$/;
-
-/** A sha / ref is interpolated into git commands; keep it to plain ref characters and never leading '-'. */
-export function assertSafeRef(ref: string, what: string): string {
-  if (!SAFE_REF.test(ref) || ref.includes('..')) throw new BenchError(`${what} ${JSON.stringify(ref)} is not a plain git ref or sha`);
-  return ref;
 }
 
 function normalizeGlob(g: string): string {
@@ -164,7 +155,7 @@ const candidateEnv = `export RATCHET_CANDIDATE_DIR="$CODE" RATCHET_CANDIDATE_HOM
  * that the holdout directory is closed to the candidate's user and open to the harness's; refuses to continue
  * otherwise (exit 12 to 19). Then hands the code tree to the candidate user and the scratch dirs to the harness user.
  */
-const isolationCheck = (isolation: Isolation, launcher: string): string =>
+const isolationCheck = (isolation: Isolation, launcher: string, container: boolean): string =>
   isolation === 'none'
     ? ''
     : `BU=${sq(BENCH_USER)}; HU=${sq(HOLDOUT_USER)}; LAUNCHER=${sq(launcher)}
@@ -184,8 +175,12 @@ ${candidateEnv}printf x > "$W/holdout/.probe" && chown "$HU:" "$W/holdout/.probe
 if setpriv --reuid="$BU" --regid="$BU" --clear-groups --no-new-privs -- cat "$W/holdout/.probe" >/dev/null 2>&1; then echo "the holdout directory is readable by $BU" >&2; exit 17; fi
 setpriv --reuid="$HU" --regid="$HU" --clear-groups -- cat "$W/holdout/.probe" >/dev/null 2>&1 || { echo "the holdout directory is not readable by $HU" >&2; exit 19; }
 rm -f "$W/holdout/.probe"
-[ "$(setpriv --reuid="$HU" --regid="$HU" --clear-groups -- "$LAUNCHER" id -un 2>/dev/null)" = "$BU" ] || { echo "the candidate launcher $LAUNCHER does not run commands as $BU for $HU" >&2; exit 18; }
-`;
+${
+  container
+    ? '' // the harness starts candidate processes through the container launcher, which the image restore probes
+    : `[ "$(setpriv --reuid="$HU" --regid="$HU" --clear-groups -- "$LAUNCHER" id -un 2>/dev/null)" = "$BU" ] || { echo "the candidate launcher $LAUNCHER does not run commands as $BU for $HU" >&2; exit 18; }
+`
+}`;
 
 const VERSION_RE = /^[A-Za-z0-9._+-]{1,64}$/;
 
@@ -196,10 +191,12 @@ const VERSION_RE = /^[A-Za-z0-9._+-]{1,64}$/;
  * The candidate user can read the store (setup installs from it) but not change it; the only things it owns are
  * `$SCRATCH` (the package manager's per-project bookkeeping, outside the store). Exit 25 to 29.
  */
-function depsRestoreFragment(r: DepsRestore, isolated: boolean): string {
+function depsRestoreFragment(r: DepsRestore, isolated: boolean, container: boolean): string {
   if (!/^s3:\/\/[a-z0-9][a-z0-9.-]*\/bench-deps\/[A-Za-z0-9._\/-]+$/.test(r.uri) || r.uri.includes('..')) throw new BenchError(`snapshot uri ${JSON.stringify(r.uri)} is not a plain s3:// uri under bench-deps/`);
   if (!/^[0-9a-f]{64}$/.test(r.sha256)) throw new BenchError('snapshot digest is not a sha256 hex string');
   if (!VERSION_RE.test(r.node) || !VERSION_RE.test(r.pm)) throw new BenchError('snapshot tool versions are not plain version strings');
+  // In container mode the toolchain is the image's: the versions are asked from a throwaway container (offline, unprivileged).
+  const tool = (cmd: string): string => (container ? `ctr ${sq(cmd)}` : cmd);
   const extract =
     r.compression === 'zstd'
       ? `command -v zstd >/dev/null 2>&1 || { echo "zstd is missing on this image (rebuild the bench image)" >&2; exit 28; }
@@ -210,8 +207,8 @@ D="$W/deps"; STORE="$D/store"; SCRATCH="$W/home/.ratchet-deps"
 mkdir -p "$STORE" "$D/in" "$SCRATCH" || exit 25
 aws s3 cp --only-show-errors ${sq(r.uri)} "$D/in/snapshot" || { echo "cannot download the dependency snapshot ${r.uri}" >&2; exit 25; }
 [ "$(sha256sum -- "$D/in/snapshot" | cut -d' ' -f1)" = ${sq(r.sha256)} ] || { echo "sha256 mismatch for the dependency snapshot" >&2; exit 26; }
-[ "$(node --version 2>/dev/null)" = ${sq(r.node)} ] || { echo "the dependency snapshot was built with node ${r.node}, this instance has $(node --version 2>&1)" >&2; exit 27; }
-[ "$(${r.strategy.version} 2>/dev/null)" = ${sq(r.pm)} ] || { echo "the dependency snapshot was built with ${r.strategy.id} ${r.pm}, this instance has $(${r.strategy.version} 2>&1)" >&2; exit 27; }
+[ "$(${tool('node --version')} 2>/dev/null)" = ${sq(r.node)} ] || { echo "the dependency snapshot was built with node ${r.node}, this ${container ? 'container' : 'instance'} has $(${tool('node --version')} 2>&1)" >&2; exit 27; }
+[ "$(${tool(r.strategy.version)} 2>/dev/null)" = ${sq(r.pm)} ] || { echo "the dependency snapshot was built with ${r.strategy.id} ${r.pm}, this ${container ? 'container' : 'instance'} has $(${tool(r.strategy.version)} 2>&1)" >&2; exit 27; }
 ${extract}
 rm -f "$D/in/snapshot"
 if [ -n "$(find "$STORE" -type l -print -quit)" ]; then echo "the dependency snapshot contains symlinks" >&2; exit 29; fi
@@ -244,6 +241,8 @@ export function checkoutScript(o: {
   isolation: Isolation;
   /** Restore this dependency snapshot before setup. */
   deps?: DepsRestore;
+  /** Load the repo's container image (offline) and probe it before setup; setup, guardrails and the evaluator then run in it. */
+  image?: ImageRestore;
   /** Test seam; default `CANDIDATE_LAUNCHER`. */
   candidateLauncher?: string;
 }): string {
@@ -279,7 +278,7 @@ if [ ${o.prune ? 1 : 0} = 1 ]; then
   done < "$W/code.match"
 fi
 apply init || exit 24
-${isolationCheck(o.isolation, o.candidateLauncher ?? CANDIDATE_LAUNCHER)}${o.deps ? depsRestoreFragment(o.deps, o.isolation === 'user') : ''}emit checkout "{\\"code\\":\\"${o.code.commit}\\",\\"bench\\":\\"${o.bench.commit}\\",\\"removed\\":$removed,\\"copied\\":$copied,\\"matched\\":$matched,\\"isolation\\":\\"${o.isolation}\\"}"
+${isolationCheck(o.isolation, o.candidateLauncher ?? CANDIDATE_LAUNCHER, !!o.image)}${o.image ? imageRestoreFragment(o.image, { work: o.layout.work, isolated: o.isolation === 'user' }) : ''}${o.deps ? depsRestoreFragment(o.deps, o.isolation === 'user', !!o.image) : ''}emit checkout "{\\"code\\":\\"${o.code.commit}\\",\\"bench\\":\\"${o.bench.commit}\\",\\"removed\\":$removed,\\"copied\\":$copied,\\"matched\\":$matched,\\"isolation\\":\\"${o.isolation}\\",\\"container\\":${o.image ? 'true' : 'false'}}"
 `;
 }
 
@@ -300,6 +299,14 @@ export interface StepScriptInput {
    * scripts do not contain the sealed location at all.
    */
   holdout?: { uri: string };
+  /**
+   * Run the step INSIDE the repo's container image (`environment.image`), loaded at checkout: `docker run --network none`, the
+   * same numeric uids as the host path, all capabilities dropped (the harness keeps SETUID/SETGID for its launcher), read-only
+   * root, tmpfs /tmp, and only the checkout, the homes, the out dir (and, for a confirm harness, the holdout, read-only) mounted.
+   */
+  container?: ContainerRuntime;
+  /** The dependency snapshot was restored at `$W/deps`: mount it read-only into setup / guardrail containers. */
+  depsMounted?: boolean;
   /** Test seam; default `CANDIDATE_LAUNCHER`. */
   candidateLauncher?: string;
 }
@@ -353,7 +360,62 @@ echo "--- output tail ---"; { tail -c 4000 "$OUT.stdout"; tail -c 2000 "$OUT.std
   // Setup and guardrails: candidate code as BENCH_USER without new privileges. The bench harness: HOLDOUT_USER,
   // with its own HOME/TMPDIR/output dir. Both lose the AWS_* variables even though a stock SSM environment has none.
   const scrub = 'env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN -u AWS_PROFILE';
-  const run = harness
+  const container = o.container;
+  if (container) assertContainerRuntime(container, o.layout.work);
+  const passEnv = [...Object.keys(o.env), ...(o.holdout ? ['RATCHET_TRACE'] : [])];
+  const containerCmd = (): string => {
+    if (!container) return '';
+    if (harness) {
+      return containerRun({
+        rt: container,
+        name: '"$CN"',
+        user: '"$HUID:$HGID"',
+        capAdd: ['SETUID', 'SETGID'], // only for the launcher; the harness itself needs nothing
+        noNewPrivileges: false, // the launcher is setuid root; it sets no_new_privs on every candidate process
+        network: 'none',
+        workdir: '"$H"',
+        mounts: [
+          '$H:$H:ro',
+          '$CODE:$CODE',
+          '$W/home:$W/home',
+          '$W/tmp:$W/tmp',
+          '$W/hhome:$W/hhome',
+          '$W/htmp:$W/htmp',
+          '$W/out:$W/out',
+          ...(o.holdout ? ['$W/holdout:$W/holdout:ro'] : []),
+          ...helperMounts(container),
+        ],
+        env: [
+          'HOME=$W/hhome',
+          'TMPDIR=$W/htmp',
+          'USER=$HU',
+          'LOGNAME=$HU',
+          'RATCHET_OUT_DIR=$W/out',
+          `RATCHET_CANDIDATE_EXEC=${HELPER_IN_CONTAINER}`,
+          'RATCHET_CANDIDATE_DIR=$CODE',
+          'RATCHET_CANDIDATE_HOME=$W/home',
+          'RATCHET_CANDIDATE_TMP=$W/tmp',
+        ],
+        passEnv,
+        command: sq(o.command),
+      });
+    }
+    return containerRun({
+      rt: container,
+      name: '"$CN"',
+      user: '"$BUID:$BGID"',
+      noNewPrivileges: true,
+      network: 'none',
+      workdir: '"$CODE"',
+      mounts: ['$CODE:$CODE', '$W/home:$W/home', '$W/tmp:$W/tmp', ...(o.depsMounted && o.kind !== 'bench' ? ['$W/deps:$W/deps:ro'] : []), ...(o.holdout ? ['$W/holdout:$W/holdout:ro'] : [])],
+      env: ['HOME=$W/home', 'TMPDIR=$W/tmp', ...(isolated ? ['USER=$BU', 'LOGNAME=$BU'] : [])],
+      passEnv,
+      command: sq(o.command),
+    });
+  };
+  const run = container
+    ? containerCmd()
+    : harness
     ? `setpriv --reuid="$HU" --regid="$HU" --clear-groups -- ${scrub} HOME="$W/hhome" TMPDIR="$W/htmp" USER="$HU" LOGNAME="$HU" RATCHET_OUT_DIR="$W/out" RATCHET_CANDIDATE_EXEC=${sq(launcher)} bash -c ${sq(o.command)}`
     : isolated
       ? `setpriv --reuid="$BU" --regid="$BU" --clear-groups --no-new-privs -- ${scrub} HOME="$W/home" TMPDIR="$W/tmp" USER="$BU" LOGNAME="$BU" bash -c ${sq(o.command)}`
@@ -401,18 +463,25 @@ kill_users() { pkill -KILL -u "$BU" 2>/dev/null || true; pkill -KILL -u "$HU" 2>
 kill_users
 ${candidateEnv}`
     : ''
+}${
+  container
+    ? `${idsFragment(isolated)}CN="ratchet-$(basename -- "$W")-${file.replace(/_/g, '-')}"
+docker rm -f "$CN" >/dev/null 2>&1 || true
+`
+    : ''
 }
 apply check
 if [ -s "$W/changed.list" ]; then
   emit tampered "{\\"paths_b64\\":\\"$(tr '\\0' '\\n' < "$W/changed.list" | head -c 4000 | b64)\\"}"
   exit 87
 fi
-${snapshot}${fetchHoldout}cd ${harness ? '"$H"' : '"$CODE"'} || exit 30
+${snapshot}${fetchHoldout}${container && harness ? launcherConfFragment() : ''}cd ${harness ? '"$H"' : '"$CODE"'} || exit 30
 ${exports}
 OUT="$W/logs/${file}"
 s=$(date +%s%N)
 timeout -k 10 ${timeoutS} ${run} </dev/null >"$OUT.stdout" 2>"$OUT.stderr"; rc=$?
 e=$(date +%s%N); ms=$(( (e - s) / 1000000 ))
+${container ? 'docker rm -f "$CN" >/dev/null 2>&1 || true' : ''}
 ${isolated ? 'kill_users' : ''}
 ${o.holdout ? 'wipe' : ''}
 to=false

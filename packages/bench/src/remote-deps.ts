@@ -18,6 +18,19 @@ import {
 } from './deps.js';
 import { depsBuildScript } from './deps-scripts.js';
 import { BenchAbortedError, BenchError } from './errors.js';
+import {
+  imageKey,
+  imageManifestKey,
+  imageTag,
+  parseImageManifest,
+  readEnvironment,
+  resolveImageSource,
+  type ImageKeyInput,
+  type ImageManifest,
+  type ImagePlan,
+  type ResolvedImage,
+} from './image.js';
+import { imageBuildScript, type ContainerRuntime, type ImageRestore } from './image-scripts.js';
 import type { BenchLog } from './log.js';
 import type { BenchProgress } from './pipeline.js';
 import { InstanceSession, tail, type SessionOptions } from './remote-session.js';
@@ -38,6 +51,10 @@ export interface DepsSnapshotOptions extends SessionOptions {
   workRoot: string;
   /** Limit for the package-manager fetch. */
   depsMs: number;
+  /** Limit for building the repo's container image. Default 45 minutes. */
+  imageMs?: number | undefined;
+  /** Container options of the runs (read-only root, pids limit, ...); the tag comes from the image. */
+  container?: Omit<ContainerRuntime, 'tag'> | undefined;
   /** Instance type the bench runs on when it is not `evaluator.hardware` (RemoteBenchRunnerOptions.instanceType): its architecture is part of the key. */
   benchInstanceType?: string | undefined;
   /** Instance type of the snapshot job; must have the architecture of the bench. Default: the bench's. */
@@ -57,6 +74,22 @@ interface BaseInfo {
   strategy: DepsStrategy;
   lockfiles: Record<string, string>;
   note?: string | undefined;
+  /** The repo's container (`environment.image`) as resolved at the base commit. */
+  image?: ResolvedImage | undefined;
+}
+
+/** What the controller prepares before a job's instance exists: the dependency snapshot and/or the repo's container image. */
+export interface PreparedEnvironment {
+  deps?: DepsPlan | undefined;
+  image?: ImagePlan | undefined;
+}
+
+interface BuildWhat {
+  arch: string;
+  image?: { key: string; expect: ImageKeyInput & { key: string } } | undefined;
+  imageHave?: ImageManifest | undefined;
+  imageKey?: string | undefined;
+  deps?: { key: string } | undefined;
 }
 
 /**
@@ -80,32 +113,106 @@ export class DepsSnapshots {
 
   /** The plan for this job, or undefined when there is nothing to install from a snapshot (no lockfile, `deps: none`). */
   async ensure(a: EnsureInput): Promise<DepsPlan | undefined> {
-    const { log, config } = a;
-    const base = await this.inspectBase(config);
-    if (base.note) log.line(`dependencies: ${base.note}`);
-    if (base.strategy.id === 'none') {
-      log.line('dependencies: no lockfile to snapshot (or evaluator.deps is none); setup runs with whatever the image provides');
-      return undefined;
-    }
-    const arch = archFromInstanceType(this.o.benchInstanceType ?? config.bench.hardware);
-    const input = { strategy: base.strategy, lockfiles: base.lockfiles, image: this.o.imageRef, arch };
-    const key = depsKey(input);
-    const expect = { ...input, key };
-    const plan = (manifest: DepsManifest, reused: boolean): DepsPlan => ({ strategy: base.strategy, key, baseCommit: base.commit, lockfiles: base.lockfiles, manifest, reused });
-
-    const have = await this.lookup(key, expect, log);
-    if (have) {
-      log.line(`dependencies: reusing snapshot ${key} (${base.strategy.lockfiles.filter((f) => f in base.lockfiles).join(', ')} at ${base.commit.slice(0, 12)})`);
-      return plan(have, true);
-    }
-    await this.buildOnce(key, a.signal, () => this.build(a, base, key, arch));
-    const made = await this.lookup(key, expect, log);
-    if (!made) throw new BenchError(`the dependency snapshot job for ${key} finished but its manifest is missing or invalid in the artifacts bucket`);
-    return plan(made, false);
+    return (await this.prepare(a)).deps;
   }
 
-  /** Strategy and lockfile hashes of bench.ref's tree. Cached per commit (a commit never changes). */
-  private inspectBase(config: RatchetConfig): Promise<BaseInfo> {
+  /**
+   * Everything the job needs from an instance WITH egress, prepared once and reused: the dependency snapshot (unless `wantDeps` is
+   * false, i.e. the runner has no setup command) and the repo's container image (`environment.image`). Both are built from bench.ref
+   * on ONE throwaway instance when either is missing; with the image present the snapshot's fetch runs inside it.
+   */
+  async prepare(a: EnsureInput & { wantDeps?: boolean }): Promise<PreparedEnvironment> {
+    const { log, config } = a;
+    const imagePath = readEnvironment(config).image;
+    const base = await this.inspectBase(config, imagePath);
+    if (base.note) log.line(`dependencies: ${base.note}`);
+    const wantDeps = (a.wantDeps ?? true) && base.strategy.id !== 'none';
+    if (!wantDeps && (a.wantDeps ?? true)) {
+      log.line('dependencies: no lockfile to snapshot (or evaluator.deps is none); setup runs with whatever the image provides');
+    }
+    if (!wantDeps && !base.image) return {};
+    const arch = archFromInstanceType(this.o.benchInstanceType ?? config.bench.hardware);
+
+    // ---- the container image
+    let imgKey: string | undefined;
+    let imgExpect: (ImageKeyInput & { key: string }) | undefined;
+    let haveImage: ImageManifest | undefined;
+    if (base.image) {
+      for (const n of base.image.spec.notes) log.line(`environment: ${n}`);
+      const ki: ImageKeyInput = { spec: base.image.spec, files: base.image.files, arch };
+      imgKey = imageKey(ki);
+      imgExpect = { ...ki, key: imgKey };
+      haveImage = await this.lookupImage(imgExpect, log);
+      if (haveImage) log.line(`environment: reusing container image ${imgKey} (${base.image.spec.path} at ${base.commit.slice(0, 12)})`);
+    }
+
+    // ---- the dependency snapshot (its "image" is the container's key when there is one: the toolchain is part of what it was fetched with)
+    let dKey: string | undefined;
+    let dExpect: Parameters<typeof parseDepsManifest>[1] | undefined;
+    let haveDeps: DepsManifest | undefined;
+    if (wantDeps) {
+      const input = { strategy: base.strategy, lockfiles: base.lockfiles, image: imgKey ?? this.o.imageRef, arch };
+      dKey = depsKey(input);
+      dExpect = { ...input, key: dKey };
+      haveDeps = await this.lookup(dKey, dExpect, log);
+      if (haveDeps) log.line(`dependencies: reusing snapshot ${dKey} (${base.strategy.lockfiles.filter((f) => f in base.lockfiles).join(', ')} at ${base.commit.slice(0, 12)})`);
+    }
+
+    const needImage = !!imgKey && !haveImage;
+    const needDeps = !!dKey && !haveDeps;
+    if (needImage || needDeps) {
+      const buildKey = `${needImage ? imgKey : ''}|${needDeps ? dKey : ''}`;
+      const what: BuildWhat = {
+        arch,
+        image: needImage ? { key: imgKey!, expect: imgExpect! } : undefined,
+        imageHave: haveImage,
+        imageKey: imgKey,
+        deps: needDeps ? { key: dKey! } : undefined,
+      };
+      await this.buildOnce(buildKey, a.signal, () => this.build(a, base, what));
+    }
+
+    let image: ImagePlan | undefined;
+    if (imgKey && base.image) {
+      const made = haveImage ?? (await this.lookupImage(imgExpect!, log));
+      if (!made) throw new BenchError(`the container image job for ${imgKey} finished but its manifest is missing or invalid in the artifacts bucket`);
+      image = { key: imgKey, tag: imageTag(imgKey), spec: base.image.spec, files: base.image.files, pinned: Object.keys(base.image.files), baseCommit: base.commit, manifest: made, reused: !!haveImage };
+    }
+    let deps: DepsPlan | undefined;
+    if (dKey) {
+      const made = haveDeps ?? (await this.lookup(dKey, dExpect!, log));
+      if (!made) throw new BenchError(`the dependency snapshot job for ${dKey} finished but its manifest is missing or invalid in the artifacts bucket`);
+      deps = { strategy: base.strategy, key: dKey, baseCommit: base.commit, lockfiles: base.lockfiles, manifest: made, reused: !!haveDeps };
+    }
+    return { deps, image };
+  }
+
+  /** The manifest of the saved image for `key`, if it exists, matches what the controller computed, and its archive is still in the bucket. */
+  private async lookupImage(expect: ImageKeyInput & { key: string }, log: BenchLog): Promise<ImageManifest | undefined> {
+    const store = this.o.store;
+    if (!store) throw new BenchError('container images need an artifacts store (stagingStore or artifacts): the bench has no network');
+    let text: string | null;
+    try {
+      text = await store.get(imageManifestKey(expect.key));
+    } catch (err) {
+      throw new BenchError(`cannot read ${imageManifestKey(expect.key)}: ${(err as Error).message}`, { cause: err });
+    }
+    if (text === null) return undefined;
+    const check = parseImageManifest(text, expect);
+    if (!check.ok) {
+      log.line(`environment: ignoring ${imageManifestKey(expect.key)}: ${check.error}`);
+      return undefined;
+    }
+    const present = await store.list(check.manifest.archive).catch(() => [] as string[]);
+    if (!present.includes(check.manifest.archive)) {
+      log.line(`environment: ${check.manifest.archive} is gone from the bucket; rebuilding`);
+      return undefined;
+    }
+    return check.manifest;
+  }
+
+  /** Strategy, lockfile hashes and (with `environment.image`) the resolved container of bench.ref's tree. Cached per commit (a commit never changes). */
+  private inspectBase(config: RatchetConfig, imagePath?: string): Promise<BaseInfo> {
     const { git } = this.o;
     const mode = config.evaluator.deps;
     return (async () => {
@@ -115,7 +222,7 @@ export class DepsSnapshots {
       } catch (err) {
         throw new BenchError(`cannot resolve bench.ref ${config.bench.ref}: ${(err as Error).message}`, { cause: err });
       }
-      const cacheKey = `${commit}\0${mode}`;
+      const cacheKey = `${commit}\0${mode}\0${imagePath ?? ''}`;
       let p = this.bases.get(cacheKey);
       if (!p) {
         p = (async () => {
@@ -129,7 +236,8 @@ export class DepsSnapshots {
             }
             const resolved = resolveDepsStrategy(mode, await rootEntries(tree));
             const lockfiles = await hashNamedFiles(tree, pinnedDepsFiles(resolved.strategy));
-            return { commit, strategy: resolved.strategy, lockfiles, note: resolved.note };
+            const image = imagePath ? await resolveImageSource(tree, imagePath) : undefined;
+            return { commit, strategy: resolved.strategy, lockfiles, note: resolved.note, image };
           } finally {
             await rm(dir, { recursive: true, force: true });
           }
@@ -186,7 +294,7 @@ export class DepsSnapshots {
     await p;
   }
 
-  private async build(a: EnsureInput, base: BaseInfo, key: string, arch: string): Promise<void> {
+  private async build(a: EnsureInput, base: BaseInfo, w: BuildWhat): Promise<void> {
     const { job, config, log, signal } = a;
     const { compute } = this.o;
     const bucket = this.o.bucket;
@@ -197,12 +305,13 @@ export class DepsSnapshots {
     const benchType = this.o.benchInstanceType ?? config.bench.hardware;
     const depsType = this.o.instanceType ?? benchType;
     if (archFromInstanceType(depsType) !== archFromInstanceType(benchType)) {
-      throw new BenchError(`the dependency snapshot job runs on ${depsType} but the bench on ${benchType}: different architectures would fetch different native packages`);
+      throw new BenchError(`the dependency snapshot job runs on ${depsType} but the bench on ${benchType}: different architectures would fetch different native packages and images`);
     }
     if (signal?.aborted) throw new BenchAbortedError();
     a.onProgress?.({ step: 'deps' });
-    log.section(`dependency snapshot ${key}`);
-    log.line(`building from ${base.strategy.lockfiles.filter((f) => f in base.lockfiles).join(', ')} at bench.ref ${config.bench.ref} (${base.commit}); the candidate is not involved`);
+    const what = [w.image ? `container image ${w.image.key}` : '', w.deps ? `dependency snapshot ${w.deps.key}` : ''].filter(Boolean).join(' + ');
+    log.section(what);
+    log.line(`building from bench.ref ${config.bench.ref} (${base.commit}); the candidate is not involved`);
 
     const staged = await stageDepsBase({ git: this.o.git, store, bucket, optimizationId: job.optimizationId, ref: base.commit });
     let instance;
@@ -215,31 +324,68 @@ export class DepsSnapshots {
     const session = new InstanceSession(this.o, instance, log, signal, 'dependency snapshot');
     try {
       await session.waitReady();
-      const layout = { work: `${this.o.workRoot}/deps-${job.optimizationId.replace(/[^A-Za-z0-9._-]/g, '_')}-${randomUUID().slice(0, 8)}` };
-      const res = await session.call(
-        'deps',
-        depsBuildScript({
-          layout,
-          strategy: base.strategy,
-          base: staged,
-          key,
-          lockfiles: base.lockfiles,
-          image: this.o.imageRef,
-          arch,
-          bucket,
-          timeoutMs: this.o.depsMs,
-          isolation: this.o.isolation,
-        }),
-        this.o.depsMs + 5 * 60_000,
-      );
-      const done = parseSentinels(res.stdout).find((s) => s.kind === 'deps');
-      if (res.exitCode !== 0 || !done) {
-        throw new BenchError(
-          `building the ${base.strategy.id} dependency snapshot failed (exit ${res.exitCode}): ${tail(res.stderr || res.stdout)}. ` +
-            'The snapshot job runs in the agent subnet and needs the package registry through the egress proxy / DNS allow-list (docs/real-env/aws.md)',
+      const workDir = (kind: string): string => `${this.o.workRoot}/${kind}-${job.optimizationId.replace(/[^A-Za-z0-9._-]/g, '_')}-${randomUUID().slice(0, 8)}`;
+
+      let imageManifest = w.imageHave;
+      if (w.image && base.image) {
+        const imageMs = this.o.imageMs ?? 45 * 60_000;
+        const res = await session.call(
+          'image',
+          imageBuildScript({
+            work: workDir('image'),
+            base: staged,
+            key: w.image.key,
+            tag: imageTag(w.image.key),
+            spec: base.image.spec,
+            files: base.image.files,
+            arch: w.arch,
+            bucket,
+            timeoutMs: imageMs,
+          }),
+          imageMs + 10 * 60_000,
         );
+        const done = parseSentinels(res.stdout).find((x) => x.kind === 'image');
+        if (res.exitCode !== 0 || !done) {
+          throw new BenchError(
+            `building the container image from ${base.image.spec.path} failed (exit ${res.exitCode}): ${tail(res.stderr || res.stdout)}. ` +
+              'The image job runs in the agent subnet: the registries the Dockerfile pulls from must be reachable through the egress proxy / DNS allow-list (docs/real-env/aws.md)',
+          );
+        }
+        log.line(`container image built: ${String(done.data.bytes)} bytes (${String(done.data.compression)}) in ${String(done.data.ms)}ms`);
+        imageManifest = await this.lookupImage(w.image.expect, log);
+        if (!imageManifest) throw new BenchError(`the container image job for ${w.image.key} finished but its manifest is missing or invalid in the artifacts bucket`);
       }
-      log.line(`dependency snapshot built: ${String(done.data.bytes)} bytes (${String(done.data.compression)}) in ${String(done.data.ms)}ms`);
+
+      if (w.deps) {
+        const container: ImageRestore | undefined = imageManifest
+          ? { uri: `s3://${bucket}/${imageManifest.archive}`, sha256: imageManifest.sha256, compression: imageManifest.compression, imageId: imageManifest.imageId, rt: { ...this.o.container, tag: imageManifest.tag } }
+          : undefined;
+        const res = await session.call(
+          'deps',
+          depsBuildScript({
+            layout: { work: workDir('deps') },
+            strategy: base.strategy,
+            base: staged,
+            key: w.deps.key,
+            lockfiles: base.lockfiles,
+            image: w.imageKey ?? this.o.imageRef,
+            arch: w.arch,
+            bucket,
+            timeoutMs: this.o.depsMs,
+            isolation: this.o.isolation,
+            ...(container ? { container } : {}),
+          }),
+          this.o.depsMs + 5 * 60_000,
+        );
+        const done = parseSentinels(res.stdout).find((x) => x.kind === 'deps');
+        if (res.exitCode !== 0 || !done) {
+          throw new BenchError(
+            `building the ${base.strategy.id} dependency snapshot failed (exit ${res.exitCode}): ${tail(res.stderr || res.stdout)}. ` +
+              'The snapshot job runs in the agent subnet and needs the package registry through the egress proxy / DNS allow-list (docs/real-env/aws.md)',
+          );
+        }
+        log.line(`dependency snapshot built: ${String(done.data.bytes)} bytes (${String(done.data.compression)}) in ${String(done.data.ms)}ms`);
+      }
     } finally {
       await session.terminate();
     }

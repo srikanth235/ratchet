@@ -31,6 +31,8 @@ export interface StepTimeouts {
   checkoutMs: number;
   /** The dependency-snapshot fetch (remote runner only; it runs once per lockfile, not per job). */
   depsMs: number;
+  /** Building the repo's container image (remote runner only; once per Dockerfile / devcontainer, not per job). */
+  imageMs: number;
   setupMs: number;
   guardrailMs: number;
   /** Per single `bench.run` invocation. */
@@ -40,6 +42,7 @@ export interface StepTimeouts {
 export const DEFAULT_TIMEOUTS: StepTimeouts = {
   checkoutMs: 10 * 60_000,
   depsMs: 20 * 60_000,
+  imageMs: 45 * 60_000,
   setupMs: 30 * 60_000,
   guardrailMs: 15 * 60_000,
   benchMs: 30 * 60_000,

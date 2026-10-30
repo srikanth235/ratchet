@@ -11,3 +11,6 @@ export * from './reaper.js';
 export * from './cost-explorer.js';
 export * from './cost-explorer.mock.js';
 export * from './identity.js';
+export * from './images.js';
+export * from './region.js';
+export * from './sandbox/override.js';

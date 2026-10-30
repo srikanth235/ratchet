@@ -33,7 +33,7 @@ as long as they have defaults and the app can run without them.
 | `agent_boundary_ref` | Reference to the permission cap that every per-agent identity must be created under (AWS: permission boundary policy ARN). |
 | `eval_identity_ref` | The identity trusted bench machines run as in the `baseline` and `bench` phases (AWS: object with `role_arn`, `role_name`, `instance_profile_arn`, `instance_profile_name`). **No access to the sealed store.** |
 | `confirm_identity_ref` | The identity a bench machine runs as in the `confirm` phase only; the sole identity that can read `sealed_bucket` (same shape as `eval_identity_ref`). |
-| `deps_identity_ref` | The identity of the dependency-snapshot builder (`purpose=deps`; same shape as `eval_identity_ref`). It runs in the agent subnet (the only place with egress), never executes candidate code, may read only the staged base tree (`bench-inputs/*/deps-base.tgz`) and write only `bench-deps/` in the artifacts store, and has **no access to the sealed store** (explicitly denied). Optional for sandboxes created before dependency snapshots: without it the app cannot build snapshots and fails closed. |
+| `deps_identity_ref` | The identity of the dependency-snapshot and container-image builder (`purpose=deps`; same shape as `eval_identity_ref`). It runs in the agent subnet (the only place with egress), never executes candidate code, may read only the staged base tree (`bench-inputs/*/deps-base.tgz`) and `bench-images/`, and write only `bench-deps/` and `bench-images/` in the artifacts store, and has **no access to the sealed store** (explicitly denied). Optional for sandboxes created before dependency snapshots: without it the app cannot build snapshots and fails closed. |
 | `network_ref` | Where machines are launched (AWS: object with `vpc_id`, `subnet_id` (agent runners), `bench_subnet_id` (bench machines; no route to the internet), `security_group_ids.agent_runner`, `security_group_ids.bench`, `egress_proxy_url` (null unless the optional allow-list proxy is enabled)). |
 | `agent_role_path` | The path/name-space under which per-agent identities MUST be created (AWS: `/ratchet/agent/`). The sealed-store deny matches on it. |
 | `limits` | Echo of `max_instances_per_agent` and `max_instance_lifetime_hours` so the app reads limits from the sandbox, not from its own config. |
@@ -106,9 +106,17 @@ An implementation that cannot satisfy one of these is not a valid sandbox.
     ref's lockfile and stores under `bench-deps/` in the artifacts store. That
     machine runs the package manager's fetch step as an unprivileged,
     metadata-blocked user (no lifecycle scripts, no candidate code) under an
-    identity that can write only `bench-deps/`; bench identities can read
-    snapshots but never write them. A candidate whose lockfile differs from the
-    base ref is blocked, not retried with network access.
+    identity that can write only `bench-deps/` and `bench-images/`; bench
+    identities can read snapshots and images but never write them. A candidate
+    whose lockfile differs from the base ref is blocked, not retried with
+    network access. The same holds for the repo's container image
+    (`environment.image`): it is built once from the base ref on the egress
+    machine, saved under `bench-images/` (content-addressed archive, manifest
+    last) and loaded offline on the bench; a candidate that changes its
+    Dockerfile / devcontainer or a file it copies is blocked ("environment
+    changes are not allowed in v0"). A custom module (`infra:`) must satisfy
+    every output of this contract; the app checks them after apply
+    (`checkSandboxContract`).
 13. **Least identity per bench phase.** The `baseline`/`bench` phases run under
     an identity with no access to the sealed store; the `confirm` phase runs
     under a separate identity that can read the holdout prefix. The app picks

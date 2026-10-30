@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { openLedger, type Ledger, type SandboxInput } from '@ratchet/core';
 import type { AwsSandboxOutputs, ProcessResult, ProcessRunner, ProcessSpec } from '@ratchet/aws';
 import { FakeSpawner, type HarnessInfo } from '@ratchet/agents';
-import { createHybridRuntime, createLiveRuntime, type HybridOptions, type LiveOptions, type LiveRuntime } from './live.js';
+import { createHybridRuntime, createLiveRuntime, createLiveRuntimeFor, resolveLiveImages, type HybridOptions, type LiveOptions, type LiveRuntime } from './live.js';
 
 const ACCT = '123456789012';
 const identity = (n: string) => ({
@@ -196,5 +196,33 @@ describe('createHybridRuntime (agents on this machine, evaluator in the cloud)',
     const stateRoot = mkdtempSync(join(tmpdir(), 'ratchet-live-'));
     roots.push(stateRoot);
     expect(() => createLiveRuntime({ ledger, region: 'us-east-1', sandbox: null, sandboxId: 'sbx', tofuBinary: 't', moduleDir: 'm', stateRoot, agentsWhere: 'local' })).toThrow(/no localAgents/);
+  });
+});
+
+describe('images found by tag, region from the repo', () => {
+  let calls = 0;
+  const fake = (images: unknown[]) => ({ send: async () => (calls++, { Images: images }) }) as never;
+  const base = { ledger: undefined as unknown as Ledger, region: 'us-east-1', sandbox: null, sandboxId: 'sbx', tofuBinary: '/opt/tofu', moduleDir: '/m', stateRoot: '/tmp/x' };
+  const tagged = (id: string, kind: string, v: string) => ({ ImageId: id, State: 'available', Architecture: 'x86_64', CreationDate: '2026-10-20T10:00:00.000Z', Tags: [{ Key: 'ratchet:image', Value: kind }, { Key: 'ratchet:image_version', Value: v }] });
+
+  it('resolveLiveImages fills both AMIs from the tags for the app version; an explicit ref wins', async () => {
+    const ec2 = fake([tagged('ami-0000000000000001', 'runner', '0.4.0-1'), tagged('ami-0000000000000002', 'bench', '0.4.0-1')]);
+    const r = await resolveLiveImages({ ...base, appVersion: '0.4.0' }, { ec2 });
+    expect([r.runnerImageRef, r.benchImageRef]).toEqual(['ami-0000000000000001', 'ami-0000000000000002']);
+    const o = await resolveLiveImages({ ...base, appVersion: '0.4.0', benchImageRef: 'ami-0fedcba9876543210' }, { ec2 });
+    expect([o.runnerImageRef, o.benchImageRef]).toEqual(['ami-0000000000000001', 'ami-0fedcba9876543210']);
+    const none = await resolveLiveImages({ ...base });
+    expect(none.runnerImageRef).toBeUndefined(); // no app version: nothing looked up
+  });
+
+  it('createLiveRuntimeFor uses environment.region of the repo, then the setting; the lookup is skipped before a sandbox exists', async () => {
+    calls = 0;
+    const ledger = openLedger(':memory:');
+    const stateRoot = mkdtempSync(join(tmpdir(), 'ratchet-live-'));
+    roots.push(stateRoot);
+    const rt = await createLiveRuntimeFor({ ...base, ledger, stateRoot, tofuRunner: new FakeTofu(), appVersion: '0.4.0', region: 'us-west-2' }, { environment: { region: 'eu-west-1' } });
+    runtimes.push(rt);
+    expect(calls).toBe(0);
+    await expect(createLiveRuntimeFor({ ...base, ledger, stateRoot }, { environment: { region: 'mars-1' } })).rejects.toThrow(/not an AWS region name/);
   });
 });

@@ -24,7 +24,16 @@ import {
   type StepSpec,
   type StepTimeouts,
 } from './pipeline.js';
-import { DepsSnapshots } from './remote-deps.js';
+import {
+  containerSetupHint,
+  environmentChangeGuardrail,
+  environmentChanges,
+  environmentFilesOf,
+  readEnvironment,
+  type ImagePlan,
+} from './image.js';
+import type { ContainerRuntime, ImageRestore } from './image-scripts.js';
+import { DepsSnapshots, type PreparedEnvironment } from './remote-deps.js';
 import {
   checkoutScript,
   depsPaths,
@@ -71,6 +80,12 @@ export interface RemoteBenchRunnerOptions {
    */
   setup?: string;
   artifacts?: ArtifactStore;
+  /**
+   * Options of the repo's container when `environment.image` is set: setup, guardrails and the evaluator then run in it with
+   * `--network none` (see image-scripts.ts for the isolation mapping). Without `environment.image` the steps run directly on the
+   * instance as before.
+   */
+  container?: Omit<ContainerRuntime, 'tag'>;
   /** The bench instance type. Default: `config.bench.hardware`. */
   instanceType?: string;
   /** Instance type of the dependency-snapshot job (must have the bench's architecture). Default: the bench's. */
@@ -116,6 +131,8 @@ export class RemoteBenchRunner implements ProgressBenchRunner {
       isolation: o.isolation ?? 'user',
       workRoot: o.workRoot ?? '/var/tmp/ratchet-bench',
       depsMs: { ...DEFAULT_TIMEOUTS, ...o.timeouts }.depsMs,
+      imageMs: { ...DEFAULT_TIMEOUTS, ...o.timeouts }.imageMs,
+      container: o.container,
       readyAttempts: o.readyAttempts,
       readyDelayMs: o.readyDelayMs,
       onWarning: o.onWarning,
@@ -145,9 +162,12 @@ export class RemoteBenchRunner implements ProgressBenchRunner {
       signal,
       onProgress,
       async (log) => {
-        // Before the first job of a lockfile (the baseline, in practice) a separate instance with egress fetches the
-        // packages; it is gone again before this job's instance exists. Without setup there is nothing to install.
-        const deps = this.o.setup ? await this.snapshots.ensure({ job, config, log, signal, onProgress }) : undefined;
+        // Before the first job of a lockfile / Dockerfile (the baseline, in practice) a separate instance with egress fetches the
+        // packages and builds the repo's container image; it is gone again before this job's instance exists. Without setup
+        // there is nothing to install, and without `environment.image` there is no container.
+        const wantsImage = readEnvironment(config).image !== undefined;
+        const prepared: PreparedEnvironment =
+          this.o.setup || wantsImage ? await this.snapshots.prepare({ job, config, log, signal, onProgress, wantDeps: !!this.o.setup }) : {};
         const instance = await this.o.compute.launchBenchInstance({
           optimizationId: job.optimizationId,
           instanceType: this.o.instanceType ?? config.bench.hardware,
@@ -155,7 +175,7 @@ export class RemoteBenchRunner implements ProgressBenchRunner {
           purpose: job.phase,
         });
         log.line(`bench instance ${instance.id} (${instance.instanceType}) launched for ${job.phase}`);
-        return new RemoteExecutor(this.o, job, config, log, instance, signal, deps);
+        return new RemoteExecutor(this.o, job, config, log, instance, signal, prepared);
       },
     );
   }
@@ -165,6 +185,8 @@ class RemoteExecutor implements PipelineExecutor {
   private readonly layout: Layout;
   private readonly timeouts: StepTimeouts;
   private readonly session: InstanceSession;
+  private readonly deps: DepsPlan | undefined;
+  private readonly image: ImagePlan | undefined;
 
   constructor(
     private readonly o: RemoteBenchRunnerOptions,
@@ -173,8 +195,10 @@ class RemoteExecutor implements PipelineExecutor {
     private readonly log: BenchLog,
     instance: InstanceInfo,
     signal: AbortSignal | undefined,
-    private readonly deps: DepsPlan | undefined,
+    prepared: PreparedEnvironment,
   ) {
+    this.deps = prepared.deps;
+    this.image = prepared.image;
     const id = `${job.optimizationId.replace(/[^A-Za-z0-9._-]/g, '_')}-${randomUUID().slice(0, 8)}`;
     this.layout = { work: `${o.workRoot ?? '/var/tmp/ratchet-bench'}/${id}` };
     this.timeouts = { ...DEFAULT_TIMEOUTS, ...o.timeouts };
@@ -197,8 +221,9 @@ class RemoteExecutor implements PipelineExecutor {
       optimizationId: this.job.optimizationId,
       sha: this.job.sha,
       // With a snapshot, the bench tree is the exact commit the snapshot's lockfile hashes were computed from.
-      benchRef: this.deps?.baseCommit ?? this.config.bench.ref,
+      benchRef: this.deps?.baseCommit ?? this.image?.baseCommit ?? this.config.bench.ref,
       ...(this.deps ? { hashFiles: pinnedDepsFiles(this.deps.strategy) } : {}),
+      ...(this.image ? { hashEnvironment: (tree: string) => environmentFilesOf(tree, this.image!.spec.path) } : {}),
     });
     this.log.line(`staged candidate ${staged.code.commit} and bench.ref ${staged.bench.commit} for the instance (no GitHub access from the bench)`);
     return staged;
@@ -215,6 +240,22 @@ class RemoteExecutor implements PipelineExecutor {
       node: plan.manifest.node,
       pm: plan.manifest.pm,
     };
+  }
+
+  /** The saved container image the checkout loads (offline) before setup. */
+  private restoreImage(plan: ImagePlan): ImageRestore {
+    const bucket = this.o.stagingBucket!;
+    return {
+      uri: `s3://${bucket}/${plan.manifest.archive}`,
+      sha256: plan.manifest.sha256,
+      compression: plan.manifest.compression,
+      imageId: plan.manifest.imageId,
+      rt: this.runtime(plan),
+    };
+  }
+
+  private runtime(plan: ImagePlan): ContainerRuntime {
+    return { ...this.o.container, tag: plan.tag };
   }
 
   async checkout(opts: { trace?: string }): Promise<CheckoutVeto | void> {
@@ -235,6 +276,20 @@ class RemoteExecutor implements PipelineExecutor {
       }
     }
 
+    // The same for the environment: the container is built once from bench.ref; a candidate that changes the Dockerfile /
+    // devcontainer or a file it copies in is blocked, not built with network access.
+    if (this.image) {
+      const moved = environmentChanges(this.image.files, staged.bench.env ?? {});
+      if (moved.length > 0) {
+        throw new BenchError(`bench.ref ${this.config.bench.ref} moved while the job was starting: ${moved.join(', ')} no longer matches the container image ${this.image.key}`);
+      }
+      const changed = environmentChanges(this.image.files, staged.code.env ?? {});
+      if (changed.length > 0) {
+        this.log.line(`!!! environment change: ${changed.join(', ')} differs from bench.ref ${this.config.bench.ref}`);
+        return { guardrail: environmentChangeGuardrail(changed, this.config.bench.ref) };
+      }
+    }
+
     // Evaluator, config, environment and the user's list (lockfiles are pinned through the dependency strategy above).
     const eff = effectiveProtected(this.config);
     // `globs` count toward "the evaluator ref holds something protected"; the rest (ratchet.yaml, the environment) is pinned like the lockfiles.
@@ -248,8 +303,9 @@ class RemoteExecutor implements PipelineExecutor {
         code: staged.code,
         bench: staged.bench,
         globs: protectedGlobs,
-        pinned: [...(this.deps ? pinnedDepsFiles(this.deps.strategy) : []), ...extraPinned],
+        pinned: [...(this.deps ? pinnedDepsFiles(this.deps.strategy) : []), ...extraPinned, ...(this.image?.pinned ?? [])],
         ...(this.deps ? { deps: this.restore(this.deps) } : {}),
+        ...(this.image ? { image: this.restoreImage(this.image) } : {}),
         prune: this.o.pruneExtraProtected ?? true,
         isolation: this.isolation,
         ...(this.o.candidateLauncher ? { candidateLauncher: this.o.candidateLauncher } : {}),
@@ -268,6 +324,7 @@ class RemoteExecutor implements PipelineExecutor {
       );
     }
     this.log.line(`overlay: ${String(s.data.copied)} protected file(s) from ${this.config.bench.ref}, ${String(s.data.removed)} candidate-only protected file(s) removed`);
+    if (this.image) this.log.line(`container image ${this.image.key} loaded and probed (--network none, caps dropped, read-only root); setup, guardrails and the evaluator run in it`);
     if (this.deps) this.log.line(`dependencies restored read-only from snapshot ${this.deps.key}; setup runs offline`);
 
     // The holdout is NOT fetched here: setup and guardrails (candidate code) run before the first bench
@@ -276,7 +333,9 @@ class RemoteExecutor implements PipelineExecutor {
   }
 
   setupFailureHint(): string | undefined {
-    return this.deps ? offlineSetupHint(this.deps.strategy, this.config.bench.ref) : undefined;
+    const hints = [this.deps ? offlineSetupHint(this.deps.strategy, this.config.bench.ref) : undefined, this.image ? containerSetupHint(this.config.bench.ref) : undefined];
+    const text = hints.filter(Boolean).join('; ');
+    return text === '' ? undefined : text;
   }
 
   async runStep(spec: StepSpec): Promise<StepOutcome> {
@@ -296,6 +355,7 @@ class RemoteExecutor implements PipelineExecutor {
         env: { ...spec.env, ...depsEnv },
         isolation: this.isolation,
         ...(spec.trace !== undefined ? { holdout: { uri: spec.trace } } : {}),
+        ...(this.image ? { container: this.runtime(this.image), ...(this.deps ? { depsMounted: true } : {}) } : {}),
         ...(this.o.candidateLauncher ? { candidateLauncher: this.o.candidateLauncher } : {}),
       }),
       spec.timeoutMs,

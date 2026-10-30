@@ -1,9 +1,13 @@
-# Trusted bench image: what `AwsCloudCompute.launchBenchInstance` boots (LiveOptions.benchImageRef).
+# Trusted bench image: what `AwsCloudCompute.launchBenchInstance` boots (LiveOptions.benchImageRef, or found by tag).
 #
-# Node 22, pnpm, git, AWS CLI v2, the SSM agent, k6, hyperfine, iptables and the unprivileged
-# `ratchet-bench` user. Deliberately NOT here: the `claude`/`codex` CLIs, any model key or token,
-# the ratchet-runner bin, profilers/compilers. Candidate code runs on this machine, so it stays
-# minimal (docs/real-env/bench.md).
+# GENERIC: the Docker engine, the SSM agent, the AWS CLI, zstd, git, iptables, the unprivileged `ratchet-bench` and
+# `ratchet-holdout` users and the setuid launcher the evaluator harness uses inside the repo's container. The repo's
+# toolchain (node, python, k6, ...) is NOT here: it is the repo's container image (`environment.image`), built once by the
+# dependency/image job, saved to the artifacts bucket and loaded offline on bench instances (docs/real-env/bench.md).
+# Deliberately NOT here either: the `claude`/`codex` CLIs, any model key or token, the ratchet-runner bin, compilers.
+#
+# `-var host_toolchain=true` adds node, pnpm, k6 and hyperfine for the legacy no-container path (a repo without
+# `environment.image`). That image is tagged `ratchet:image=bench-host`, so tag lookup never picks it; pass its ami id explicitly.
 #
 # The IMDS block for ratchet-bench is added by the instance user data on every boot
 # (packages/aws `benchUserData`), not baked in; 70-bench-user.sh and 90-verify-bench.sh only
@@ -12,18 +16,21 @@
 locals {
   bench_scripts = [
     "00-base.sh",
-    "10-node.sh",
     "20-aws-cli.sh",
-    "30-bench-tools.sh",
+    "25-docker.sh",
+    "35-candidate-launcher.sh",
     "70-bench-user.sh",
     "90-verify-bench.sh",
     "99-cleanup.sh",
   ]
-  bench_support_files = ["lib.sh", "versions.sh"]
+  # Added by -var host_toolchain=true; `sort` puts them back in numeric order.
+  bench_host_scripts  = ["10-node.sh", "30-bench-tools.sh"]
+  bench_run_scripts   = sort(concat(local.bench_scripts, var.host_toolchain ? local.bench_host_scripts : []))
+  bench_support_files = ["lib.sh", "versions.sh", "ratchet-candidate-ctr.c"]
 
-  bench_name = "ratchet-bench-${var.image_version}-${var.arch}"
+  bench_name = "ratchet-bench${var.host_toolchain ? "-host" : ""}-${var.image_version}-${var.arch}"
   bench_tags = merge(local.common_tags, {
-    "ratchet:image" = "bench"
+    "ratchet:image" = var.host_toolchain ? "bench-host" : "bench"
   })
 }
 
@@ -54,7 +61,7 @@ source "amazon-ebs" "bench" {
   associate_public_ip_address = true
 
   ami_name        = local.bench_name
-  ami_description = "Ratchet trusted bench ${var.image_version} (${var.arch}): Node 22, pnpm, git, aws, ssm-agent, k6, hyperfine, iptables, ratchet-bench user"
+  ami_description = "Ratchet trusted bench ${var.image_version} (${var.arch}): docker, git, aws, ssm-agent, zstd, iptables, ratchet-bench and ratchet-holdout users${var.host_toolchain ? ", host toolchain (node, pnpm, k6, hyperfine)" : ""}"
   ami_users       = var.ami_users
   encrypt_boot    = var.encrypt_boot
   kms_key_id      = var.kms_key_id
@@ -91,13 +98,13 @@ build {
 
   # Only the files the bench image needs: no agent installer, no agent pins, no runner tarballs.
   provisioner "file" {
-    sources     = [for f in concat(local.bench_support_files, local.bench_scripts) : "${path.root}/scripts/${f}"]
+    sources     = [for f in concat(local.bench_support_files, local.bench_run_scripts) : "${path.root}/scripts/${f}"]
     destination = "${local.remote_dir}/"
   }
 
   provisioner "shell" {
     execute_command  = "{{ .Vars }} sudo -n -E bash '{{ .Path }}'"
-    environment_vars = ["RATCHET_DNF_ARGS=${var.dnf_args}"]
-    inline           = [for s in local.bench_scripts : "bash ${local.remote_dir}/${s}"]
+    environment_vars = ["RATCHET_DNF_ARGS=${var.dnf_args}", "RATCHET_HOST_TOOLCHAIN=${var.host_toolchain ? 1 : 0}"]
+    inline           = [for s in local.bench_run_scripts : "bash ${local.remote_dir}/${s}"]
   }
 }

@@ -837,6 +837,9 @@ export function benchUserData(spec: BenchLaunchSpec, maxLifetimeHours: number): 
     users.map((u) => `iptables -I OUTPUT 1 -m owner --uid-owner ${u} -d 169.254.169.254 -j REJECT\n`).join('') +
     users.map((u) => `command -v ip6tables >/dev/null 2>&1 && ip6tables -I OUTPUT 1 -m owner --uid-owner ${u} -d fd00:ec2::254 -j REJECT || true\n`).join('') +
     'mount -o remount,hidepid=2 /proc >/dev/null 2>&1 || true\n' +
+    // The repo's container (`environment.image`) runs on this engine, loaded offline, with --network none. Images without Docker
+    // (the legacy host-toolchain path) simply skip it.
+    DOCKER_START +
     heredocInstall(CANDIDATE_EXEC_PATH, CANDIDATE_EXEC_SCRIPT, '755', 'RATCHET_CANDIDATE_EXEC_EOF') +
     heredocInstall(CANDIDATE_LAUNCHER_PATH, CANDIDATE_LAUNCHER_SCRIPT, '755', 'RATCHET_CANDIDATE_LAUNCHER_EOF') +
     heredocInstall(`${CANDIDATE_SUDOERS_PATH}.tmp`, CANDIDATE_SUDOERS, '440', 'RATCHET_SUDOERS_EOF') +
@@ -869,8 +872,38 @@ export function depsUserData(spec: BenchLaunchSpec, maxLifetimeHours: number, ne
     `command -v ip6tables >/dev/null 2>&1 && ip6tables -I OUTPUT 1 -m owner --uid-owner ${u} -d fd00:ec2::254 -j REJECT || true\n` +
     'mount -o remount,hidepid=2 /proc >/dev/null 2>&1 || true\n' +
     envFile({ RATCHET_OPTIMIZATION_ID: spec.optimizationId, RATCHET_BENCH_PURPOSE: spec.purpose, ...proxyEnv(net) }) +
+    dockerBuilderSetup(net) +
     'set -a; . /etc/ratchet/runner.env; set +a\n' +
     'mkdir -p /run/ratchet && touch /run/ratchet/user-data.done\n'
+  );
+}
+
+/** Starts the Docker engine when the image has one (the generic bench image does; the legacy host-toolchain image does not). */
+const DOCKER_START = 'command -v docker >/dev/null 2>&1 && systemctl start docker >/dev/null 2>&1 || true\n';
+
+/**
+ * The image / dependency job builds the repo's container and runs the package fetch in it, on THIS instance (egress). Containers
+ * reach the network through the host, where the owner-match rule on OUTPUT does not apply, so metadata is blocked for forwarded
+ * traffic too (the DOCKER-USER chain Docker consults first, and FORWARD as a second net; IMDSv2 hop limit 1 is the third). The
+ * daemon's own registry pulls need the allow-list proxy settings in its systemd environment (the client environment does not
+ * reach the daemon). Images without Docker skip all of it.
+ */
+function dockerBuilderSetup(net?: RunnerNetworkOptions): string {
+  const proxy = proxyEnv(net);
+  const dropIn = Object.keys(proxy).length
+    ? `install -d -m 755 /etc/systemd/system/docker.service.d\ncat > /etc/systemd/system/docker.service.d/ratchet-proxy.conf <<'RATCHET_DOCKER_PROXY_EOF'\n[Service]\n` +
+      ['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY'].map((k) => `Environment="${k}=${proxy[k]}"\n`).join('') +
+      `RATCHET_DOCKER_PROXY_EOF\nsystemctl daemon-reload\n`
+    : '';
+  return (
+    'if command -v docker >/dev/null 2>&1; then\n' +
+    '  iptables -N DOCKER-USER >/dev/null 2>&1 || true\n' +
+    '  iptables -I DOCKER-USER 1 -d 169.254.169.254 -j REJECT\n' +
+    '  iptables -I FORWARD 1 -d 169.254.169.254 -j REJECT\n' +
+    '  command -v ip6tables >/dev/null 2>&1 && ip6tables -I FORWARD 1 -d fd00:ec2::254 -j REJECT || true\n' +
+    dropIn +
+    '  systemctl start docker\n' +
+    'fi\n'
   );
 }
 

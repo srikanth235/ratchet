@@ -14,6 +14,18 @@
       "Resource": "${artifacts_bucket_arn}/bench-deps/*"
     },
     {
+      "Sid": "ReadBenchImages",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "${artifacts_bucket_arn}/bench-images/*"
+    },
+    {
+      "Sid": "WriteBenchImages",
+      "Effect": "Allow",
+      "Action": ["s3:PutObject", "s3:AbortMultipartUpload"],
+      "Resource": "${artifacts_bucket_arn}/bench-images/*"
+    },
+    {
       "Sid": "SsmManagedInstanceChannel",
       "Effect": "Allow",
       "Action": [

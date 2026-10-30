@@ -109,7 +109,7 @@ export class LocalFakeCompute implements CloudCompute {
     writeFileSync(file, command.script);
     return new Promise((resolve) => {
       const child = spawn('bash', [file], {
-        env: { ...process.env, PATH: `${this.shim}:${process.env.PATH}`, ...this.extraEnv, ...command.env },
+        env: { ...process.env, PATH: `${this.shim}:${process.env.PATH}`, RATCHET_FAKE_INSTANCE: instanceId, ...this.extraEnv, ...command.env },
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
       });
