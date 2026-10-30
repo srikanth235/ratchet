@@ -37,8 +37,7 @@ export class DevSandboxProvider implements SandboxProvider {
   }
 
   async outputs(sandboxId: string): Promise<SandboxOutputs | null> {
-    // The dev stub always reports an applied sandbox so the outputs panel is populated.
-    return this.applied.get(sandboxId) ?? this.outputsFor(sandboxId);
+    return this.applied.get(sandboxId) ?? null;
   }
 
   private outputsFor(id: string): SandboxOutputs {

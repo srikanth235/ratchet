@@ -12,6 +12,15 @@ asarUnpack:
 extraResources:
   - from: ../core/src/ledger/migrations
     to: migrations
+# The OpenTofu sandbox module: live mode runs `tofu` against Resources/infra/aws (Settings can point elsewhere).
+# A pinned `tofu` binary placed in Resources/bin/ is picked up automatically (see defaultLivePaths).
+  - from: ../../infra/aws
+    to: infra/aws
+    filter:
+      - "**/*"
+      - "!tests/**"
+      - "!**/.terraform/**"
+      - "!**/*.tfstate*"
 mac:
   category: public.app-category.developer-tools
   hardenedRuntime: true

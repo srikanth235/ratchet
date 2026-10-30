@@ -1,7 +1,8 @@
+import { useEffect, useState } from 'react';
 import { Button, Card, Eyebrow, Pill } from '@ratchet/ui';
-import type { PlanChangeVM } from '../../shared/types';
+import type { PlanChangeVM, SandboxInfo, SandboxStatusVM } from '../../shared/types';
 import { ErrorNote, PageHeader } from '../components/common';
-import { useQuery } from '../data';
+import { errMsg, useNav, useQuery } from '../data';
 
 const SIGIL: Record<PlanChangeVM['action'], { cls: string; label: string }> = {
   create: { cls: 'plan--create', label: '+ create' },
@@ -68,16 +69,98 @@ export function SandboxDiagram({ region, sandboxId }: { region: string; sandboxI
 
 const mask = (id: string | null) => (id && id.length >= 8 ? `${id.slice(0, 4)} ···· ${id.slice(-4)}` : (id ?? '—'));
 
+type Pending = 'plan' | 'apply' | 'destroy';
+
+const BUSY: SandboxStatusVM[] = ['applying', 'destroying'];
+
+function StatusPill({ info }: { info: SandboxInfo }) {
+  const toAdd = info.plan?.changes.filter((c) => c.action === 'create').length ?? 0;
+  switch (info.status) {
+    case 'applied':
+      return <Pill tone="mint" dot large>Applied</Pill>;
+    case 'applying':
+      return <Pill tone="brass" dot live large>Applying…</Pill>;
+    case 'destroying':
+      return <Pill tone="brass" dot live large>Destroying…</Pill>;
+    case 'destroyed':
+      return <Pill tone="neutral" dot large>Destroyed</Pill>;
+    case 'failed':
+      return <Pill tone="rose" dot large>Failed</Pill>;
+    default:
+      return <Pill tone="brass" dot large>{info.plan ? `Plan ready · ${toAdd} to add` : 'Not planned yet'}</Pill>;
+  }
+}
+
+/** The confirmation shown before anything is created or destroyed. */
+function ConfirmCard({ kind, info, busy, onConfirm, onCancel }: { kind: 'apply' | 'destroy'; info: SandboxInfo; busy: boolean; onConfirm(): void; onCancel(): void }) {
+  const { plan, account } = info;
+  const n = (a: PlanChangeVM['action']) => plan?.changes.filter((c) => c.action === a).length ?? 0;
+  if (kind === 'apply') {
+    return (
+      <Card className="confirm-card">
+        <div role="group" aria-label="Confirm apply" className="confirm-card">
+          <h2 className="confirm-card__title">Apply this plan{account.simulated ? ' (simulated)' : ''}?</h2>
+          <p className="confirm-card__body">
+            {account.simulated
+              ? 'Simulation: the mock sandbox records its outputs in the ledger and nothing is created in AWS.'
+              : `OpenTofu will create real resources in AWS${account.accountId ? ` account ${mask(account.accountId)}` : ''} (region ${account.region}, profile ${account.profile}). Idle cost is roughly $29 a month for the network endpoints; destroy the sandbox when you are done.`}
+          </p>
+          <div className="confirm-card__facts mono">
+            <span>{plan?.summary ?? 'No plan'}</span>
+            <span>+{n('create')} ~{n('update') + n('replace')} −{n('delete')}</span>
+          </div>
+          <div className="confirm-card__actions">
+            <Button disabled={busy} onClick={onConfirm}>Confirm apply</Button>
+            <Button variant="ghost" disabled={busy} onClick={onCancel}>Cancel</Button>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+  return (
+    <Card className="confirm-card confirm-card--danger">
+      <div role="group" aria-label="Confirm destroy" className="confirm-card">
+        <h2 className="confirm-card__title">Destroy sandbox {account.sandboxId}?</h2>
+        <p className="confirm-card__body">
+          {account.simulated
+            ? 'Simulation: the mock sandbox and its recorded outputs are removed.'
+            : 'OpenTofu will delete the buckets (including the sealed holdout traces and all artifacts), the network and the evaluator identities. This cannot be undone. It is refused while an optimization is running or any instance or agent identity is left.'}
+        </p>
+        <div className="confirm-card__actions">
+          <Button variant="danger" disabled={busy} onClick={onConfirm}>Confirm destroy</Button>
+          <Button variant="ghost" disabled={busy} onClick={onCancel}>Cancel</Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export function Sandbox() {
-  const { data, error, refresh, loading } = useQuery(() => window.ratchet.sandboxInfo(), [], { intervalMs: 15_000 });
-  if (error && !data) return <ErrorNote error={error} />;
-  if (!data) return <p className="muted">Loading…</p>;
-  const { plan, outputs, account, limits } = data;
-  const count = (a: PlanChangeVM['action']) => plan.changes.filter((c) => c.action === a).length;
+  const [pollMs, setPollMs] = useState(15_000);
+  const { data, error, refresh, loading } = useQuery(() => window.ratchet.sandboxInfo(), [], { intervalMs: pollMs });
+  const { go } = useNav();
+  const [local, setLocal] = useState<SandboxInfo | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [confirm, setConfirm] = useState<'apply' | 'destroy' | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  // A fresh read replaces what an action returned; poll quickly while OpenTofu is working.
+  useEffect(() => {
+    setLocal(null);
+    setPollMs(data && BUSY.includes(data.status) ? 2_000 : 15_000);
+  }, [data]);
+
+  const info = local ?? data;
+  if (error && !info) return <ErrorNote error={error} />;
+  if (!info) return <p className="muted">Loading…</p>;
+
+  const { plan, outputs, account, limits } = info;
+  const count = (a: PlanChangeVM['action']) => plan?.changes.filter((c) => c.action === a).length ?? 0;
   const toAdd = count('create');
-  const status = outputs
-    ? <Pill tone="mint" dot large>Applied</Pill>
-    : <Pill tone="brass" dot large>Plan ready · {toAdd} to add</Pill>;
+  const busy = pending !== null || BUSY.includes(info.status);
+  const changesPending = plan ? plan.changes.some((c) => c.action !== 'no-op') : false;
+  const needsPlan = !plan && !account.simulated;
+  const canApplyNow = info.status === 'applied' ? changesPending : !BUSY.includes(info.status);
   const outRows: [string, string | null][] = [
     ['artifacts_bucket', outputs?.artifactsBucket ?? null],
     ['sealed_bucket', outputs?.sealedBucket ?? null],
@@ -86,15 +169,63 @@ export function Sandbox() {
     ['network_ref', outputs?.network.subnetId ?? null],
   ];
 
+  const run = async (what: Pending, fn: () => Promise<SandboxInfo>) => {
+    setPending(what);
+    setActionError(null);
+    try {
+      setLocal(await fn());
+    } catch (e) {
+      setActionError(errMsg(e));
+      refresh();
+    } finally {
+      setConfirm(null);
+      setPending(null);
+    }
+  };
+
   return (
     <>
       <PageHeader
         eyebrow="Environments"
         title="AWS sandbox"
-        badge={<>{status}{account.simulated ? <Pill tone="neutral" large>Simulated sandbox</Pill> : <Pill tone="brass" large>Live account</Pill>}</>}
+        badge={<><StatusPill info={info} />{account.simulated ? <Pill tone="neutral" large>Simulated sandbox</Pill> : <Pill tone="brass" large>Live account</Pill>}</>}
         sub="A fenced area in a dedicated account. Agents run headless on runners inside it; the trusted evaluator runner sits outside their reach."
-        actions={<Button variant="ghost" disabled={loading} onClick={refresh}>Re-plan</Button>}
+        actions={
+          <>
+            <Button variant="ghost" disabled={loading || busy || info.setupProblems.length > 0} onClick={() => void run('plan', () => window.ratchet.planSandbox())}>
+              {needsPlan ? 'Plan' : 'Re-plan'}
+            </Button>
+            {canApplyNow && (
+              <Button disabled={busy || !info.canApply || !plan} title={!plan ? 'Review the plan first' : undefined} onClick={() => setConfirm('apply')}>
+                {info.status === 'applied' ? 'Apply changes' : 'Apply sandbox'}
+              </Button>
+            )}
+            {(info.status === 'applied' || info.status === 'failed') && (
+              <Button variant="danger" disabled={busy || !info.canDestroy} title={info.destroyBlockedReason ?? undefined} onClick={() => setConfirm('destroy')}>
+                Destroy sandbox
+              </Button>
+            )}
+          </>
+        }
       />
+      <ErrorNote error={actionError ?? (info.status === 'failed' ? (info.lastError ?? 'The last apply or destroy failed; run it again to converge.') : null)} />
+      {info.setupProblems.length > 0 && (
+        <div className="setup-note" role="status">
+          Live setup is incomplete:
+          <ul>{info.setupProblems.map((p) => <li key={p}>{p}</li>)}</ul>
+          <Button variant="subtle" onClick={() => go('settings')}>Open Settings</Button>
+        </div>
+      )}
+      {info.destroyBlockedReason && (info.status === 'applied' || info.status === 'failed') && <p className="muted" role="status">Destroy unavailable: {info.destroyBlockedReason}</p>}
+      {confirm && (
+        <ConfirmCard
+          kind={confirm}
+          info={info}
+          busy={busy}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => void run(confirm, () => (confirm === 'apply' ? window.ratchet.applySandbox() : window.ratchet.destroySandbox()))}
+        />
+      )}
 
       <Card className="diagram-card">
         <div className="card-head">
@@ -108,27 +239,34 @@ export function Sandbox() {
         <Card className="plan-card">
           <div className="plan-card__head">
             <h2 className="card-title">OpenTofu plan</h2>
-            <span className="mono faint" style={{ fontSize: 12 }}>{plan.summary}</span>
+            <span className="mono faint" style={{ fontSize: 12 }}>{plan?.summary ?? 'No plan yet'}</span>
             <span className="plan__counts mono" aria-label="Plan totals">
               <span style={{ color: 'var(--rt-color-mint)' }}>+{toAdd}</span><span>~{count('update') + count('replace')}</span><span>−{count('delete')}</span>
             </span>
           </div>
-          <ul className="plan" aria-label="Plan changes">
-            {plan.changes.map((c) => {
-              const g = SIGIL[c.action];
-              const k = resourceKind(c.type);
-              return (
-                <li key={c.address} className={g.cls}>
-                  <span className={`plan__kind mono ${k.cls}`} aria-hidden="true">{k.label}</span>
-                  <span className="plan__main">
-                    <span className="mono plan__addr">{c.address}</span>
-                    <span className="plan__type">{c.type}</span>
-                  </span>
-                  <span className="plan__act mono">{g.label}</span>
-                </li>
-              );
-            })}
-          </ul>
+          {plan ? (
+            <ul className="plan" aria-label="Plan changes">
+              {plan.changes.map((c) => {
+                const g = SIGIL[c.action];
+                const k = resourceKind(c.type);
+                return (
+                  <li key={c.address} className={g.cls}>
+                    <span className={`plan__kind mono ${k.cls}`} aria-hidden="true">{k.label}</span>
+                    <span className="plan__main">
+                      <span className="mono plan__addr">{c.address}</span>
+                      <span className="plan__type">{c.type}</span>
+                    </span>
+                    <span className="plan__act mono">{g.label}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <div className="plan-empty">
+              <p className="muted">A real plan runs <span className="mono">tofu plan</span> against your account, so it only runs when you ask. Review it here before anything is applied.</p>
+              <Button variant="subtle" disabled={busy || info.setupProblems.length > 0} onClick={() => void run('plan', () => window.ratchet.planSandbox())}>Run plan</Button>
+            </div>
+          )}
         </Card>
 
         <div className="side-col">
@@ -138,6 +276,7 @@ export function Sandbox() {
             <div className="kv-row"><span>Account</span><span className="mono">{mask(account.accountId)}</span></div>
             <div className="kv-row"><span>Region</span><span className="mono">{account.region}</span></div>
             <div className="kv-row"><span>Sandbox</span><span className="mono">{account.sandboxId}</span></div>
+            <div className="kv-row"><span>Optimizations</span><span className="mono">{info.optimizations.length}</span></div>
           </Card>
           <Card className="side-card side-card--gap">
             <Eyebrow>Agent limits</Eyebrow>

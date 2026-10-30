@@ -1,6 +1,8 @@
 import type { AgentKind, OptimizationStatus, Verdict } from '@ratchet/ui';
+import type { AwsAuthKind, LiveSettings, LiveSettingsInput } from './live-settings.js';
 
 export type { AgentKind, OptimizationStatus, Verdict };
+export type { AwsAuthKind, LiveSettings, LiveSettingsInput };
 export type Mode = 'live' | 'simulation';
 
 // ------------------------------------------------------------------ view models (main → renderer)
@@ -222,27 +224,72 @@ export interface PlanChangeVM {
   type: string;
 }
 
+/** Where a sandbox is in its lifecycle (`absent` = never planned). */
+export type SandboxStatusVM = 'absent' | 'planned' | 'applying' | 'applied' | 'destroying' | 'destroyed' | 'failed';
+
+export interface SandboxOutputsVM {
+  artifactsBucket: string;
+  sealedBucket: string;
+  agentBoundaryRef: string;
+  evalIdentityRef: string;
+  agentRolePath: string;
+  network: { subnetId: string; agentRunnerSecurityGroupId: string; benchSecurityGroupId: string };
+}
+
 export interface SandboxInfo {
-  plan: { changes: PlanChangeVM[]; summary: string };
-  outputs: {
-    artifactsBucket: string;
-    sealedBucket: string;
-    agentBoundaryRef: string;
-    evalIdentityRef: string;
-    agentRolePath: string;
-    network: { subnetId: string; agentRunnerSecurityGroupId: string; benchSecurityGroupId: string };
-  } | null;
+  /**
+   * The OpenTofu plan: free in simulation (always present), but a real `tofu plan` in live mode, so it is `null`
+   * until the user asks for it (`planSandbox`) and again after an apply or destroy.
+   */
+  plan: { changes: PlanChangeVM[]; summary: string } | null;
+  /** Contract outputs recorded in the ledger by the last apply; `null` unless the sandbox is applied. */
+  outputs: SandboxOutputsVM | null;
+  status: SandboxStatusVM;
+  /** Why the last apply / destroy failed. */
+  lastError: string | null;
+  appliedAt: number | null;
+  /** Optimizations linked to this sandbox. */
+  optimizations: { id: string; status: string }[];
+  /** Apply is possible (not busy, live settings complete in live mode). */
+  canApply: boolean;
+  /** Destroy is possible; otherwise `destroyBlockedReason` says why (a running optimization, un-torn-down runs). */
+  canDestroy: boolean;
+  destroyBlockedReason: string | null;
+  /** Live mode: what has to be configured before the sandbox can be planned or applied. */
+  setupProblems: string[];
   account: { sandboxId: string; region: string; profile: string; accountId: string | null; simulated: boolean };
   limits: { allowedInstanceTypes: string[]; maxInstancesPerAgent: number; maxInstanceLifetimeHours: number };
 }
 
 export type SecretName = 'anthropicApiKey' | 'openaiApiKey' | 'githubToken';
 
+/** Live mode: non-secret settings, what the paths default to, and what still blocks a live run. */
+export interface LiveSettingsVM extends LiveSettings {
+  /** What empty `tofuBinary` / `moduleDir` resolve to (bundled `infra/aws` in a packaged app). */
+  defaults: { tofuBinary: string; moduleDir: string };
+  /** One line per requirement (AWS sign-in, region, OpenTofu, GitHub, model keys, AMIs, sandbox). */
+  readiness: PreflightItem[];
+  /** Nothing in `readiness` fails. */
+  ready: boolean;
+  /** Settings changed while an optimization was running; they apply once it has stopped. */
+  restartRequired: boolean;
+}
+
+export type ConnectionTarget = 'aws' | 'github' | 'anthropic' | 'openai' | 'tofu';
+
+export interface ConnectionResultVM {
+  target: ConnectionTarget;
+  ok: boolean;
+  /** One line; never contains a key or token. */
+  detail: string;
+}
+
 /** Secrets never cross to the renderer: only whether each one is configured. */
 export interface SettingsVM {
   mode: Mode;
   awsProfile: string;
   secrets: Record<SecretName, boolean>;
+  live: LiveSettingsVM;
   /** False when the OS keychain (safeStorage) is unavailable, so secrets cannot be stored. */
   encryptionAvailable: boolean;
   engine: EngineInfo;
@@ -287,6 +334,10 @@ export interface RatchetApi {
   preflight(input: { agents: AgentKind[]; configYaml: string }): Promise<PreflightItem[]>;
   sandboxInfo(): Promise<SandboxInfo>;
   getSettings(): Promise<SettingsVM>;
+  // sandbox lifecycle (planned -> applying -> applied -> destroying -> destroyed / failed, recorded in the ledger)
+  planSandbox(): Promise<SandboxInfo>;
+  applySandbox(): Promise<SandboxInfo>;
+  destroySandbox(): Promise<SandboxInfo>;
   // commands (mirror EngineApi)
   createOptimization(input: CreateOptimizationInput): Promise<string>;
   startOptimization(id: string): Promise<void>;
@@ -302,6 +353,10 @@ export interface RatchetApi {
   setAwsProfile(profile: string): Promise<SettingsVM>;
   setSecret(name: SecretName, value: string): Promise<SettingsVM>;
   clearSecret(name: SecretName): Promise<SettingsVM>;
+  /** Validated as a whole; nothing is saved if any field is invalid. */
+  saveLiveSettings(input: LiveSettingsInput): Promise<SettingsVM>;
+  /** Read-only probe of one live setting (STS, GitHub, a model API, `tofu version`); secrets are read in the main process. */
+  testConnection(target: ConnectionTarget): Promise<ConnectionResultVM>;
   // events
   onEvent(listener: (e: EngineEventVM) => void): () => void;
 }

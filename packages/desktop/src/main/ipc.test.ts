@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { openLedger } from '@ratchet/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { IPC } from '../shared/channels.js';
@@ -43,6 +45,16 @@ describe('registerIpc', () => {
     expect(ctx.ipc.handlers.size).toBe(Object.keys(ARGS).length);
   });
 
+  it('the preload bridge exposes exactly the IPC methods, and none that reads a secret', () => {
+    const src = readFileSync(join(__dirname, '../preload/index.ts'), 'utf8');
+    const list = /const methods: Invoke\[\] = \[([\s\S]*?)\];/.exec(src)![1]!;
+    const exposed = [...list.matchAll(/'(\w+)'/g)].map((m) => m[1]!).sort();
+    expect(exposed).toEqual(Object.keys(ARGS).sort());
+    expect(exposed.filter((m) => /secret/i.test(m) && !/^(setSecret|clearSecret)$/.test(m))).toEqual([]);
+    // the bridge forwards through ipcRenderer.invoke only; no raw ipcRenderer or Node handle is exposed
+    expect(src).not.toMatch(/exposeInMainWorld\('ratchet',\s*\{?\s*ipcRenderer/);
+  });
+
   it('serves reads from the ledger', async () => {
     const snap = (await ctx.ipc.invoke(IPC.listOptimizations)) as { optimizations: unknown[]; featuredId: string };
     expect(snap.optimizations).toHaveLength(4);
@@ -69,6 +81,20 @@ describe('registerIpc', () => {
     ['setAwsProfile', ['bad profile; rm -rf /']],
     ['setSecret', ['anthropicApiKey', 'short']],
     ['setSecret', ['rootPassword', 'long-enough-secret']],
+    ['setSecret', ['anthropicApiKey', 'sk-proj-this-is-an-openai-key']],
+    ['setSecret', ['githubToken', 'not-a-github-token']],
+    ['saveLiveSettings', [{ awsRegion: 'mars-north-9' }]],
+    ['saveLiveSettings', [{ runnerImageRef: 'i-0123456789abcdef0' }]],
+    ['saveLiveSettings', [{ githubRepo: 'https://evil.example/x/y' }]],
+    ['saveLiveSettings', [{ tofuBinary: 'tofu --version; id' }]],
+    ['saveLiveSettings', [{ moduleDir: '../../etc' }]],
+    ['saveLiveSettings', [{ awsAuth: 'password' }]],
+    ['saveLiveSettings', [{ anthropicApiKey: 'sk-ant-smuggled-through-settings' }]],
+    ['saveLiveSettings', [{}, {}]],
+    ['testConnection', ['stripe']],
+    ['testConnection', []],
+    ['planSandbox', ['extra']],
+    ['destroySandbox', [{ sandboxId: 'other' }]],
     ['recentActivity', [{ limit: 0 }]],
     ['recentActivity', [{ unknown: 1 }]],
     ['createOptimization', [{ repoUrl: 'x', baseRef: 'main', agents: [], budgetUsd: 10, timeLimitSeconds: 60, plateauEvals: 3 }]],
@@ -184,21 +210,36 @@ describe('RatchetService commands & events', () => {
     expect(live.find((i) => i.id === 'anthropic')!.state).toBe('fail');
     expect(live.find((i) => i.id === 'openai')!.state).toBe('fail');
     expect(live.find((i) => i.id === 'aws')!.state).toBe('fail');
+    expect(live.find((i) => i.id === 'repo')!.state).toBe('fail');
+    expect(live.find((i) => i.id === 'images')!.state).toBe('fail');
+    expect(live.find((i) => i.id === 'sandbox')).toMatchObject({ state: 'fail', detail: expect.stringContaining('apply it under Environments') });
+    expect(sim.find((i) => i.id === 'sandbox')!.state).toBe('warn');
+    expect(sim.find((i) => i.id === 'repo')).toBeUndefined();
     await service.setAwsProfile('sandbox');
     await service.setSecret('anthropicApiKey', 'sk-ant-test-123456');
     const after = await service.preflight({ agents: ['claude-code'], configYaml: yaml });
     expect(after.find((i) => i.id === 'anthropic')!.state).toBe('ok');
     expect(after.find((i) => i.id === 'aws')!.detail).toBe('sandbox');
+    await service.applySandbox();
+    expect((await service.preflight({ agents: ['claude-code'], configYaml: yaml })).find((i) => i.id === 'sandbox')).toMatchObject({ state: 'ok' });
     service.dispose();
   });
 
-  it('sandboxInfo returns plan, outputs, account and limits from the SandboxProvider', async () => {
-    const { service } = setup();
-    const info = await service.sandboxInfo();
-    expect(info.plan.summary).toMatch(/^Plan: \d+ to add/);
-    expect(info.outputs?.artifactsBucket).toContain('artifacts');
-    expect(info.account).toMatchObject({ region: 'us-east-1', simulated: true, accountId: '000000000000' });
-    expect(info.limits.allowedInstanceTypes).toContain('c7i.2xlarge');
+  it('sandboxInfo plans for free in simulation; apply records the outputs and destroy clears them', async () => {
+    const { service, ledger } = setup();
+    const before = await service.sandboxInfo();
+    expect(before).toMatchObject({ status: 'planned', outputs: null, canApply: true, canDestroy: false, account: { sandboxId: 'ratchet-sim', region: 'us-east-1', simulated: true } });
+    expect(before.plan?.summary).toMatch(/^Plan: \d+ to add/);
+    expect(before.limits.allowedInstanceTypes).toContain('c7i.2xlarge');
+
+    const applied = await service.applySandbox();
+    expect(applied).toMatchObject({ status: 'applied', canDestroy: true, account: { accountId: '000000000000' } });
+    expect(applied.outputs?.artifactsBucket).toContain('artifacts');
+    expect(applied.plan?.changes.every((c) => c.action === 'no-op')).toBe(true);
+    expect(ledger.getSandbox('ratchet-sim')).toMatchObject({ status: 'applied', provider: 'mock' });
+
+    const gone = await service.destroySandbox();
+    expect(gone).toMatchObject({ status: 'destroyed', outputs: null, canDestroy: false });
     service.dispose();
   });
 });

@@ -1,10 +1,12 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { openLedger } from '@ratchet/core';
+import { createConnectionTester } from '@ratchet/runtime';
 import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron';
 import { IPC } from '../shared/channels.js';
 import { createEngineForApp } from './engine.js';
 import { isTrustedUrl, registerIpc } from './ipc.js';
+import { defaultLivePaths } from './live-config.js';
 import { createService } from './service.js';
 import { SettingsStore } from './settings.js';
 
@@ -65,10 +67,20 @@ app.whenReady().then(() => {
     decrypt: (b) => safeStorage.decryptString(b),
   });
 
+  // Live mode: the bundled OpenTofu module (packaged: Resources/infra/aws) and, per sandbox, state under userData.
+  const liveDefaults = defaultLivePaths({
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    repoRoot: resolve(process.env['RATCHET_REPO_ROOT'] ?? join(__dirname, '../../../..')),
+  });
+  const live = { settings, stateRoot: join(userData, 'sandboxes'), defaults: liveDefaults };
+
   const service = createService({
     ledger,
     settings,
-    createApp: (mode) => createEngineForApp(ledger, mode),
+    liveDefaults,
+    connectionTester: createConnectionTester(),
+    createApp: (mode) => createEngineForApp(ledger, mode, { live }),
     saveReport: async (defaultName, markdown) => {
       // Test/CI override: write the report into this directory instead of asking through a native dialog.
       const autoDir = process.env['RATCHET_E2E_SAVE_DIR'];
