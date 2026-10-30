@@ -70,7 +70,7 @@ export async function simulate(o: { repoRoot: string; attempts?: number; duratio
   await running.catch(() => {});
   unsub();
   await rt.dispose();
-  return { id, summary, history, candidates, pr, workRoot, ledger };
+  return { id, summary, history, candidates, pr, workRoot, ledger, compute: rt.compute, engine: rt.engine };
 }
 
 const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);

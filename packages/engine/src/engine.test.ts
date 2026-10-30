@@ -341,6 +341,29 @@ describe('happy path', () => {
     expect(dead.reasons[0]).toMatch(/bench infrastructure error after 2 attempts/);
   });
 
+  it('a guardrail that fails before any bench run (no samples at all) blocks the candidate instead of wedging the queue', async () => {
+    const h = makeHarness();
+    const { id } = await h.begin({ agents: ['codex'] });
+    h.git.push('ratchet/opt-test/codex', 'sha-brk', ['src/search.ts']);
+    h.bench.set('sha-brk', 'bench', { samples: [], guardrails: [{ name: 'pnpm test:unit', passed: false, detail: 'exited with status 1' }] });
+    candidate(h, 'ratchet/opt-test/codex', 'sha-next', { bench: [70, 70, 70], confirm: [70, 70, 70] });
+    await h.until(() => h.ledger.candidatesWithResults(id).length === 2 && h.ledger.candidatesWithResults(id).every((c) => c.verdict !== 'pending'), 20);
+    expect(verdicts(h, id)).toEqual({ 'sha-brk': 'blocked', 'sha-next': 'verified' });
+    const brk = h.ledger.candidatesWithResults(id).find((c) => c.sha === 'sha-brk')!;
+    expect(brk.reasons[0]).toMatch(/guardrail failed: pnpm test:unit \(exited with status 1\)/);
+    expect(h.bench.jobs.filter((j) => j.sha === 'sha-brk')).toHaveLength(1); // not retried
+  });
+
+  it('an outcome with neither samples nor a failed guardrail counts as a failed attempt and is rejected after the attempt limit', async () => {
+    const h = makeHarness();
+    const { id } = await h.begin({ agents: ['codex'] });
+    h.git.push('ratchet/opt-test/codex', 'sha-empty', ['src/search.ts']);
+    h.bench.set('sha-empty', 'bench', { samples: [] });
+    await h.until(() => h.ledger.candidatesWithResults(id).every((c) => c.verdict !== 'pending') && h.ledger.candidatesWithResults(id).length === 1, 20);
+    expect(verdicts(h, id)).toEqual({ 'sha-empty': 'rejected' });
+    expect(h.bench.jobs.filter((j) => j.sha === 'sha-empty')).toHaveLength(2);
+  });
+
   it('retries a candidate whose changed files cannot be read yet, without losing order', async () => {
     const h = makeHarness();
     const { id } = await h.begin();
@@ -481,6 +504,180 @@ describe('cost and stop rules', () => {
     expect(verdicts(h, id)).toEqual({ 'sha-last': 'verified' });
   });
 
+  describe('graceful stop drains every candidate', () => {
+    const CC = 'ratchet/opt-test/claude-code';
+    const CX = 'ratchet/opt-test/codex';
+
+    it('all agents done in the same tick as their last push: the final git poll submits it and the drain verifies it', async () => {
+      const h = makeHarness();
+      const { id, agents } = await h.begin();
+      candidate(h, CX, 'sha-last', { bench: [85, 85, 85], confirm: [85, 85, 85] });
+      h.runners.emit(agents['claude-code']!, ev('status', { data: { state: 'done' } }));
+      h.runners.emit(agents.codex!, ev('status', { data: { state: 'done' } }));
+      await h.until(() => h.ledger.getOptimization(id)!.status === 'stopped');
+      expect(h.engine.stopReason(id)).toBe('all agents finished');
+      expect(verdicts(h, id)).toEqual({ 'sha-last': 'verified' });
+      expect(h.ledger.candidatesWithResults(id)[0]!.results.map((r) => r.phase)).toEqual(['bench', 'confirm']);
+      expect(h.ledger.currentBest(id)).toBe(85);
+    });
+
+    it('a runner that pushes its last commit while it is being stopped is still collected and evaluated', async () => {
+      const h = makeHarness({ settings: {} });
+      const { id, agents } = await h.begin({ timeLimitSeconds: 5 * 60 });
+      const origStop = h.runners.stop.bind(h.runners);
+      h.runners.stop = async (handle) => {
+        await origStop(handle);
+        if (handle.agentId === agents.codex) {
+          candidate(h, CX, 'sha-in-flight', { bench: [70, 70, 70], confirm: [70, 70, 70] });
+          h.runners.emit(handle.agentId, ev('status', { data: { state: 'done' } }));
+        }
+      };
+      await h.until(() => h.ledger.getOptimization(id)!.status === 'stopped');
+      expect(verdicts(h, id)).toEqual({ 'sha-in-flight': 'verified' });
+    });
+
+    it('reports done only AFTER the push becomes visible: the drain keeps polling git until runners are done and the branch is quiet', async () => {
+      const h = makeHarness();
+      const { id, agents } = await h.begin({ timeLimitSeconds: 5 * 60 });
+      // The branch listing lags: the first two polls after the stop see nothing, then the commit appears.
+      candidate(h, CC, 'sha-lagging', { bench: [60, 60, 60], confirm: [60, 60, 60] });
+      const real = h.git.listCandidates.bind(h.git);
+      let hidden = 0;
+      h.git.listCandidates = async (branch, since) => {
+        if (h.ledger.getOptimization(id)!.status === 'stopping' && hidden < 2) {
+          hidden++;
+          return [];
+        }
+        return real(branch, since);
+      };
+      // Make the commit invisible to the normal running polls too, so only the drain can find it.
+      const running = h.git.commits.get(CC)!.splice(0);
+      h.runners.emit(agents['claude-code']!, ev('status', { data: { state: 'done' } }));
+      h.runners.emit(agents.codex!, ev('status', { data: { state: 'done' } }));
+      await h.cycle(1);
+      h.git.commits.set(CC, running);
+      await h.until(() => h.ledger.getOptimization(id)!.status === 'stopped');
+      expect(verdicts(h, id)).toEqual({ 'sha-lagging': 'verified' });
+    });
+
+    it('survives a transient git failure during the final poll: it retries while draining', async () => {
+      const h = makeHarness();
+      const { id, agents } = await h.begin();
+      candidate(h, CX, 'sha-flaky', { bench: [88, 88, 88], confirm: [88, 88, 88] });
+      const real = h.git.listCandidates.bind(h.git);
+      let failures = 0;
+      h.git.listCandidates = async (branch, since) => {
+        if (failures < 3) {
+          failures++;
+          throw new Error('git fetch lock contention');
+        }
+        return real(branch, since);
+      };
+      h.runners.emit(agents['claude-code']!, ev('status', { data: { state: 'done' } }));
+      h.runners.emit(agents.codex!, ev('status', { data: { state: 'done' } }));
+      await h.until(() => h.ledger.getOptimization(id)!.status === 'stopped');
+      expect(verdicts(h, id)).toEqual({ 'sha-flaky': 'verified' });
+    });
+
+    it('an agent that finishes while the others keep running still gets its last push submitted in that tick', async () => {
+      const h = makeHarness();
+      const { id, agents } = await h.begin();
+      candidate(h, CC, 'sha-final', { bench: [75, 75, 75], confirm: [75, 75, 75] });
+      h.runners.emit(agents['claude-code']!, ev('status', { data: { state: 'done' } }));
+      await h.cycle(1);
+      expect(h.ledger.getAgent(agents['claude-code']!)!.status).toBe('done');
+      expect(h.ledger.getOptimization(id)!.status).toBe('running');
+      expect(Object.keys(verdicts(h, id))).toEqual(['sha-final']);
+      await h.cycle(4);
+      expect(verdicts(h, id)).toEqual({ 'sha-final': 'verified' });
+    });
+
+    it('evaluates a backlog queued from several agents (bench + confirm) before terminating', async () => {
+      const h = makeHarness();
+      const { id, agents } = await h.begin({ timeLimitSeconds: 5 * 60 });
+      candidate(h, CC, 'sha-b1', { bench: [90, 90, 90], confirm: [90, 90, 90] });
+      candidate(h, CX, 'sha-b2', { bench: [80, 80, 80], confirm: [80, 80, 80] });
+      candidate(h, CC, 'sha-b3', { bench: [70, 70, 70], confirm: [70, 70, 70] });
+      h.runners.emit(agents['claude-code']!, ev('status', { data: { state: 'done' } }));
+      h.runners.emit(agents.codex!, ev('status', { data: { state: 'done' } }));
+      await h.until(() => h.ledger.getOptimization(id)!.status === 'stopped');
+      expect(Object.values(verdicts(h, id)).filter((v) => v === 'pending')).toEqual([]);
+      expect(Object.keys(verdicts(h, id)).sort()).toEqual(['sha-b1', 'sha-b2', 'sha-b3']);
+      expect(h.ledger.currentBest(id)).toBe(70);
+      expect(h.compute.live()).toEqual([]);
+    });
+
+    it('the drain is bounded by drainTimeoutMs', async () => {
+      const h = makeHarness({ settings: { drainTimeoutMs: 3 * TICK_MS } });
+      const { id, agents } = await h.begin({ timeLimitSeconds: 5 * 60 });
+      let release!: () => void;
+      h.bench.gate = new Promise<void>((r) => (release = r));
+      candidate(h, CX, 'sha-slow', { bench: [50, 50, 50], confirm: [50, 50, 50] });
+      h.runners.emit(agents['claude-code']!, ev('status', { data: { state: 'done' } }));
+      h.runners.emit(agents.codex!, ev('status', { data: { state: 'done' } }));
+      for (let i = 0; i < 12 && h.ledger.getOptimization(id)!.status !== 'stopped'; i++) {
+        h.clock.advance(TICK_MS);
+        await h.engine.tick();
+      }
+      release();
+      expect(h.ledger.getOptimization(id)!.status).toBe('stopped');
+      expect(h.engine.stopReason(id)).toMatch(/drain timeout/);
+    });
+  });
+
+  describe('identical shas from different agents', () => {
+    it('keys candidates per (agent, sha): both get rows and verdicts; the second is rejected after the first moves the ratchet', async () => {
+      const h = makeHarness();
+      const { id, agents } = await h.begin();
+      const CC = 'ratchet/opt-test/claude-code';
+      const CX = 'ratchet/opt-test/codex';
+      h.git.push(CC, 'sha-same', ['src/search.ts']);
+      h.git.push(CX, 'sha-same', ['src/search.ts']);
+      h.bench.set('sha-same', 'bench', { samples: [80, 80, 80], guardrails: [{ name: 'pytest -q', passed: true }] });
+      h.bench.set('sha-same', 'confirm', { samples: [80, 80, 80] });
+      await h.until(() => h.ledger.candidatesWithResults(id).length === 2 && h.ledger.candidatesWithResults(id).every((c) => c.verdict !== 'pending'));
+
+      const rows = h.ledger.candidatesWithResults(id);
+      expect(new Set(rows.map((c) => c.id)).size).toBe(2);
+      expect(rows.map((c) => [c.agentId, c.sha]).sort()).toEqual(
+        [[agents['claude-code'], 'sha-same'], [agents.codex, 'sha-same']].sort(),
+      );
+      const first = rows.find((c) => c.agentId === agents['claude-code'])!;
+      const second = rows.find((c) => c.agentId === agents.codex)!;
+      expect(first.verdict).toBe('verified');
+      expect(second.verdict).toBe('rejected');
+      expect(second.reasons.join(' ')).toMatch(/not better than current best 80/);
+      expect(second.results.map((r) => r.phase)).toEqual(['bench']);
+      expect(h.ledger.ratchetHistory(id).map((m) => m.sha)).toEqual(['sha-same']);
+      expect(h.ledger.currentBest(id)).toBe(80);
+      // each agent hears about its own candidate only
+      expect(h.runners.sentTo(agents['claude-code']!).filter((m) => m.type === 'verdict')).toEqual([
+        expect.objectContaining({ sha: 'sha-same', verdict: 'verified' }),
+      ]);
+      expect(h.runners.sentTo(agents.codex!).filter((m) => m.type === 'verdict')).toEqual([
+        expect.objectContaining({ sha: 'sha-same', verdict: 'rejected' }),
+      ]);
+      // re-listing does not duplicate either row
+      await h.cycle(3);
+      expect(h.ledger.candidatesWithResults(id)).toHaveLength(2);
+    });
+
+    it('a later commit on one branch is found even when another agent already submitted the same sha', async () => {
+      const h = makeHarness();
+      const { id } = await h.begin();
+      const CC = 'ratchet/opt-test/claude-code';
+      const CX = 'ratchet/opt-test/codex';
+      h.git.push(CC, 'sha-same', ['src/search.ts']);
+      h.bench.set('sha-same', 'bench', { samples: [90, 90, 90] });
+      h.bench.set('sha-same', 'confirm', { samples: [90, 90, 90] });
+      await h.cycle(6);
+      h.git.push(CX, 'sha-same', ['src/search.ts']);
+      candidate(h, CX, 'sha-next', { bench: [70, 70, 70], confirm: [70, 70, 70] });
+      await h.until(() => h.ledger.candidatesWithResults(id).length === 3 && h.ledger.candidatesWithResults(id).every((c) => c.verdict !== 'pending'));
+      expect(verdicts(h, id)['sha-next']).toBe('verified');
+    });
+  });
+
   it('stops after plateauEvals consecutive evaluations without a verified win; a win resets the count', async () => {
     const h = makeHarness();
     const { id } = await h.begin({ agents: ['claude-code'], plateauEvals: 3 });
@@ -517,6 +714,29 @@ describe('cost and stop rules', () => {
     expect(h.engine.stopReason(id)).toBe('all agents finished');
     expect(h.ledger.getAgent(agents['claude-code']!)!.status).toBe('done');
     expect(h.ledger.getAgent(agents.codex!)!.status).toBe('failed');
+  });
+});
+
+describe('runner finish events', () => {
+  it("treats the runner loop's closing status (reason, no state) as done / failed, and stops once every agent is finished", async () => {
+    const h = makeHarness();
+    const { id, agents } = await h.begin();
+    const fin = (reason: string): AgentEvent => ev('status', { text: `runner finished: ${reason}`, data: { reason, turns: 3, candidates: 1, spendUsd: 0.1 } });
+    h.runners.emit(agents['claude-code']!, fin('idle'));
+    h.runners.emit(agents.codex!, fin('agent-unavailable'));
+    await h.until(() => h.ledger.getOptimization(id)!.status === 'stopped');
+    expect(h.engine.stopReason(id)).toBe('all agents finished');
+    expect(h.ledger.getAgent(agents['claude-code']!)!.status).toBe('done');
+    expect(h.ledger.getAgent(agents.codex!)!.status).toBe('failed');
+  });
+
+  it('a runner that finished because the engine stopped it is not treated as done early', async () => {
+    const h = makeHarness();
+    const { id, agents } = await h.begin();
+    h.runners.emit(agents['claude-code']!, ev('status', { text: 'runner finished: stopped', data: { reason: 'stopped', turns: 1, candidates: 0 } }));
+    await h.cycle(2);
+    expect(h.ledger.getAgent(agents['claude-code']!)!.status).toBe('running');
+    expect(h.ledger.getOptimization(id)!.status).toBe('running');
   });
 });
 

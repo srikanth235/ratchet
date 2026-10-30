@@ -41,6 +41,8 @@ export interface SimulationOptions {
 export interface SimulationRuntime {
   engine: Engine;
   sandbox: SandboxProvider;
+  /** The in-memory cloud, exposed so tests can assert teardown left nothing tagged. */
+  compute: MockCloudCompute;
   /** `repoUrl` to pass to createOptimization. */
   repoUrl: string;
   baseRef: string;
@@ -133,6 +135,7 @@ export async function createSimulationRuntime(opts: SimulationOptions): Promise<
   return {
     engine,
     sandbox,
+    compute,
     repoUrl: repo.remoteDir,
     baseRef: repo.baseRef,
     git,

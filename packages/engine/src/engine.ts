@@ -563,15 +563,26 @@ export class Engine implements EngineApi {
         .filter((a) => a.runnerInstanceId && LIVE_AGENT.has(a.status))
         .map((a) => this.ports.runners.stop(this.handle(a)).catch((e) => this.reportError(e, `runners.stop ${a.id}`))),
     );
-    // The runners are down: collect what they left behind, then close the agents' access.
-    for (const a of agents) {
-      const cur = this.requireAgent(a.id);
-      await this.pollRunner(opt, cur, true);
-      await this.pollGit(opt, this.requireAgent(a.id));
+    // The runners are down: collect what they left behind (events first, then a final git poll of every
+    // branch), then close the agents' access. A git poll that fails here is retried on every drain tick.
+    await this.drainPoll(opt);
+    await Promise.allSettled(this.ledger.listAgents(id).map((a) => this.revokeAgent(a)));
+  }
+
+  /**
+   * One collection pass while stopping: every runner's last events, then every agent branch, so a
+   * commit pushed just before (or while) the runner reported done is never missed. Agents still
+   * marked live are closed afterwards. Returns true only when every branch was listed successfully.
+   */
+  private async drainPoll(opt: OptimizationRow): Promise<boolean> {
+    let complete = true;
+    for (const a of this.ledger.listAgents(opt.id)) {
+      await this.pollRunner(opt, this.requireAgent(a.id), true);
+      if (!(await this.pollGit(opt, this.requireAgent(a.id)))) complete = false;
       const after = this.requireAgent(a.id);
       if (!TERMINAL_AGENT.has(after.status)) this.ledger.setAgentStatus(a.id, 'stopped');
     }
-    await Promise.allSettled(this.ledger.listAgents(id).map((a) => this.revokeAgent(a)));
+    return complete;
   }
 
   // ------------------------------------------------------------------ agent control
@@ -784,6 +795,9 @@ export class Engine implements EngineApi {
     await this.collectBenchResult(id);
     const opt = this.requireOpt(id);
     const agents = this.ledger.listAgents(id);
+    // An agent that reports done / failed in this very poll may have pushed its last commit just before:
+    // it still gets one more git poll in this tick (agents live at the start of the tick are polled).
+    const liveAtStart = new Set(agents.filter((a) => LIVE_AGENT.has(this.requireAgent(a.id).status)).map((a) => a.id));
     for (const a of agents) {
       if (rt.killing) return;
       await this.pollRunner(opt, this.requireAgent(a.id), false);
@@ -791,7 +805,7 @@ export class Engine implements EngineApi {
     for (const a of agents) {
       if (rt.killing) return;
       const cur = this.requireAgent(a.id);
-      if (LIVE_AGENT.has(cur.status)) await this.pollGit(opt, cur);
+      if (LIVE_AGENT.has(cur.status) || liveAtStart.has(a.id)) await this.pollGit(opt, cur);
     }
     if (rt.killing) return;
     if (await this.enforceLimits(id)) return;
@@ -810,9 +824,13 @@ export class Engine implements EngineApi {
       await this.executeKill(id, `${this.kv.get(K.stopReason(id)) ?? 'stopped'} (drain timeout)`, 'stopped');
       return;
     }
+    // Keep collecting while draining: a failed or lagging git listing must not strand a candidate.
+    const opt = this.requireOpt(id);
+    const gitComplete = await this.drainPoll(opt);
+    if (rt.killing) return;
     await this.scheduleBench(id);
     const pending = this.ledger.candidatesWithResults(id).some((c) => c.verdict === 'pending');
-    if (!rt.job && !pending) {
+    if (gitComplete && !rt.job && !pending) {
       await this.executeKill(id, this.kv.get(K.stopReason(id)) ?? 'stopped', 'stopped');
       return;
     }
@@ -952,7 +970,7 @@ export class Engine implements EngineApi {
   private statusFromEvents(events: AgentEvent[]): AgentStatus | undefined {
     let out: AgentStatus | undefined;
     for (const e of events) {
-      const s = e.type === 'status' ? e.data?.state : undefined;
+      const s = e.type === 'status' ? (e.data?.state ?? finishedState(e.data)) : undefined;
       if (typeof s === 'string' && (AGENT_STATUSES as readonly string[]).includes(s) && ['done', 'failed', 'paused', 'running'].includes(s)) {
         out = s as AgentStatus;
       }
@@ -962,7 +980,8 @@ export class Engine implements EngineApi {
 
   // ------------------------------------------------------------------ git: candidates
 
-  private async pollGit(opt: OptimizationRow, agent: AgentRow): Promise<void> {
+  /** Submit the agent branch's new candidate commits. False when the branch could not be fully read (retry later). */
+  private async pollGit(opt: OptimizationRow, agent: AgentRow): Promise<boolean> {
     const config = this.config(opt.id);
     const git = this.gitFor(opt.repo);
     const baseSha = await this.baseSha(opt).catch((err) => {
@@ -979,7 +998,7 @@ export class Engine implements EngineApi {
       found = await git.listCandidates(agent.branch, last);
     } catch (err) {
       this.reportError(err, `listCandidates ${agent.branch}`);
-      return;
+      return false;
     }
     for (const c of found) {
       if (known.has(c.sha)) continue;
@@ -988,7 +1007,7 @@ export class Engine implements EngineApi {
         files = await git.changedFiles(baseSha, c.sha);
       } catch (err) {
         this.reportError(err, `changedFiles ${c.sha}`);
-        return; // keep order: retry this commit (and the rest) next tick
+        return false; // keep order: retry this commit (and the rest) next tick
       }
       const violations = findProtectedViolations(files, config.protected);
       const now = this.clock.now();
@@ -1002,6 +1021,7 @@ export class Engine implements EngineApi {
         await this.finalize(opt, this.requireCandidate(opt.id, row.id), 'blocked', reasons, undefined);
       }
     }
+    return true;
   }
 
   // ------------------------------------------------------------------ bench queue
@@ -1016,7 +1036,15 @@ export class Engine implements EngineApi {
     let needsConfirm: CandidateWithResults | undefined;
     for (const c of this.ledger.candidatesWithResults(id)) {
       if (c.verdict !== 'pending' || c.results.length === 0) continue;
-      const outcome = await this.settleCandidate(opt, c);
+      let outcome: RatchetOutcome | undefined;
+      try {
+        outcome = await this.settleCandidate(opt, c);
+      } catch (err) {
+        // Never let one unevaluable candidate wedge the queue (and the drain) forever.
+        this.reportError(err, `settle ${c.sha}`);
+        await this.finalize(opt, c, 'rejected', [`could not evaluate candidate: ${(err as Error).message}`], undefined);
+        continue;
+      }
       if (outcome?.verdict === 'pending_confirm' && !needsConfirm) needsConfirm = c;
     }
     if (needsConfirm) {
@@ -1081,29 +1109,50 @@ export class Engine implements EngineApi {
     if (!cand || cand.verdict !== 'pending') return;
 
     if (!job.result.ok) {
-      const attempts = (rt.attempts.get(`${cand.id}:${job.phase}`) ?? 0) + 1;
-      rt.attempts.set(`${cand.id}:${job.phase}`, attempts);
-      const msg = job.result.err instanceof Error ? job.result.err.message : String(job.result.err);
-      this.reportError(job.result.err, `bench ${job.phase} ${cand.sha}`);
-      this.logCandidate(cand, `${job.phase} failed (attempt ${attempts}): ${msg}`, 'error');
-      if (attempts >= this.settings.maxBenchAttempts) {
-        await this.finalize(opt, cand, 'rejected', [`bench infrastructure error after ${attempts} attempts: ${msg}`], undefined);
-      }
+      await this.benchAttemptFailed(rt, opt, cand, job.phase, job.result.err);
       return; // otherwise the scheduler retries it next tick
     }
 
     const outcome = job.result.outcome;
-    this.ledger.recordBenchResult({
-      candidateId: cand.id,
-      phase: job.phase,
-      samples: samplesOf(outcome),
-      stats: statsOf(outcome),
-      guardrails: outcome.guardrails,
-      startedAt: outcome.startedAt,
-      finishedAt: outcome.finishedAt,
-    });
+    // A guardrail that fails before any bench run leaves no samples (the pipeline fails fast): the
+    // candidate is blocked outright, there is nothing to record or to retry.
+    if (outcome.samples.length === 0 && outcome.runs.length === 0) {
+      const failed = outcome.guardrails.filter((g) => !g.passed);
+      if (failed.length > 0) {
+        const reasons = failed.map((g) => `guardrail failed: ${g.name}${g.detail ? ` (${g.detail})` : ''}`);
+        await this.finalize(opt, cand, 'blocked', reasons, undefined);
+        return;
+      }
+    }
+    try {
+      this.ledger.recordBenchResult({
+        candidateId: cand.id,
+        phase: job.phase,
+        samples: samplesOf(outcome),
+        stats: statsOf(outcome),
+        guardrails: outcome.guardrails,
+        startedAt: outcome.startedAt,
+        finishedAt: outcome.finishedAt,
+      });
+    } catch (err) {
+      // An unusable outcome counts like a failed run, so it can never be retried forever.
+      await this.benchAttemptFailed(rt, opt, cand, job.phase, err);
+      return;
+    }
     const fresh = this.requireCandidate(id, cand.id);
     await this.settleCandidate(opt, fresh);
+  }
+
+  /** Count a failed bench attempt; after `maxBenchAttempts` the candidate is rejected as an infrastructure failure. */
+  private async benchAttemptFailed(rt: Runtime, opt: OptimizationRow, cand: CandidateWithResults, phase: 'bench' | 'confirm', err: unknown): Promise<void> {
+    const attempts = (rt.attempts.get(`${cand.id}:${phase}`) ?? 0) + 1;
+    rt.attempts.set(`${cand.id}:${phase}`, attempts);
+    const msg = err instanceof Error ? err.message : String(err);
+    this.reportError(err, `bench ${phase} ${cand.sha}`);
+    this.logCandidate(cand, `${phase} failed (attempt ${attempts}): ${msg}`, 'error');
+    if (attempts >= this.settings.maxBenchAttempts) {
+      await this.finalize(opt, cand, 'rejected', [`bench infrastructure error after ${attempts} attempts: ${msg}`], undefined);
+    }
   }
 
   /**
@@ -1314,6 +1363,26 @@ export class Engine implements EngineApi {
     } catch {
       // never let a logging hook break the loop
     }
+  }
+}
+
+/**
+ * The runner loop's closing status event carries `{ reason, turns, candidates, ... }` and no `state`:
+ * map its stop reason so an agent that ran out of ideas, budget or time counts as done, and one that
+ * crashed or could not start as failed. A `stopped` / `aborted` reason is the engine's own doing.
+ */
+function finishedState(data: Record<string, unknown> | undefined): AgentStatus | undefined {
+  if (!data || typeof data.reason !== 'string' || typeof data.turns !== 'number') return undefined;
+  switch (data.reason) {
+    case 'idle':
+    case 'budget':
+    case 'deadline':
+      return 'done';
+    case 'failed':
+    case 'agent-unavailable':
+      return 'failed';
+    default:
+      return undefined;
   }
 }
 
