@@ -96,7 +96,8 @@ tar, GNU coreutils (`timeout`, `realpath -m`, `date +%s%N`, `sha256sum`), GNU fi
 GNU grep with `-P`, util-linux `setpriv`, `pkill`, `iptables` and `sudo` (the instance user-data installs the rules, the launcher and the sudo rule), `shred` and `cp --reflink`,
 the `aws` CLI (staged archives and `s3://` traces), plus the repo's toolchain (node, pnpm, k6),
 installed world-readable and executable (the bench runs as an unprivileged user, so nothing under `/root`).
-`git` is **not** needed on the bench instance any more.
+`git` is **not** needed on the bench instance any more (the bench image from `infra/images/bench.pkr.hcl` carries it anyway;
+build it as described in `docs/real-env/aws.md`, "Build images").
 
 ## 2. Noise on pinned hardware (PLAN spike B)
 

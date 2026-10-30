@@ -35,8 +35,10 @@ path; they can be added later as another adapter.
 
 - `infra/contract.md` + `infra/aws` OpenTofu module (7 resources).
 - `TofuRunner` (bundled binary; plan → diff UI → apply / destroy).
-- Agent runner image (Node, git, `claude`, `codex`, profilers, AWS CLI) via
-  Packer or EC2 Image Builder.
+- Agent runner image (Node, git, `claude`, `codex`, profilers, AWS CLI) and
+  trusted bench image (`ratchet-bench` user, no agent CLIs) via Packer
+  (`infra/images`; EC2 Image Builder as the documented alternative). AMI ids
+  go to live mode as `runnerImageRef` / `benchImageRef`.
 - `RunnerLauncher` + `CredentialMinter`: per-agent IAM role / instance profile
   under the boundary, SSM secrets (model key, repo-scoped GitHub token),
   deny-all kill switch.

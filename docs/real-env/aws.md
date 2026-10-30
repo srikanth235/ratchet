@@ -21,16 +21,42 @@ or production account).
 
 - A dedicated AWS account with an SSO profile; `export AWS_PROFILE=ratchet-sandbox AWS_REGION=us-east-1`.
 - A pinned `tofu` binary (`tofu version`) and this repo built: `pnpm install && pnpm build`.
-- A runner AMI and a bench AMI (Node, git, agent CLIs, AWS CLI, SSM agent, a `ratchet` binary
-  on PATH providing `ratchet runner` / `ratchet bench-agent`). The bench AMI additionally needs `iptables`,
-  `setpriv`, `pkill`, `sudo`, `shred`, GNU `find`/`grep -P`/`sha256sum`/`cp` and a world-readable toolchain (see `bench.md`;
-  no setuid binary other than `sudo` is wanted); it does not need a source-control client. Until those exist, use any
-  SSM-enabled Amazon Linux AMI: instances will launch, tag, accrue cost and be SSM-reachable,
-  which is all steps 2-6 need.
+- A runner AMI and a bench AMI, built from `infra/images` (see "Build images" below). Until they exist, use any
+  SSM-enabled Amazon Linux AMI: instances will launch, tag, accrue cost and be SSM-reachable, which is all
+  steps 2-6 need. The bench AMI must also carry `iptables`, `setpriv`, `pkill`, `sudo`, `shred`, GNU
+  `find`/`grep -P`/`sha256sum`/`cp` and a world-readable toolchain (see `bench.md`); `infra/images` installs them.
+  The runner AMI is first needed for `agents.md`, the bench AMI for `bench.md`.
 - Billing alarms on the account (the kill switch is a backstop, not a substitute).
 
 Run the snippets below from a scratch script (`node --input-type=module -e '...'` or a
 `.mjs` file) importing from `packages/aws/dist/index.js`.
+
+## Build images
+
+Live mode launches two machine images that nothing else creates; build them once per region, and again when a
+pinned tool or `packages/agents` changes. The Packer definitions and scripts are in `infra/images` (procedure,
+reproducibility, and the EC2 Image Builder alternative: `infra/images/README.md`).
+
+```sh
+export AWS_PROFILE=ratchet-sandbox AWS_REGION=us-east-1     # the sandbox account; the builder needs outbound internet
+infra/images/build.sh both          # packs the runner tarballs, runs packer for runner and bench
+# runnerImageRef: ami-0123456789abcdef0
+# benchImageRef: ami-0fedcba9876543210
+```
+
+- **Runner** (`ratchet:image=runner`): Node 22, pnpm, git, `claude` and `codex` (pinned), AWS CLI v2, SSM agent, perf,
+  hyperfine, k6 and the `ratchet-runner` bin from this checkout.
+- **Bench** (`ratchet:image=bench`): Node 22, pnpm, git, k6, hyperfine, AWS CLI v2, SSM agent, iptables and the
+  unprivileged `ratchet-bench` user. No agent CLIs, no model keys. The IMDS block for that user is added by the
+  instance user data (`benchUserData`), not baked into the image.
+- **Pass the ids** to live mode: `createLiveRuntime({ ..., runnerImageRef: 'ami-...', benchImageRef: 'ami-...' })`
+  (`packages/runtime/src/live.ts`). They are used verbatim as `ImageId` in `RunInstances`, so they must be the plain
+  `ami-...` ids of the sandbox's region and account (the AMIs are encrypted by default).
+- **Check:** `aws ec2 describe-images --image-ids <ami> --query 'Images[].Tags'` shows `ratchet:image`,
+  `ratchet:image_version` and `ratchet:source_commit`; `bench.md` section 5 exercises the bench AMI, and the first
+  `launchRunner` in `agents.md` the runner AMI.
+- **Without AWS:** `pnpm --filter @ratchet/infra-tests test` checks the scripts' invariants (pins, no agent CLIs on the
+  bench, the `ratchet-bench` user, the AMI tags) and `packer validate` the templates.
 
 ## 1. `TofuSandboxProvider`
 
