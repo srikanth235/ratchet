@@ -87,3 +87,20 @@ export async function goTo(win, label) {
 }
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Screens in sidebar order → screenshot file names. */
+export const SCREENS = [
+  { name: 'optimizations', nav: 'Optimizations', ready: 'Optimizations' },
+  { name: 'live-agents', nav: 'Live agents', ready: 'Live agents' },
+  { name: 'benchmarks', nav: 'Benchmark history', ready: 'Benchmark history' },
+  { name: 'result', nav: 'Result', ready: 'Result' },
+  { name: 'sandbox', nav: 'AWS sandbox', ready: 'AWS sandbox' },
+  { name: 'settings', nav: 'Settings', ready: 'Settings' },
+];
+
+/** Open the "New optimization" screen from the Optimizations header button. */
+export async function openNewOptimization(win) {
+  await goTo(win, 'Optimizations');
+  await win.getByRole('button', { name: /New optimization/ }).click();
+  await win.getByRole('heading', { level: 1, name: 'New optimization' }).waitFor();
+}
