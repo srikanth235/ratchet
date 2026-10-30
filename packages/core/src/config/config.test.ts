@@ -98,8 +98,8 @@ agent: { instructions: RATCHET.md, allowed_instance_types: [c7i.xlarge] }
   it('reports missing required sections with their paths', () => {
     const errs = errorsOf('version: 0\n');
     const paths = errs.map((e) => e.path).sort();
-    expect(paths).toEqual(['agent', 'bench', 'objective']);
-    expect(formatConfigError(errs[0]!)).toMatch(/^(agent|bench|objective): /);
+    expect(paths).toEqual(['agent', 'evaluator', 'objective']);
+    expect(formatConfigError(errs[0]!)).toMatch(/^(agent|evaluator|objective): /);
   });
 
   it('reports a wrong version', () => {
@@ -122,13 +122,13 @@ agent: { instructions: RATCHET.md, allowed_instance_types: [c7i.xlarge] }
   });
 
   it('validates repeats', () => {
-    expect(errorsOf(mutate('repeats: 5', 'repeats: 0'))[0]!.path).toBe('bench.repeats');
+    expect(errorsOf(mutate('repeats: 5', 'repeats: 0'))[0]!.path).toBe('evaluator.repeats');
     expect(errorsOf(mutate('repeats: 5', 'repeats: 2.5'))[0]!.message).toMatch(/integer/);
   });
 
   it('rejects unknown keys (typos) with their location', () => {
     const errs = errorsOf(mutate('  hardware: c7i.2xlarge', '  hardware: c7i.2xlarge\n  hardwre: x'));
-    expect(errs).toEqual([{ path: 'bench', message: 'unknown key "hardwre"' }]);
+    expect(errs).toEqual([{ path: 'evaluator', message: 'unknown key "hardwre"' }]);
     expect(errorsOf(VALID + 'extra: 1\n')[0]).toEqual({ path: '', message: 'unknown key "extra"' });
   });
 
@@ -166,7 +166,7 @@ agent: { instructions: RATCHET.md, allowed_instance_types: [c7i.xlarge] }
     const errs = errorsOf(
       mutate('direction: minimize', 'direction: sideways').replace('repeats: 5', 'repeats: 0'),
     );
-    expect(errs.map((e) => e.path).sort()).toEqual(['bench.repeats', 'objective.direction']);
+    expect(errs.map((e) => e.path).sort()).toEqual(['evaluator.repeats', 'objective.direction']);
   });
 });
 
@@ -231,5 +231,46 @@ describe('guardrail evaluation', () => {
   it('command results', () => {
     expect(evaluateCommandResult({ run: 'pytest -q' }, 0)).toEqual({ name: 'pytest -q', passed: true, detail: undefined });
     expect(evaluateCommandResult({ run: 'pytest -q' }, 1).passed).toBe(false);
+  });
+});
+
+describe('generic evaluator + value', () => {
+  const generic = `
+version: 0
+pack: forecasting
+objective:
+  name: Weekly sales forecast
+  metric: wape
+  direction: minimize
+  min_gain: 0.02
+  value: { usd_per_unit: 250000, period: year, unit: "WAPE point" }
+evaluator:
+  kind: backtest
+  ref: ratchet/eval
+  run: python -m eval.backtest
+  repeats: 3
+  hardware: m7i.xlarge
+  holdout: s3://sealed/last-8-weeks.parquet
+agent: { instructions: RATCHET.md, allowed_instance_types: [m7i.xlarge] }
+`;
+  it('parses `evaluator`, holdout and value, and aliases it as `bench`', () => {
+    const r = parseConfig(generic);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.config.evaluator.kind).toBe('backtest');
+    expect(r.config.evaluator.holdout).toBe('s3://sealed/last-8-weeks.parquet');
+    expect(r.config.bench.confirm_trace).toBe('s3://sealed/last-8-weeks.parquet');
+    expect(r.config.bench).toBe(r.config.evaluator);
+    expect(r.config.objective.value).toEqual({ usd_per_unit: 250000, period: 'year', basis: 'estimated', unit: 'WAPE point' });
+    expect(r.config.pack).toBe('forecasting');
+  });
+  it('defaults evaluator.kind to benchmark for legacy `bench:` configs', () => {
+    const r = parseConfig(generic.replace('evaluator:', 'bench:').replace('  kind: backtest\n', ''));
+    expect(r.ok && r.config.evaluator.kind).toBe('benchmark');
+  });
+  it('rejects a non-positive value', () => {
+    const r = parseConfig(generic.replace('usd_per_unit: 250000', 'usd_per_unit: 0'));
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors[0]!.path).toBe('objective.value.usd_per_unit');
   });
 });

@@ -1,14 +1,22 @@
 version: 0
+pack: perf                         # domain pack: code performance
 objective:
+  name: search-api p95 latency
   metric: http_req_duration.p95   # key in the benchmark's JSON output (ms)
   direction: minimize
   min_gain: 0.03                  # 3%
-bench:
+  value:                          # business case: what 1 ms of p95 is worth
+    usd_per_unit: 1200            # USD per ms of p95 improvement per year (infra + conversion)
+    period: year
+    basis: estimated              # becomes `measured` once confirmed in production
+    unit: ms
+evaluator:                        # the trusted evaluation (alias: bench)
+  kind: benchmark
   ref: ratchet/bench              # protected ref holding the trusted bench
   run: k6 run bench/k6/search.js  # writes bench-result.json (RESULT_FILE); local fallback: node dist/bench/local.js
   repeats: 5                      # also used for the baseline noise floor
   hardware: c7i.2xlarge           # pinned, dedicated host
-  confirm_trace: s3://sealed/demo-search-trace.json   # bench/traces/generate.ts --seed <hidden>
+  holdout: s3://sealed/demo-search-trace.json   # bench/traces/generate.ts --seed <hidden>
 guardrails:
   - run: pnpm test:unit
   - run: pnpm test:contract

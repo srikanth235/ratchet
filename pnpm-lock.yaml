@@ -17,6 +17,9 @@ importers:
       vitest:
         specifier: ^3.0.0
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(jsdom@26.1.0)(tsx@4.23.15)(yaml@2.9.1)
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
   examples/demo-search:
     devDependencies:
@@ -183,6 +186,30 @@ importers:
       '@ratchet/core':
         specifier: workspace:*
         version: link:../core
+
+  packages/runtime:
+    dependencies:
+      '@ratchet/agents':
+        specifier: workspace:*
+        version: link:../agents
+      '@ratchet/aws':
+        specifier: workspace:*
+        version: link:../aws
+      '@ratchet/bench':
+        specifier: workspace:*
+        version: link:../bench
+      '@ratchet/core':
+        specifier: workspace:*
+        version: link:../core
+      '@ratchet/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@ratchet/github':
+        specifier: workspace:*
+        version: link:../github
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
   packages/ui:
     devDependencies:

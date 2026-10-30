@@ -16,9 +16,13 @@ export function runValidate(path: string | undefined, io: Io): number {
   const lines = [
     `${file}: OK`,
     `  objective   ${c.objective.direction} ${c.objective.metric} (min gain ${(c.objective.min_gain * 100).toFixed(2).replace(/\.?0+$/, '')}%)`,
-    `  bench       ${c.bench.run}`,
-    `              ref ${c.bench.ref}, ${c.bench.repeats} repeats on ${c.bench.hardware}` +
-      (c.bench.confirm_trace ? `, confirm trace ${c.bench.confirm_trace}` : ', no confirm trace'),
+    ...(c.pack ? [`  pack        ${c.pack}`] : []),
+    ...(c.objective.value
+      ? [`  value       $${c.objective.value.usd_per_unit} per ${c.objective.value.unit ?? 'unit'} per ${c.objective.value.period} (${c.objective.value.basis})`]
+      : []),
+    `  evaluator   ${c.evaluator.kind}: ${c.evaluator.run}`,
+    `              ref ${c.evaluator.ref}, ${c.evaluator.repeats} repeats on ${c.evaluator.hardware}` +
+      (c.evaluator.holdout ? `, holdout ${c.evaluator.holdout}` : ', no holdout'),
     `  guardrails  ${c.guardrails.length === 0 ? 'none' : c.guardrails.map(guardrailName).join('; ')}`,
     `  protected   ${c.protected.length === 0 ? 'none' : c.protected.join(', ')}`,
     `  agent       ${c.agent.instructions}; instance types ${c.agent.allowed_instance_types.join(', ')}`,

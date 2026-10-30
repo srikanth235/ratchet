@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, normalize } from 'node:path';
 import {
@@ -265,7 +265,9 @@ export class Engine implements EngineApi {
     configPath: string,
     briefPath: string | null,
   ): Promise<{ configYaml: string; brief?: string | undefined }> {
-    const dir = await mkdtemp(join(this.settings.scratchDir ?? tmpdir(), 'ratchet-engine-'));
+    const scratchRoot = this.settings.scratchDir ?? tmpdir();
+    await mkdir(scratchRoot, { recursive: true });
+    const dir = await mkdtemp(join(scratchRoot, 'ratchet-engine-'));
     try {
       await git.checkout(baseRef, dir);
       const configYaml = await this.readInside(dir, configPath).catch((err) => {

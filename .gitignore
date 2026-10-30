@@ -10,3 +10,4 @@ coverage/
 release/
 packages/desktop/out-before/
 packages/e2e/artifacts/
+.ratchet-sim-*/

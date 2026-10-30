@@ -1,17 +1,40 @@
 # Ratchet v0 — Architecture
 
-> A ratchet only turns one way. Ratchet lets coding agents try to make your
-> software faster or cheaper, and keeps a change only when a trusted benchmark
-> confirms it is better.
+> A ratchet only turns one way. Ratchet lets coding agents try to improve a
+> business metric — cut costs or grow profit — and keeps a change only when a
+> trusted evaluator confirms it is better, on data the agents never saw.
 
 Status: draft for discussion. UI design: "Ratchet App Design" canvas
 (Midnight Brass), six screens; see §9.
 
+## 0. Product shape: a generic core with domain packs
+
+Businesses want two things: lower costs and higher profit. Ratchet is a
+**generic verified-improvement platform**: the user declares an objective (a
+metric, its direction and what a unit of it is worth in dollars), a trusted
+**evaluator**, guardrails and a sealed **holdout**; agents propose changes; the
+ratchet keeps only verified wins. The core never looks at the domain.
+
+| | Perf pack (v0) | Forecasting pack (next) | Cost pack (later) |
+|---|---|---|---|
+| Metric | p95 latency ↓ | WAPE / MAPE ↓ | $ per run ↓ |
+| Evaluator `kind` | `benchmark` (k6, criterion, hyperfine) | `backtest` (rolling-origin) | `simulation` / pipeline run + cost meter |
+| Holdout | hidden traffic trace | most recent unseen period | held-out partition |
+| Domain guardrails | tests, API contract, error rate, memory | no leakage / look-ahead, interface preserved, train-time cap | output equals baseline, SLA |
+| Noise | run-to-run variance | seed / fold variance | run variance |
+| Value model | $ per ms (infra + conversion) | $ per WAPE point (inventory, stockouts) | $ per $ saved |
+
+A **pack** is evaluator templates + guardrails + holdout strategy + a default
+value model + an agent brief, for one domain. Go to market one pack at a time;
+the platform is the core underneath. Headline result: **$ value per year
+created per $ spent** (`estimateValue`, `returnOnSpend` in core), labelled
+*estimated* until measured in production.
+
 ## 1. v0 scope
 
-v0 is **developer-centric performance optimization**: latency, throughput,
-cold start, build time, cost per run. Anything with a reproducible benchmark
-that prints a number.
+v0 ships the core plus the **perf pack**: latency, throughput, cold start,
+build time, cost per run — anything with a reproducible benchmark that prints a
+number. The forecasting pack is the next milestone (§10).
 
 | In scope | Out of scope (later) |
 |---|---|
@@ -86,16 +109,24 @@ from running the baseline N times before any agent starts.
 
 ```yaml
 version: 0
+pack: perf                        # informational: which domain pack this follows
 objective:
-  metric: http_req_duration.p95   # key in the benchmark's JSON output
+  name: search-api p95 latency
+  metric: http_req_duration.p95   # key in the evaluator's JSON output
   direction: minimize
   min_gain: 0.03                  # 3%
-bench:
-  ref: ratchet/bench              # protected ref holding the trusted bench
+  value:                          # business case
+    usd_per_unit: 1200            # $ per ms of p95 improvement
+    period: year
+    basis: estimated              # → measured once confirmed in production
+    unit: ms
+evaluator:                        # the trusted evaluation (legacy alias: bench)
+  kind: benchmark                 # benchmark | backtest | eval | simulation
+  ref: ratchet/bench              # protected ref holding the trusted evaluator
   run: k6 run bench/k6/search.js
   repeats: 5                      # also used for the baseline noise floor
   hardware: c7i.2xlarge           # pinned, dedicated host
-  confirm_trace: s3://sealed/search-trace.jsonl
+  holdout: s3://sealed/search-trace.jsonl   # sealed; agents never see it
 guardrails:
   - run: pytest -q
   - run: openapi-diff --base main
@@ -110,8 +141,9 @@ agent:
   allowed_instance_types: [c7i.2xlarge, c7i.xlarge, m7i.large]
 ```
 
-The bench code comes from `bench.ref`, never from the candidate's tree, so an
-agent cannot change how it is scored.
+The evaluator comes from `evaluator.ref`, never from the candidate's tree, so an
+agent cannot change how it is scored. A forecasting config looks the same with
+`kind: backtest`, `metric: wape` and `holdout:` pointing at the latest unseen period.
 
 ## 5. Agents: headless on agent runners
 

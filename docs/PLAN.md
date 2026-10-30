@@ -92,6 +92,22 @@ change that edits `bench/**` is blocked; a noise-level change is rejected.
 
 **Exit:** v0 success criteria below met on both demos and at least one partner repo.
 
+## Phase 7 · Forecasting pack (after v0)
+
+- `examples/demo-forecast`: a sales-forecasting pipeline with a rolling-origin
+  backtest evaluator (`kind: backtest`, `metric: wape`), the most recent weeks
+  as the sealed holdout, and leakage / look-ahead guardrails.
+- Pack template: `ratchet init --pack forecasting` writes `ratchet.yaml`,
+  `RATCHET.md` and evaluator scaffolding.
+- Scripted agent with real model improvements (features, model choice,
+  reconciliation) plus deliberate leakage attempts that must be blocked.
+- UI: domain-neutral copy ("evaluator", "holdout"), $ value and return on spend
+  next to the metric.
+
+**Exit:** a simulated forecasting run produces a verified WAPE improvement that
+holds on the holdout, a leakage attempt is blocked, and the result shows
+$ value per $ spent.
+
 ## v0 success criteria
 
 1. 8 h unattended run ends with a PR and benchmark report.

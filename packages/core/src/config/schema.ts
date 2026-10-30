@@ -84,26 +84,58 @@ const guardrailSchema = z
 
 const nonEmpty = (what: string) => z.string({ error: `${what} must be a string` }).min(1, `${what} must not be empty`);
 
-export const configSchema = z.strictObject({
+/** What kind of trusted evaluation produces the objective metric. Informational for now; packs set it. */
+export const EVALUATOR_KINDS = ['benchmark', 'backtest', 'eval', 'simulation'] as const;
+export type EvaluatorKind = (typeof EVALUATOR_KINDS)[number];
+
+const evaluatorSchema = z
+  .strictObject({
+    kind: z.enum(EVALUATOR_KINDS, { error: `evaluator.kind must be one of ${EVALUATOR_KINDS.join(', ')}` }).default('benchmark'),
+    ref: nonEmpty('evaluator.ref'),
+    run: nonEmpty('evaluator.run'),
+    repeats: z
+      .number({ error: 'repeats must be an integer' })
+      .int('repeats must be an integer')
+      .min(1, 'repeats must be >= 1'),
+    hardware: nonEmpty('evaluator.hardware'),
+    /** Sealed holdout the agents never see: hidden traffic trace, most recent unseen period, held-out partition. */
+    holdout: z.string({ error: 'holdout must be a string' }).min(1).optional(),
+    /** Deprecated alias of `holdout`. */
+    confirm_trace: z.string({ error: 'confirm_trace must be a string' }).min(1).optional(),
+  })
+  .transform(({ holdout, confirm_trace, ...rest }) => {
+    const trace = holdout ?? confirm_trace;
+    return { ...rest, ...(trace ? { confirm_trace: trace, holdout: trace } : {}) };
+  });
+
+/**
+ * How a metric change converts to money (the business case): `usd_per_unit` dollars per
+ * one unit of improvement in `objective.metric`, per `period`. `basis: estimated` until it
+ * has been measured in production.
+ */
+const valueSchema = z.strictObject({
+  usd_per_unit: z.number({ error: 'value.usd_per_unit must be a number (USD per one unit of metric improvement)' }).positive('value.usd_per_unit must be > 0'),
+  period: z.enum(['month', 'year'], { error: 'value.period must be "month" or "year"' }).default('year'),
+  basis: z.enum(['estimated', 'measured'], { error: 'value.basis must be "estimated" or "measured"' }).default('estimated'),
+  unit: z.string().min(1).optional(),
+  note: z.string().min(1).optional(),
+});
+
+const rawConfigSchema = z.strictObject({
   version: z.literal(0, { error: 'version must be 0 (the only supported ratchet.yaml version)' }),
+  /** Domain pack this config follows (e.g. perf, forecasting). Informational. */
+  pack: z.string().min(1).optional(),
   objective: z.strictObject({
+    name: z.string().min(1).optional(),
     metric: nonEmpty('objective.metric'),
     direction: z.enum(['minimize', 'maximize'], { error: 'direction must be "minimize" or "maximize"' }),
     min_gain: z
       .number({ error: 'min_gain must be a number (a fraction, e.g. 0.03 for 3%)' })
       .min(0, 'min_gain must be >= 0')
       .max(1, 'min_gain is a fraction and must be <= 1 (0.03 means 3%)'),
+    value: valueSchema.optional(),
   }),
-  bench: z.strictObject({
-    ref: nonEmpty('bench.ref'),
-    run: nonEmpty('bench.run'),
-    repeats: z
-      .number({ error: 'repeats must be an integer' })
-      .int('repeats must be an integer')
-      .min(1, 'repeats must be >= 1'),
-    hardware: nonEmpty('bench.hardware'),
-    confirm_trace: z.string({ error: 'confirm_trace must be a string' }).min(1).optional(),
-  }),
+  evaluator: evaluatorSchema,
   guardrails: z.array(guardrailSchema, { error: 'guardrails must be a list' }).default([]),
   protected: z
     .array(nonEmpty('protected glob'), { error: 'protected must be a list of globs' })
@@ -115,6 +147,24 @@ export const configSchema = z.strictObject({
       .min(1, 'allowed_instance_types must list at least one instance type'),
   }),
 });
+
+/**
+ * `ratchet.yaml` schema. The trusted evaluation lives under `evaluator:`; the older
+ * `bench:` key is accepted as an alias. The parsed config exposes it as both
+ * `evaluator` and `bench` (same object) so existing code keeps working.
+ */
+export const configSchema = z
+  .preprocess((input) => {
+    if (input && typeof input === 'object' && !Array.isArray(input)) {
+      const o = input as Record<string, unknown>;
+      if ('bench' in o && !('evaluator' in o)) {
+        const { bench, ...rest } = o;
+        return { ...rest, evaluator: bench };
+      }
+    }
+    return input;
+  }, rawConfigSchema)
+  .transform((c) => ({ ...c, bench: c.evaluator }));
 
 export type RatchetConfig = z.output<typeof configSchema>;
 export type Direction = RatchetConfig['objective']['direction'];
