@@ -249,19 +249,24 @@ describe("bench image", () => {
     expect(stripComments(read("scripts", "00-base.sh"))).toMatch(/procps-ng/);
     expect(stripComments(read("scripts", "70-bench-user.sh"))).toMatch(/dnf_install iptables-nft/);
   });
-  it("creates the ratchet-bench user exactly like the instance user data does", () => {
+  it("creates the ratchet-bench and ratchet-holdout users exactly like the instance user data does", () => {
     const name = /BENCH_OS_USER = '([^']+)'/.exec(awsTs)![1]!;
     expect(name).toBe("ratchet-bench");
+    const holdout = /HOLDOUT_OS_USER = '([^']+)'/.exec(awsTs)![1]!;
+    expect(holdout).toBe("ratchet-holdout");
     expect(/BENCH_USER = '([^']+)'/.exec(readRepo("packages", "bench", "src", "remote-scripts.ts"))![1]).toBe(name);
-    const userData = /useradd ([^\\`]*?)\$\{BENCH_OS_USER\}/.exec(awsTs)![1]!.trim();
+    // The user data loops over both users: `id -u ${u} ... || useradd <flags> ${u}`.
+    const userData = /useradd ([^\\`]*?)\$\{u\}/.exec(awsTs)![1]!.trim();
     expect(userData).toBe("--system --no-create-home --shell /usr/sbin/nologin");
     const script = stripComments(read("scripts", "70-bench-user.sh"));
     expect(script).toContain(`BENCH_USER=${name}`);
-    expect(script).toContain(`useradd ${userData} "$BENCH_USER"`);
-    expect(script).toMatch(/id -u "\$BENCH_USER" >\/dev\/null 2>&1 \|\| useradd/); // same idempotent guard as the user data
+    expect(script).toContain(`HOLDOUT_USER=${holdout}`);
+    expect(script).toContain('for u in "$BENCH_USER" "$HOLDOUT_USER"; do');
+    expect(script).toContain(`useradd ${userData} "$u"`);
+    expect(script).toMatch(/id -u "\$u" >\/dev\/null 2>&1 \|\| useradd/); // same idempotent guard as the user data
   });
   it("leaves the IMDS block to the user data: no persistent rule in the image, none left behind", () => {
-    const rule = /iptables -I OUTPUT 1 (-m owner --uid-owner \$\{BENCH_OS_USER\} -d 169\.254\.169\.254 -j REJECT)/.exec(awsTs)![1]!.replace("${BENCH_OS_USER}", "ratchet-bench");
+    const rule = /iptables -I OUTPUT 1 (-m owner --uid-owner \$\{u\} -d 169\.254\.169\.254 -j REJECT)/.exec(awsTs)![1]!.replace("${u}", "ratchet-bench");
     // Nothing in the provisioning steps inserts or saves firewall rules...
     for (const f of benchScripts.filter((x) => x !== "90-verify-bench.sh")) {
       const text = stripComments(read("scripts", f));
@@ -276,7 +281,7 @@ describe("bench image", () => {
     expect(verify).toMatch(/iptables -D "\$\{IMDS_RULE\[@\]\}"/);
     expect(verify).toContain("the image must not keep the IMDS rule");
     // And the user data still carries the rule + the IPv6 twin the image relies on.
-    expect(awsTs).toContain("ip6tables -I OUTPUT 1 -m owner --uid-owner ${BENCH_OS_USER} -d fd00:ec2::254 -j REJECT");
+    expect(awsTs).toContain("ip6tables -I OUTPUT 1 -m owner --uid-owner ${u} -d fd00:ec2::254 -j REJECT");
   });
   it("probes the toolchain as the unprivileged user with the same setpriv flags as the bench runner", () => {
     const remote = readRepo("packages", "bench", "src", "remote-scripts.ts");
@@ -377,8 +382,8 @@ describe("images: documentation and wiring", () => {
       expect(doc, f).toContain("benchImageRef");
     }
     const live = readRepo("packages", "runtime", "src", "live.ts");
-    expect(live).toMatch(/runnerImageRef: string/);
-    expect(live).toMatch(/benchImageRef: string/);
+    expect(live).toMatch(/runnerImageRef\??: string/);
+    expect(live).toMatch(/benchImageRef\??: string/);
   });
   it("has a README with the build procedure and the EC2 Image Builder alternative", () => {
     expect(existsSync(join(imagesDir, "README.md"))).toBe(true);
