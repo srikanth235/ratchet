@@ -39,6 +39,11 @@ export interface StageInput extends StageBase {
    * `StagedArchive.files`. The controller needs the candidate's, to block a lockfile change before the instance runs anything.
    */
   hashFiles?: readonly string[];
+  /**
+   * Hashes the environment (the repo's Dockerfile / devcontainer and what it copies in) of a tree before it is archived; the result is
+   * in `StagedArchive.env`. Used for BOTH trees: the controller compares them to block a candidate that changes the environment.
+   */
+  hashEnvironment?: (tree: string) => Promise<Record<string, string>>;
 }
 
 function validate(i: StageBase): void {
@@ -48,7 +53,7 @@ function validate(i: StageBase): void {
 }
 
 /** Materialize `ref` with the GitHost, archive it as `<prefix><name>` and upload it. `.git` and history never leave the controller. */
-async function stageOne(i: StageBase, work: string, prefix: string, what: string, ref: string, name: string, hashFiles?: readonly string[]): Promise<StagedArchive> {
+async function stageOne(i: StageBase, work: string, prefix: string, what: string, ref: string, name: string, hashFiles?: readonly string[], hashEnvironment?: (tree: string) => Promise<Record<string, string>>): Promise<StagedArchive> {
   let commit: string;
   const tree = join(work, name);
   try {
@@ -60,6 +65,7 @@ async function stageOne(i: StageBase, work: string, prefix: string, what: string
     throw new BenchError(`cannot resolve ${what} ${ref}: ${(err as Error).message}`, { cause: err });
   }
   const files = hashFiles ? await hashNamedFiles(tree, hashFiles) : undefined;
+  const env = hashEnvironment ? await hashEnvironment(tree) : undefined;
   const file = join(work, `${name}.tgz`);
   try {
     await execFileP('tar', ['-czf', file, '-C', tree, '.']);
@@ -69,7 +75,7 @@ async function stageOne(i: StageBase, work: string, prefix: string, what: string
   const bytes = await readFile(file);
   const key = `${prefix}${name}.tgz`;
   await i.store.put(key, bytes);
-  return { uri: `s3://${i.bucket}/${key}`, sha256: createHash('sha256').update(bytes).digest('hex'), commit, ...(files ? { files } : {}) };
+  return { uri: `s3://${i.bucket}/${key}`, sha256: createHash('sha256').update(bytes).digest('hex'), commit, ...(files ? { files } : {}), ...(env ? { env } : {}) };
 }
 
 /**
@@ -86,8 +92,8 @@ export async function stageSource(i: StageInput): Promise<StagedSource> {
   const prefix = `${STAGING_PREFIX}${i.optimizationId}/${randomUUID()}/`;
   const work = await mkdtemp(join(tmpdir(), 'ratchet-stage-'));
   try {
-    const code = await stageOne(i, work, prefix, 'candidate', i.sha, 'code', i.hashFiles);
-    const bench = await stageOne(i, work, prefix, 'bench.ref', i.benchRef, 'bench', i.hashFiles);
+    const code = await stageOne(i, work, prefix, 'candidate', i.sha, 'code', i.hashFiles, i.hashEnvironment);
+    const bench = await stageOne(i, work, prefix, 'bench.ref', i.benchRef, 'bench', i.hashFiles, i.hashEnvironment);
     return { code, bench };
   } finally {
     await rm(work, { recursive: true, force: true });

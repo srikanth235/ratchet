@@ -47,7 +47,39 @@ export {
   type ResolvedDeps,
 } from './deps.js';
 export { depsBuildScript, type DepsBuildInput } from './deps-scripts.js';
-export { DepsSnapshots, type DepsSnapshotOptions } from './remote-deps.js';
+export {
+  containerSetupHint,
+  environmentChangeGuardrail,
+  environmentChanges,
+  environmentFilesOf,
+  imageKey,
+  imageManifestKey,
+  imageTag,
+  IMAGE_PREFIX,
+  normalizeRepoRelative,
+  parseDockerfile,
+  parseImageManifest,
+  parseJsonc,
+  readEnvironment,
+  resolveImageSource,
+  type EnvironmentSettings,
+  type ImageKeyInput,
+  type ImageManifest,
+  type ImagePlan,
+  type ImageSpec,
+  type ResolvedImage,
+} from './image.js';
+export {
+  CANDIDATE_HELPER,
+  containerRun,
+  imageBuildScript,
+  imageRestoreFragment,
+  type ContainerRunSpec,
+  type ContainerRuntime,
+  type ImageBuildInput,
+  type ImageRestore,
+} from './image-scripts.js';
+export { DepsSnapshots, type DepsSnapshotOptions, type PreparedEnvironment } from './remote-deps.js';
 export { BenchQueue, stateLabel, type BenchQueueOptions, type BenchRequest, type BenchTicket, type QueueEvent } from './queue.js';
 export {
   benchResultRecord,

@@ -1,5 +1,6 @@
 import { DEPS_PREFIX, DEPS_USER, type DepsStrategy } from './deps.js';
 import { BenchError } from './errors.js';
+import { assertContainerRuntime, containerRun, ctrFunction, ensureImageLoaded, type ImageRestore } from './image-scripts.js';
 import { assertSafeRef, sq, SENTINEL, type Isolation, type Layout, type StagedArchive } from './remote-scripts.js';
 
 /**
@@ -39,6 +40,12 @@ export interface DepsBuildInput {
   timeoutMs: number;
   /** `none` runs everything as the current user (tests only). */
   isolation: Isolation;
+  /**
+   * The repo's container image (`environment.image`): the fetch runs INSIDE it (the bench instances have no node or package
+   * manager of their own), as the same unprivileged user, with all capabilities dropped and a read-only root, but WITH network
+   * (this instance is the one with egress). The image is loaded from the artifacts bucket when this instance does not hold it yet.
+   */
+  container?: ImageRestore;
 }
 
 const BUCKET_RE = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
@@ -48,6 +55,7 @@ export function depsBuildScript(o: DepsBuildInput): string {
   if (o.strategy.id === 'none') throw new BenchError('there is nothing to snapshot for a strategy without a lockfile');
   if (!/^(pnpm|npm)-[0-9a-f]{40}$/.test(o.key)) throw new BenchError(`snapshot key ${JSON.stringify(o.key)} is not a plain key`);
   if (!BUCKET_RE.test(o.bucket)) throw new BenchError(`artifacts bucket ${JSON.stringify(o.bucket)} is not a valid bucket name`);
+  if (o.container) assertContainerRuntime(o.container.rt, o.layout.work);
   assertSafeRef(o.base.commit, 'base commit');
   if (!/^s3:\/\/[a-z0-9][a-z0-9.-]*\/[A-Za-z0-9._\/-]+\/deps-base\.tgz$/.test(o.base.uri) || o.base.uri.includes('..')) {
     throw new BenchError(`staged base tree uri ${JSON.stringify(o.base.uri)} is not a plain s3:// uri ending in deps-base.tgz`);
@@ -65,6 +73,21 @@ export function depsBuildScript(o: DepsBuildInput): string {
   // The fetch command, as the unprivileged user: a clean environment plus only the proxy variables the user data wrote.
   const clean = `env -i PATH="$PATH" HOME="$W/home" TMPDIR="$W/tmp" LANG=C.UTF-8 USER="$DU" LOGNAME="$DU" \${PX[@]+"\${PX[@]}"} ${envArgs} bash -c ${sq(o.strategy.fetch)}`;
   const run = isolated ? `setpriv --reuid="$DU" --regid="$DU" --clear-groups --no-new-privs -- ${clean}` : clean;
+  const fetchCommand = o.container
+    ? containerRun({
+        rt: o.container.rt,
+        name: '"$CN"',
+        user: '"$BUID:$BGID"',
+        noNewPrivileges: true,
+        network: 'bridge',
+        workdir: '"$TREE"',
+        mounts: ['$TREE:$TREE', '$STORE:$STORE', '$W/home:$W/home', '$W/tmp:$W/tmp'],
+        env: ['HOME=$W/home', 'TMPDIR=$W/tmp'],
+        extra: [...fetchEnv.flatMap(([k, v]) => ['-e', sq(`${k}=${v}`)]), '${DENV[@]+"${DENV[@]}"}'],
+        command: sq(o.strategy.fetch),
+      })
+    : run;
+  const tool = (cmd: string): string => (o.container ? `ctr ${sq(cmd)}` : cmd);
 
   return `set -uo pipefail
 W=${sq(o.layout.work)}
@@ -87,10 +110,18 @@ chown -R "$DU:" "$TREE" "$STORE" "$W/home" "$W/tmp" || exit 16`
 }
 [ -r /etc/ratchet/runner.env ] && { set -a; . /etc/ratchet/runner.env; set +a; }
 PX=(); for v in HTTPS_PROXY https_proxy HTTP_PROXY http_proxy NO_PROXY no_proxy NODE_USE_ENV_PROXY; do [ -n "\${!v:-}" ] && PX+=("$v=\${!v}"); done
-cd "$TREE" || exit ${DEPS_BUILD_EXIT.prepare}
+${
+  o.container
+    ? `DENV=(); for kv in \${PX[@]+"\${PX[@]}"}; do DENV+=(-e "$kv"); done
+${isolated ? 'BUID=$(id -u "$DU"); BGID=$(id -g "$DU")' : 'BUID=$(id -u); BGID=$(id -g)'}
+CN="ratchet-$(basename -- "$W")-fetch"
+${ensureImageLoaded(o.container)}${ctrFunction(o.container.rt)}docker rm -f "$CN" >/dev/null 2>&1 || true
+`
+    : ''
+}cd "$TREE" || exit ${DEPS_BUILD_EXIT.prepare}
 s=$(date +%s%N)
-timeout -k 10 ${timeoutS} ${run} </dev/null >"$W/fetch.out" 2>&1; rc=$?
-e=$(date +%s%N); ms=$(( (e - s) / 1000000 ))
+timeout -k 10 ${timeoutS} ${fetchCommand} </dev/null >"$W/fetch.out" 2>&1; rc=$?
+${o.container ? 'docker rm -f "$CN" >/dev/null 2>&1 || true\n' : ''}e=$(date +%s%N); ms=$(( (e - s) / 1000000 ))
 echo "--- fetch output tail ---"; tail -c 4000 "$W/fetch.out"
 [ $rc -eq 0 ] || { echo "the package fetch (${o.strategy.id}) exited with status $rc" >&2; exit ${DEPS_BUILD_EXIT.fetch}; }
 
@@ -104,7 +135,7 @@ else
   tar -C "$STORE" --sort=name --owner=0 --group=0 --numeric-owner -cf - . | gzip -3 > "$OUT/snapshot" || exit ${DEPS_BUILD_EXIT.pack}
 fi
 SHA=$(sha256sum -- "$OUT/snapshot" | cut -d' ' -f1); BYTES=$(stat -c %s -- "$OUT/snapshot")
-NODEV=$(node --version 2>/dev/null | tr -cd 'A-Za-z0-9._+-'); PMV=$(${o.strategy.version} 2>/dev/null | tr -cd 'A-Za-z0-9._+-')
+NODEV=$(${tool('node --version')} 2>/dev/null | tr -cd 'A-Za-z0-9._+-'); PMV=$(${tool(o.strategy.version)} 2>/dev/null | tr -cd 'A-Za-z0-9._+-')
 [ -n "$NODEV" ] && [ -n "$PMV" ] || { echo "cannot determine the node and ${o.strategy.id} versions" >&2; exit ${DEPS_BUILD_EXIT.pack}; }
 ARCHIVE=${sq(archivePrefix)}/"$SHA.$EXT"
 printf '%s,"node":"%s","pm":"%s","compression":"%s","archive":"%s","sha256":"%s","bytes":%s,"createdAt":%s}\\n' ${sq(head.slice(0, -1))} "$NODEV" "$PMV" "$COMP" "$ARCHIVE" "$SHA" "$BYTES" "$(date +%s%3N)" > "$OUT/manifest.json"
