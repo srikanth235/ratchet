@@ -1,5 +1,6 @@
 import { extname } from 'node:path';
 import { globToRegExp } from '@ratchet/core';
+import type { DepsStrategy } from './deps.js';
 import { BenchError } from './errors.js';
 
 /**
@@ -37,7 +38,24 @@ export interface StagedArchive {
   sha256: string;
   /** Full commit sha the archive was made from. */
   commit: string;
+  /** sha256 of the requested root-level files of the staged tree (lockfiles), computed on the controller before archiving. */
+  files?: Record<string, string>;
 }
+
+/** A dependency snapshot to restore before setup (see deps.ts). */
+export interface DepsRestore {
+  strategy: DepsStrategy;
+  /** `s3://<artifacts bucket>/bench-deps/<key>/<sha256>.<ext>` */
+  uri: string;
+  sha256: string;
+  compression: 'zstd' | 'gzip';
+  /** `node --version` and the package manager's version on the machine that built it; a different image is refused. */
+  node: string;
+  pm: string;
+}
+
+/** Where the restored store lives on the instance (read-only) and the directory the candidate user may write for the package manager. */
+export const depsPaths = (l: Layout): { store: string; scratch: string } => ({ store: `${l.work}/deps/store`, scratch: `${l.work}/home/.ratchet-deps` });
 
 /** `user`: setup and guardrails run as BENCH_USER, the bench harness as HOLDOUT_USER, IMDS blocked for both (default, fail-closed). `none`: single-user, for local tests only. */
 export type Isolation = 'user' | 'none';
@@ -169,6 +187,40 @@ rm -f "$W/holdout/.probe"
 [ "$(setpriv --reuid="$HU" --regid="$HU" --clear-groups -- "$LAUNCHER" id -un 2>/dev/null)" = "$BU" ] || { echo "the candidate launcher $LAUNCHER does not run commands as $BU for $HU" >&2; exit 18; }
 `;
 
+const VERSION_RE = /^[A-Za-z0-9._+-]{1,64}$/;
+
+/**
+ * Restores the dependency snapshot as ROOT, after the isolation checks and before any step runs candidate code:
+ * download (through the S3 gateway endpoint), sha256 check, same node and package-manager version as the builder, extract,
+ * refuse symlinks, let the strategy wire its few writable paths, then hand the whole store to root and make it read-only.
+ * The candidate user can read the store (setup installs from it) but not change it; the only things it owns are
+ * `$SCRATCH` (the package manager's per-project bookkeeping, outside the store). Exit 25 to 29.
+ */
+function depsRestoreFragment(r: DepsRestore, isolated: boolean): string {
+  if (!/^s3:\/\/[a-z0-9][a-z0-9.-]*\/bench-deps\/[A-Za-z0-9._\/-]+$/.test(r.uri) || r.uri.includes('..')) throw new BenchError(`snapshot uri ${JSON.stringify(r.uri)} is not a plain s3:// uri under bench-deps/`);
+  if (!/^[0-9a-f]{64}$/.test(r.sha256)) throw new BenchError('snapshot digest is not a sha256 hex string');
+  if (!VERSION_RE.test(r.node) || !VERSION_RE.test(r.pm)) throw new BenchError('snapshot tool versions are not plain version strings');
+  const extract =
+    r.compression === 'zstd'
+      ? `command -v zstd >/dev/null 2>&1 || { echo "zstd is missing on this image (rebuild the bench image)" >&2; exit 28; }
+zstd -dc -- "$D/in/snapshot" | tar -x -C "$STORE" --no-same-owner --no-same-permissions || exit 29`
+      : `tar -xzf "$D/in/snapshot" -C "$STORE" --no-same-owner --no-same-permissions || exit 29`;
+  return `# ---- dependency snapshot (root): read-only for the candidate user ----
+D="$W/deps"; STORE="$D/store"; SCRATCH="$W/home/.ratchet-deps"
+mkdir -p "$STORE" "$D/in" "$SCRATCH" || exit 25
+aws s3 cp --only-show-errors ${sq(r.uri)} "$D/in/snapshot" || { echo "cannot download the dependency snapshot ${r.uri}" >&2; exit 25; }
+[ "$(sha256sum -- "$D/in/snapshot" | cut -d' ' -f1)" = ${sq(r.sha256)} ] || { echo "sha256 mismatch for the dependency snapshot" >&2; exit 26; }
+[ "$(node --version 2>/dev/null)" = ${sq(r.node)} ] || { echo "the dependency snapshot was built with node ${r.node}, this instance has $(node --version 2>&1)" >&2; exit 27; }
+[ "$(${r.strategy.version} 2>/dev/null)" = ${sq(r.pm)} ] || { echo "the dependency snapshot was built with ${r.strategy.id} ${r.pm}, this instance has $(${r.strategy.version} 2>&1)" >&2; exit 27; }
+${extract}
+rm -f "$D/in/snapshot"
+if [ -n "$(find "$STORE" -type l -print -quit)" ]; then echo "the dependency snapshot contains symlinks" >&2; exit 29; fi
+${r.strategy.restore}
+${isolated ? 'chown -R "$BU:" "$SCRATCH" || exit 16\nchown -hR root:root "$D" || exit 16\n' : ''}chmod -R go-w,a+rX "$D" || exit 16
+emit deps "{\\"restored\\":true,\\"bytes\\":$(du -sb "$STORE" | cut -f1)}"
+`;
+}
+
 /**
  * Fetches the pre-staged candidate and bench.ref archives from the artifacts bucket (through the S3
  * gateway endpoint; the bench subnet has no other way out), verifies their digests, applies the
@@ -176,14 +228,22 @@ rm -f "$W/holdout/.probe"
  * block, the holdout directory permissions and the candidate launcher, and hands the code tree to the
  * candidate user. No source-control access and no credentials in the script, and the sealed bucket is
  * not touched: the holdout is fetched later, by the bench step that needs it.
+ *
+ * With `deps` the dependency snapshot is restored (read-only) last, still as root and before any candidate code ran.
+ * `pinned` are extra protected paths (the lockfiles): they come from bench.ref exactly like `globs`, but do not count
+ * as "the user protected something" in the `matched` figure.
  */
 export function checkoutScript(o: {
   layout: Layout;
   code: StagedArchive;
   bench: StagedArchive;
   globs: readonly string[];
+  /** Always-protected root paths (lockfiles of the dependency strategy), on top of `globs`. */
+  pinned?: readonly string[];
   prune: boolean;
   isolation: Isolation;
+  /** Restore this dependency snapshot before setup. */
+  deps?: DepsRestore;
   /** Test seam; default `CANDIDATE_LAUNCHER`. */
   candidateLauncher?: string;
 }): string {
@@ -193,7 +253,7 @@ export function checkoutScript(o: {
     if (!/^[0-9a-f]{64}$/.test(a.sha256)) throw new BenchError('staged archive digest is not a sha256 hex string');
   }
   return `${prelude(o.layout)}${overlayFns}
-RE=${sq(protectedPcre(o.globs))}
+RE=${sq(protectedPcre([...o.globs, ...(o.pinned ?? [])]))}; RE_USER=${sq(protectedPcre(o.globs))}
 rm -rf -- "\${W:?}"; mkdir -p "$CODE" "$STAGE" "$W/logs" "$W/in" || exit 10
 fetch() {
   aws s3 cp --only-show-errors "$1" "$3" || { echo "cannot download $1" >&2; return 1; }
@@ -205,6 +265,7 @@ tar -xzf "$W/in/code.tgz" -C "$CODE" --no-same-owner || exit 22
 tar -xzf "$W/in/bench.tgz" -C "$STAGE" --no-same-owner || exit 23
 list() { (cd -- "$1" && find . -mindepth 1 \\( -type f -o -type l \\) -printf '%P\\0'); }
 list "$STAGE" | grep -zP "$RE" > "$W/bench.match" || true
+matched=$(list "$STAGE" | grep -zcP "$RE_USER" || true)
 list "$CODE" | grep -zP "$RE" > "$W/code.match" || true
 removed=0
 if [ ${o.prune ? 1 : 0} = 1 ]; then
@@ -218,7 +279,7 @@ if [ ${o.prune ? 1 : 0} = 1 ]; then
   done < "$W/code.match"
 fi
 apply init || exit 24
-${isolationCheck(o.isolation, o.candidateLauncher ?? CANDIDATE_LAUNCHER)}emit checkout "{\\"code\\":\\"${o.code.commit}\\",\\"bench\\":\\"${o.bench.commit}\\",\\"removed\\":$removed,\\"copied\\":$copied,\\"isolation\\":\\"${o.isolation}\\"}"
+${isolationCheck(o.isolation, o.candidateLauncher ?? CANDIDATE_LAUNCHER)}${o.deps ? depsRestoreFragment(o.deps, o.isolation === 'user') : ''}emit checkout "{\\"code\\":\\"${o.code.commit}\\",\\"bench\\":\\"${o.bench.commit}\\",\\"removed\\":$removed,\\"copied\\":$copied,\\"matched\\":$matched,\\"isolation\\":\\"${o.isolation}\\"}"
 `;
 }
 

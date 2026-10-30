@@ -26,7 +26,7 @@ export class LocalFakeCompute implements CloudCompute {
   failTerminate = false;
   /** Make `runCommand` throw this many times before working (instance not yet registered with SSM). */
   notReadyFor = 0;
-  private children = new Set<ChildProcess>();
+  private children = new Map<ChildProcess, string>();
   private counter = 0;
 
   constructor(
@@ -41,7 +41,7 @@ export class LocalFakeCompute implements CloudCompute {
       const aws = join(this.shim, 'aws');
       writeFileSync(
         aws,
-        `#!/bin/bash\n# aws s3 cp [--only-show-errors] s3://b/k dst\nargs=(); for a in "$@"; do case "$a" in --*) ;; *) args+=("$a");; esac; done\nsrc="\${args[2]}"; dst="\${args[3]}"\ncp -- ${JSON.stringify(s3Dir)}/"\${src#s3://}" "$dst"\n`,
+        `#!/bin/bash\n# aws s3 cp [--only-show-errors] src dst: one side is s3://bucket/key (download or upload)\nargs=(); for a in "$@"; do case "$a" in --*) ;; *) args+=("$a");; esac; done\nsrc="\${args[2]}"; dst="\${args[3]}"\nif [[ "$dst" == s3://* ]]; then mkdir -p "$(dirname ${JSON.stringify(s3Dir)}/"\${dst#s3://}")"; cp -- "$src" ${JSON.stringify(s3Dir)}/"\${dst#s3://}"; else cp -- ${JSON.stringify(s3Dir)}/"\${src#s3://}" "$dst"; fi\n`,
       );
       chmodSync(aws, 0o755);
     }
@@ -75,7 +75,8 @@ export class LocalFakeCompute implements CloudCompute {
   async terminate(ids: string[]): Promise<void> {
     if (this.failTerminate) throw new Error('terminate failed');
     this.terminated.push(...ids);
-    for (const c of this.children) if (c.pid) this.kill(c);
+    // Only what runs on the terminated instances (concurrent jobs have instances of their own).
+    for (const [c, instance] of this.children) if (c.pid && ids.includes(instance)) this.kill(c);
   }
 
   /** Terminating an instance kills everything on it, including processes that left the process group (`timeout` does). */
@@ -112,7 +113,7 @@ export class LocalFakeCompute implements CloudCompute {
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: true,
       });
-      this.children.add(child);
+      this.children.set(child, instanceId);
       let stdout = '';
       let stderr = '';
       child.stdout.setEncoding('utf8').on('data', (d: string) => (stdout += d));

@@ -21,7 +21,7 @@ import { BenchLog } from './log.js';
 /**
  * The bench pipeline, shared by LocalBenchRunner and RemoteBenchRunner so both run the same steps:
  *
- *   checkout (+ protected overlay) -> setup -> command guardrails (fail fast) -> bench x N
+ *   checkout (+ protected overlay; a changed lockfile blocks here) -> setup -> command guardrails (fail fast) -> bench x N
  *   -> threshold guardrails over the per-metric medians of the N runs
  *
  * Only the `PipelineExecutor` differs (local child processes vs. SSM scripts on a bench instance).
@@ -29,6 +29,8 @@ import { BenchLog } from './log.js';
 
 export interface StepTimeouts {
   checkoutMs: number;
+  /** The dependency-snapshot fetch (remote runner only; it runs once per lockfile, not per job). */
+  depsMs: number;
   setupMs: number;
   guardrailMs: number;
   /** Per single `bench.run` invocation. */
@@ -37,12 +39,14 @@ export interface StepTimeouts {
 
 export const DEFAULT_TIMEOUTS: StepTimeouts = {
   checkoutMs: 10 * 60_000,
+  depsMs: 20 * 60_000,
   setupMs: 30 * 60_000,
   guardrailMs: 15 * 60_000,
   benchMs: 30 * 60_000,
 };
 
 export type BenchProgress =
+  | { step: 'deps' }
   | { step: 'checkout' }
   | { step: 'setup' }
   | { step: 'guardrails'; index: number; total: number; name: string }
@@ -87,9 +91,19 @@ export interface StepOutcome {
   error?: string;
 }
 
+/** An executor refuses to go on: the pipeline records `guardrail` (failed) and the candidate is blocked without running anything. */
+export interface CheckoutVeto {
+  guardrail: GuardrailResult;
+}
+
 export interface PipelineExecutor {
-  /** Materialize the candidate and overlay the protected files from bench.ref. `opts.trace` is only announced here: the holdout is not fetched before the bench steps. */
-  checkout(opts: { trace?: string }): Promise<void>;
+  /**
+   * Materialize the candidate and overlay the protected files from bench.ref. `opts.trace` is only announced here: the holdout is not fetched before the bench steps.
+   * May return a veto (a candidate whose lockfile differs from bench.ref's: the bench has no network, so its dependencies cannot be installed).
+   */
+  checkout(opts: { trace?: string }): Promise<CheckoutVeto | void>;
+  /** Extra explanation for a failed setup (e.g. that the bench installs from a snapshot with no network). */
+  setupFailureHint?(): string | undefined;
   /** Run one step. Throws BenchAbortedError when aborted. Must verify/restore protected files first. */
   runStep(spec: StepSpec): Promise<StepOutcome>;
   dispose(): Promise<void>;
@@ -199,7 +213,11 @@ export async function runPipeline(ctx: PipelineContext): Promise<PipelineResult>
   throwIfAborted(ctx.signal);
   emit({ step: 'checkout' });
   log.section(`checkout ${job.sha} (bench from ${config.bench.ref})`);
-  await exec.checkout(trace === undefined ? {} : { trace });
+  const veto = await exec.checkout(trace === undefined ? {} : { trace });
+  if (veto) {
+    log.line(`blocked before running anything: ${veto.guardrail.detail ?? veto.guardrail.name}`);
+    return { runs, guardrails: [veto.guardrail] };
+  }
 
   /** Run a step; returns false (and records the failure) when trusted files were tampered with. */
   const guarded = async (spec: StepSpec): Promise<StepOutcome | undefined> => {
@@ -218,11 +236,9 @@ export async function runPipeline(ctx: PipelineContext): Promise<PipelineResult>
     if (!out) return { runs, guardrails };
     const failed = out.timedOut || out.error !== undefined || out.exitCode !== 0;
     if (failed) {
-      guardrails.push({
-        name: 'setup',
-        passed: false,
-        detail: out.timedOut ? `timed out after ${ctx.timeouts.setupMs}ms` : (out.error ?? `exited with status ${out.exitCode}`),
-      });
+      const why = out.timedOut ? `timed out after ${ctx.timeouts.setupMs}ms` : (out.error ?? `exited with status ${out.exitCode}`);
+      const hint = exec.setupFailureHint?.();
+      guardrails.push({ name: 'setup', passed: false, detail: hint ? `${why} (${hint})` : why });
       return { runs, guardrails };
     }
   }

@@ -45,7 +45,7 @@ export type QueueEvent =
   | (Ref & { type: 'failed'; error: string })
   | (Ref & { type: 'cancelled'; wasRunning: boolean });
 
-/** Short UI label for an event: queued, checkout, setup, guardrails 1/2, bench 3/5, confirm 2/3, done, ... */
+/** Short UI label for an event: queued, dependencies, checkout, setup, guardrails 1/2, bench 3/5, confirm 2/3, done, ... */
 export function stateLabel(e: QueueEvent): string {
   switch (e.type) {
     case 'queued':
@@ -55,6 +55,8 @@ export function stateLabel(e: QueueEvent): string {
     case 'progress': {
       const p = e.progress;
       switch (p.step) {
+        case 'deps':
+          return 'dependencies';
         case 'checkout':
         case 'setup':
         case 'evaluate':

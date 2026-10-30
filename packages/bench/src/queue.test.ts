@@ -173,13 +173,14 @@ describe('BenchQueue', () => {
     submit('A', 'a1');
     await tick();
     const p = runner.calls[0]!.progress!;
+    p({ step: 'deps' });
     p({ step: 'checkout' });
     p({ step: 'guardrails', index: 1, total: 2, name: 'pnpm test' });
     p({ step: 'bench', run: 2, of: 5, phase: 'bench' });
     p({ step: 'bench', run: 1, of: 3, phase: 'confirm' });
     runner.calls[0]!.resolve();
     await tick();
-    expect(events.map(stateLabel)).toEqual(['queued (next)', 'starting', 'checkout', 'guardrails 1/2', 'bench 2/5', 'confirm 1/3', 'done']);
+    expect(events.map(stateLabel)).toEqual(['queued (next)', 'starting', 'dependencies', 'checkout', 'guardrails 1/2', 'bench 2/5', 'confirm 1/3', 'done']);
   });
 
   it('reports a failing runner as a failed event and keeps going', async () => {
