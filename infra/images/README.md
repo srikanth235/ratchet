@@ -207,10 +207,8 @@ test phases are extra; the `90-verify-*` scripts already fail the build on a bad
 
 ## Known gaps (not fixed here: other packages)
 
-- `RATCHET_SECRET_REFS` is written by `runnerUserData` joined with newlines, but `parseSecretRefs` in
-  `packages/agents` splits on commas. With more than one secret the refs will not parse; fix on either side.
-- Proxy variables from `runner.env` reach `ratchet-runner` (via the launcher) but not the agent CLIs: the runner's
-  `AGENT_ENV_PASSTHROUGH` omits `HTTPS_PROXY`/`NO_PROXY`/`NODE_USE_ENV_PROXY`. See `docs/real-env/aws.md` section 9.
+- Fixed since: `RATCHET_SECRET_REFS` is now written comma-separated (what `parseSecretRefs` reads), and the proxy
+  variables, including `NODE_USE_ENV_PROXY=1` for Node's fetch, now reach the agent CLIs.
 - The bench image has no baked `node_modules`/pnpm store; `docs/real-env/bench.md` recommends baking the repository's
   dependencies in for offline `pnpm install`, which is project-specific and not done here.
 - Nothing here has run on AWS: the Packer templates are validated, the install steps were run in a scratch prefix, and

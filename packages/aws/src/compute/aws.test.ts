@@ -338,6 +338,14 @@ describe('launch', () => {
     branch: 'ratchet/opt1/a1',
   };
 
+  it('runner user data lists several secret refs in the comma format the runner parses', () => {
+    const two = { ...runnerSpec, secrets: [...runnerSpec.secrets, { name: 'GITHUB_TOKEN', ref: '/ratchet/opt1/a1/GITHUB_TOKEN' }] };
+    const line = runnerUserData(two, 2).split('\n').find((l) => l.includes('RATCHET_SECRET_REFS='))!;
+    expect(line).toContain('ANTHROPIC_API_KEY=/ratchet/opt1/a1/ANTHROPIC_API_KEY,GITHUB_TOKEN=/ratchet/opt1/a1/GITHUB_TOKEN');
+    expect(() => runnerUserData({ ...runnerSpec, secrets: [{ name: 'A', ref: '/x,B=/y' }] }, 2)).toThrow(/invalid secret ref/);
+    expect(() => runnerUserData({ ...runnerSpec, secrets: [{ name: 'a-b', ref: '/x' }] }, 2)).toThrow(/invalid secret ref/);
+  });
+
   it('launchRunner: tags, IMDSv2, terminate-on-shutdown, profile, network, user-data', async () => {
     ec2.on(RunInstancesCommand).resolves({ Instances: [{ InstanceId: 'i-1', LaunchTime: new Date(5000) }] });
     const info = await compute.launchRunner(runnerSpec);

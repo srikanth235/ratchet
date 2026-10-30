@@ -353,7 +353,7 @@ proxy on 3128, the interface endpoints and the S3 prefix list.
 | non-443 / plain HTTP | `curl -x $HTTPS_PROXY http://example.com`, `CONNECT example.com:22` | denied |
 | AWS endpoints | `aws sts get-caller-identity`, `aws ec2 describe-instances`, `aws s3 ls s3://<artifacts>/artifacts/opt1/a1/` | work (STS/EC2 via the proxy, S3 via the gateway endpoint; if they hang, `NO_PROXY` in `/etc/ratchet/runner.env` is wrong for that service) |
 | SSM | `cloud.runCommand(runner.id, ...)` | works (SSM agent uses the interface endpoints, not the proxy) |
-| agent CLIs | start `claude -p` and `codex exec` with the runner env | both honor `HTTPS_PROXY` (Node fetch does not by default: if a CLI ignores it, calls time out and the CLI needs a proxy flag or `NODE_USE_ENV_PROXY=1`, or add it to the runner image) |
+| agent CLIs | start `claude -p` and `codex exec` with the runner env | both honor `HTTPS_PROXY` (the runner env sets `NODE_USE_ENV_PROXY=1` for Node's fetch; if a CLI still ignores the proxy, calls time out and it needs its own proxy flag) |
 | package installs | `pnpm install` in the runner | fails unless the registry is in `egress_proxy_extra_domains`; decide per project, do not allow `*` |
 | failure mode | stop the proxy instance | runners lose model/GitHub access, SSM and S3 keep working; `tofu apply` replaces it |
 

@@ -695,7 +695,11 @@ function noProxyList(region: string): string {
 
 /** Starts `ratchet runner`. Secret VALUES never appear here: only SSM refs, fetched with the instance profile. */
 export function runnerUserData(spec: RunnerLaunchSpec, maxLifetimeHours: number, net?: RunnerNetworkOptions): string {
-  const refs = spec.secrets.map((s) => `${s.name}=${s.ref}`).join('\n');
+  // Comma-separated: the format runner-main's parseSecretRefs reads. Neither env names nor SSM parameter names allow commas.
+  for (const s of spec.secrets) {
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(s.name) || !/^[A-Za-z0-9_.\-/]+$/.test(s.ref)) throw new Error(`invalid secret ref ${JSON.stringify(`${s.name}=${s.ref}`)}`);
+  }
+  const refs = spec.secrets.map((s) => `${s.name}=${s.ref}`).join(',');
   const proxy: Record<string, string> = net?.proxyUrl
     ? {
         HTTPS_PROXY: net.proxyUrl,
@@ -704,6 +708,8 @@ export function runnerUserData(spec: RunnerLaunchSpec, maxLifetimeHours: number,
         http_proxy: net.proxyUrl,
         NO_PROXY: noProxyList(net.region),
         no_proxy: noProxyList(net.region),
+        // Node's built-in fetch ignores the variables above unless this is set (the agent CLIs are Node programs).
+        NODE_USE_ENV_PROXY: '1',
       }
     : {};
   if (net?.proxyUrl && !/^http:\/\/[0-9.]+:\d+$/.test(net.proxyUrl)) throw new Error(`invalid egress proxy url ${JSON.stringify(net.proxyUrl)}`);
@@ -722,7 +728,7 @@ export function runnerUserData(spec: RunnerLaunchSpec, maxLifetimeHours: number,
     'set -a; . /etc/ratchet/runner.env; set +a\n' +
     // Login shells (SSM sessions, agents spawning bash) get the proxy too.
     (net?.proxyUrl
-      ? "grep -E '^(HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy)=' /etc/ratchet/runner.env | sed 's/^/export /' > /etc/profile.d/ratchet-proxy.sh\nchmod 644 /etc/profile.d/ratchet-proxy.sh\n"
+      ? "grep -E '^(HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy|NODE_USE_ENV_PROXY)=' /etc/ratchet/runner.env | sed 's/^/export /' > /etc/profile.d/ratchet-proxy.sh\nchmod 644 /etc/profile.d/ratchet-proxy.sh\n"
       : '') +
     'nohup ratchet runner >/var/log/ratchet-runner.log 2>&1 &\n'
   );

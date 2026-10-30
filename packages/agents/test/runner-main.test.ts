@@ -83,7 +83,7 @@ describe('runnerMain (what the `ratchet-runner` bin runs)', () => {
     const git: GitRunner = (args, opts) => (gitEnvs.push(opts.env), execGit(args.map((a) => (a === httpsUrl ? config.repoUrl : a)), opts));
     const adapterFactory = (_c: unknown, e: Record<string, string>): AgentAdapter => ((agentEnv = e), new ScriptedAgent({ name: 'x', attempts: [] }));
     const code = await runnerMain({
-      env: { ...env, RATCHET_SECRET_REFS: 'ANTHROPIC_API_KEY=/ratchet/opt1/cc/ANTHROPIC_API_KEY,GITHUB_TOKEN=/ratchet/opt1/cc/GITHUB_TOKEN', AWS_REGION: 'us-east-1', SECRET_OTHER: 'leak-me-not' },
+      env: { ...env, RATCHET_SECRET_REFS: 'ANTHROPIC_API_KEY=/ratchet/opt1/cc/ANTHROPIC_API_KEY,GITHUB_TOKEN=/ratchet/opt1/cc/GITHUB_TOKEN', AWS_REGION: 'us-east-1', SECRET_OTHER: 'leak-me-not', HTTPS_PROXY: 'http://10.42.3.10:3128', NO_PROXY: '169.254.169.254', NODE_USE_ENV_PROXY: '1' },
       spawner: aws.spawner, git, adapterFactory, log: () => {},
     });
     expect(code).toBe(1); // empty script -> agent-unavailable
@@ -93,6 +93,10 @@ describe('runnerMain (what the `ratchet-runner` bin runs)', () => {
     expect(agentEnv['GITHUB_TOKEN']).toBeUndefined();
     expect(agentEnv['SECRET_OTHER']).toBeUndefined(); // only a small passthrough list reaches the agent
     expect(agentEnv['AWS_REGION']).toBe('us-east-1');
+    // With the sandbox egress proxy on, the agent CLIs reach the model APIs only through it.
+    expect(agentEnv['HTTPS_PROXY']).toBe('http://10.42.3.10:3128');
+    expect(agentEnv['NO_PROXY']).toBe('169.254.169.254');
+    expect(agentEnv['NODE_USE_ENV_PROXY']).toBe('1');
     const header = gitEnvs.find((e) => e?.['GIT_CONFIG_KEY_0'])!;
     expect(header['GIT_CONFIG_KEY_0']).toBe('http.https://github.com/.extraheader');
     expect(header['GIT_CONFIG_VALUE_0']).toBe(`AUTHORIZATION: basic ${Buffer.from('x-access-token:ghs_token123').toString('base64')}`);

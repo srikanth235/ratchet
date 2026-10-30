@@ -35,7 +35,9 @@ export interface RunnerMainOptions {
 }
 
 /** Env passed through to the agent CLI; deliberately small. The git token never goes in. */
-const AGENT_ENV_PASSTHROUGH = ['PATH', 'HOME', 'USER', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR', 'SHELL', 'AWS_REGION', 'AWS_DEFAULT_REGION'];
+// The proxy variables matter when the sandbox routes runner egress through its proxy: without them the agent CLIs
+// cannot reach the model APIs.
+const AGENT_ENV_PASSTHROUGH = ['PATH', 'HOME', 'USER', 'LANG', 'LC_ALL', 'TERM', 'TMPDIR', 'SHELL', 'AWS_REGION', 'AWS_DEFAULT_REGION', 'HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'NO_PROXY', 'no_proxy', 'NODE_USE_ENV_PROXY'];
 
 /** `NAME=ref,NAME2=ref2` of SSM parameter names, fetched with `aws ssm get-parameter --with-decryption`. */
 export function parseSecretRefs(spec: string | undefined): Record<string, string> {
