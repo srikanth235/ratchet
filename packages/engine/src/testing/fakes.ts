@@ -16,6 +16,7 @@ import type {
   CandidateCommit,
   Clock,
   CloudCompute,
+  CommitFilesInput,
   FileDiff,
   GitHost,
   GuardrailResult,
@@ -117,6 +118,20 @@ export class FakeGit implements GitHost {
     this.log.push('git.openPullRequest');
     this.prs.push(input);
     return { url: `https://example.test/pr/${this.prs.length}` };
+  }
+
+  /** Branches that already exist in the remote (`commitFiles` refuses them). */
+  readonly existingBranches = new Set<string>();
+  readonly filesCommitted: Array<{ input: CommitFilesInput; sha: string }> = [];
+  failCommitFiles = false;
+
+  async commitFiles(input: CommitFilesInput): Promise<{ sha: string }> {
+    this.log.push(`git.commitFiles:${input.branch}`);
+    if (this.failCommitFiles || this.existingBranches.has(input.branch)) throw new Error(`branch ${input.branch} already exists`);
+    this.existingBranches.add(input.branch);
+    const sha = `files-${this.filesCommitted.length + 1}`;
+    this.filesCommitted.push({ input, sha });
+    return { sha };
   }
 
   readonly resolved = new Map<string, string>();

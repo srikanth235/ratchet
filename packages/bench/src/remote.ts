@@ -9,6 +9,7 @@ import type {
   InstanceInfo,
   RatchetConfig,
 } from '@ratchet/core';
+import { effectiveProtected } from '@ratchet/core';
 import { dependencyChangeGuardrail, lockfileChanges, offlineSetupHint, pinnedDepsFiles, type DepsPlan } from './deps.js';
 import { BenchError } from './errors.js';
 import type { BenchLog } from './log.js';
@@ -234,6 +235,11 @@ class RemoteExecutor implements PipelineExecutor {
       }
     }
 
+    // Evaluator, config, environment and the user's list (lockfiles are pinned through the dependency strategy above).
+    const eff = effectiveProtected(this.config);
+    // `globs` count toward "the evaluator ref holds something protected"; the rest (ratchet.yaml, the environment) is pinned like the lockfiles.
+    const extraPinned = eff.evaluatorGlobs.filter((g) => !eff.required.includes(g));
+    const protectedGlobs = eff.required;
     await this.session.waitReady();
     const res = await this.session.call(
       'checkout',
@@ -241,8 +247,9 @@ class RemoteExecutor implements PipelineExecutor {
         layout: this.layout,
         code: staged.code,
         bench: staged.bench,
-        globs: this.config.protected,
-        ...(this.deps ? { pinned: pinnedDepsFiles(this.deps.strategy), deps: this.restore(this.deps) } : {}),
+        globs: protectedGlobs,
+        pinned: [...(this.deps ? pinnedDepsFiles(this.deps.strategy) : []), ...extraPinned],
+        ...(this.deps ? { deps: this.restore(this.deps) } : {}),
         prune: this.o.pruneExtraProtected ?? true,
         isolation: this.isolation,
         ...(this.o.candidateLauncher ? { candidateLauncher: this.o.candidateLauncher } : {}),
@@ -256,7 +263,7 @@ class RemoteExecutor implements PipelineExecutor {
     const matched = Number(s.data.matched ?? s.data.copied);
     if (!(matched > 0)) {
       throw new BenchError(
-        `bench.ref ${this.config.bench.ref} contains no files matching the protected globs [${this.config.protected.join(', ')}]; ` +
+        `bench.ref ${this.config.bench.ref} contains no files matching the protected globs [${protectedGlobs.join(', ')}]; ` +
           'refusing to benchmark with an unprotected bench',
       );
     }

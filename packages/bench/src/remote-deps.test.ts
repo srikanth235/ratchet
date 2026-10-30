@@ -441,7 +441,7 @@ describe('dependency snapshots (RemoteBenchRunner)', () => {
 
     it('the user protecting nothing is still an error: the pinned lockfile does not stand in for a protected bench', async () => {
       const r = rig(fx);
-      await expect(r.runner.run(job(fx.base), cfg({ protectedGlobs: ['nothing/**'] }), null)).rejects.toThrow(/contains no files matching the protected globs/);
+      await expect(r.runner.run(job(fx.base), cfg({ protectedGlobs: ['nothing/**'], run: 'sh ./score.sh' }), null)).rejects.toThrow(/contains no files matching the protected globs/);
     });
   });
 

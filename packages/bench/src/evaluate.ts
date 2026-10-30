@@ -1,4 +1,5 @@
 import {
+  CALIBRATION,
   evaluateRatchet,
   summarize,
   type BenchOutcome,
@@ -54,6 +55,11 @@ export interface EvaluateCandidateInput {
   config: Pick<RatchetConfig, 'objective'>;
   /** Current best verified value on the bench. */
   currentBest: number;
+  /**
+   * The win threshold (a fraction) when it is not fixed in ratchet.yaml: the calibrated one (core's `calibrate`).
+   * Wins over `config.objective.min_gain`; with neither, `CALIBRATION.fallbackGain`.
+   */
+  minGain?: number | undefined;
   /** Baseline noise floor in metric units (core's `noiseFloor`). */
   noiseFloor: number;
   /** The current best's value on the hidden trace; defaults to `currentBest` (see core's RatchetInput). */
@@ -90,6 +96,7 @@ export interface CandidateEvaluation {
  */
 export function evaluateCandidate(input: EvaluateCandidateInput): CandidateEvaluation {
   const { bench, confirm } = input;
+  const minGain = input.minGain ?? input.config.objective.min_gain ?? CALIBRATION.fallbackGain;
   const guardrails = [...bench.guardrails, ...(confirm?.guardrails ?? [])];
   const results = [benchResultRecord('bench', bench), confirm ? benchResultRecord('confirm', confirm) : undefined].filter(
     (r): r is BenchResultRecord => r !== undefined,
@@ -106,12 +113,12 @@ export function evaluateCandidate(input: EvaluateCandidateInput): CandidateEvalu
       reasons,
       candidateValue: NaN,
       improvement: NaN,
-      requiredGain: Math.max(input.noiseFloor, input.config.objective.min_gain * Math.abs(input.currentBest)),
+      requiredGain: Math.max(input.noiseFloor, minGain * Math.abs(input.currentBest)),
     };
   } else {
     outcome = evaluateRatchet({
       direction: input.config.objective.direction,
-      minGain: input.config.objective.min_gain,
+      minGain,
       noiseFloor: input.noiseFloor,
       currentBest: input.currentBest,
       candidate: bench.samples,
