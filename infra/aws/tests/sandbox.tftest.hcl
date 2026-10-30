@@ -1,5 +1,5 @@
 # `tofu test` with a mocked AWS provider - no account or credentials needed.
-# NOTE: written without access to an OpenTofu binary; not yet executed.
+# Run: tofu init -backend=false && tofu test
 
 mock_provider "aws" {
   mock_data "aws_caller_identity" {
@@ -13,6 +13,11 @@ mock_provider "aws" {
       id         = "vpc-0abc"
       arn        = "arn:aws:ec2:us-east-1:123456789012:vpc/vpc-0abc"
       cidr_block = "10.0.0.0/16"
+    }
+  }
+  mock_data "aws_iam_policy_document" {
+    defaults = {
+      json = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"ec2.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}"
     }
   }
   mock_data "aws_subnets" {
@@ -29,6 +34,7 @@ mock_provider "aws" {
 variables {
   sandbox_id = "demo"
   region     = "us-east-1"
+  subnet_id  = "subnet-0aaa" # mock_data list defaults are not applied to aws_subnets.ids
 }
 
 run "boundary_denies_sealed_and_control_plane" {
@@ -45,7 +51,8 @@ run "boundary_denies_sealed_and_control_plane" {
   assert {
     condition = anytrue([
       for s in jsondecode(aws_iam_policy.agent_boundary.policy).Statement :
-      s.Sid == "DenyControlPlaneAndBilling" && s.Effect == "Deny" && contains(s.Action, "iam:*")
+      s.Effect == "Deny" && contains(flatten([s.Action]), "iam:*")
+      if try(s.Sid, "") == "DenyControlPlaneAndBilling"
     ])
     error_message = "boundary must deny iam:*"
   }
@@ -66,9 +73,9 @@ run "boundary_requires_tags_and_allow_listed_types" {
   assert {
     condition = anytrue([
       for s in jsondecode(aws_iam_policy.agent_boundary.policy).Statement :
-      s.Sid == "AllowRunInstancesTaggedAndAllowListed" &&
-      s.Condition.StringEquals["ec2:InstanceType"] == ["c7i.large"] &&
+      flatten([s.Condition.StringEquals["ec2:InstanceType"]]) == ["c7i.large"] &&
       contains(keys(s.Condition.StringEquals), "aws:RequestTag/ratchet:opt")
+      if try(s.Sid, "") == "AllowRunInstancesTaggedAndAllowListed"
     ])
     error_message = "RunInstances must require the opt tag and only allow-listed types"
   }

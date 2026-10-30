@@ -63,7 +63,7 @@ resource "aws_security_group" "bench" {
   revoke_rules_on_delete = true
 
   ingress {
-    description = "Load generator <-> target within the bench group"
+    description = "Load generator to target within the bench group"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -71,7 +71,7 @@ resource "aws_security_group" "bench" {
   }
 
   egress {
-    description = "Load generator <-> target within the bench group"
+    description = "Load generator to target within the bench group"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
