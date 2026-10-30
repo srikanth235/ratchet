@@ -12,6 +12,7 @@ import type {
 import { BenchAbortedError, BenchError } from './errors.js';
 import { runProcess } from './exec.js';
 import type { BenchLog } from './log.js';
+import { currentNodeRuntime, withNodeOnPath, type NodeRuntimeInfo } from './node-path.js';
 import { applyOverlay, restoreProtected } from './overlay.js';
 import {
   DEFAULT_TIMEOUTS,
@@ -37,6 +38,12 @@ export interface LocalBenchRunnerOptions {
   timeouts?: Partial<StepTimeouts>;
   /** Extra environment for every step (merged over `process.env`). */
   env?: Record<string, string>;
+  /**
+   * Runtime that runs this process, used to put a working `node` first on PATH for every step (inside the
+   * packaged Electron app PATH has no node and `process.execPath` is the Electron binary; see node-path.ts).
+   * Default: the current process. `false` leaves PATH alone.
+   */
+  nodeRuntime?: NodeRuntimeInfo | false;
   /** Run command guardrails in the confirm phase too. Default false (they passed in the bench phase). */
   commandGuardrailsInConfirm?: boolean;
   /** Delete candidate files that match `protected` but are absent from bench.ref. Default true. */
@@ -154,6 +161,7 @@ class LocalExecutor implements PipelineExecutor {
     }
     this.log.section(spec.name);
     const env: Record<string, string> = { ...this.o.env, ...spec.env };
+    if (this.o.nodeRuntime !== false) Object.assign(env, withNodeOnPath(env, { runtime: this.o.nodeRuntime ?? currentNodeRuntime() }));
     if (spec.trace !== undefined) {
       env.RATCHET_TRACE = URL_LIKE.test(spec.trace) || isAbsolute(spec.trace) ? spec.trace : resolve(spec.trace);
     }

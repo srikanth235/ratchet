@@ -39,6 +39,9 @@ importers:
 
   packages/aws:
     dependencies:
+      '@aws-sdk/client-cost-explorer':
+        specifier: ^3.1160.0
+        version: 3.1160.0
       '@aws-sdk/client-ec2':
         specifier: ^3.1160.0
         version: 3.1160.0
@@ -76,6 +79,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@ratchet/aws':
+        specifier: workspace:*
+        version: link:../aws
       '@ratchet/core':
         specifier: workspace:*
         version: link:../core
@@ -241,6 +247,10 @@ packages:
 
   '@aws-sdk/checksums@3.1002.0':
     resolution: {integrity: sha512-JhnrBaQczTv0niJccOmIC6uRLVi7YCP85Yl7lhdnfyEjaqZBQ0GVtT5rILziQoGparp23bZS0fgUiE/bUR7g+A==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-cost-explorer@3.1160.0':
+    resolution: {integrity: sha512-VpVfEOqo4RRil5I+xosvpgresL0/RVA4rlic8E4fFhNjLwmYULL+NY7DFO4g8lRqWb+/rz0cUbAPVidc+3mFNQ==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/client-ec2@3.1160.0':
@@ -2888,6 +2898,17 @@ snapshots:
       '@aws-sdk/core': 3.979.0
       '@aws-sdk/types': 3.975.0
       '@smithy/core': 3.38.0
+      '@smithy/types': 4.19.0
+      tslib: 2.8.1
+
+  '@aws-sdk/client-cost-explorer@3.1160.0':
+    dependencies:
+      '@aws-sdk/core': 3.979.0
+      '@aws-sdk/credential-provider-node': 3.972.91
+      '@aws-sdk/types': 3.975.0
+      '@smithy/core': 3.38.0
+      '@smithy/fetch-http-handler': 5.8.0
+      '@smithy/node-http-handler': 4.14.0
       '@smithy/types': 4.19.0
       tslib: 2.8.1
 

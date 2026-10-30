@@ -2,6 +2,7 @@ import type {
   ArtifactStore,
   BenchRunner,
   CloudCompute,
+  CostReconciler,
   GitHost,
   PriceBook,
   RunnerControl,
@@ -19,4 +20,6 @@ export interface EnginePorts {
   git: GitHost | ((repoUrl: string) => GitHost);
   runners: RunnerControl;
   bench: BenchRunner;
+  /** Billing truth for the cost estimate (Cost Explorer). Optional: without it `reconcileCosts` reports it is unavailable. */
+  costs?: CostReconciler;
 }

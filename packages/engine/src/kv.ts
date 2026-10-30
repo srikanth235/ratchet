@@ -74,6 +74,7 @@ export const K = {
   baseSha: (opt: string) => `opt:${opt}:base_sha`,
   pr: (opt: string) => `opt:${opt}:pr_url`,
   teardown: (opt: string) => `opt:${opt}:teardown_report`,
+  reconcile: (opt: string) => `opt:${opt}:cost_reconcile`,
   cursor: (agent: string) => `agent:${agent}:cursor`,
   identity: (agent: string) => `agent:${agent}:identity`,
   secrets: (agent: string) => `agent:${agent}:secret_refs`,

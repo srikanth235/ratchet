@@ -1,4 +1,4 @@
-import { openLedger, type AgentKind, type Ledger } from '@ratchet/core';
+import { openLedger, type AgentKind, type CostReconciler, type Ledger } from '@ratchet/core';
 import { Engine } from '../engine.js';
 import type { EngineSettings } from '../settings.js';
 import {
@@ -73,6 +73,8 @@ export interface HarnessOptions {
   hourly?: number;
   settings?: EngineSettings;
   configYaml?: string;
+  /** Billing source for `reconcileCosts` (omitted: the engine has none). */
+  costs?: CostReconciler;
 }
 
 export function makeHarness(opts: HarnessOptions = {}): Harness {
@@ -98,7 +100,7 @@ export function makeHarness(opts: HarnessOptions = {}): Harness {
       ledger,
       mode: 'simulation',
       clock,
-      ports: { sandbox: new FakeSandbox(), compute, prices, artifacts, git, runners, bench },
+      ports: { sandbox: new FakeSandbox(), compute, prices, artifacts, git, runners, bench, ...(opts.costs ? { costs: opts.costs } : {}) },
       settings,
     });
     e.subscribe((ev) => events.push(ev));

@@ -8,6 +8,7 @@ export type EngineErrorCode =
   | 'no_verified'
   | 'orphans'
   | 'teardown_incomplete'
+  | 'unavailable'
   | 'aborted';
 
 export class EngineError extends Error {
