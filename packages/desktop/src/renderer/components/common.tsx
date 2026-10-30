@@ -1,17 +1,81 @@
 import type { ReactNode } from 'react';
-import { Eyebrow } from '@ratchet/ui';
+import { Eyebrow, Pill, StatusPill } from '@ratchet/ui';
+import type { OptimizationDetail } from '../../shared/types';
 import { useNav, useSnapshot } from '../data';
+import { fmtDuration } from '../format';
+import type { NavId } from '../nav';
 
-export function PageHeader({ title, sub, actions }: { title: string; sub?: ReactNode; actions?: ReactNode }) {
+export interface PageHeaderProps {
+  title: string;
+  /** Breadcrumb / section label above the title. */
+  eyebrow?: ReactNode;
+  /** Smaller (44px) title, used by the per-optimization screens. */
+  compact?: boolean;
+  /** Pill next to the title. */
+  badge?: ReactNode;
+  sub?: ReactNode;
+  actions?: ReactNode;
+  tabs?: ReactNode;
+}
+
+export function PageHeader({ title, eyebrow, compact, badge, sub, actions, tabs }: PageHeaderProps) {
   return (
     <header className="page-header">
-      <div>
-        <h1 className="page-title">{title}</h1>
-        {sub && <p className="page-sub">{sub}</p>}
+      <div className="page-header__row">
+        <div className="page-header__titles">
+          {eyebrow && <span className="rt-eyebrow page-eyebrow">{eyebrow}</span>}
+          <div className="page-header__title-row">
+            <h1 className={`page-title${compact ? ' page-title--sm' : ''}`}>{title}</h1>
+            {badge}
+          </div>
+          {sub && <p className="page-sub">{sub}</p>}
+        </div>
+        {actions && <div className="page-actions">{actions}</div>}
       </div>
-      {actions && <div className="page-actions">{actions}</div>}
+      {tabs}
     </header>
   );
+}
+
+/** `Optimizations / acme/search-service` */
+export function Crumbs({ repo }: { repo?: string }) {
+  const { go } = useNav();
+  return (
+    <>
+      <button type="button" className="crumb" onClick={() => go('optimizations')}>Optimizations</button>
+      <span aria-hidden="true">/</span>
+      {repo ? <span className="mono">{repo}</span> : <span>New</span>}
+    </>
+  );
+}
+
+const TABS: { id: NavId; label: string }[] = [
+  { id: 'agents', label: 'Agents' },
+  { id: 'benchmarks', label: 'Benchmark history' },
+  { id: 'result', label: 'Result' },
+];
+
+/** Per-optimization tab bar (Agents / Benchmark history / Result). */
+export function OptTabs({ current }: { current: NavId }) {
+  const { go } = useNav();
+  return (
+    <div className="tabs" role="tablist" aria-label="Optimization views">
+      {TABS.map((t) => (
+        <button key={t.id} type="button" role="tab" aria-selected={t.id === current} className={`tab${t.id === current ? ' tab--on' : ''}`} onClick={() => go(t.id)}>
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The status pill of a per-optimization header: `Live · 3h 10m of 8h` while running, the status otherwise. */
+export function StateBadge({ detail }: { detail: OptimizationDetail }) {
+  const s = detail.summary.status;
+  if (s === 'running' || s === 'baselining') {
+    return <Pill tone="brass" dot live large>{s === 'baselining' ? 'Baselining' : 'Live'} · {fmtDuration(detail.elapsedS)} of {fmtDuration(detail.timeLimitS)}</Pill>;
+  }
+  return <StatusPill status={s} large />;
 }
 
 export function ErrorNote({ error }: { error: string | null }) {
@@ -36,7 +100,7 @@ export function OptimizationPicker() {
   return (
     <label className="picker">
       <span className="sr-only">Optimization</span>
-      <select value={selectedId ?? ''} onChange={(e) => select(e.target.value || null)} aria-label="Optimization">
+      <select value={selectedId ?? snap.data?.featuredId ?? ''} onChange={(e) => select(e.target.value || null)} aria-label="Optimization">
         {rows.map((o) => (
           <option key={o.id} value={o.id}>{o.name}</option>
         ))}

@@ -36,3 +36,20 @@ export function fmtClock(at: number): string {
   const d = new Date(at);
   return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
 }
+
+/** `−28%` / `+43%`: signed gain with the metric's direction (a lower-is-better win shows a minus). */
+export function gainLabel(o: Pick<Optimization, 'baseline' | 'best' | 'direction'>, digits = 0): string | null {
+  const g = gainPct(o);
+  if (g === null) return null;
+  const sign = g === 0 ? '' : o.direction === 'lower' ? (g > 0 ? '−' : '+') : g > 0 ? '+' : '−';
+  return `${sign}${Math.abs(g).toFixed(digits)}%`;
+}
+
+/** Short icon label for a metric key: `http_req_duration.p95` → `p95`, `events_per_s` → `eps`. */
+export function metricGlyph(metric: string): string {
+  const parts = metric.split(/[._\-\s]+/).filter(Boolean);
+  const last = parts.at(-1) ?? metric;
+  if (last.length <= 3 && (parts.length === 1 || /\d/.test(last))) return last.toLowerCase();
+  const initials = parts.map((p) => p[0]).join('').toLowerCase();
+  return initials.length >= 2 ? initials.slice(0, 3) : last.slice(0, 3).toLowerCase();
+}

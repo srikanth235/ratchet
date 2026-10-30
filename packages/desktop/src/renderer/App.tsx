@@ -26,7 +26,7 @@ export function App({ initialRoute = 'optimizations' }: { initialRoute?: NavId }
       <SnapshotContext.Provider value={snapshot}>
         <div className="shell">
           <Sidebar />
-          <main className="content">
+          <main className="content" data-screen={route}>
             {route === 'optimizations' && <Optimizations />}
             {route === 'new' && <NewOptimization />}
             {route === 'agents' && <LiveAgents />}

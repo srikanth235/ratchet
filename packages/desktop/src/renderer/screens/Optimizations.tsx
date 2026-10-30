@@ -1,28 +1,41 @@
-import { AgentAvatar, Button, Card, Eyebrow, StairChart, StatusPill } from '@ratchet/ui';
+import { AgentAvatar, Button, Card, StairChart, StatusPill, agentColor, agentLabel } from '@ratchet/ui';
 import { ActivityFeed } from '../components/ActivityFeed';
-import { ErrorNote, Empty, PageHeader } from '../components/common';
+import { Empty, ErrorNote, PageHeader } from '../components/common';
 import { Icon } from '../components/icons';
 import { KpiCard } from '../components/KpiCard';
 import { OptimizationsTable } from '../components/OptimizationsTable';
-import { useNav, useSnapshot } from '../data';
-import { fmtMetric } from '../format';
+import { forOptimization, useNav, useQuery, useSnapshot } from '../data';
+import { fmtDuration, fmtNum, gainLabel } from '../format';
 
 export function Optimizations() {
   const { data, error } = useSnapshot();
   const { go, open } = useNav();
+  const featured = data?.optimizations.find((o) => o.id === data.featuredId);
+  const detail = useQuery(() => window.ratchet.getOptimization(featured!.id), [featured?.id], {
+    skip: !featured, relevant: forOptimization(featured?.id ?? null), intervalMs: 10_000,
+  });
 
   if (error && !data) return <ErrorNote error={`Failed to load optimizations: ${error}`} />;
   if (!data) return <p className="muted">Loading…</p>;
 
-  const featured = data.optimizations.find((o) => o.id === data.featuredId);
   const series = data.featuredSeries;
+  const repos = new Set(data.optimizations.map((o) => o.repo)).size;
+  const d = detail.data;
+  const live = featured && (featured.status === 'running' || featured.status === 'baselining');
+  const evals = featured?.candidateCount ?? 0;
+  const blocked = d?.agents.reduce((n, a) => n + a.stats.blocked, 0) ?? 0;
+  const rate = d && d.elapsedS > 60 ? (evals / d.elapsedS) * 3600 : null;
+  const locks = series ? Math.max(0, series.steps.length - 1) : 0;
+  const gain = featured ? gainLabel(featured, 1) : null;
+  const spendPct = featured && featured.budgetUsd > 0 ? Math.min(100, (featured.spendUsd / featured.budgetUsd) * 100) : 0;
 
   return (
     <>
       <PageHeader
+        eyebrow={<span>Local workspace · {repos} repo{repos === 1 ? '' : 's'}</span>}
         title="Optimizations"
-        sub="Agents ratchet your benchmarks down — only verified wins ship."
-        actions={<Button onClick={() => go('new')}><Icon name="plus" size={16} /> New optimization</Button>}
+        sub={<>Agents propose changes. The benchmark decides. <span className="tagline">Only verified wins ratchet forward.</span></>}
+        actions={<Button onClick={() => go('new')}><Icon name="plus" size={13} /> New optimization</Button>}
       />
 
       <section className="kpis" aria-label="Key metrics">
@@ -34,31 +47,73 @@ export function Optimizations() {
       ) : (
         <section className="grid-main">
           {featured && (
-            <Card className="featured">
+            <Card className="featured" data-testid="featured">
               <div className="featured__head">
-                <div>
-                  <Eyebrow>{featured.status === 'running' || featured.status === 'baselining' ? 'Live optimization' : 'Latest optimization'}</Eyebrow>
+                <div className="featured__id">
+                  {live ? (
+                    <span className="featured__eyebrow">
+                      <span className="halo-dot" aria-hidden="true" />
+                      Live{d ? ` · ${fmtDuration(d.elapsedS)} of ${fmtDuration(d.timeLimitS)}` : ''}
+                    </span>
+                  ) : (
+                    <span className="featured__eyebrow"><StatusPill status={featured.status} /></span>
+                  )}
                   <h2 className="featured__title">{featured.name}</h2>
-                  <div className="mono featured__repo">{featured.repo}</div>
+                  <span className="mono featured__repo">{featured.repo} · {featured.metric}</span>
                 </div>
-                <StatusPill status={featured.status} />
+                <div className="featured__side">
+                  <span className="avatars">{featured.agents.map((a, i) => <AgentAvatar key={a} agent={a} size={28} ring overlap={i ? 8 : 0} />)}</span>
+                  <button type="button" className="open-btn" onClick={() => open(featured.id, live ? 'agents' : 'result')}>Open <Icon name="chevron" size={12} /></button>
+                </div>
               </div>
+
               <div className="featured__hero">
-                <span className="hero-num hero-num--lg">{fmtMetric(featured.baseline, featured.unit)}</span>
-                <span className="arrow">→</span>
-                <span className="hero-num hero-num--lg brass">{fmtMetric(featured.best, featured.unit)}</span>
-                {featured.gainPct !== null && (
-                  <span className="mono gain">{featured.gainPct >= 0 ? (featured.direction === 'lower' ? '−' : '+') : ''}{Math.abs(featured.gainPct).toFixed(0)}%</span>
-                )}
-                <span className="avatars">{featured.agents.map((a) => <AgentAvatar key={a} agent={a} />)}</span>
+                <div className="hero-big">
+                  <span className="serif" data-testid="featured-best">{featured.best === null ? '—' : fmtNum(featured.best)}</span>
+                  {featured.unit && <span className="hero-big__unit">{featured.unit}</span>}
+                </div>
+                <div className="hero-meta">
+                  {gain && <span className="mono gain">{gain} vs baseline</span>}
+                  <span className="hero-meta__sub">
+                    {featured.baseline !== null ? `baseline ${fmtNum(featured.baseline)} ${featured.unit}`.trim() : 'baseline pending'}
+                    {series?.noiseFloor != null ? ` · noise ±${fmtNum(series.noiseFloor)} ${featured.unit}`.trimEnd() : ''}
+                    {` · ${locks} lock${locks === 1 ? '' : 's'}`}
+                  </span>
+                </div>
+                <div className="chart-legend">
+                  <span><i className="legend-line" aria-hidden="true" />Best verified</span>
+                  {featured.agents.map((a) => (
+                    <span key={a}><i className="legend-dot" style={{ background: agentColor(a) }} aria-hidden="true" />{agentLabel(a)}</span>
+                  ))}
+                </div>
               </div>
+
               {series && series.steps.length > 0 && (
                 <StairChart steps={series.steps} points={series.points} direction={series.direction} unit={series.unit} tMax={series.tMax}
-                  noiseBand={series.baseline !== null && series.noiseFloor !== null ? { center: series.baseline, halfWidth: series.noiseFloor } : undefined} />
+                  {...(live && d ? { limit: d.timeLimitS / 60 } : {})} />
               )}
-              <div className="featured__links">
-                <button type="button" className="link-btn" onClick={() => open(featured.id, 'agents')}>Live agents →</button>
-                <button type="button" className="link-btn" onClick={() => open(featured.id, 'benchmarks')}>Benchmark history →</button>
+
+              <div className="strip">
+                <div className="strip__cell">
+                  <div className="rt-eyebrow">Spend</div>
+                  <div className="strip__value mono">${featured.spendUsd.toFixed(0)} <span className="faint">/ {featured.budgetUsd.toFixed(0)}</span></div>
+                  <div className="track" aria-hidden="true"><span style={{ width: `${spendPct}%` }} /></div>
+                </div>
+                <div className="strip__cell">
+                  <div className="rt-eyebrow">Evals</div>
+                  <div className="strip__value mono">{evals}</div>
+                  <div className="strip__foot">{rate !== null ? `≈ ${rate.toFixed(1)} / hour` : 'warming up'}</div>
+                </div>
+                <div className="strip__cell">
+                  <div className="rt-eyebrow">Verified</div>
+                  <div className="strip__value mono gain">{featured.verifiedWins}</div>
+                  <div className="strip__foot">of {evals} evals</div>
+                </div>
+                <div className="strip__cell">
+                  <div className="rt-eyebrow">Blocked</div>
+                  <div className="strip__value mono" style={{ color: 'var(--rt-color-rose)' }}>{blocked}</div>
+                  <div className="strip__foot">by guardrails</div>
+                </div>
               </div>
             </Card>
           )}
