@@ -24,6 +24,8 @@ import {
   StaticPriceBook,
   TofuSandboxProvider,
   awsComputeConfigFromOutputs,
+  regionForOptimization,
+  resolveImageRefs,
   type AwsSandboxOutputs,
   type ProcessRunner,
 } from '@ratchet/aws';
@@ -44,9 +46,17 @@ export interface LiveOptions {
   /** `owner/name` of the repository to optimize. Without it (or the token) git, bench and runners are unready. */
   githubRepo?: string | undefined;
   githubToken?: string | undefined;
-  /** AMIs built for agent runners and bench instances. */
+  /**
+   * AMI override for agent runners and bench instances ("Advanced", development only). Normally left unset: the AMIs are found by
+   * tag (`ratchet:image=runner|bench` + `ratchet:image_version` matching `appVersion`) by `resolveLiveImages` /
+   * `createLiveRuntimeFor`, so the user never types an AMI id.
+   */
   runnerImageRef?: string | undefined;
   benchImageRef?: string | undefined;
+  /** The app version the published AMIs are matched against (`ratchet:image_version`). */
+  appVersion?: string | undefined;
+  /** The sandbox module is a custom one (`infra:` in ratchet.yaml): validate its outputs against infra/contract.md after apply. */
+  infraOverride?: boolean | undefined;
   /**
    * Candidate setup run on the bench before the guardrails, e.g. `pnpm install --frozen-lockfile && pnpm build`. The bench has no
    * network: when this is set, dependencies come from a snapshot of the lockfile at `evaluator.ref` that a separate instance with
@@ -121,6 +131,7 @@ export function createLiveRuntime(opts: LiveOptions): LiveRuntime {
     stateRoot: opts.stateRoot,
     env: { ...(opts.awsProfile ? { AWS_PROFILE: opts.awsProfile } : {}), ...opts.awsEnv },
     ...(opts.tofuRunner ? { runner: opts.tofuRunner } : {}),
+    ...(opts.infraOverride ? { validateContract: true } : {}),
     // Teardown guard: runtime agent roles must be gone before `tofu destroy`. No outputs = nothing was ever launched.
     listRuntimeAgentRoles: async () =>
       out ? (await compute.listTagged()).filter((i) => i.role === 'agent_runner' && i.state !== 'terminated').map((i) => i.id) : [],
@@ -170,4 +181,34 @@ export function createLiveRuntime(opts: LiveOptions): LiveRuntime {
       await engine.close();
     },
   };
+}
+
+/**
+ * Fills `runnerImageRef` / `benchImageRef` from the published AMIs (EC2 DescribeImages by tag and `appVersion`) when they are not
+ * given. An explicit ref always wins. Without `appVersion` nothing is looked up (the refs stay as given, and `missing` says so).
+ * Lookup errors are `ImageLookupError`s that say which image to build.
+ */
+export async function resolveLiveImages(opts: LiveOptions, lookup: Partial<Parameters<typeof resolveImageRefs>[0]> = {}): Promise<LiveOptions> {
+  if (!opts.appVersion || (opts.runnerImageRef && opts.benchImageRef)) return opts;
+  const need = (['runner', 'bench'] as const).filter((k) => !(k === 'runner' ? opts.runnerImageRef : opts.benchImageRef));
+  const r = await resolveImageRefs({
+    appVersion: opts.appVersion,
+    region: opts.region,
+    need,
+    profile: opts.awsProfile,
+    ...lookup,
+  });
+  return { ...opts, runnerImageRef: opts.runnerImageRef ?? r.runner, benchImageRef: opts.benchImageRef ?? r.bench };
+}
+
+/**
+ * The live runtime for ONE optimization: the region comes from the repo (`environment.region` in ratchet.yaml, else the settings'
+ * region, else us-east-1) and the AMIs are found by tag in that region. `config` is the parsed ratchet.yaml (read defensively).
+ */
+export async function createLiveRuntimeFor(opts: Omit<LiveOptions, 'region'> & { region?: string | undefined }, config: unknown, lookup?: Parameters<typeof resolveLiveImages>[1]): Promise<LiveRuntime> {
+  const region = regionForOptimization(config, opts.region);
+  const withRegion: LiveOptions = { ...opts, region };
+  // Only look images up once a sandbox exists in that region: before the first apply there is nothing to launch.
+  const resolved = opts.sandbox ? await resolveLiveImages(withRegion, lookup) : withRegion;
+  return createLiveRuntime(resolved);
 }
