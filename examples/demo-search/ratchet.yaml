@@ -1,0 +1,24 @@
+version: 0
+objective:
+  metric: http_req_duration.p95   # key in the benchmark's JSON output (ms)
+  direction: minimize
+  min_gain: 0.03                  # 3%
+bench:
+  ref: ratchet/bench              # protected ref holding the trusted bench
+  run: k6 run bench/k6/search.js  # writes bench-result.json (RESULT_FILE); local fallback: node dist/bench/local.js
+  repeats: 5                      # also used for the baseline noise floor
+  hardware: c7i.2xlarge           # pinned, dedicated host
+  confirm_trace: s3://sealed/demo-search-trace.json   # bench/traces/generate.ts --seed <hidden>
+guardrails:
+  - run: pnpm test:unit
+  - run: pnpm test:contract
+  - error_rate: "< 0.001"
+  - peak_rss: "< 1.2x"
+protected:                        # changes here block a candidate
+  - bench/**
+  - ratchet.yaml
+  - tests/contract/**
+  - SOLUTIONS.md
+agent:
+  instructions: RATCHET.md        # brief injected into every session
+  allowed_instance_types: [c7i.2xlarge, c7i.xlarge, m7i.large]
