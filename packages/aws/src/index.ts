@@ -8,3 +8,5 @@ export * from './pricing.js';
 export * from './artifacts.js';
 export * from './cost.js';
 export * from './reaper.js';
+export * from './cost-explorer.js';
+export * from './cost-explorer.mock.js';

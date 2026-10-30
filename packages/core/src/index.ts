@@ -7,3 +7,4 @@ export * from './protected.js';
 export * from './value.js';
 export * from './ledger/index.js';
 export type * from './ports/index.js';
+export * from './cost/reconcile.js';

@@ -6,7 +6,7 @@
  */
 import type { RatchetConfig } from '../config/schema.js';
 import type { GuardrailResult } from '../config/guardrails.js';
-import type { AgentKind, CandidateVerdict } from '../ledger/schema.js';
+import type { AgentKind, CandidateVerdict, SpendCategory } from '../ledger/schema.js';
 
 export type OptimizationId = string;
 export type AgentId = string;
@@ -134,6 +134,69 @@ export interface ArtifactStore {
   put(key: string, body: string | Uint8Array): Promise<void>;
   get(key: string): Promise<string | null>;
   list(prefix: string): Promise<string[]>;
+}
+
+// ---------------------------------------------------------------- cost reconciliation
+
+/** What to ask the billing system about: everything tagged to one optimization within a time window. */
+export interface CostActualsQuery {
+  optimizationId: OptimizationId;
+  /** Window start (epoch ms); implementations round down to their billing granularity (UTC day). */
+  startMs: number;
+  /** Window end (epoch ms); implementations round up to their billing granularity. */
+  endMs: number;
+}
+
+/** Billed cost of the tagged resources, mapped to ledger categories. */
+export interface CostActuals {
+  /** USD per ledger category (a category missing from the billing data is absent, not 0). */
+  byCategory: Partial<Record<SpendCategory, number>>;
+  /** Number of non-empty billing groups that came back; 0 means no billing data at all (not available yet, or tags not activated). */
+  groups: number;
+  /** False while the billing system flags the window as still being estimated / incomplete. */
+  complete: boolean;
+  /** Why `complete` is false, or any caveat worth showing the user. */
+  note?: string;
+}
+
+/**
+ * Billing truth for the cost meter's estimate (docs/V0_ARCHITECTURE.md §7 "Reconcile"). The AWS
+ * implementation queries Cost Explorer by cost-allocation tag (~24 h lag); the mock returns canned
+ * numbers. `reconcileSpend` (core) turns the difference into ledger correction rows.
+ */
+export interface CostReconciler {
+  actuals(query: CostActualsQuery): Promise<CostActuals>;
+}
+
+/** One category of a reconcile run. */
+export interface CostReconcileLine {
+  category: SpendCategory;
+  /** Ledger total for the category before this run (estimates plus earlier corrections). */
+  ledgerUsd: number;
+  /** Billed amount for the category. */
+  actualUsd: number;
+  /** `actualUsd - ledgerUsd`; the correction row's amount when `written`. */
+  deltaUsd: number;
+  written: boolean;
+}
+
+/**
+ * - `reconciled`: at least one correction row was written.
+ * - `unchanged`: billing data is complete and already matches the ledger (re-runs land here).
+ * - `pending`: billing data is incomplete or missing; nothing was written. Try again after ~24 h.
+ */
+export type CostReconcileStatus = 'reconciled' | 'unchanged' | 'pending';
+
+export interface CostReconcileReport {
+  optimizationId: OptimizationId;
+  at: number;
+  status: CostReconcileStatus;
+  /** Set when `status` is `pending`. */
+  reason?: string;
+  window: { startMs: number; endMs: number };
+  lines: CostReconcileLine[];
+  /** Sum of the correction rows written by this run. */
+  writtenUsd: number;
 }
 
 // ---------------------------------------------------------------- git
@@ -309,6 +372,12 @@ export interface EngineApi {
   messageAgent(agentId: AgentId, text: string): Promise<void>;
   openPullRequest(id: OptimizationId): Promise<{ url: string }>;
   teardown(id: OptimizationId): Promise<void>;
+  /**
+   * Compare the ledger's estimated infrastructure spend with the billing data (Cost Explorer) and
+   * record correction rows. Idempotent; reports `pending` while billing data lags. Optional so
+   * existing implementations keep compiling.
+   */
+  reconcileCosts?(id: OptimizationId): Promise<CostReconcileReport>;
   subscribe(listener: (e: EngineEvent) => void): () => void;
 }
 
