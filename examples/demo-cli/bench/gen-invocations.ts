@@ -38,8 +38,8 @@ export function generateMix(seed: number, tasks = BENCH_SPEC.tasks): Mix {
   const search = (): Invocation => ({ args: ['search', ...(rng() < 0.5 ? [word()] : [word(), word()]), '--limit', String(int(3, 20))] });
   const exportJob = (): Invocation => {
     const format = pick(rng, ['csv', 'json', 'md']);
-    const args = ['export', '--format', format, '--limit', String(int(40, 400))];
-    const status = some(STATUSES, 0.6);
+    const args = ['export', '--format', format, '--limit', String(int(1500, 3000))];
+    const status = some(STATUSES, 0.15);
     if (status) args.push('--status', status);
     return { args };
   };

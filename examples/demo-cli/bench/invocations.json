@@ -42,48 +42,44 @@
     "--format",
     "json",
     "--limit",
-    "129",
-    "--status",
-    "doing"
+    "1871"
    ]
   },
   {
    "args": [
     "due",
     "--within",
-    "6",
+    "31",
     "--tz",
-    "Europe/London"
+    "America/Sao_Paulo"
    ]
   },
   {
    "args": [
     "list",
-    "--status",
-    "todo",
     "--assignee",
-    "omar.haddad",
+    "amara.okafor",
+    "--label",
+    "ux",
     "--sort",
-    "estimate",
+    "due",
     "--limit",
-    "15"
+    "33"
    ]
   },
   {
    "args": [
     "search",
-    "rate",
+    "customers",
     "--limit",
-    "12"
+    "14"
    ]
   },
   {
    "args": [
     "due",
     "--within",
-    "46",
-    "--tz",
-    "America/Los_Angeles"
+    "34"
    ]
   },
   {
@@ -95,7 +91,9 @@
   },
   {
    "args": [
-    "verison"
+    "verison",
+    "--limit",
+    "5"
    ],
    "expect": 2
   }
