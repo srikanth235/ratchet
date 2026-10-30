@@ -1,0 +1,644 @@
+import {
+  DescribeInstancesCommand,
+  EC2Client,
+  RunInstancesCommand,
+  TerminateInstancesCommand,
+  type Instance,
+  type RunInstancesCommandInput,
+  type Tag,
+} from '@aws-sdk/client-ec2';
+import {
+  AddRoleToInstanceProfileCommand,
+  CreateInstanceProfileCommand,
+  CreateRoleCommand,
+  DeleteInstanceProfileCommand,
+  DeleteRoleCommand,
+  DeleteRolePolicyCommand,
+  DetachRolePolicyCommand,
+  IAMClient,
+  ListAttachedRolePoliciesCommand,
+  ListRolePoliciesCommand,
+  ListRolesCommand,
+  PutRolePolicyCommand,
+  RemoveRoleFromInstanceProfileCommand,
+} from '@aws-sdk/client-iam';
+import {
+  AddTagsToResourceCommand,
+  DeleteParametersCommand,
+  GetCommandInvocationCommand,
+  GetParametersByPathCommand,
+  PutParameterCommand,
+  SendCommandCommand,
+  SSMClient,
+} from '@aws-sdk/client-ssm';
+import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts';
+import type {
+  AgentId,
+  AgentIdentity,
+  BenchLaunchSpec,
+  CloudCompute,
+  Clock,
+  InstanceInfo,
+  InstanceRole,
+  OptimizationId,
+  RemoteCommand,
+  RemoteCommandResult,
+  RunnerLaunchSpec,
+  SecretRef,
+} from '@ratchet/core';
+import {
+  DEFAULT_AGENT_ROLE_PATH,
+  TAG_AGENT,
+  TAG_OPT,
+  TAG_PURPOSE,
+  TAG_ROLE,
+  TAG_SANDBOX,
+  arnName,
+  assertValidId,
+  boundedName,
+  errName,
+  shQuote,
+  systemClock,
+} from '../util.js';
+import type { AwsSandboxOutputs } from '../sandbox/tofu.js';
+
+export const KILL_SWITCH_POLICY_NAME = 'ratchet-kill-switch';
+export const AGENT_POLICY_NAME = 'ratchet-agent-permissions';
+
+export interface AwsComputeConfig {
+  sandboxId: string;
+  region: string;
+  /** `agent_boundary_ref` output. */
+  agentBoundaryArn: string;
+  /** `agent_role_path` output, e.g. `/ratchet/agent/`. */
+  agentRolePath: string;
+  subnetId: string;
+  agentRunnerSecurityGroupId: string;
+  benchSecurityGroupId: string;
+  /** Bench instance profile: ARN or name (`eval_identity_ref`). */
+  benchInstanceProfile: string;
+  artifactsBucket: string;
+  /** Local self-destruct for runners/bench (`shutdown` + terminate-on-shutdown). Default 2. */
+  maxInstanceLifetimeHours?: number;
+}
+
+export function awsComputeConfigFromOutputs(o: AwsSandboxOutputs, sandboxId: string): AwsComputeConfig {
+  return {
+    sandboxId,
+    region: o.region,
+    agentBoundaryArn: o.agentBoundaryRef,
+    agentRolePath: o.agentRolePath,
+    subnetId: o.network.subnetId,
+    agentRunnerSecurityGroupId: o.network.agentRunnerSecurityGroupId,
+    benchSecurityGroupId: o.network.benchSecurityGroupId,
+    benchInstanceProfile: o.evalIdentity.instanceProfileArn,
+    artifactsBucket: o.artifactsBucket,
+    maxInstanceLifetimeHours: o.limits.maxInstanceLifetimeHours,
+  };
+}
+
+export interface AwsClients {
+  ec2: EC2Client;
+  iam: IAMClient;
+  ssm: SSMClient;
+  sts: STSClient;
+}
+
+export interface AwsCloudComputeOptions {
+  clients?: Partial<AwsClients>;
+  clock?: Clock;
+  /** SSM poll interval for runCommand. Default 2000. */
+  pollIntervalMs?: number;
+  /** Retries for IAM eventual consistency on RunInstances. Default 6. */
+  iamPropagationRetries?: number;
+}
+
+const TERMINAL_SSM = new Set(['Success', 'Failed', 'Cancelled', 'TimedOut', 'DeliveryTimedOut', 'ExecutionTimedOut', 'Undeliverable', 'Terminated']);
+const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const SECRET_NAME = /^[A-Za-z0-9_.-]+$/;
+
+export class AwsCloudCompute implements CloudCompute {
+  readonly clients: AwsClients;
+  private readonly clock: Clock;
+  private account?: { accountId: string; partition: string };
+
+  constructor(
+    private readonly cfg: AwsComputeConfig,
+    private readonly opts: AwsCloudComputeOptions = {},
+  ) {
+    const region = cfg.region;
+    this.clients = {
+      ec2: opts.clients?.ec2 ?? new EC2Client({ region }),
+      iam: opts.clients?.iam ?? new IAMClient({ region }),
+      ssm: opts.clients?.ssm ?? new SSMClient({ region }),
+      sts: opts.clients?.sts ?? new STSClient({ region }),
+    };
+    this.clock = opts.clock ?? systemClock;
+    if (!cfg.agentRolePath.startsWith('/') || !cfg.agentRolePath.endsWith('/')) {
+      throw new Error(`agentRolePath must start and end with "/": ${cfg.agentRolePath}`);
+    }
+  }
+
+  /** Verify credentials; optionally that they belong to the expected (dedicated) account. */
+  async preflight(expectedAccountId?: string): Promise<{ accountId: string; arn: string }> {
+    const r = await this.clients.sts.send(new GetCallerIdentityCommand({}));
+    const accountId = r.Account ?? '';
+    if (expectedAccountId && accountId !== expectedAccountId) {
+      throw new Error(`credentials are for account ${accountId}, expected sandbox account ${expectedAccountId}`);
+    }
+    return { accountId, arn: r.Arn ?? '' };
+  }
+
+  private async acct(): Promise<{ accountId: string; partition: string }> {
+    if (!this.account) {
+      const r = await this.clients.sts.send(new GetCallerIdentityCommand({}));
+      const arn = r.Arn ?? '';
+      this.account = { accountId: r.Account ?? '', partition: arn.split(':')[1] || 'aws' };
+    }
+    return this.account;
+  }
+
+  // ---- identity -----------------------------------------------------------
+
+  async createAgentIdentity(optimizationId: OptimizationId, agentId: AgentId): Promise<AgentIdentity> {
+    assertValidId('optimization', optimizationId);
+    assertValidId('agent', agentId);
+    const { accountId, partition } = await this.acct();
+    const name = agentRoleName(optimizationId, agentId);
+    const tags = [
+      { Key: TAG_OPT, Value: optimizationId },
+      { Key: TAG_AGENT, Value: agentId },
+      { Key: TAG_SANDBOX, Value: this.cfg.sandboxId },
+    ];
+    const { iam } = this.clients;
+
+    const role = await tolerate('EntityAlreadyExists', async () => {
+      const r = await iam.send(
+        new CreateRoleCommand({
+          RoleName: name,
+          Path: this.cfg.agentRolePath,
+          AssumeRolePolicyDocument: JSON.stringify({
+            Version: '2012-10-17',
+            Statement: [
+              {
+                Effect: 'Allow',
+                Principal: { Service: 'ec2.amazonaws.com' },
+                Action: 'sts:AssumeRole',
+                Condition: { StringEquals: { 'aws:SourceAccount': accountId } },
+              },
+            ],
+          }),
+          PermissionsBoundary: this.cfg.agentBoundaryArn,
+          Tags: tags,
+          MaxSessionDuration: 3600,
+          Description: `Ratchet agent ${agentId} of optimization ${optimizationId}`,
+        }),
+      );
+      return r.Role?.Arn;
+    });
+    const roleArn = role ?? `arn:${partition}:iam::${accountId}:role${this.cfg.agentRolePath}${name}`;
+
+    await iam.send(
+      new PutRolePolicyCommand({
+        RoleName: name,
+        PolicyName: AGENT_POLICY_NAME,
+        PolicyDocument: JSON.stringify(this.agentIdentityPolicy(partition, accountId, optimizationId, agentId)),
+      }),
+    );
+
+    const profile = await tolerate('EntityAlreadyExists', async () => {
+      const r = await iam.send(
+        new CreateInstanceProfileCommand({ InstanceProfileName: name, Path: this.cfg.agentRolePath, Tags: tags }),
+      );
+      return r.InstanceProfile?.Arn;
+    });
+    await tolerate('LimitExceeded', () =>
+      iam.send(new AddRoleToInstanceProfileCommand({ InstanceProfileName: name, RoleName: name })).then(() => undefined),
+    );
+    const profileArn = profile ?? `arn:${partition}:iam::${accountId}:instance-profile${this.cfg.agentRolePath}${name}`;
+
+    return { optimizationId, agentId, roleRef: roleArn, instanceProfileRef: profileArn };
+  }
+
+  /** What the agent needs; the boundary caps it (effective = intersection). */
+  private agentIdentityPolicy(partition: string, account: string, opt: string, agent: string): object {
+    const region = this.cfg.region;
+    return {
+      Version: '2012-10-17',
+      Statement: [
+        {
+          Sid: 'Ec2',
+          Effect: 'Allow',
+          Action: ['ec2:RunInstances', 'ec2:CreateTags', 'ec2:StartInstances', 'ec2:StopInstances', 'ec2:TerminateInstances', 'ec2:Describe*'],
+          Resource: '*',
+        },
+        {
+          Sid: 'ArtifactObjects',
+          Effect: 'Allow',
+          Action: ['s3:GetObject', 's3:PutObject', 's3:AbortMultipartUpload', 's3:ListMultipartUploadParts'],
+          Resource: `arn:${partition}:s3:::${this.cfg.artifactsBucket}/artifacts/${opt}/${agent}/*`,
+        },
+        {
+          Sid: 'ArtifactList',
+          Effect: 'Allow',
+          Action: 's3:ListBucket',
+          Resource: `arn:${partition}:s3:::${this.cfg.artifactsBucket}`,
+          Condition: { StringLike: { 's3:prefix': `artifacts/${opt}/${agent}/*` } },
+        },
+        {
+          Sid: 'OwnSecrets',
+          Effect: 'Allow',
+          Action: ['ssm:GetParameter', 'ssm:GetParameters'],
+          Resource: `arn:${partition}:ssm:${region}:${account}:parameter/ratchet/${opt}/${agent}/*`,
+        },
+        {
+          Sid: 'SsmManagedInstance',
+          Effect: 'Allow',
+          Action: [
+            'ssm:UpdateInstanceInformation',
+            'ssmmessages:CreateControlChannel',
+            'ssmmessages:CreateDataChannel',
+            'ssmmessages:OpenControlChannel',
+            'ssmmessages:OpenDataChannel',
+            'ec2messages:AcknowledgeMessage',
+            'ec2messages:DeleteMessage',
+            'ec2messages:FailMessage',
+            'ec2messages:GetEndpoint',
+            'ec2messages:GetMessages',
+            'ec2messages:SendReply',
+          ],
+          Resource: '*',
+        },
+      ],
+    };
+  }
+
+  async revokeAgentIdentity(identity: AgentIdentity): Promise<void> {
+    await this.clients.iam.send(
+      new PutRolePolicyCommand({
+        RoleName: arnName(identity.roleRef),
+        PolicyName: KILL_SWITCH_POLICY_NAME,
+        PolicyDocument: JSON.stringify({
+          Version: '2012-10-17',
+          Statement: [{ Sid: 'KillSwitchDenyAll', Effect: 'Deny', Action: '*', Resource: '*' }],
+        }),
+      }),
+    );
+  }
+
+  /**
+   * Order matters: the role must leave its instance profile before either can
+   * be deleted, and a role cannot be deleted while inline/managed policies remain.
+   */
+  async deleteAgentIdentity(identity: AgentIdentity): Promise<void> {
+    const { iam } = this.clients;
+    const role = arnName(identity.roleRef);
+    const profile = arnName(identity.instanceProfileRef);
+    const ignoreMissing = (p: Promise<unknown>) => p.catch(ignoreCodes('NoSuchEntity'));
+
+    await ignoreMissing(iam.send(new RemoveRoleFromInstanceProfileCommand({ InstanceProfileName: profile, RoleName: role })));
+    await ignoreMissing(iam.send(new DeleteInstanceProfileCommand({ InstanceProfileName: profile })));
+
+    const inline = await iam.send(new ListRolePoliciesCommand({ RoleName: role })).catch(ignoreCodes('NoSuchEntity'));
+    for (const name of inline?.PolicyNames ?? []) {
+      await ignoreMissing(iam.send(new DeleteRolePolicyCommand({ RoleName: role, PolicyName: name })));
+    }
+    const attached = await iam.send(new ListAttachedRolePoliciesCommand({ RoleName: role })).catch(ignoreCodes('NoSuchEntity'));
+    for (const p of attached?.AttachedPolicies ?? []) {
+      await ignoreMissing(iam.send(new DetachRolePolicyCommand({ RoleName: role, PolicyArn: p.PolicyArn })));
+    }
+    await ignoreMissing(iam.send(new DeleteRoleCommand({ RoleName: role })));
+  }
+
+  // ---- secrets ------------------------------------------------------------
+
+  async putSecret(optimizationId: OptimizationId, agentId: AgentId, name: string, value: string): Promise<SecretRef> {
+    assertValidId('optimization', optimizationId);
+    assertValidId('agent', agentId);
+    if (!SECRET_NAME.test(name)) throw new Error(`invalid secret name ${JSON.stringify(name)}`);
+    const ref = `${secretPrefix(optimizationId, agentId)}${name}`;
+    const { ssm } = this.clients;
+    // PutParameter rejects Tags together with Overwrite, so tag separately.
+    await ssm.send(new PutParameterCommand({ Name: ref, Value: value, Type: 'SecureString', Overwrite: true }));
+    await ssm.send(
+      new AddTagsToResourceCommand({
+        ResourceType: 'Parameter',
+        ResourceId: ref,
+        Tags: [
+          { Key: TAG_OPT, Value: optimizationId },
+          { Key: TAG_AGENT, Value: agentId },
+        ],
+      }),
+    );
+    return { name, ref };
+  }
+
+  async deleteSecrets(optimizationId: OptimizationId, agentId: AgentId): Promise<void> {
+    assertValidId('optimization', optimizationId);
+    assertValidId('agent', agentId);
+    const { ssm } = this.clients;
+    const names: string[] = [];
+    let token: string | undefined;
+    do {
+      const r = await ssm.send(
+        new GetParametersByPathCommand({ Path: secretPrefix(optimizationId, agentId), Recursive: true, WithDecryption: false, NextToken: token }),
+      );
+      for (const p of r.Parameters ?? []) if (p.Name) names.push(p.Name);
+      token = r.NextToken;
+    } while (token);
+    for (let i = 0; i < names.length; i += 10) {
+      await ssm.send(new DeleteParametersCommand({ Names: names.slice(i, i + 10) }));
+    }
+  }
+
+  // ---- compute ------------------------------------------------------------
+
+  async launchRunner(spec: RunnerLaunchSpec): Promise<InstanceInfo> {
+    assertValidId('optimization', spec.optimizationId);
+    assertValidId('agent', spec.agentId);
+    const params = this.baseRunParams({
+      imageRef: spec.imageRef,
+      instanceType: spec.instanceType,
+      securityGroupId: this.cfg.agentRunnerSecurityGroupId,
+      profile: { Arn: spec.identity.instanceProfileRef },
+      userData: runnerUserData(spec, this.cfg.maxInstanceLifetimeHours ?? 2),
+      tags: [
+        { Key: TAG_OPT, Value: spec.optimizationId },
+        { Key: TAG_AGENT, Value: spec.agentId },
+        { Key: TAG_ROLE, Value: 'agent_runner' },
+        { Key: TAG_SANDBOX, Value: this.cfg.sandboxId },
+        { Key: 'Name', Value: `ratchet-runner-${spec.optimizationId}-${spec.agentId}` },
+      ],
+    });
+    return this.runInstance(params, 'agent_runner', spec.optimizationId, spec.agentId, spec.instanceType);
+  }
+
+  async launchBenchInstance(spec: BenchLaunchSpec): Promise<InstanceInfo> {
+    assertValidId('optimization', spec.optimizationId);
+    const p = this.cfg.benchInstanceProfile;
+    const params = this.baseRunParams({
+      imageRef: spec.imageRef,
+      instanceType: spec.instanceType,
+      securityGroupId: this.cfg.benchSecurityGroupId,
+      profile: p.startsWith('arn:') ? { Arn: p } : { Name: p },
+      userData: benchUserData(spec, this.cfg.maxInstanceLifetimeHours ?? 2),
+      tags: [
+        { Key: TAG_OPT, Value: spec.optimizationId },
+        { Key: TAG_ROLE, Value: 'bench' },
+        { Key: TAG_PURPOSE, Value: spec.purpose },
+        { Key: TAG_SANDBOX, Value: this.cfg.sandboxId },
+        { Key: 'Name', Value: `ratchet-bench-${spec.optimizationId}-${spec.purpose}` },
+      ],
+    });
+    return this.runInstance(params, 'bench', spec.optimizationId, undefined, spec.instanceType);
+  }
+
+  private baseRunParams(a: {
+    imageRef: string;
+    instanceType: string;
+    securityGroupId: string;
+    profile: { Arn?: string; Name?: string };
+    userData: string;
+    tags: Tag[];
+  }): RunInstancesCommandInput {
+    return {
+      ImageId: a.imageRef,
+      InstanceType: a.instanceType as RunInstancesCommandInput['InstanceType'],
+      MinCount: 1,
+      MaxCount: 1,
+      SubnetId: this.cfg.subnetId,
+      SecurityGroupIds: [a.securityGroupId],
+      IamInstanceProfile: a.profile,
+      MetadataOptions: { HttpTokens: 'required', HttpEndpoint: 'enabled', HttpPutResponseHopLimit: 1 },
+      InstanceInitiatedShutdownBehavior: 'terminate',
+      UserData: Buffer.from(a.userData, 'utf8').toString('base64'),
+      TagSpecifications: [
+        { ResourceType: 'instance', Tags: a.tags },
+        { ResourceType: 'volume', Tags: a.tags.filter((t) => t.Key !== 'Name') },
+      ],
+    };
+  }
+
+  private async runInstance(
+    params: RunInstancesCommandInput,
+    role: InstanceRole,
+    optimizationId: string,
+    agentId: string | undefined,
+    instanceType: string,
+  ): Promise<InstanceInfo> {
+    const retries = this.opts.iamPropagationRetries ?? 6;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const r = await this.clients.ec2.send(new RunInstancesCommand(params));
+        const inst = r.Instances?.[0];
+        if (!inst?.InstanceId) throw new Error('RunInstances returned no instance');
+        return {
+          id: inst.InstanceId,
+          role,
+          optimizationId,
+          ...(agentId ? { agentId } : {}),
+          instanceType,
+          state: 'pending',
+          launchedAt: inst.LaunchTime?.getTime() ?? this.clock.now(),
+        };
+      } catch (e) {
+        // A just-created instance profile is not visible to EC2 for a few seconds.
+        const msg = (e as Error).message ?? '';
+        if (attempt < retries && errName(e) === 'InvalidParameterValue' && /instance profile/i.test(msg)) {
+          await this.clock.sleep(Math.min(2000 * 2 ** attempt, 15000));
+          continue;
+        }
+        throw e;
+      }
+    }
+  }
+
+  async terminate(instanceIds: string[]): Promise<void> {
+    if (instanceIds.length === 0) return;
+    try {
+      await this.clients.ec2.send(new TerminateInstancesCommand({ InstanceIds: instanceIds }));
+    } catch (e) {
+      if (errName(e) !== 'InvalidInstanceID.NotFound') throw e; // already gone: idempotent
+    }
+  }
+
+  async listTagged(optimizationId?: OptimizationId): Promise<InstanceInfo[]> {
+    const filters = optimizationId
+      ? [{ Name: `tag:${TAG_OPT}`, Values: [optimizationId] }]
+      : [{ Name: 'tag-key', Values: [TAG_OPT] }];
+    const out: InstanceInfo[] = [];
+    let token: string | undefined;
+    do {
+      const r = await this.clients.ec2.send(new DescribeInstancesCommand({ Filters: filters, NextToken: token }));
+      for (const res of r.Reservations ?? []) for (const i of res.Instances ?? []) {
+        const info = toInstanceInfo(i);
+        if (info) out.push(info);
+      }
+      token = r.NextToken;
+    } while (token);
+    return out;
+  }
+
+  // ---- remote commands ----------------------------------------------------
+
+  async runCommand(instanceId: string, command: RemoteCommand): Promise<RemoteCommandResult> {
+    const timeout = command.timeoutSeconds ?? 600;
+    const script = [
+      ...Object.entries(command.env ?? {}).map(([k, v]) => {
+        if (!ENV_KEY.test(k)) throw new Error(`invalid env var name ${JSON.stringify(k)}`);
+        return `export ${k}=${shQuote(v)}`;
+      }),
+      command.script,
+    ].join('\n');
+    const { ssm } = this.clients;
+    const sent = await ssm.send(
+      new SendCommandCommand({
+        InstanceIds: [instanceId],
+        DocumentName: 'AWS-RunShellScript',
+        Parameters: { commands: [script], executionTimeout: [String(timeout)] },
+        TimeoutSeconds: Math.max(30, timeout),
+        Comment: 'ratchet',
+      }),
+    );
+    const commandId = sent.Command?.CommandId;
+    if (!commandId) throw new Error('SendCommand returned no CommandId');
+
+    const interval = this.opts.pollIntervalMs ?? 2000;
+    const deadline = this.clock.now() + (timeout + 60) * 1000;
+    for (;;) {
+      await this.clock.sleep(interval);
+      let inv;
+      try {
+        inv = await ssm.send(new GetCommandInvocationCommand({ CommandId: commandId, InstanceId: instanceId }));
+      } catch (e) {
+        if (errName(e) !== 'InvocationDoesNotExist') throw e; // not registered yet
+        if (this.clock.now() > deadline) throw new Error(`SSM command ${commandId} never registered on ${instanceId}`);
+        continue;
+      }
+      const status = inv.Status ?? 'Pending';
+      if (TERMINAL_SSM.has(status)) {
+        const timedOut = status.includes('TimedOut');
+        return {
+          exitCode: timedOut ? 124 : (inv.ResponseCode ?? (status === 'Success' ? 0 : 1)),
+          stdout: inv.StandardOutputContent ?? '',
+          stderr: (inv.StandardErrorContent ?? '') + (status === 'Success' ? '' : `${inv.StandardErrorContent ? '\n' : ''}[ssm status: ${status}]`),
+        };
+      }
+      if (this.clock.now() > deadline) throw new Error(`SSM command ${commandId} on ${instanceId} still ${status} after ${timeout + 60}s`);
+    }
+  }
+}
+
+// ---- helpers ----------------------------------------------------------------
+
+export function agentRoleName(opt: string, agent: string): string {
+  return boundedName(`ratchet-agent-${opt}-${agent}`);
+}
+
+export function secretPrefix(opt: string, agent: string): string {
+  return `/ratchet/${opt}/${agent}/`;
+}
+
+function ignoreCodes(...names: string[]) {
+  return (e: unknown): undefined => {
+    if (names.some((n) => errName(e).startsWith(n))) return undefined;
+    throw e;
+  };
+}
+
+async function tolerate<T>(code: string, fn: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (errName(e).startsWith(code)) return undefined;
+    throw e;
+  }
+}
+
+const STATE: Record<string, InstanceInfo['state']> = {
+  pending: 'pending',
+  running: 'running',
+  'shutting-down': 'stopping',
+  stopping: 'stopping',
+  stopped: 'stopped',
+  terminated: 'terminated',
+};
+
+export function toInstanceInfo(i: Instance): InstanceInfo | null {
+  const tags = new Map((i.Tags ?? []).map((t) => [t.Key ?? '', t.Value ?? '']));
+  const opt = tags.get(TAG_OPT);
+  if (!i.InstanceId || !opt) return null;
+  const agent = tags.get(TAG_AGENT);
+  const tagged = tags.get(TAG_ROLE);
+  // Agent-launched experiments carry only opt+agent tags (the boundary forces just those).
+  const role: InstanceRole = tagged === 'agent_runner' || tagged === 'bench' || tagged === 'experiment' ? tagged : agent ? 'experiment' : 'bench';
+  const state = STATE[i.State?.Name ?? ''] ?? 'pending';
+  const info: InstanceInfo = {
+    id: i.InstanceId,
+    role,
+    optimizationId: opt,
+    ...(agent ? { agentId: agent } : {}),
+    instanceType: i.InstanceType ?? 'unknown',
+    state,
+    launchedAt: i.LaunchTime?.getTime() ?? 0,
+  };
+  if (state === 'terminated' || state === 'stopped') {
+    // StateTransitionReason: "User initiated (2026-01-02 03:04:05 GMT)"
+    const m = /\((\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) GMT\)/.exec(i.StateTransitionReason ?? '');
+    if (m) info.terminatedAt = Date.parse(`${m[1]}T${m[2]}Z`);
+  }
+  return info;
+}
+
+/** Runtime agent roles still present under the agent path (teardown guard for TofuSandboxProvider). */
+export async function listAgentRoles(iam: IAMClient, agentRolePath = DEFAULT_AGENT_ROLE_PATH): Promise<string[]> {
+  const names: string[] = [];
+  let marker: string | undefined;
+  do {
+    const r = await iam.send(new ListRolesCommand({ PathPrefix: agentRolePath, Marker: marker }));
+    for (const role of r.Roles ?? []) if (role.RoleName) names.push(role.RoleName);
+    marker = r.IsTruncated ? r.Marker : undefined;
+  } while (marker);
+  return names;
+}
+
+const COMMON_SCRIPT_HEAD = '#!/bin/bash\nset -euo pipefail\n';
+
+function lifetimeGuard(hours: number): string {
+  // Local backstop to the reaper: shutdown terminates (InstanceInitiatedShutdownBehavior=terminate).
+  return `shutdown -h +${Math.max(1, Math.round(hours * 60))} >/dev/null 2>&1 || true\n`;
+}
+
+function envFile(vars: Record<string, string>): string {
+  const lines = Object.entries(vars).map(([k, v]) => `${k}=${shQuote(v)}`);
+  return `install -d -m 700 /etc/ratchet\numask 077\ncat > /etc/ratchet/runner.env <<'RATCHET_ENV_EOF'\n${lines.join('\n')}\nRATCHET_ENV_EOF\n`;
+}
+
+/** Starts `ratchet runner`. Secret VALUES never appear here: only SSM refs, fetched with the instance profile. */
+export function runnerUserData(spec: RunnerLaunchSpec, maxLifetimeHours: number): string {
+  const refs = spec.secrets.map((s) => `${s.name}=${s.ref}`).join('\n');
+  return (
+    COMMON_SCRIPT_HEAD +
+    lifetimeGuard(maxLifetimeHours) +
+    envFile({
+      RATCHET_OPTIMIZATION_ID: spec.optimizationId,
+      RATCHET_AGENT_ID: spec.agentId,
+      RATCHET_AGENT_KIND: spec.kind,
+      RATCHET_REPO_URL: spec.repoUrl,
+      RATCHET_BRANCH: spec.branch,
+      RATCHET_SECRET_REFS: refs,
+    }) +
+    'set -a; . /etc/ratchet/runner.env; set +a\n' +
+    'nohup ratchet runner >/var/log/ratchet-runner.log 2>&1 &\n'
+  );
+}
+
+export function benchUserData(spec: BenchLaunchSpec, maxLifetimeHours: number): string {
+  return (
+    COMMON_SCRIPT_HEAD +
+    lifetimeGuard(maxLifetimeHours) +
+    envFile({ RATCHET_OPTIMIZATION_ID: spec.optimizationId, RATCHET_BENCH_PURPOSE: spec.purpose }) +
+    'set -a; . /etc/ratchet/runner.env; set +a\n' +
+    'nohup ratchet bench-agent >/var/log/ratchet-bench.log 2>&1 &\n'
+  );
+}
