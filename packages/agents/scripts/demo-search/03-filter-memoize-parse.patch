@@ -1,0 +1,23 @@
+diff --git a/src/filter.ts b/src/filter.ts
+index 1dc27b9..1dda09f 100644
+--- a/src/filter.ts
++++ b/src/filter.ts
+@@ -99,10 +99,18 @@ function print(node: FilterNode): string {
+   }
+ }
+ 
++const PARSE_CACHE_LIMIT = 1024;
++const parseCache = new Map<string, FilterNode>();
++
++/** Parsed ASTs are immutable, so they are memoized by expression text (oldest entry evicted first). */
+ export function parseFilter(input: string): FilterNode {
++  const cached = parseCache.get(input);
++  if (cached) return cached;
+   const ast = parseOnce(input);
+   // self-check: the canonical form must parse back to the same tree
+   if (print(parseOnce(print(ast))) !== print(ast)) throw new FilterSyntaxError("unstable filter", 0);
++  if (parseCache.size >= PARSE_CACHE_LIMIT) parseCache.delete(parseCache.keys().next().value as string);
++  parseCache.set(input, ast);
+   return ast;
+ }
+ 
