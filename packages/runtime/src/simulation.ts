@@ -62,7 +62,8 @@ export async function prepareSimulationRepo(opts: Required<Pick<SimulationOption
   const hidden = join(sealedDir, 'hidden-mix.json');
   const generator = join(projectDir, 'dist/bench/traces/generate.js');
   if (!existsSync(hidden) && existsSync(generator)) {
-    execFileSync(process.execPath, [generator, '--seed', '424242', '--out', hidden], { cwd: projectDir, stdio: 'ignore' });
+    // Inside Electron, execPath is the Electron binary: ELECTRON_RUN_AS_NODE makes it behave as plain Node (no-op under Node).
+    execFileSync(process.execPath, [generator, '--seed', '424242', '--out', hidden], { cwd: projectDir, stdio: 'ignore', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } });
   }
 
   const remote = await createBareRemote(projectDir, { remoteDir: join(root, 'remote.git'), workDir: join(root, 'seed'), branch: 'main' });

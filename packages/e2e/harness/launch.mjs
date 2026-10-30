@@ -32,7 +32,6 @@ export async function launchApp({ width = VIEWPORT.width, height = VIEWPORT.heig
     RATCHET_USER_DATA_DIR: userDataDir,
     RATCHET_E2E_SAVE_DIR: saveDir,
     RATCHET_REPO_ROOT: REPO_ROOT,
-    RATCHET_NODE_BIN: process.execPath,
     ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
   };
   // `real` = the core Engine in simulation mode (default). `dev` = the seeded stub, for design screenshots only.

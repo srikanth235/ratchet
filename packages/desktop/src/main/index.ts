@@ -12,11 +12,6 @@ import { SettingsStore } from './settings.js';
 // Must run before the app is ready, as userData is read from it.
 if (process.env['RATCHET_USER_DATA_DIR']) app.setPath('userData', process.env['RATCHET_USER_DATA_DIR']);
 
-// Test/CI override: the simulation runtime spawns `process.execPath` to run plain Node scripts; inside Electron that is
-// the Electron binary, so point it at a real Node (packages/e2e sets this). Not needed once the runtime spawns with
-// ELECTRON_RUN_AS_NODE=1.
-if (process.env['RATCHET_NODE_BIN']) process.execPath = process.env['RATCHET_NODE_BIN'];
-
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
