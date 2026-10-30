@@ -1,10 +1,12 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { formatConfigError, parseConfig } from '@ratchet/core';
+import { formatConfigError, getTemplate, listTemplates, parseConfig, renderTemplate, resolveTemplateId, type TemplateInfo } from '@ratchet/core';
 import type { Io } from '../io.js';
-import { findPack, PACKS, type Direction, type InitOptions, type TemplateFile } from './init-templates.js';
 
 export interface InitArgs {
+  /** A template id (see `--list-templates`). */
+  template?: string;
+  /** Legacy alias of `template` (`perf` and `forecasting` map to the templates that replaced them). */
   pack?: string;
   metric?: string;
   direction?: string;
@@ -13,57 +15,68 @@ export interface InitArgs {
   dir?: string;
   force?: boolean;
   dryRun?: boolean;
+  listTemplates?: boolean;
+  /** Legacy alias of `listTemplates`. */
   listPacks?: boolean;
 }
 
-/** `ratchet init --list-packs` */
-function listPacks(io: Io): number {
-  const width = Math.max(...PACKS.map((p) => p.id.length));
-  io.out(
-    PACKS.map(
-      (p) =>
-        `${p.id.padEnd(width)}  ${p.description}\n${' '.repeat(width)}  default: ${p.defaults.direction} ${p.defaults.metric}, $${p.defaults.valueUsd} per ${p.unit} per year; writes ${p
-          .render(p.defaults)
-          .map((f) => f.path)
-          .join(', ')}`,
-    ).join('\n') + '\n',
-  );
+function describe(t: TemplateInfo): string {
+  if (t.kind === 'demo') {
+    return [`${t.id}  [demo]  ${t.title}`, `    ${t.description}`, `    try it: ${t.example} (runs in simulation, nothing to set up)`].join('\n');
+  }
+  return [
+    `${t.id}  ${t.title}`,
+    `    ${t.description}`,
+    `    measures ${t.measures}; ${t.holdout ? `holdout: ${t.holdout}` : 'no holdout'}; machine ${t.machine}`,
+    `    default: ${t.objective.direction} ${t.objective.metric}; writes ${t.files.join(', ')}`,
+  ].join('\n');
+}
+
+/** `ratchet init --list-templates` */
+function listAll(io: Io): number {
+  const groups: Array<[string, TemplateInfo[]]> = [
+    ['Templates (ratchet init --template <id>)', listTemplates({ kind: 'template' })],
+    ['Try a demo', listTemplates({ kind: 'demo' })],
+  ];
+  io.out(groups.map(([title, items]) => `${title}\n\n${items.map(describe).join('\n\n')}`).join('\n\n') + '\n');
   return 0;
 }
 
 /**
- * `ratchet init --pack <perf|forecasting>`: write ratchet.yaml, RATCHET.md and evaluator scaffolding into `dir`.
+ * `ratchet init --template <id>` (alias `--pack`): write ratchet.yaml, RATCHET.md and the evaluator's files into `dir`.
  * The generated ratchet.yaml is checked with the same parser as `ratchet validate` before anything is written.
  * Returns the process exit code: 0 written (or dry run), 1 refused or invalid.
  */
 export function runInit(args: InitArgs, io: Io): number {
-  if (args.listPacks) return listPacks(io);
-  if (!args.pack) {
-    io.err(`init: --pack is required (one of ${PACKS.map((p) => p.id).join(', ')}; see --list-packs)\n`);
+  if (args.listTemplates || args.listPacks) return listAll(io);
+  const requested = args.template ?? args.pack;
+  const ids = listTemplates({ kind: 'template' }).map((t) => t.id);
+  if (!requested) {
+    io.err(`init: --template is required (one of ${ids.join(', ')}; see --list-templates)\n`);
     return 1;
   }
-  const pack = findPack(args.pack);
-  if (!pack) {
-    io.err(`init: unknown pack ${JSON.stringify(args.pack)} (available: ${PACKS.map((p) => p.id).join(', ')})\n`);
+  const info = getTemplate(requested);
+  if (!info) {
+    io.err(`init: unknown template ${JSON.stringify(requested)} (available: ${ids.join(', ')})\n`);
+    return 1;
+  }
+  if (info.kind === 'demo') {
+    io.err(`init: ${info.id} is a demo, not a template: it runs in simulation from ${info.example}; there is nothing to write into a repository\n`);
     return 1;
   }
 
-  const direction = args.direction ?? pack.defaults.direction;
+  const direction = args.direction ?? info.objective.direction;
   if (direction !== 'minimize' && direction !== 'maximize') {
     io.err(`init: --direction must be "minimize" or "maximize", got ${JSON.stringify(direction)}\n`);
     return 1;
   }
-  const options: InitOptions = {
-    metric: args.metric?.trim() || pack.defaults.metric,
-    direction: direction as Direction,
-    valueUsd: args.valueUsd ?? pack.defaults.valueUsd,
-  };
-  if (!Number.isFinite(options.valueUsd) || options.valueUsd <= 0) {
+  if (args.valueUsd !== undefined && (!Number.isFinite(args.valueUsd) || args.valueUsd <= 0)) {
     io.err('init: --value-usd must be a positive number\n');
     return 1;
   }
 
-  const files = pack.render(options);
+  const rendered = renderTemplate(info.id, { ...(args.metric?.trim() ? { metric: args.metric.trim() } : {}), direction, ...(args.valueUsd !== undefined ? { valueUsd: args.valueUsd } : {}) });
+  const { files, options } = rendered;
   const generated = files.find((f) => f.path === 'ratchet.yaml')!;
   const parsed = parseConfig(generated.content);
   if (!parsed.ok) {
@@ -80,9 +93,10 @@ export function runInit(args: InitArgs, io: Io): number {
   }
 
   const verb = args.dryRun ? 'would write' : 'wrote';
-  const lines = files.map((f: TemplateFile) => `  ${verb} ${f.path}${existing.includes(f) ? ' (overwritten)' : ''}  ${f.content.split('\n').length - 1} lines`);
+  const alias = args.pack && !args.template && resolveTemplateId(args.pack) !== args.pack ? ` (--pack ${args.pack} is now the ${info.id} template)` : '';
+  const lines = files.map((f) => `  ${verb} ${f.path}${existing.includes(f) ? ' (overwritten)' : ''}  ${f.content.split('\n').length - 1} lines`);
   if (args.dryRun) {
-    io.out(`ratchet init --pack ${pack.id} (dry run, nothing written to ${root})\n${lines.join('\n')}\n\n--- ratchet.yaml ---\n${generated.content}`);
+    io.out(`ratchet init --template ${info.id}${alias} (dry run, nothing written to ${root})\n${lines.join('\n')}\n\n--- ratchet.yaml ---\n${generated.content}`);
     return 0;
   }
   for (const f of files) {
@@ -91,7 +105,7 @@ export function runInit(args: InitArgs, io: Io): number {
     writeFileSync(target, f.content);
   }
   io.out(
-    `ratchet init --pack ${pack.id}: ${options.direction} ${options.metric}, $${options.valueUsd} per ${pack.unit} per year (estimated)\n${lines.join('\n')}\n\n` +
+    `ratchet init --template ${info.id}${alias}: ${options.direction} ${options.metric}, $${options.valueUsd} per ${info.objective.unit} per year (estimated)\n${lines.join('\n')}\n\n` +
       `Next: replace the TODOs, then \`ratchet validate\` and \`ratchet baseline\`.\n`,
   );
   return 0;
