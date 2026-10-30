@@ -19,7 +19,7 @@ import { parseConfig, type AgentKind, type Clock, type Ledger, type RatchetConfi
 import { Engine, type EngineSettings } from '@ratchet/engine';
 import { FsArtifactStore, MockCloudCompute, MockCostReconciler, MockSandboxProvider, StaticPriceBook, billed } from '@ratchet/aws';
 import { LocalGitHost, createBareRemote } from '@ratchet/github';
-import { LocalBenchRunner } from '@ratchet/bench';
+import { LocalBenchRunner, withNodeOnPath } from '@ratchet/bench';
 import { LocalRunnerControl, ScriptedAgent, loadDemoForecastScript, loadDemoSearchScript, type AgentScript } from '@ratchet/agents';
 import { systemClock } from './clock.js';
 
@@ -113,7 +113,8 @@ export async function prepareSimulationRepo(opts: Required<Pick<SimulationOption
     if (!existsSync(sealed)) {
       const cmd = String(fill(overlay.sealed.run, { out: sealed }));
       try {
-        execFileSync('sh', ['-c', cmd], { cwd: projectDir, stdio: 'pipe' });
+        // `node` must resolve even when the app was launched from the Dock (no node on PATH, execPath = Electron).
+        execFileSync('sh', ['-c', cmd], { cwd: projectDir, stdio: 'pipe', env: withNodeOnPath(process.env) });
       } catch (err) {
         throw new Error(`could not produce the sealed holdout with \`${cmd}\` in ${projectDir} (is the project built? run \`pnpm build\`): ${(err as Error).message.split('\n')[0]}`);
       }

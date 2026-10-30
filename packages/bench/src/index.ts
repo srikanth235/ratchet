@@ -16,6 +16,7 @@ export {
   type StepSpec,
   type StepTimeouts,
 } from './pipeline.js';
+export { currentNodeRuntime, ensureNodeShim, nodeDirFor, nodeShimScript, resolveNodeOnPath, withNodeOnPath, type NodeRuntimeInfo, type WithNodeOnPathOptions } from './node-path.js';
 export { LocalBenchRunner, type LocalBenchRunnerOptions } from './local.js';
 export { RemoteBenchRunner, type RemoteBenchRunnerOptions } from './remote.js';
 export { protectedPcre, BENCH_USER, type Isolation, type StagedArchive } from './remote-scripts.js';
