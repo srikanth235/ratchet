@@ -1,0 +1,9 @@
+# Overlay for local simulation runs (packages/runtime): merged over ratchet.yaml before the demo is pushed to the
+# simulated "GitHub". Not part of the customer-facing contract; the simulator removes this file from the repo it creates.
+sealed:                           # the hidden holdout, produced outside the repo (the demo must be built first)
+  run: node dist/eval/holdout.js --seed 424242 --out "{out}"
+  file: sealed-holdout.json
+evaluator:
+  run: node dist/eval/backtest.js
+  repeats: 2
+  holdout: "{sealed}"             # replaced by the path of the file above

@@ -1,0 +1,16 @@
+{
+  "name": "@ratchet/demo-forecast",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:contract": "vitest run tests/contract/predict.test.ts",
+    "backtest": "pnpm build && node dist/eval/backtest.js",
+    "holdout": "pnpm build && node dist/eval/holdout.js",
+    "test:leakage": "vitest run tests/contract/leakage.test.ts"
+  }
+}

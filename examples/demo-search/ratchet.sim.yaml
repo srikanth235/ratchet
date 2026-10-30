@@ -1,0 +1,8 @@
+# Overlay for local simulation runs (packages/runtime): merged over ratchet.yaml before the demo is pushed to the
+# simulated "GitHub"; the simulator removes this file from the repo it creates.
+sealed:                           # hidden query mix: same distribution family, a seed the agents never see
+  run: node dist/bench/traces/generate.js --seed 424242 --out "{out}"
+  file: hidden-mix.json
+evaluator:
+  run: node dist/bench/local.js --duration {duration} --warmup 1 --mix "${RATCHET_TRACE:-bench/query-mix.json}"
+  holdout: "{sealed}"

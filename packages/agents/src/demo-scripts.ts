@@ -34,3 +34,14 @@ export function loadScript(file: string, patchDir = file.replace(/[^/\\]+$/, '')
 export function loadDemoSearchScript(variant: 'cc' | 'cx', dir = DEMO_SEARCH_SCRIPT_DIR): AgentScript {
   return loadScript(join(dir, `${variant}.script.json`), dir);
 }
+
+export const DEMO_FORECAST_SCRIPT_DIR = fileURLToPath(new URL('../scripts/demo-forecast/', import.meta.url));
+
+/**
+ * The shipped demo-forecast scripts. `cc` and `cx` play the five real improvements from examples/demo-forecast/SOLUTIONS.md
+ * in different orders, interleaved with deliberate bad attempts (evaluator / data-generator edit, look-ahead leakage,
+ * a backtest-overfit trick, a noise-level tweak).
+ */
+export function loadDemoForecastScript(variant: 'cc' | 'cx', dir = DEMO_FORECAST_SCRIPT_DIR): AgentScript {
+  return loadScript(join(dir, `${variant}.script.json`), dir);
+}

@@ -1,0 +1,32 @@
+diff --git a/src/model.ts b/src/model.ts
+index 629a578..7f940ee 100644
+--- a/src/model.ts
++++ b/src/model.ts
+@@ -12,2 +12,4 @@ const PROFILE_SMOOTHING = 0.25;
+ const LEVEL_ALPHA = 0.2;
++/** Weight of a SKU's own seasonal profile; the rest comes from the mean profile of its category. */
++const OWN_PROFILE_WEIGHT = 0.4;
+ 
+@@ -49,4 +51,21 @@ function smoothedLevel(y: readonly number[], profile: readonly number[]): number
+ 
++/** Shrink each SKU's noisy profile towards the mean profile of its category. */
++function poolProfiles(series: readonly Series[], own: readonly number[][]): number[][] {
++  const sums = new Map<number, number[]>();
++  const counts = new Map<number, number>();
++  series.forEach((s, i) => {
++    const sum = sums.get(s.category) ?? new Array<number>(SEASON).fill(0);
++    own[i]!.forEach((v, j) => (sum[j]! += v));
++    sums.set(s.category, sum);
++    counts.set(s.category, (counts.get(s.category) ?? 0) + 1);
++  });
++  return series.map((s, i) => {
++    const category = sums.get(s.category)!;
++    const n = counts.get(s.category)!;
++    return own[i]!.map((v, j) => OWN_PROFILE_WEIGHT * v + (1 - OWN_PROFILE_WEIGHT) * (category[j]! / n));
++  });
++}
++
+ export function fit(series: readonly Series[]): Model {
+-  const profile = series.map((s) => seasonalProfile(s.y));
++  const profile = poolProfiles(series, series.map((s) => seasonalProfile(s.y)));
+   return { profile, level: series.map((s, i) => smoothedLevel(s.y, profile[i]!)) };
