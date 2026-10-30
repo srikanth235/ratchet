@@ -1,6 +1,6 @@
 {
-  "id": "4fd8444a-cfff-4f18-9936-72809bc5478a",
-  "prevId": "ee0fe0f9-585c-45d5-bb41-3a19f98b526f",
+  "id": "bf639726-3775-4482-b26e-c5249f4a45ba",
+  "prevId": "6d418ad2-f659-4363-9c2a-267c935b1db2",
   "version": "6",
   "dialect": "sqlite",
   "tables": {
@@ -39,7 +39,7 @@
           "name": "payload",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         }
       },

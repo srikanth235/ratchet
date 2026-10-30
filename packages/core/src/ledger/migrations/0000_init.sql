@@ -3,7 +3,7 @@ CREATE TABLE `agent_events` (
 	`agent_id` text NOT NULL,
 	`at` integer NOT NULL,
 	`type` text NOT NULL,
-	`payload` text NOT NULL,
+	`payload` text,
 	FOREIGN KEY (`agent_id`) REFERENCES `agents`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint

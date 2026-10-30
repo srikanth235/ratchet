@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "ee0fe0f9-585c-45d5-bb41-3a19f98b526f",
+  "id": "6d418ad2-f659-4363-9c2a-267c935b1db2",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "agent_events": {
@@ -39,7 +39,7 @@
           "name": "payload",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         }
       },

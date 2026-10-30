@@ -236,7 +236,7 @@ export const agentEvents = sqliteTable(
       .references(() => agents.id),
     at: integer('at').notNull(),
     type: text('type').notNull(),
-    payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(),
+    payload: text('payload', { mode: 'json' }).$type<unknown>(),
   },
   (t) => [index('agent_events_agent_idx').on(t.agentId, t.id)],
 );
