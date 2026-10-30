@@ -7,6 +7,8 @@
 Status: draft for discussion. UI design: "Ratchet App Design" canvas
 (Midnight Brass), six screens; see §9.
 
+> **Superseded in part:** the simplified product model in [`SIMPLIFIED_MODEL.md`](SIMPLIFIED_MODEL.md) (settings, harness detection, local agents, `environment:` in `ratchet.yaml`, evaluator templates, invisible sandbox) takes precedence where the two differ.
+
 ## 0. Product shape: a generic core with domain packs
 
 Businesses want two things: lower costs and higher profit. Ratchet is a
