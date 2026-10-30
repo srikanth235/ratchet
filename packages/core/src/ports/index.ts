@@ -153,8 +153,10 @@ export interface GitHost {
   changedFiles(baseRef: string, sha: string): Promise<string[]>;
   /** Materialize `sha` (code) into `dir`; used by the bench runner. */
   checkout(sha: string, dir: string): Promise<void>;
-  /** Squash `shas` onto `base` into a new branch and open a PR. */
-  openPullRequest(input: { base: string; head: string; title: string; body: string }): Promise<{ url: string }>;
+  /** Squash the verified `shas` (ratchet order; last one's tree wins) onto `base` as branch `head` and open a PR. */
+  openPullRequest(input: { base: string; head: string; title: string; body: string; shas: string[] }): Promise<{ url: string }>;
+  /** Resolve a ref (branch, tag, sha) to a full commit sha. */
+  resolveRef(ref: string): Promise<string>;
   remoteUrl(): string;
 }
 
@@ -166,6 +168,10 @@ export interface AgentUsage {
   costUsd?: number;
 }
 
+/**
+ * Conventions: `usage` is incremental (tokens/cost for this event only, not cumulative).
+ * `status` events carry `data.state` in 'running' | 'paused' | 'done' | 'failed'.
+ */
 export interface AgentEvent {
   at: number;
   type: 'status' | 'message' | 'tool' | 'commit' | 'usage' | 'error' | 'verdict';
@@ -201,6 +207,8 @@ export interface AgentAdapter {
 
 export type RunnerMessage =
   | { type: 'verdict'; sha: string; verdict: CandidateVerdict; reasons: string[]; currentBest: number }
+  /** The shared ratchet moved (possibly by another agent): rebase onto `sha` from `branch`. */
+  | { type: 'ratchet'; sha: string; branch: string; value: number }
   | { type: 'user'; text: string }
   | { type: 'pause' }
   | { type: 'resume' }
@@ -287,7 +295,8 @@ export type EngineEvent =
   | { type: 'agent-event'; optimizationId: OptimizationId; agentId: AgentId; event: AgentEvent }
   | { type: 'candidate'; optimizationId: OptimizationId; candidateId: string; verdict: CandidateVerdict }
   | { type: 'ratchet'; optimizationId: OptimizationId; from: number; to: number }
-  | { type: 'spend'; optimizationId: OptimizationId; totalUsd: number };
+  | { type: 'spend'; optimizationId: OptimizationId; totalUsd: number }
+  | { type: 'notice'; optimizationId: OptimizationId; level: 'info' | 'warning' | 'error'; text: string };
 
 export interface EngineApi {
   mode(): Mode;
