@@ -9,7 +9,7 @@
     "declaration": false,
     "sourceMap": false,
     "types": ["node", "vite/client"],
-    "paths": { "@ratchet/ui": ["../ui/src/index.ts"] }
+    "paths": { "@ratchet/ui": ["../ui/src/index.ts"], "@ratchet/core": ["../core/src/index.ts"] }
   },
   "include": ["src", "electron.vite.config.ts", "vitest.config.ts"]
 }
