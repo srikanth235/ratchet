@@ -1,6 +1,6 @@
 // Launch the built desktop app under Playwright. Playwright is installed globally (NODE_PATH), so it is loaded
 // through createRequire instead of an ESM `import`.
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -11,6 +11,7 @@ export const { _electron, chromium } = require('playwright');
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const E2E_ROOT = join(here, '..');
+export const REPO_ROOT = join(here, '..', '..', '..');
 export const DESKTOP_ROOT = join(E2E_ROOT, '..', 'desktop');
 export const ARTIFACTS = join(E2E_ROOT, 'artifacts');
 export const MAIN_ENTRY = process.env.RATCHET_MAIN ?? join(DESKTOP_ROOT, 'out', 'main', 'index.js');
@@ -23,12 +24,24 @@ const electronPath = () => createRequire(join(DESKTOP_ROOT, 'package.json'))('el
  * Launch the app with a fresh, isolated userData dir (so the ledger DB and settings are new for every run) and
  * resolve the first window at 1440x1000. Console errors and uncaught page errors are collected in `errors`.
  */
-export async function launchApp({ width = VIEWPORT.width, height = VIEWPORT.height } = {}) {
+export async function launchApp({ width = VIEWPORT.width, height = VIEWPORT.height, engine = 'real' } = {}) {
   const userDataDir = mkdtempSync(join(tmpdir(), 'ratchet-e2e-'));
+  const saveDir = join(userDataDir, 'exports');
+  const env = {
+    ...process.env,
+    RATCHET_USER_DATA_DIR: userDataDir,
+    RATCHET_E2E_SAVE_DIR: saveDir,
+    RATCHET_REPO_ROOT: REPO_ROOT,
+    RATCHET_NODE_BIN: process.execPath,
+    ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
+  };
+  // `real` = the core Engine in simulation mode (default). `dev` = the seeded stub, for design screenshots only.
+  if (engine === 'dev') env.RATCHET_ENGINE = 'dev';
+  else delete env.RATCHET_ENGINE;
   const app = await _electron.launch({
     executablePath: electronPath(),
     args: [MAIN_ENTRY, '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
-    env: { ...process.env, RATCHET_USER_DATA_DIR: userDataDir, ELECTRON_DISABLE_SECURITY_WARNINGS: '1' },
+    env,
   });
   const win = await app.firstWindow();
   const errors = [];
@@ -46,6 +59,7 @@ export async function launchApp({ width = VIEWPORT.width, height = VIEWPORT.heig
     errors,
     consoleLog,
     userDataDir,
+    saveDir,
     async close() {
       await app.close().catch(() => undefined);
       rmSync(userDataDir, { recursive: true, force: true });
@@ -115,4 +129,46 @@ export async function openNewOptimization(win) {
   await goTo(win, 'Optimizations');
   await win.getByRole('button', { name: /New optimization/ }).click();
   await waitForScreen(win, 'new');
+}
+
+// ---------------------------------------------------------------- polling + helpers shared by the specs
+
+/** Poll `fn` until it returns a truthy value (returned) or `timeout` ms pass (throws with `what` and the last error). */
+export async function poll(what, fn, { timeout = 60_000, interval = 500 } = {}) {
+  const end = Date.now() + timeout;
+  let last;
+  for (;;) {
+    try {
+      const v = await fn();
+      if (v) return v;
+      last = undefined;
+    } catch (e) {
+      last = e;
+    }
+    if (Date.now() > end) throw new Error(`timed out after ${Math.round(timeout / 1000)}s waiting for ${what}${last ? `: ${last.message}` : ''}`);
+    await sleep(interval);
+  }
+}
+
+/** Call the preload API from the page, e.g. `rpc(win, 'getOptimization', id)`. Used to read the truth the UI must agree with. */
+export const rpc = (win, method, ...args) =>
+  win.evaluate(([m, a]) => window.ratchet[m](...a), [method, args]);
+
+/** The documented renderer API: every method of `RatchetApi` in shared/types.ts, read from the source so it cannot drift. */
+export function documentedApi() {
+  const src = readFileSync(join(DESKTOP_ROOT, 'src', 'shared', 'types.ts'), 'utf8');
+  const body = src.slice(src.indexOf('export interface RatchetApi'));
+  return [...body.matchAll(/^ {2}(\w+)\(/gm)].map((m) => m[1]).sort();
+}
+
+/** Never fail on a transient "Loading…": wait until the main column has settled. */
+export async function waitSettled(win, timeout = 20_000) {
+  await poll('screen to finish loading', () => win.evaluate(() => !document.querySelector('main')?.textContent?.includes('Loading…')), { timeout });
+}
+
+/** Same number formatting as the app (renderer/format.ts `fmtNum`). */
+export function fmtNum(v) {
+  if (Math.abs(v) >= 100) return v.toFixed(0);
+  if (Math.abs(v) >= 10) return Number.isInteger(v) ? String(v) : v.toFixed(1);
+  return Number.isInteger(v) ? String(v) : v.toFixed(2);
 }

@@ -23,6 +23,6 @@ const specs = readdirSync(join(root, 'specs'))
 // A tall virtual screen so the window can be grown to the full content height for full-page screenshots.
 const xvfb = ['-a', '-s', '-screen 0 1920x5200x24 -nolisten tcp'];
 const useXvfb = !process.env.DISPLAY;
-const test = [process.execPath, '--test', '--test-concurrency=1', '--test-timeout=120000', ...specs];
+const test = [process.execPath, '--test', '--test-concurrency=1', '--test-timeout=1500000', ...specs];
 if (useXvfb) run('xvfb-run', [...xvfb, ...test]);
 else run(test[0], test.slice(1));

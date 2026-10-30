@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { ARTIFACTS, SCREENS, goTo, launchApp, openNewOptimization, screenshotScreen, waitForScreen } from '../harness/launch.mjs';
 
 const dir = process.argv[2] ? join(process.cwd(), process.argv[2]) : join(ARTIFACTS, 'app');
-const { app, win, close } = await launchApp();
+const { app, win, close } = await launchApp({ engine: 'dev' });
 try {
   await win.waitForTimeout(1500);
   for (const s of SCREENS) {

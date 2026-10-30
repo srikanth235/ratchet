@@ -101,6 +101,15 @@ describe('New optimization', () => {
     expect(['baselining', 'running']).toContain(h.ledger.getOptimization(id)?.status);
   });
 
+  it('lands on Live agents immediately and reports a failed start there', async () => {
+    await openForm();
+    vi.spyOn(window.ratchet, 'startOptimization').mockRejectedValue(new Error("Error invoking remote method 'ratchet:startOptimization': Error: baseline blew up"));
+    fireEvent.change(screen.getByPlaceholderText('search-api p95 latency'), { target: { value: 'Doomed run' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Run baseline & start' }));
+    expect(await screen.findByRole('heading', { name: 'Doomed run', level: 1 })).toBeTruthy();
+    expect((await screen.findByRole('alert')).textContent).toBe('Could not start: baseline blew up');
+  });
+
   it('shows the error when creation fails', async () => {
     await openForm();
     vi.spyOn(window.ratchet, 'createOptimization').mockRejectedValue(new Error("Error invoking remote method 'ratchet:createOptimization': Error: boom"));
@@ -119,7 +128,7 @@ describe('Live agents', () => {
     expect(cc.getByTestId('hypothesis').textContent).toBe('“Short-circuit empty queries before the index”');
     expect(cc.getByText(/Recent evals/)).toBeTruthy();
     await waitFor(() => expect(cc.getAllByText(/Ratchet-Candidate/).length).toBeGreaterThan(0));
-    expect(screen.getByText('Trusted bench runner')).toBeTruthy();
+    expect(screen.getByText('Trusted evaluator')).toBeTruthy();
     expect(screen.getByText(/Confirm on hidden trace/)).toBeTruthy();
   });
 

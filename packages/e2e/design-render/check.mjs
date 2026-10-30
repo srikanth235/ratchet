@@ -158,7 +158,7 @@ const APP_ROUTE = {
 };
 
 const browser = await chromium.launch({ args: ['--no-sandbox'] });
-const { win: aPage, close } = await launchApp();
+const { win: aPage, close } = await launchApp({ engine: 'dev' });
 const out = { label, at: new Date().toISOString(), screens: {} };
 try {
   await aPage.waitForTimeout(1500);

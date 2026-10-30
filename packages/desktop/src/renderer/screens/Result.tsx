@@ -4,6 +4,7 @@ import { Crumbs, Empty, ErrorNote, OptimizationPicker, PageHeader, StateBadge, u
 import { Icon } from '../components/icons';
 import { errMsg, forOptimization, useQuery } from '../data';
 import { fmtDuration, fmtNum, fmtUsd, gainLabel } from '../format';
+import { fmtRoi, fmtUsdCompact, valueOf } from '../value';
 
 const SPEND_COLORS = ['#EBCB8E', '#D9B26F', '#8C7448', '#4A5568', '#3A4558'];
 
@@ -56,6 +57,7 @@ export function Result() {
   const canPr = finished && wins.length > 0;
   const agentsInvolved = new Set(wins.map((w) => w.agent)).size || s.agents.length;
   const steps = series.data?.steps ?? [];
+  const value = valueOf(d.configYaml, s.direction, s.baseline, s.best, sp.total);
 
   async function run(key: string, fn: () => Promise<string>) {
     setBusy(key);
@@ -108,6 +110,12 @@ export function Result() {
               {gain && <span className="mono gain">{gain}</span>}{gain ? ' · ' : ''}
               {s.verifiedWins} verified win{s.verifiedWins === 1 ? '' : 's'} from {agentsInvolved} agent{agentsInvolved === 1 ? '' : 's'} over {fmtDuration(d.elapsedS)}
             </span>
+            {value && (
+              <span className="headline__value" data-testid="value">
+                Worth <span className="mono gain">{fmtUsdCompact(value.usdPerYear)}</span> a year ({value.basis})
+                {value.returnOnSpend !== null && <> · <span className="mono">{fmtRoi(value.returnOnSpend)}</span> return on spend</>}
+              </span>
+            )}
           </div>
           <div className="headline__tiles">
             <div className="stat-tile"><Eyebrow>Spend</Eyebrow><div className="serif">{fmtUsd(sp.total)} <small>/ {sp.budgetUsd.toFixed(0)}</small></div></div>
@@ -139,7 +147,7 @@ export function Result() {
                 <li key={w.id} className="win-row">
                   <AgentAvatar agent={w.agent} size={24} />
                   <div className="win-row__body">
-                    <span>{w.message || 'Candidate'}</span>
+                    <span title={w.message}>{w.message || 'Candidate'}</span>
                     <span className="mono win-row__meta">{w.sha} · {w.benchValue === null ? '—' : `${fmtNum(w.benchValue)}${unit ? ` ${unit}` : ''}`}{w.confirmValue !== null && ` · hidden trace ${fmtNum(w.confirmValue)}${unit ? ` ${unit}` : ''}`}</span>
                   </div>
                   <span className="mono delta-badge">{w.vsBaselinePct === null ? '' : `${w.vsBaselinePct >= 0 ? '−' : '+'}${Math.abs(w.vsBaselinePct).toFixed(1)}%`}</span>

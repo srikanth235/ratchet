@@ -4,7 +4,9 @@ import { buildConfigYaml, DEFAULT_FORM, type ConfigForm } from '../../shared/con
 import type { AgentKind, PreflightItem, ValidateConfigResult } from '../../shared/types';
 import { Crumbs, ErrorNote, PageHeader } from '../components/common';
 import { Icon } from '../components/icons';
-import { errMsg, useNav } from '../data';
+import { summarizeYaml } from '../config-summary';
+import { errMsg, reportStartError, useNav } from '../data';
+import { fmtUsdCompact } from '../value';
 
 const AGENT_CHOICES: { kind: AgentKind; label: string; hint: string }[] = [
   { kind: 'claude-code', label: 'Claude Code', hint: 'Anthropic · claude -p headless' },
@@ -82,6 +84,7 @@ export function NewOptimization() {
 
   const generated = useMemo(() => buildConfigYaml(s.form), [s.form]);
   const yaml = override ?? generated;
+  const ys = useMemo(() => summarizeYaml(yaml), [yaml]);
 
   const setForm = (patch: Partial<ConfigForm>) => setS((p) => ({ ...p, form: { ...p.form, ...patch } }));
   const set = <K extends keyof NewOptimizationFormState>(k: K, v: NewOptimizationFormState[K]) => setS((p) => ({ ...p, [k]: v }));
@@ -111,7 +114,7 @@ export function NewOptimization() {
     setError(null);
     try {
       const id = await window.ratchet.createOptimization({
-        ...(s.name.trim() && { name: s.name.trim() }),
+        ...((s.name.trim() || ys?.name) && { name: s.name.trim() || ys!.name! }),
         repoUrl: s.repoUrl.trim(),
         baseRef: s.baseRef.trim(),
         configPath: s.configPath.trim() || 'ratchet.yaml',
@@ -121,7 +124,9 @@ export function NewOptimization() {
         timeLimitSeconds: s.timeLimitSeconds,
         plateauEvals: s.plateauEvals,
       });
-      await window.ratchet.startOptimization(id);
+      // The baseline run takes about a minute: show the Agents screen right away (status "Baselining") instead of
+      // freezing this form, and surface a failed start there.
+      window.ratchet.startOptimization(id).catch((e: unknown) => reportStartError(id, e));
       open(id, 'agents');
     } catch (e) {
       setError(errMsg(e));
@@ -132,6 +137,9 @@ export function NewOptimization() {
   const f = s.form;
   const targetReady = s.repoUrl.trim() !== '' && s.baseRef.trim() !== '';
   const summary = validation?.ok ? validation.summary : null;
+  const valueText = ys?.value
+    ? `${fmtUsdCompact(ys.value.usdPerUnit)}${ys.value.unit ? ` per ${ys.value.unit}` : ''} / ${ys.value.period} · ${ys.value.basis}`
+    : null;
   const protectedList = f.protectedGlobs.split('\n').map((l) => l.trim()).filter(Boolean);
   const agentNames = s.agents.map((a) => AGENT_CHOICES.find((c) => c.kind === a)?.label ?? a).join(', ');
   const limitHours = s.timeLimitSeconds / 3600;
@@ -140,7 +148,7 @@ export function NewOptimization() {
       <PageHeader
         eyebrow={<Crumbs />}
         title="New optimization"
-        sub="Pick a benchmark, set guardrails, choose agents. Ratchet locks a baseline before any agent starts."
+        sub="Pick an evaluator, set guardrails, choose agents. Ratchet locks a baseline before any agent starts."
         actions={
           <>
             <Button variant="ghost" onClick={() => go('optimizations')}>Cancel</Button>
@@ -164,16 +172,24 @@ export function NewOptimization() {
             <div className="file-bar">
               <span className="mono" style={{ color: 'var(--rt-color-brass-highlight)' }}>{s.configPath || 'ratchet.yaml'}</span>
               <span className="muted">
-                {summary ? `${summary.metric} · ${summary.guardrails.length} guardrail${summary.guardrails.length === 1 ? '' : 's'} · ${summary.protectedGlobs.length} protected path${summary.protectedGlobs.length === 1 ? '' : 's'}` : validation ? 'needs attention — see the review panel' : 'checking…'}
+                {summary
+                  ? [
+                      summary.metric,
+                      ys?.evaluator ? `${ys.evaluator.kind} evaluator` : null,
+                      valueText,
+                      `${summary.guardrails.length} guardrail${summary.guardrails.length === 1 ? '' : 's'}`,
+                      `${summary.protectedGlobs.length} protected path${summary.protectedGlobs.length === 1 ? '' : 's'}`,
+                    ].filter(Boolean).join(' · ')
+                  : validation ? 'needs attention — see the review panel' : 'checking…'}
               </span>
               <button type="button" className="text-link" style={{ marginLeft: 'auto' }} onClick={() => { setEditing(true); setOverride((o) => o ?? generated); }}>View file</button>
             </div>
           </Card>
 
           <Card className="step step--focus">
-            <StepHead n={2} title="Benchmark & metric" sub="The number agents are trying to move" tone="focus" />
+            <StepHead n={2} title="Evaluator & metric" sub="The number agents are trying to move" tone="focus" />
             <div className="form-grid">
-              <Field label="Metric" hint="Key in the benchmark's JSON output"><input className="mono" value={f.metric} onChange={(e) => setForm({ metric: e.target.value })} /></Field>
+              <Field label="Metric" hint="Key in the evaluator's JSON output"><input className="mono" value={f.metric} onChange={(e) => setForm({ metric: e.target.value })} /></Field>
               <div className="field">
                 <span className="field__label">Goal</span>
                 <div className="segmented" role="radiogroup" aria-label="Direction">
@@ -187,9 +203,9 @@ export function NewOptimization() {
                 <input className="mono" type="number" min={0} max={100} step={0.5} value={f.minGainPct} onChange={(e) => setForm({ minGainPct: Number(e.target.value) })} />
               </Field>
               <Field label="Runs per eval"><input className="mono" type="number" min={1} value={f.repeats} onChange={(e) => setForm({ repeats: Number(e.target.value) })} /></Field>
-              <Field label="Bench command"><input className="mono" value={f.benchRun} onChange={(e) => setForm({ benchRun: e.target.value })} /></Field>
-              <Field label="Bench ref" hint="Protected ref holding the trusted bench"><input className="mono" value={f.benchRef} onChange={(e) => setForm({ benchRef: e.target.value })} /></Field>
-              <Field label="Bench hardware"><input className="mono" value={f.hardware} onChange={(e) => setForm({ hardware: e.target.value })} /></Field>
+              <Field label="Evaluator command"><input className="mono" value={f.benchRun} onChange={(e) => setForm({ benchRun: e.target.value })} /></Field>
+              <Field label="Evaluator ref" hint="Protected ref holding the trusted evaluator"><input className="mono" value={f.benchRef} onChange={(e) => setForm({ benchRef: e.target.value })} /></Field>
+              <Field label="Evaluator hardware"><input className="mono" value={f.hardware} onChange={(e) => setForm({ hardware: e.target.value })} /></Field>
               <Field label="Confirm trace" hint="Hidden trace for the confirm run (optional)"><input className="mono" value={f.confirmTrace} onChange={(e) => setForm({ confirmTrace: e.target.value })} placeholder="s3://sealed/trace.json" /></Field>
             </div>
           </Card>
@@ -255,6 +271,8 @@ export function NewOptimization() {
             <div className="kv-row"><span>Repository</span><span className="mono">{s.repoUrl.replace(/^https?:\/\/github\.com\//, '') || '—'}</span></div>
             <div className="kv-row"><span>Base ref</span><span className="mono">{s.baseRef || '—'}</span></div>
             <div className="kv-row"><span>Metric</span><span className="mono">{f.metric} {f.direction === 'minimize' ? '↓' : '↑'} · min {f.minGainPct}%</span></div>
+            {ys?.evaluator && <div className="kv-row"><span>Evaluator</span><span className="mono">{ys.evaluator.kind}{ys.evaluator.ref ? ` · ${ys.evaluator.ref}` : ''}</span></div>}
+            {valueText && <div className="kv-row"><span>Value</span><span className="mono">{valueText}</span></div>}
             <div className="kv-row"><span>Guardrails</span><span>{lineCount(f.guardrails)} active</span></div>
             <div className="kv-row"><span>Agents</span><span>{agentNames || 'none'}</span></div>
             <div className="kv-row"><span>Limits</span><span className="mono">${s.budgetUsd} · {+limitHours.toFixed(1)} h</span></div>

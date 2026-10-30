@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { AgentAvatar, Card, StatusPill, type OptimizationStatus } from '@ratchet/ui';
 import type { Optimization, RatchetSeries } from '../../shared/types';
 import { forOptimization, useQuery } from '../data';
-import { fmtMetric, gainLabel, metricGlyph } from '../format';
+import { fmtMetric, gainLabel, metricGlyph, repoLabel } from '../format';
 
 type Filter = 'all' | 'running' | 'shipped' | 'drafts';
 const GROUPS: Record<Exclude<Filter, 'all'>, OptimizationStatus[]> = {
@@ -78,7 +78,7 @@ export function OptimizationsTable({ rows, onOpen }: { rows: Optimization[]; onO
                         <span className="table__name">
                           {openable ? <button type="button" className="link-btn table__name" onClick={(e) => { e.stopPropagation(); onOpen(o); }}>{o.name}</button> : o.name}
                         </span>
-                        <span className="table__sub mono">{o.repo} · {o.metric}</span>
+                        <span className="table__sub mono">{repoLabel(o.repo)} · {o.metric}</span>
                       </span>
                     </div>
                   </td>

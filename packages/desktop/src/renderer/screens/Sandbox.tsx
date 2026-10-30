@@ -34,13 +34,13 @@ function Node({ x, y, title, sub, trusted = false, icon }: { x: number; y: numbe
   );
 }
 
-/** Architecture sketch: the trusted path (brass) from the control plane through the bench runner to the sealed traces. */
+/** Architecture sketch: the trusted path (brass) from the control plane through the evaluator runner to the sealed traces. */
 export function SandboxDiagram({ region, sandboxId }: { region: string; sandboxId: string }) {
   const grey = '#8592A6';
   const label = { fontSize: 13, fontFamily: 'Instrument Sans, sans-serif' } as const;
   return (
     <div className="diagram rt-dots" style={{ padding: 0 }}>
-      <svg viewBox="0 0 1016 340" role="img" aria-label="Sandbox architecture: control plane, bench runner and sealed traces on the trusted path; agent runners confined to the agent boundary" className="rt-chart sandbox-diagram">
+      <svg viewBox="0 0 1016 340" role="img" aria-label="Sandbox architecture: control plane, evaluator runner and sealed traces on the trusted path; agent runners confined to the agent boundary" className="rt-chart sandbox-diagram">
         <defs>
           <marker id="sb-grey" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill={grey} /></marker>
           <marker id="sb-brass" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L8 4L0 8z" fill="#D9B26F" /></marker>
@@ -53,12 +53,12 @@ export function SandboxDiagram({ region, sandboxId }: { region: string; sandboxI
         <Node x={24} y={40} title="Ratchet.app" sub="your Mac · control" icon="M0 0h14v9H0zM4 13h6" />
         <Node x={552} y={40} title="GitHub" sub="one branch per agent" icon="M3 0a2 2 0 1 0 0 .01M3 12a2 2 0 1 0 0 .01M11 4a2 2 0 1 0 0 .01M3 2v8M11 6c0 4-8 2-8 4" />
         <Node x={288} y={196} title="Agent runners" sub="Claude Code · Codex" icon="M0 0h14v10H0zM3 3l2 2-2 2M7 8h3" />
-        <Node x={552} y={196} title="Bench runner" sub="eval-only role" trusted icon="M0 10a7 7 0 0 1 14 0M7 10l3-4" />
+        <Node x={552} y={196} title="Evaluator runner" sub="eval-only role" trusted icon="M0 10a7 7 0 0 1 14 0M7 10l3-4" />
         <Node x={816} y={196} title="Sealed traces" sub="S3 · deny agents" trusted icon="M2 6h10v7H2zM4 6V4a3 3 0 0 1 6 0v2" />
         <text x="124" y="176" fill="#A7B1C2" {...label}>launch · SSM</text>
         <text x="448" y="62" fill="#A7B1C2" {...label}>push</text>
         <text x="392" y="140" fill="#A7B1C2" {...label}>headless agent</text>
-        <text x="656" y="158" fill="#EBCB8E" {...label}>re-bench</text>
+        <text x="656" y="158" fill="#EBCB8E" {...label}>re-evaluate</text>
         <text x="756" y="216" fill="#EBCB8E" {...label}>read</text>
         <text x="284" y="310" fill="#C9A86A" fontSize="10.5" letterSpacing="1.5" fontWeight="600" fontFamily="Instrument Sans, sans-serif">YOUR AWS ACCOUNT · {region.toUpperCase()} · {sandboxId.toUpperCase()}</text>
       </svg>
@@ -92,7 +92,7 @@ export function Sandbox() {
         eyebrow="Environments"
         title="AWS sandbox"
         badge={<>{status}{account.simulated ? <Pill tone="neutral" large>Simulated sandbox</Pill> : <Pill tone="brass" large>Live account</Pill>}</>}
-        sub="A fenced area in a dedicated account. Agents run headless on runners inside it; the trusted bench runner sits outside their reach."
+        sub="A fenced area in a dedicated account. Agents run headless on runners inside it; the trusted evaluator runner sits outside their reach."
         actions={<Button variant="ghost" disabled={loading} onClick={refresh}>Re-plan</Button>}
       />
 

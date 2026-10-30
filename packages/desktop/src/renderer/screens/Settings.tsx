@@ -59,7 +59,7 @@ export function Settings() {
   if (!s) return <p className="muted">Loading…</p>;
 
   const modes: { id: Mode; label: string; text: string }[] = [
-    { id: 'simulation', label: 'Simulation', text: 'Everything runs on this machine: mock AWS, scripted agent, local bench. No cloud spend.' },
+    { id: 'simulation', label: 'Simulation', text: 'Everything runs on this machine: mock AWS, scripted agents, local evaluator. No cloud spend.' },
     { id: 'live', label: 'Live', text: 'Real sandbox account, real agents on runners, real PRs. Requires keys and an AWS profile.' },
   ];
 

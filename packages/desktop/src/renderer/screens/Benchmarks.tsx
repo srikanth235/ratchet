@@ -132,7 +132,7 @@ export function Benchmarks() {
       <Card className="table-card">
         <div className="table-head">
           <h2 className="card-title">Candidates</h2>
-          <span className="card-head__note">{rows.length} shown · every commit an agent submitted, re-benched by the trusted runner</span>
+          <span className="card-head__note">{rows.length} shown · every commit an agent submitted, re-evaluated by the trusted runner</span>
           <div className="chips" role="group" aria-label="Filter by verdict">
             {FILTERS.map((f) => (
               <button key={f} type="button" aria-pressed={filter === f} className={`chip${filter === f ? ' chip--on' : ''}`} onClick={() => setFilter(f)}>{f.replace('_', ' ')}</button>
@@ -142,7 +142,7 @@ export function Benchmarks() {
         <div className="table-scroll">
           <table className="table table--sm">
             <thead>
-              <tr><th>Commit</th><th>Change</th><th>Guardrails</th><th className="num">Bench</th><th className="num">Confirm</th><th className="num">vs baseline</th><th>Verdict</th></tr>
+              <tr><th>Commit</th><th>Change</th><th>Guardrails</th><th className="num">Measured</th><th className="num">Confirm</th><th className="num">vs baseline</th><th>Verdict</th></tr>
             </thead>
             <tbody>
               {rows.map((c) => {

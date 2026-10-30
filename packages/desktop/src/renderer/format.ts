@@ -54,3 +54,11 @@ export function metricGlyph(metric: string): string {
   const words = pick.split(/[_\-\s]+/).filter(Boolean);
   return (words.length > 1 ? words.map((w) => w[0]).join('').slice(0, 3) : pick.slice(0, 3)).toLowerCase();
 }
+
+/** `acme/search-api` for a GitHub URL; `local · remote.git` for a filesystem path (the simulation's repo). */
+export function repoLabel(repo: string): string {
+  const gh = /^(?:https?:\/\/|git@)github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?\/?$/.exec(repo);
+  if (gh) return gh[1]!;
+  if (repo.startsWith('/') || /^[A-Za-z]:[\\/]/.test(repo)) return `local · ${repo.split(/[\\/]/).filter(Boolean).at(-1) ?? repo}`;
+  return repo;
+}

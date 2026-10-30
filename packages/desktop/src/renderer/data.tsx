@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type DependencyList } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore, type DependencyList } from 'react';
 import type { EngineEventVM, OptimizationsSnapshot } from '../shared/types';
 import type { NavId } from './nav';
 
@@ -93,3 +93,24 @@ export const forOptimization =
 
 export const SnapshotContext = createContext<Query<OptimizationsSnapshot>>({ data: null, error: null, loading: true, refresh: () => undefined });
 export const useSnapshot = (): Query<OptimizationsSnapshot> => useContext(SnapshotContext);
+
+// ------------------------------------------------------------------ background start errors
+
+/**
+ * Starting an optimization (baseline run, ~1 minute) continues in the background after the form navigates to the
+ * Agents screen; a failure to start is parked here and shown on that screen.
+ */
+const startErrors = new Map<string, string>();
+const startErrorListeners = new Set<() => void>();
+
+export function reportStartError(id: string, e: unknown): void {
+  startErrors.set(id, errMsg(e));
+  startErrorListeners.forEach((l) => l());
+}
+
+export function useStartError(id: string | null): string | null {
+  return useSyncExternalStore(
+    (l) => (startErrorListeners.add(l), () => startErrorListeners.delete(l)),
+    () => (id ? (startErrors.get(id) ?? null) : null),
+  );
+}

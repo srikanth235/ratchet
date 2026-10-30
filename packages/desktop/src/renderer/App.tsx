@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { NavContext, SnapshotContext, useQuery, type NavState } from './data';
 import type { NavId } from './nav';
@@ -15,9 +15,12 @@ export function App({ initialRoute = 'optimizations' }: { initialRoute?: NavId }
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const snapshot = useQuery(() => window.ratchet.listOptimizations(), [], { intervalMs: 10_000 });
 
+  const refreshRef = useRef(snapshot.refresh);
+  refreshRef.current = snapshot.refresh;
+
   const go = useCallback((r: NavId) => setRoute(r), []);
   const nav = useMemo<NavState>(
-    () => ({ route, go, selectedId, select: setSelectedId, open: (id, r) => { setSelectedId(id); setRoute(r); } }),
+    () => ({ route, go, selectedId, select: setSelectedId, open: (id, r) => { setSelectedId(id); setRoute(r); refreshRef.current(); } }),
     [route, go, selectedId],
   );
 

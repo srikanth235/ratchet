@@ -9,7 +9,7 @@ export function Pipeline({ pipeline }: { pipeline: BenchPipelineVM }) {
   return (
     <Card className="pipeline" data-testid="pipeline">
       <div className="card-head">
-        <h2 className="card-title">Trusted bench runner</h2>
+        <h2 className="card-title">Trusted evaluator</h2>
         <span className="card-head__note">eval-only credentials · agents can’t read or change it</span>
         <span className="mono faint card-head__aside" style={{ fontSize: 12 }}>
           {pipeline.candidate ? `candidate ${pipeline.candidate.sha}` : 'idle'}

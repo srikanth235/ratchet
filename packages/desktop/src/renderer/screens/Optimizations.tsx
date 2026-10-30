@@ -5,7 +5,8 @@ import { Icon } from '../components/icons';
 import { KpiCard } from '../components/KpiCard';
 import { OptimizationsTable } from '../components/OptimizationsTable';
 import { forOptimization, useNav, useQuery, useSnapshot } from '../data';
-import { fmtDuration, fmtNum, gainLabel } from '../format';
+import { fmtDuration, fmtNum, gainLabel, repoLabel } from '../format';
+import { fmtUsdCompact, valueOf } from '../value';
 
 export function Optimizations() {
   const { data, error } = useSnapshot();
@@ -27,6 +28,7 @@ export function Optimizations() {
   const rate = d && d.elapsedS > 60 ? (evals / d.elapsedS) * 3600 : null;
   const locks = series ? Math.max(0, series.steps.length - 1) : 0;
   const gain = featured ? gainLabel(featured, 1) : null;
+  const value = d && featured ? valueOf(d.configYaml, featured.direction, featured.baseline, featured.best, featured.spendUsd) : null;
   const spendPct = featured && featured.budgetUsd > 0 ? Math.min(100, (featured.spendUsd / featured.budgetUsd) * 100) : 0;
 
   return (
@@ -34,7 +36,7 @@ export function Optimizations() {
       <PageHeader
         eyebrow={<span>Local workspace · {repos} repo{repos === 1 ? '' : 's'}</span>}
         title="Optimizations"
-        sub={<>Agents propose changes. The benchmark decides. <span className="tagline">Only verified wins ratchet forward.</span></>}
+        sub={<>Agents propose changes. The evaluator decides. <span className="tagline">Only verified wins ratchet forward.</span></>}
         actions={<Button onClick={() => go('new')}><Icon name="plus" size={13} /> New optimization</Button>}
       />
 
@@ -59,7 +61,7 @@ export function Optimizations() {
                     <span className="featured__eyebrow"><StatusPill status={featured.status} /></span>
                   )}
                   <h2 className="featured__title">{featured.name}</h2>
-                  <span className="mono featured__repo">{featured.repo} · {featured.metric}</span>
+                  <span className="mono featured__repo">{repoLabel(featured.repo)} · {featured.metric}</span>
                 </div>
                 <div className="featured__side">
                   <span className="avatars">{featured.agents.map((a, i) => <AgentAvatar key={a} agent={a} size={28} ring overlap={i ? 8 : 0} />)}</span>
@@ -78,6 +80,7 @@ export function Optimizations() {
                     {featured.baseline !== null ? `baseline ${fmtNum(featured.baseline)} ${featured.unit}`.trim() : 'baseline pending'}
                     {series?.noiseFloor != null ? ` · noise ±${fmtNum(series.noiseFloor)} ${featured.unit}`.trimEnd() : ''}
                     {` · ${locks} lock${locks === 1 ? '' : 's'}`}
+                  {value ? ` · ≈ ${fmtUsdCompact(value.usdPerYear)} / year` : ''}
                   </span>
                 </div>
                 <div className="chart-legend">

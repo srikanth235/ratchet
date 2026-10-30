@@ -4,7 +4,7 @@ import { AgentCard } from '../components/AgentCard';
 import { Crumbs, Empty, ErrorNote, OptTabs, OptimizationPicker, PageHeader, StateBadge, useSelectedId } from '../components/common';
 import { Icon } from '../components/icons';
 import { Pipeline } from '../components/Pipeline';
-import { errMsg, forOptimization, useQuery } from '../data';
+import { errMsg, forOptimization, useQuery, useStartError } from '../data';
 import { fmtDuration, fmtNum, gainLabel } from '../format';
 
 const TICK: Record<string, string> = { verified: '#7BD8B0', blocked: '#F08A93', failed_confirm: '#8592A6', rejected: '#3A4558', pending: '#3A4558' };
@@ -28,6 +28,7 @@ export function LiveAgents() {
   const [confirmStop, setConfirmStop] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const startError = useStartError(id);
 
   if (id === null) return <><PageHeader title="Agents" /><Empty title="No optimization selected">Start one from Optimizations.</Empty></>;
   if (q.error && !q.data) return <ErrorNote error={q.error} />;
@@ -94,7 +95,7 @@ export function LiveAgents() {
         }
         tabs={<OptTabs current="agents" />}
       />
-      <ErrorNote error={error} />
+      <ErrorNote error={error ?? (startError ? `Could not start: ${startError}` : null)} />
 
       <section className="stat-cards" aria-label="Run summary">
         <Card className="stat-card">

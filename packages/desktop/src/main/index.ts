@@ -12,6 +12,11 @@ import { SettingsStore } from './settings.js';
 // Must run before the app is ready, as userData is read from it.
 if (process.env['RATCHET_USER_DATA_DIR']) app.setPath('userData', process.env['RATCHET_USER_DATA_DIR']);
 
+// Test/CI override: the simulation runtime spawns `process.execPath` to run plain Node scripts; inside Electron that is
+// the Electron binary, so point it at a real Node (packages/e2e sets this). Not needed once the runtime spawns with
+// ELECTRON_RUN_AS_NODE=1.
+if (process.env['RATCHET_NODE_BIN']) process.execPath = process.env['RATCHET_NODE_BIN'];
+
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
@@ -70,6 +75,14 @@ app.whenReady().then(() => {
     settings,
     createApp: (mode) => createEngineForApp(ledger, mode),
     saveReport: async (defaultName, markdown) => {
+      // Test/CI override: write the report into this directory instead of asking through a native dialog.
+      const autoDir = process.env['RATCHET_E2E_SAVE_DIR'];
+      if (autoDir) {
+        mkdirSync(autoDir, { recursive: true });
+        const file = join(autoDir, defaultName);
+        writeFileSync(file, markdown, 'utf8');
+        return file;
+      }
       const res = await dialog.showSaveDialog({ defaultPath: defaultName, filters: [{ name: 'Markdown', extensions: ['md'] }] });
       if (res.canceled || !res.filePath) return null;
       writeFileSync(res.filePath, markdown, 'utf8');

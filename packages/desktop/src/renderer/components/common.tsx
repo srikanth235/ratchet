@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Eyebrow, Pill, StatusPill } from '@ratchet/ui';
 import type { OptimizationDetail } from '../../shared/types';
 import { useNav, useSnapshot } from '../data';
-import { fmtDuration } from '../format';
+import { fmtDuration, repoLabel } from '../format';
 import type { NavId } from '../nav';
 
 export interface PageHeaderProps {
@@ -44,7 +44,7 @@ export function Crumbs({ repo }: { repo?: string }) {
     <>
       <button type="button" className="crumb" onClick={() => go('optimizations')}>Optimizations</button>
       <span aria-hidden="true">/</span>
-      {repo ? <span className="mono">{repo}</span> : <span>New</span>}
+      {repo ? <span className="mono">{repoLabel(repo)}</span> : <span>New</span>}
     </>
   );
 }
@@ -114,6 +114,7 @@ export function useSelectedId(): string | null {
   const { selectedId } = useNav();
   const snap = useSnapshot();
   const rows = snap.data?.optimizations ?? [];
-  if (selectedId && rows.some((o) => o.id === selectedId)) return selectedId;
+  // A just-created optimization is selected before the snapshot has caught up with it: trust the selection.
+  if (selectedId) return selectedId;
   return snap.data?.featuredId ?? rows.find((o) => o.status !== 'draft')?.id ?? null;
 }
