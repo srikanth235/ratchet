@@ -33,6 +33,8 @@ describe("aws module: the section-7 resources", () => {
     "aws_iam_instance_profile\" \"bench_runner",
     "aws_iam_role\" \"confirm_runner",
     "aws_iam_instance_profile\" \"confirm_runner",
+    "aws_iam_role\" \"deps_runner",
+    "aws_iam_instance_profile\" \"deps_runner",
     "aws_vpc\" \"sandbox",
     "aws_subnet\" \"bench",
     "aws_vpc_endpoint\" \"s3",
@@ -135,6 +137,7 @@ describe("aws module: template wiring", () => {
     ["agent_boundary", iam],
     ["bench_runner_policy", iam],
     ["confirm_runner_policy", iam],
+    ["deps_runner_policy", iam],
     ["s3_endpoint_policy", net],
     ["sealed_bucket_policy", s3],
   ])("%s: templatefile() passes exactly the variables the template uses", (name, src) => {
@@ -151,7 +154,7 @@ describe("aws module: contract surface", () => {
   });
   it("declares every contract output", () => {
     const o = tf("outputs.tf");
-    for (const name of ["artifacts_bucket", "sealed_bucket", "agent_boundary_ref", "eval_identity_ref", "confirm_identity_ref", "network_ref"]) {
+    for (const name of ["artifacts_bucket", "sealed_bucket", "agent_boundary_ref", "eval_identity_ref", "confirm_identity_ref", "deps_identity_ref", "network_ref"]) {
       expect(o).toContain(`output "${name}"`);
     }
     expect(o).toMatch(/bench_subnet_id/);
@@ -162,7 +165,7 @@ describe("aws module: contract surface", () => {
   it("documents every contract name in contract.md", async () => {
     const { readFileSync } = await import("node:fs");
     const md = readFileSync(new URL("../../contract.md", import.meta.url), "utf8");
-    for (const name of ["sandbox_id", "region", "allowed_instance_types", "max_instances_per_agent", "max_instance_lifetime_hours", "tags", "artifacts_bucket", "sealed_bucket", "agent_boundary_ref", "eval_identity_ref", "confirm_identity_ref", "network_ref"]) {
+    for (const name of ["sandbox_id", "region", "allowed_instance_types", "max_instances_per_agent", "max_instance_lifetime_hours", "tags", "artifacts_bucket", "sealed_bucket", "agent_boundary_ref", "eval_identity_ref", "confirm_identity_ref", "deps_identity_ref", "network_ref"]) {
       expect(md).toContain(`\`${name}\``);
     }
   });

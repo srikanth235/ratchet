@@ -14,7 +14,7 @@ as_bench() { setpriv --reuid="$BU" --regid="$BU" --clear-groups --no-new-privs -
 
 log "commands the bench scripts use"
 for c in bash tar timeout realpath date sha256sum find grep setpriv pkill chown chgrp iptables ip6tables unzip \
-         aws node npm pnpm git k6 hyperfine; do
+         zstd aws node npm pnpm git k6 hyperfine; do
   command -v "$c" >/dev/null || die "missing command: $c"
 done
 printf 'a1b2\n' | grep -oP '\d+(?=b)' | grep -qx 1 || die "grep -P does not work"

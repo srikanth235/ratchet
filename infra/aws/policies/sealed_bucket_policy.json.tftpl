@@ -26,6 +26,14 @@
       "Condition": { "ArnEquals": { "aws:PrincipalArn": "${bench_runner_role_arn}" } }
     },
     {
+      "Sid": "DenyDepsRunner",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": ["${sealed_bucket_arn}", "${sealed_bucket_arn}/*"],
+      "Condition": { "ArnEquals": { "aws:PrincipalArn": "${deps_runner_role_arn}" } }
+    },
+    {
       "Sid": "DenyInsecureTransport",
       "Effect": "Deny",
       "Principal": "*",

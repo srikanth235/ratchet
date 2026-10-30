@@ -263,3 +263,44 @@ run "bench_inputs_zero_days_rejected" {
 
   expect_failures = [var.bench_inputs_retention_days]
 }
+
+# ---- dependency snapshots must not open the bench subnet ----
+#
+# The deps job runs in the AGENT subnet (the only place with egress). Adding it
+# changes nothing for the bench: same private route table, same five egress
+# rules, and no package-registry name in the allow-list unless the operator
+# adds one for the agent path.
+
+run "deps_snapshots_leave_the_bench_subnet_offline" {
+  command = apply
+
+  assert {
+    condition     = length(aws_route_table.private.route) == 0 && aws_route_table_association.bench.route_table_id == aws_route_table.private.id
+    error_message = "the bench subnet keeps the route-less private table"
+  }
+
+  assert {
+    condition     = length(aws_security_group.bench.egress) == 5 && !anytrue([for r in aws_security_group.bench.egress : contains(coalesce(r.cidr_blocks, []), "0.0.0.0/0")])
+    error_message = "the bench security group keeps exactly its five rules and no internet egress"
+  }
+
+  assert {
+    condition     = length(aws_security_group.bench.ingress) == 1 && one(aws_security_group.bench.ingress).self == true
+    error_message = "the bench security group keeps self-only ingress"
+  }
+
+  assert {
+    condition     = aws_subnet.bench.map_public_ip_on_launch == false
+    error_message = "the bench subnet hands out no public IPs"
+  }
+
+  assert {
+    condition     = !anytrue([for d in aws_route53_resolver_firewall_domain_list.allowed[0].domains : strcontains(d, "npmjs")])
+    error_message = "no package registry is allowed by default: it is an explicit operator choice (egress_proxy_extra_domains / dns_firewall_extra_domains)"
+  }
+
+  assert {
+    condition     = length(aws_security_group.agent_runner.ingress) == 0
+    error_message = "the deps job reuses the agent runner group, which has no inbound"
+  }
+}
