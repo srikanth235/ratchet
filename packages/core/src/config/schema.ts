@@ -230,12 +230,16 @@ const rawConfigSchema = z.strictObject({
   protected: z
     .array(nonEmpty('protected glob'), { error: 'protected must be a list of globs' })
     .default([]),
-  agent: z.strictObject({
-    instructions: nonEmpty('agent.instructions'),
-    allowed_instance_types: z
-      .array(nonEmpty('instance type'), { error: 'allowed_instance_types must be a list of strings' })
-      .min(1, 'allowed_instance_types must list at least one instance type'),
-  }),
+  /** Optional: the brief defaults to `RATCHET.md`, the instance types agents may launch to the bench machine. */
+  agent: z
+    .strictObject({
+      instructions: nonEmpty('agent.instructions').optional(),
+      allowed_instance_types: z
+        .array(nonEmpty('instance type'), { error: 'allowed_instance_types must be a list of strings' })
+        .min(1, 'allowed_instance_types must list at least one instance type')
+        .optional(),
+    })
+    .optional(),
 });
 
 /**
@@ -289,8 +293,15 @@ export const configSchema = z
       run: run ?? '',
       hardware: c.evaluator.hardware ?? c.environment?.machine ?? tpl?.machine ?? DEFAULT_BENCH_MACHINE,
     };
-    return { ...c, guardrails, protected: c.protected, evaluator, bench: evaluator };
+    const agent = {
+      instructions: c.agent?.instructions ?? DEFAULT_AGENT_INSTRUCTIONS,
+      allowed_instance_types: c.agent?.allowed_instance_types ?? [evaluator.hardware],
+    };
+    return { ...c, guardrails, protected: c.protected, evaluator, bench: evaluator, agent };
   });
+
+/** The agents' brief when `agent.instructions` is not set. */
+export const DEFAULT_AGENT_INSTRUCTIONS = 'RATCHET.md';
 
 export type RatchetConfig = z.output<typeof configSchema>;
 export type Direction = RatchetConfig['objective']['direction'];

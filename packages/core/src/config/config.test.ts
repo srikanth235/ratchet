@@ -98,8 +98,8 @@ agent: { instructions: RATCHET.md, allowed_instance_types: [c7i.xlarge] }
   it('reports missing required sections with their paths', () => {
     const errs = errorsOf('version: 0\n');
     const paths = errs.map((e) => e.path).sort();
-    expect(paths).toEqual(['agent', 'evaluator', 'objective']);
-    expect(formatConfigError(errs[0]!)).toMatch(/^(agent|evaluator|objective): /);
+    expect(paths).toEqual(['evaluator', 'objective']);
+    expect(formatConfigError(errs[0]!)).toMatch(/^(evaluator|objective): /);
   });
 
   it('reports a wrong version', () => {

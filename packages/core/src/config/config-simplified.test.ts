@@ -132,8 +132,11 @@ describe('ratchet.yaml, simplified model', () => {
     });
   });
 
-  it('still requires the agent block (and reports what else is missing)', () => {
-    expect(errors('version: 0\n').map((e) => e.path).sort()).toEqual(['agent', 'evaluator', 'objective']);
+  it('needs only objective and evaluator; the agent block defaults (brief RATCHET.md, the bench machine)', () => {
+    expect(errors('version: 0\n').map((e) => e.path).sort()).toEqual(['evaluator', 'objective']);
+    const r = parseConfig('version: 0\nobjective: { metric: http_req_duration.p95, direction: minimize }\nevaluator: { template: http-latency }\nenvironment: { machine: c7i.xlarge }\n');
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.config.agent).toEqual({ instructions: 'RATCHET.md', allowed_instance_types: ['c7i.xlarge'] });
   });
 });
 
