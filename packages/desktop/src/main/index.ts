@@ -8,6 +8,10 @@ import { isTrustedUrl, registerIpc } from './ipc.js';
 import { createService } from './service.js';
 import { SettingsStore } from './settings.js';
 
+// Test/CI override: keep the ledger DB and settings in an isolated directory (used by packages/e2e).
+// Must run before the app is ready, as userData is read from it.
+if (process.env['RATCHET_USER_DATA_DIR']) app.setPath('userData', process.env['RATCHET_USER_DATA_DIR']);
+
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow(): void {
