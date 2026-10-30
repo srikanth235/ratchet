@@ -292,13 +292,13 @@ resources (the optional proxy is off by default):
 
 | Resource | Purpose |
 |---|---|
-| `aws_s3_bucket.artifacts` | Agent event streams and build outputs, one prefix per agent; `bench-inputs/` (staged candidates, read-only for the bench), `bench-deps/` (dependency snapshots: written only by the deps identity, read by the bench identities) and `bench-results/` |
+| `aws_s3_bucket.artifacts` | Agent event streams and build outputs, one prefix per agent; `bench-inputs/` (staged candidates, read-only for the bench), `bench-deps/` (dependency snapshots) and `bench-images/` (saved repo container images; both written only by the deps identity, read by the bench identities) and `bench-results/` |
 | `aws_s3_bucket.sealed` | Hidden traffic traces, confirm runner only (holdout prefix) |
 | `aws_s3_bucket_policy.sealed_deny_agents` | Explicit deny for every agent identity, for the bench runner and for the dependency-snapshot builder |
 | `aws_iam_policy.agent_boundary` | Permission boundary for every agent role (launch only into the agent subnet, never with bench/endpoint/proxy groups) |
 | `aws_iam_role.bench_runner` + `aws_iam_instance_profile.bench_runner` | Trusted bench for `baseline`/`bench` phases: **no sealed access** |
 | `aws_iam_role.confirm_runner` + `aws_iam_instance_profile.confirm_runner` | Trusted bench for `confirm` only: reads the holdout prefix of the sealed bucket |
-| `aws_iam_role.deps_runner` + `aws_iam_instance_profile.deps_runner` | Dependency-snapshot builder (`purpose: deps`): runs in the **agent** subnet (egress, through the proxy when enabled), reads only the staged base tree (`bench-inputs/*/deps-base.tgz`), writes only `bench-deps/`; no sealed access, no candidate code |
+| `aws_iam_role.deps_runner` + `aws_iam_instance_profile.deps_runner` | Dependency-snapshot builder (`purpose: deps`): runs in the **agent** subnet (egress, through the proxy when enabled), reads only the staged base tree (`bench-inputs/*/deps-base.tgz`) and `bench-images/`, writes only `bench-deps/` and `bench-images/`; no sealed access, no candidate code |
 | `aws_vpc.sandbox`, `aws_subnet.bench`, `aws_subnet.agent`, route tables, internet gateway | Dedicated network; the bench subnet has no route to the internet |
 | `aws_vpc_endpoint.s3` (gateway, bucket-restricted policy) + 4 interface endpoints (`ssm`, `ssmmessages`, `ec2messages`, `logs`) | The only ways out of the bench subnet |
 | `aws_security_group.agent_runner` | Egress HTTPS + DNS (or, with the proxy, only proxy / endpoints / S3) |
@@ -344,6 +344,16 @@ by the app per optimization (below), not by OpenTofu.
    is terminated before the bench instance exists. The bench instance restores
    it read-only before setup and installs offline; a candidate that changes the
    lockfile is blocked.
+   With `environment.image` (a Dockerfile or devcontainer.json of the repo) the
+   same egress job also builds the repo's **container image** from the base ref,
+   saves it content-addressed to `bench-images/` (manifest last) and runs the
+   package fetch inside it. Bench and confirm instances load it offline (sha256
+   and image id verified) and run setup, guardrails and the evaluator in it with
+   `--network none`, all capabilities dropped, a read-only root and the same two
+   uids (the harness starts candidate processes through a setuid launcher inside
+   the container); the holdout is mounted read-only into the confirm harness only.
+   A candidate that changes the Dockerfile, the devcontainer or a file it copies
+   is blocked ("environment changes are not allowed in v0").
 4. Runs guardrails, then the benchmark N times. The evaluator harness runs as a
    second user (`ratchet-holdout`) from a read-only snapshot and starts the
    candidate's own processes as `ratchet-bench` through a launcher. If the

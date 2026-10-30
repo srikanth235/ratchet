@@ -46,12 +46,35 @@ infra/images/build.sh both          # packs the runner tarballs, runs packer for
 
 - **Runner** (`ratchet:image=runner`): Node 22, pnpm, git, `claude` and `codex` (pinned), AWS CLI v2, SSM agent, perf,
   hyperfine, k6 and the `ratchet-runner` bin from this checkout.
-- **Bench** (`ratchet:image=bench`): Node 22, pnpm, git, k6, hyperfine, AWS CLI v2, SSM agent, iptables and the
-  unprivileged `ratchet-bench` user. No agent CLIs, no model keys. The IMDS block for that user is added by the
-  instance user data (`benchUserData`), not baked into the image.
-- **Pass the ids** to live mode: `createLiveRuntime({ ..., runnerImageRef: 'ami-...', benchImageRef: 'ami-...' })`
-  (`packages/runtime/src/live.ts`). They are used verbatim as `ImageId` in `RunInstances`, so they must be the plain
-  `ami-...` ids of the sandbox's region and account (the AMIs are encrypted by default).
+- **Bench** (`ratchet:image=bench`): **generic** since the repo's container replaced per-repo toolchains: the Docker engine,
+  git, AWS CLI v2, SSM agent, zstd, iptables, the unprivileged `ratchet-bench` and `ratchet-holdout` users and the setuid
+  `ratchet-candidate-ctr` launcher. No language toolchain, no agent CLIs, no model keys, no compiler. The repo's toolchain is
+  its container (`environment.image`, `bench.md` "The repo's container"). `-var host_toolchain=true` builds the legacy variant with
+  node, pnpm, k6 and hyperfine (tagged `ratchet:image=bench-host`, never found by the lookup) for repos without `environment.image`.
+  The IMDS block for the users is added by the instance user data (`benchUserData`), not baked into the image.
+- **You do not pass the ids.** The app looks the images up by tag (`ratchet:image=runner|bench`, `ratchet:image_version` equal to the
+  app version or the app version plus a build suffix; newest wins; own account, the sandbox's region, the architecture of the instance
+  types): `findRatchetImages(version, { region })` / `resolveImageRefs` in `packages/aws`, wired into
+  `createLiveRuntimeFor(opts, config)` / `resolveLiveImages(opts)` in `packages/runtime/src/live.ts`. `build.sh` stamps the app version
+  (`packages/desktop` version, or `RATCHET_APP_VERSION`) into the tag. A missing image is an `ImageLookupError` that says which image to
+  build. The explicit override stays for development only (Settings > Advanced):
+  `createLiveRuntime({ ..., runnerImageRef: 'ami-...', benchImageRef: 'ami-...' })`; it is used verbatim as `ImageId`, so it must be
+  the plain `ami-...` id of the sandbox's region and account (the AMIs are encrypted by default).
+- **Region per optimization.** `environment.region` in `ratchet.yaml` (read defensively; a value that is not a region name is an error)
+  picks the region of that optimization's runtime and image lookup (`regionForOptimization`, `createLiveRuntimeFor`); the setting
+  and `us-east-1` are the fallbacks. AMIs and the sandbox are regional: build / apply in every region you use.
+- **Custom sandbox module (advanced, off by default).** `infra: <dir>` in `ratchet.yaml` names a module in the repository. It is
+  read from the protected ref only (`materializeInfraOverride`: no symlinks, `.tf` files present, and no `local-exec` / `remote-exec` /
+  `external` data source, because a module runs with your credentials), and after every apply its outputs are validated against
+  `infra/contract.md` (`checkSandboxContract`, enabled with `TofuSandboxProvider({ validateContract: true })`, `LiveOptions.infraOverride`)
+  with a message that lists every missing or malformed output and every broken separation (buckets, identities, subnets, groups).
+  TODO: the engine's sandbox lifecycle does not yet call `readInfraOverride` / `materializeInfraOverride` and pass the resulting
+  `moduleDir`; the functions and the post-apply validation are in place and tested.
+- **Registries for the image build.** The container image job runs in the agent subnet; the registries its Dockerfile pulls from are
+  not in the default DNS / proxy allow-list. Add them for your repo (`egress_proxy_extra_domains` with the proxy,
+  `dns_firewall_extra_domains` without): typically `registry-1.docker.io`, `auth.docker.io`, `production.cloudflare.docker.com`,
+  `ghcr.io`, `public.ecr.aws`, plus OS package mirrors used by `RUN` steps. That is an operator decision (`environment.network` is the
+  per-repo expression of it); nothing about the bench subnet changes.
 - **Check:** `aws ec2 describe-images --image-ids <ami> --query 'Images[].Tags'` shows `ratchet:image`,
   `ratchet:image_version` and `ratchet:source_commit`; `bench.md` section 5 exercises the bench AMI, and the first
   `launchRunner` in `agents.md` the runner AMI.
