@@ -347,7 +347,7 @@ export class Engine implements EngineApi {
     let baseline = this.ledger.getBaseline(id);
     if (!baseline) {
       const outcome = await this.ports.bench.run(
-        { optimizationId: id, sha: opt.baseRef, phase: 'baseline', repeats: config.bench.repeats },
+        { optimizationId: id, sha: await this.baseSha(opt), phase: 'baseline', repeats: config.bench.repeats },
         config,
         null,
         rt.abort.signal,
@@ -374,7 +374,7 @@ export class Engine implements EngineApi {
     }
     if (config.bench.confirm_trace && this.settings.confirmBaseline && !this.kv.has(K.confirmBest(id))) {
       const confirm = await this.ports.bench.run(
-        { optimizationId: id, sha: opt.baseRef, phase: 'confirm', repeats: config.bench.repeats, trace: config.bench.confirm_trace },
+        { optimizationId: id, sha: await this.baseSha(opt), phase: 'confirm', repeats: config.bench.repeats, trace: config.bench.confirm_trace },
         config,
         { metrics: metricsFromStats(baseline.stats) },
         rt.abort.signal,
@@ -383,6 +383,16 @@ export class Engine implements EngineApi {
       this.kv.set(K.confirmBest(id), String(median(samplesOf(confirm))));
     }
     return baseline.value;
+  }
+
+  /** `baseRef` resolved to a sha once and remembered, so baseline, confirm-baseline and diffs all use the same commit. */
+  private async baseSha(opt: OptimizationRow): Promise<string> {
+    const key = K.baseSha(opt.id);
+    const known = this.kv.get(key);
+    if (known) return known;
+    const sha = await this.gitFor(opt.repo).resolveRef(opt.baseRef);
+    this.kv.set(key, sha);
+    return sha;
   }
 
   private async loadBrief(id: string, config: RatchetConfig): Promise<string> {
@@ -432,7 +442,7 @@ export class Engine implements EngineApi {
     const secrets = this.kv.getJson<SecretRef[]>(K.secrets(agentId)) ?? [];
 
     if (step < 3) {
-      await git.createBranch(opt.baseRef, agent.branch);
+      await git.createBranch(await this.baseSha(opt), agent.branch);
       done(3);
     }
     if (step < 4) {
@@ -617,9 +627,7 @@ export class Engine implements EngineApi {
     const gain = baseline && baseline.value !== 0 ? Math.abs(best - baseline.value) / Math.abs(baseline.value) * 100 : 0;
     const title = `Ratchet: ${opt.metric} ${baseline ? fmt(baseline.value) : '?'} -> ${fmt(best)} (${fmt(gain)}% ${opt.direction === 'minimize' ? 'lower' : 'higher'}, ${shas.length} verified)`;
     const body = await (this.settings.reportBuilder ?? defaultReport)(this.ledger, id);
-    // GitHost.openPullRequest documents "squash `shas` onto `base`" but its input type has no `shas` yet.
-    const input = { base: opt.baseRef, head: `ratchet/${id}/result`, title, body, shas };
-    const res = await this.gitFor(opt.repo).openPullRequest(input);
+    const res = await this.gitFor(opt.repo).openPullRequest({ base: opt.baseRef, head: `ratchet/${id}/result`, title, body, shas });
     this.kv.set(K.pr(id), res.url);
     await this.ports.artifacts.put(`engine/${id}/report.md`, body).catch((e) => this.reportError(e, 'artifacts.put report'));
     return res;
@@ -849,7 +857,12 @@ export class Engine implements EngineApi {
     }
     if (total >= opt.budgetUsd * this.settings.warnFraction && !this.kv.has(K.warned(id))) {
       this.kv.set(K.warned(id), String(this.clock.now()));
-      this.emit({ type: 'optimization', optimizationId: id, status: 'warning:budget_80' });
+      this.emit({
+        type: 'notice',
+        optimizationId: id,
+        level: 'warning',
+        text: `spend $${total.toFixed(2)} reached ${Math.round(this.settings.warnFraction * 100)}% of the $${opt.budgetUsd.toFixed(2)} budget`,
+      });
     }
     if (opt.status !== 'running') return false;
 
@@ -950,6 +963,10 @@ export class Engine implements EngineApi {
   private async pollGit(opt: OptimizationRow, agent: AgentRow): Promise<void> {
     const config = this.config(opt.id);
     const git = this.gitFor(opt.repo);
+    const baseSha = await this.baseSha(opt).catch((err) => {
+      this.reportError(err, `resolveRef ${opt.baseRef}`);
+      return opt.baseRef;
+    });
     const all = this.ledger.candidatesWithResults(opt.id);
     let seq = all.length;
     const mine = all.filter((c) => c.agentId === agent.id);
@@ -966,7 +983,7 @@ export class Engine implements EngineApi {
       if (known.has(c.sha)) continue;
       let files: string[];
       try {
-        files = await git.changedFiles(opt.baseRef, c.sha);
+        files = await git.changedFiles(baseSha, c.sha);
       } catch (err) {
         this.reportError(err, `changedFiles ${c.sha}`);
         return; // keep order: retry this commit (and the rest) next tick
@@ -1167,10 +1184,9 @@ export class Engine implements EngineApi {
     const owner = agents.find((a) => a.id === cand.agentId);
     if (owner) await this.sendTo(owner, { type: 'verdict', sha: cand.sha, verdict: finalVerdict, reasons: finalReasons, currentBest: best });
     if (moved && owner) {
-      const note = `shared ratchet moved: ${owner.kind} candidate ${cand.sha} -> ${fmt(moved.to)} (was ${fmt(moved.from)}). Rebase onto it.`;
       for (const other of agents) {
         if (other.id === owner.id) continue;
-        await this.sendTo(other, { type: 'verdict', sha: cand.sha, verdict: 'verified', reasons: [note], currentBest: best });
+        await this.sendTo(other, { type: 'ratchet', sha: cand.sha, branch: owner.branch, value: moved.to });
       }
     }
   }

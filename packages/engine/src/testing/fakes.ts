@@ -61,7 +61,7 @@ export interface FakeCommit extends CandidateCommit {
 export class FakeGit implements GitHost {
   readonly branches = new Map<string, string>(); // branch -> fromRef
   readonly commits = new Map<string, FakeCommit[]>();
-  readonly prs: Array<{ base: string; head: string; title: string; body: string; shas?: string[] }> = [];
+  readonly prs: Array<{ base: string; head: string; title: string; body: string; shas: string[] }> = [];
   failChangedFiles = new Set<string>();
   files: Record<string, string>;
 
@@ -108,10 +108,15 @@ export class FakeGit implements GitHost {
     }
   }
 
-  async openPullRequest(input: { base: string; head: string; title: string; body: string }): Promise<{ url: string }> {
+  async openPullRequest(input: { base: string; head: string; title: string; body: string; shas: string[] }): Promise<{ url: string }> {
     this.log.push('git.openPullRequest');
-    this.prs.push(input as (typeof this.prs)[number]);
+    this.prs.push(input);
     return { url: `https://example.test/pr/${this.prs.length}` };
+  }
+
+  readonly resolved = new Map<string, string>();
+  async resolveRef(ref: string): Promise<string> {
+    return this.resolved.get(ref) ?? `${ref}-sha`;
   }
 
   remoteUrl(): string {
@@ -152,6 +157,7 @@ export class FakeBench implements BenchRunner {
     this.log.push(`bench.${job.phase}:${job.sha}`);
     this.jobs.push(job);
     this.baselineArgs.push(baseline);
+    if (signal?.aborted) throw new Error('aborted');
     if (this.gate) {
       await Promise.race([
         this.gate,

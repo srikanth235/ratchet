@@ -160,6 +160,8 @@ checked again on the partner's account.
   teardown treats only non-terminated ones as orphans.
 - The hidden-trace baseline (an extra `confirm` job on the base ref at start, `confirmBaseline`) works
   with the real bench runner: it needs the trace reachable and costs one extra fresh instance.
-- Shared-ratchet announcements are encoded as a `verdict` runner message for the winning sha (see
-  engine design notes); the runner loop must treat a verdict for a foreign sha as "new shared best" and
-  rebase onto it, fetching the other agent's branch.
+- Shared-ratchet announcements use the `ratchet` runner message (`sha`, `branch`, `value`) sent to
+  the other runners; the winner's own runner gets its `verdict`. The runner loop must fetch that branch
+  and rebase onto the sha.
+- `baseRef` is resolved once with `GitHost.resolveRef` and remembered; baseline, confirm-baseline,
+  branch creation and protected-path diffs all use that sha. The budget warning is a `notice` event.

@@ -134,8 +134,8 @@ export function makeHarness(opts: HarnessOptions = {}): Harness {
       if (!pred()) throw new Error(`condition not met after ${max} cycles`);
     },
     async begin(b = {}) {
-      bench.set('main', 'baseline', { samples: b.baseline ?? [100, 102, 98], metrics: { peak_rss: 500 } });
-      bench.set('main', 'confirm', { samples: b.confirmBaseline ?? [100, 100, 100] });
+      bench.set('main-sha', 'baseline', { samples: b.baseline ?? [100, 102, 98], metrics: { peak_rss: 500 } });
+      bench.set('main-sha', 'confirm', { samples: b.confirmBaseline ?? [100, 100, 100] });
       const id = await h.engine.createOptimization({
         repoUrl: git.remoteUrl(),
         baseRef: 'main',

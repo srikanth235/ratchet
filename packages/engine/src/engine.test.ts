@@ -117,7 +117,7 @@ describe('start', () => {
     expect(baseline.stats['metric:peak_rss']).toBe(500);
     expect(h.ledger.getOptimization(id)!.status).toBe('running');
     expect(h.ledger.getOptimization(id)!.startedAt).not.toBeNull();
-    expect(h.bench.jobs[0]).toMatchObject({ phase: 'baseline', repeats: 3, sha: 'main' });
+    expect(h.bench.jobs[0]).toMatchObject({ phase: 'baseline', repeats: 3, sha: 'main-sha' });
     // the baseline on the hidden trace, so confirm compares like with like
     expect(h.bench.jobs[1]).toMatchObject({ phase: 'confirm', trace: 's3://sealed/trace.jsonl' });
 
@@ -169,7 +169,7 @@ describe('start', () => {
 
   it('fails when the baseline breaks its own command guardrail', async () => {
     const h = makeHarness();
-    h.bench.set('main', 'baseline', { samples: [10, 10, 10], guardrails: [{ name: 'pytest -q', passed: false }] });
+    h.bench.set('main-sha', 'baseline', { samples: [10, 10, 10], guardrails: [{ name: 'pytest -q', passed: false }] });
     const id = await h.engine.createOptimization({ repoUrl: 'x', baseRef: 'main', agents: ['codex'], budgetUsd: 5, timeLimitSeconds: 60, plateauEvals: 3 });
     await expect(h.engine.start(id)).rejects.toThrow(/baseline fails its own guardrails/);
     expect(h.ledger.getOptimization(id)!.status).toBe('failed');
@@ -185,7 +185,7 @@ describe('start', () => {
   it('a kill switch during the baseline wins and start() returns quietly', async () => {
     const h = makeHarness();
     h.bench.gate = new Promise(() => undefined); // baseline never finishes on its own
-    h.bench.set('main', 'baseline', { samples: [1, 1, 1] });
+    h.bench.set('main-sha', 'baseline', { samples: [1, 1, 1] });
     const id = await h.engine.createOptimization({ repoUrl: 'x', baseRef: 'main', agents: ['codex'], budgetUsd: 5, timeLimitSeconds: 60, plateauEvals: 3 });
     const starting = h.engine.start(id);
     await Promise.resolve();
@@ -263,8 +263,12 @@ describe('happy path', () => {
     expect(toClaude.filter((m) => m.type === 'verdict' && m.sha === 'sha-c1')).toEqual([
       { type: 'verdict', sha: 'sha-c1', verdict: 'verified', reasons: expect.any(Array), currentBest: 90 },
     ]);
-    expect(toClaude.some((m) => m.type === 'verdict' && m.sha === 'sha-x3' && m.verdict === 'verified' && m.currentBest === 70)).toBe(true);
-    expect(toCodex.some((m) => m.type === 'verdict' && m.sha === 'sha-c1' && m.verdict === 'verified' && m.currentBest === 90)).toBe(true);
+    expect(toClaude).toContainEqual({ type: 'ratchet', sha: 'sha-x3', branch: 'ratchet/opt-test/codex', value: 70 });
+    expect(toCodex).toContainEqual({ type: 'ratchet', sha: 'sha-c1', branch: 'ratchet/opt-test/claude-code', value: 90 });
+    // the winner gets its verdict, not a ratchet announcement about itself
+    expect(toCodex.some((m) => m.type === 'ratchet' && m.sha === 'sha-x3')).toBe(false);
+    expect(toClaude.some((m) => m.type === 'ratchet' && m.sha === 'sha-c1')).toBe(false);
+    expect(toCodex.some((m) => m.type === 'verdict' && m.sha === 'sha-c1')).toBe(false);
     expect(toCodex.some((m) => m.type === 'verdict' && m.sha === 'sha-x1' && m.verdict === 'blocked')).toBe(true);
     // a rejection is private to its author
     expect(toClaude.some((m) => m.type === 'verdict' && m.sha === 'sha-x2')).toBe(false);
@@ -415,11 +419,11 @@ describe('cost and stop rules', () => {
 
     await h.cycle(3); // $1.0 = 83%
     expect(h.ledger.getOptimization(id)!.status).toBe('running');
-    expect(events.filter((e) => e.type === 'optimization' && e.status === 'warning:budget_80')).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'notice' && e.level === 'warning')).toHaveLength(1);
     await h.cycle(1); // $1.333 >= $1.2
     expect(h.ledger.getOptimization(id)!.status).toBe('stopped');
     expect(h.engine.stopReason(id)).toMatch(/budget exhausted/);
-    expect(events.filter((e) => e.type === 'optimization' && e.status === 'warning:budget_80')).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'notice' && e.level === 'warning')).toHaveLength(1);
 
     const after = h.log.slice(mark);
     const idx = (prefix: string) => after.findIndex((l) => l.startsWith(prefix));
@@ -746,8 +750,8 @@ describe('restart and resume', () => {
   it('finishes launching half-launched agents after a hard crash, without repeating completed steps', async () => {
     const dir = mkTmp();
     const h = makeHarness({ ledgerPath: join(dir, 'ledger.db') });
-    h.bench.set('main', 'baseline', { samples: [100, 100, 100] });
-    h.bench.set('main', 'confirm', { samples: [100, 100, 100] });
+    h.bench.set('main-sha', 'baseline', { samples: [100, 100, 100] });
+    h.bench.set('main-sha', 'confirm', { samples: [100, 100, 100] });
     const id = await h.engine.createOptimization({ repoUrl: 'x', baseRef: 'main', agents: ['claude-code', 'codex'], budgetUsd: 100, timeLimitSeconds: 3600, plateauEvals: 5 });
     // the process dies while the second runner is being launched
     const realLaunch = h.compute.launchRunner.bind(h.compute);

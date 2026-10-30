@@ -71,6 +71,7 @@ export const K = {
   stopReason: (opt: string) => `opt:${opt}:stop_reason`,
   stopAt: (opt: string) => `opt:${opt}:stop_at`,
   confirmBest: (opt: string) => `opt:${opt}:confirm_best`,
+  baseSha: (opt: string) => `opt:${opt}:base_sha`,
   pr: (opt: string) => `opt:${opt}:pr_url`,
   teardown: (opt: string) => `opt:${opt}:teardown_report`,
   cursor: (agent: string) => `agent:${agent}:cursor`,
