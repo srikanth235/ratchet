@@ -8,3 +8,5 @@ coverage/
 .terraform/
 *.tfstate*
 release/
+packages/desktop/out-before/
+packages/e2e/artifacts/
