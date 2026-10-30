@@ -2,7 +2,7 @@ import type { PlanChange, SandboxInput, SandboxProvider } from '@ratchet/core';
 import { assertValidSandboxId } from '../util.js';
 import { TeardownBlockedError, type AwsSandboxOutputs } from './tofu.js';
 
-/** The 8 headline resources of infra/aws plus the bench role policy, with real addresses. */
+/** The headline resources of infra/aws (docs/V0_ARCHITECTURE.md §7), with real addresses. */
 export const SANDBOX_RESOURCES: ReadonlyArray<{ address: string; type: string }> = [
   { address: 'aws_s3_bucket.artifacts', type: 'aws_s3_bucket' },
   { address: 'aws_s3_bucket.sealed', type: 'aws_s3_bucket' },
@@ -10,8 +10,19 @@ export const SANDBOX_RESOURCES: ReadonlyArray<{ address: string; type: string }>
   { address: 'aws_iam_policy.agent_boundary', type: 'aws_iam_policy' },
   { address: 'aws_iam_role.bench_runner', type: 'aws_iam_role' },
   { address: 'aws_iam_instance_profile.bench_runner', type: 'aws_iam_instance_profile' },
+  { address: 'aws_iam_role.confirm_runner', type: 'aws_iam_role' },
+  { address: 'aws_iam_instance_profile.confirm_runner', type: 'aws_iam_instance_profile' },
+  { address: 'aws_vpc.sandbox', type: 'aws_vpc' },
+  { address: 'aws_subnet.bench', type: 'aws_subnet' },
+  { address: 'aws_subnet.agent', type: 'aws_subnet' },
+  { address: 'aws_vpc_endpoint.s3', type: 'aws_vpc_endpoint' },
+  { address: 'aws_vpc_endpoint.interface["ssm"]', type: 'aws_vpc_endpoint' },
+  { address: 'aws_vpc_endpoint.interface["ssmmessages"]', type: 'aws_vpc_endpoint' },
+  { address: 'aws_vpc_endpoint.interface["ec2messages"]', type: 'aws_vpc_endpoint' },
+  { address: 'aws_vpc_endpoint.interface["logs"]', type: 'aws_vpc_endpoint' },
   { address: 'aws_security_group.agent_runner', type: 'aws_security_group' },
   { address: 'aws_security_group.bench', type: 'aws_security_group' },
+  { address: 'aws_security_group.endpoints', type: 'aws_security_group' },
 ];
 
 export interface MockSandboxProviderOptions {
@@ -53,7 +64,13 @@ export class MockSandboxProvider implements SandboxProvider {
       agentBoundaryRef: `arn:aws:iam::${acct}:policy/ratchet/${p}-agent-boundary`,
       evalIdentityRef: `arn:aws:iam::${acct}:instance-profile/ratchet/bench/${p}-bench-runner`,
       agentRolePath: '/ratchet/agent/',
-      network: { subnetId: 'subnet-0mock0000', agentRunnerSecurityGroupId: 'sg-0mockrunner', benchSecurityGroupId: 'sg-0mockbench' },
+      network: {
+        subnetId: 'subnet-0mockagent',
+        benchSubnetId: 'subnet-0mockbench',
+        agentRunnerSecurityGroupId: 'sg-0mockrunner',
+        benchSecurityGroupId: 'sg-0mockbench',
+        egressProxyUrl: null,
+      },
       region: input.region,
       vpcId: 'vpc-0mock0000',
       evalIdentity: {
@@ -62,6 +79,13 @@ export class MockSandboxProvider implements SandboxProvider {
         instanceProfileArn: `arn:aws:iam::${acct}:instance-profile/ratchet/bench/${p}-bench-runner`,
         instanceProfileName: `${p}-bench-runner`,
       },
+      confirmIdentity: {
+        roleArn: `arn:aws:iam::${acct}:role/ratchet/bench/${p}-confirm-runner`,
+        roleName: `${p}-confirm-runner`,
+        instanceProfileArn: `arn:aws:iam::${acct}:instance-profile/ratchet/bench/${p}-confirm-runner`,
+        instanceProfileName: `${p}-confirm-runner`,
+      },
+      sealedConfirmPrefix: 'holdout/',
       limits: { maxInstancesPerAgent: input.maxInstancesPerAgent, maxInstanceLifetimeHours: input.maxInstanceLifetimeHours },
     };
     this.applied.set(input.sandboxId, out);

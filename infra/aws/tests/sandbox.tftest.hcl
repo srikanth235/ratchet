@@ -8,23 +8,28 @@ mock_provider "aws" {
   mock_data "aws_partition" {
     defaults = { partition = "aws" }
   }
-  mock_data "aws_vpc" {
-    defaults = {
-      id         = "vpc-0abc"
-      arn        = "arn:aws:ec2:us-east-1:123456789012:vpc/vpc-0abc"
-      cidr_block = "10.0.0.0/16"
-    }
+  mock_data "aws_availability_zones" {
+    defaults = { names = ["us-east-1a"] }
+  }
+  mock_data "aws_ssm_parameter" {
+    defaults = { value = "ami-0123456789abcdef0" }
   }
   mock_data "aws_iam_policy_document" {
     defaults = {
       json = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"ec2.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}"
     }
   }
-  mock_data "aws_subnets" {
-    defaults = { ids = ["subnet-0bbb", "subnet-0aaa"] }
-  }
   mock_resource "aws_s3_bucket" {
     defaults = { arn = "arn:aws:s3:::mock-bucket" }
+  }
+  mock_resource "aws_iam_role" {
+    defaults = { arn = "arn:aws:iam::123456789012:role/ratchet/bench/mock" }
+  }
+  mock_resource "aws_vpc" {
+    defaults = { arn = "arn:aws:ec2:us-east-1:123456789012:vpc/vpc-0abc" }
+  }
+  mock_resource "aws_vpc_endpoint" {
+    defaults = { prefix_list_id = "pl-0123456789abcdef0" }
   }
   mock_resource "aws_iam_policy" {
     defaults = { arn = "arn:aws:iam::123456789012:policy/ratchet/mock" }
@@ -34,7 +39,8 @@ mock_provider "aws" {
 variables {
   sandbox_id = "demo"
   region     = "us-east-1"
-  subnet_id  = "subnet-0aaa" # mock_data list defaults are not applied to aws_subnets.ids
+  # mock_data list defaults are not applied, so pin the AZ instead of reading it.
+  availability_zone = "us-east-1a"
 }
 
 run "boundary_denies_sealed_and_control_plane" {
@@ -102,12 +108,217 @@ run "bench_role_outside_agent_path" {
   }
 }
 
+run "bench_roles_split_sealed_access" {
+  command = apply
+
+  assert {
+    condition     = aws_iam_role.confirm_runner.path == "/ratchet/bench/" && aws_iam_role.confirm_runner.name != aws_iam_role.bench_runner.name
+    error_message = "confirm runner is a separate role outside the agent path"
+  }
+
+  assert {
+    condition     = !strcontains(aws_iam_role_policy.bench_runner.policy, "sealed")
+    error_message = "the bench runner policy must not mention the sealed bucket"
+  }
+
+  assert {
+    condition     = strcontains(aws_iam_role_policy.confirm_runner.policy, "ratchet-demo-sealed") || strcontains(aws_iam_role_policy.confirm_runner.policy, "holdout/")
+    error_message = "the confirm runner policy must grant the holdout prefix"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.confirm_runner.policy).Statement :
+      s.Sid == "ReadHoldoutTraces" && endswith(s.Resource, "/holdout/*")
+    ])
+    error_message = "confirm runner reads only the holdout prefix of the sealed bucket"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_s3_bucket_policy.sealed_deny_agents.policy).Statement :
+      s.Sid == "DenyBenchRunner" && s.Effect == "Deny"
+    ])
+    error_message = "sealed bucket must explicitly deny the bench runner"
+  }
+}
+
+run "custom_confirm_prefix_is_used" {
+  command = apply
+
+  variables {
+    sealed_confirm_prefix = "traces/v1/"
+  }
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_role_policy.confirm_runner.policy).Statement :
+      s.Sid == "ReadHoldoutTraces" && endswith(s.Resource, "/traces/v1/*")
+    ])
+    error_message = "confirm runner follows sealed_confirm_prefix"
+  }
+}
+
+run "wildcard_confirm_prefix_rejected" {
+  command = plan
+
+  variables {
+    sealed_confirm_prefix = "*/"
+  }
+
+  expect_failures = [var.sealed_confirm_prefix]
+}
+
+run "traversal_confirm_prefix_rejected" {
+  command = plan
+
+  variables {
+    sealed_confirm_prefix = "../"
+  }
+
+  expect_failures = [var.sealed_confirm_prefix]
+}
+
 run "agent_runner_sg_has_no_ingress" {
   command = apply
 
   assert {
     condition     = length(aws_security_group.agent_runner.ingress) == 0
     error_message = "agent runner must have no inbound rules"
+  }
+}
+
+run "bench_has_no_internet_egress" {
+  command = apply
+
+  assert {
+    condition = alltrue([
+      for r in aws_security_group.bench.egress :
+      length(coalesce(r.cidr_blocks, [])) == 0 || (r.from_port == 53 && r.to_port == 53)
+    ])
+    error_message = "bench egress may use CIDRs only for DNS to the VPC; everything else is self / endpoint group / prefix list"
+  }
+
+  assert {
+    condition     = !anytrue([for r in aws_security_group.bench.egress : contains(coalesce(r.cidr_blocks, []), "0.0.0.0/0")])
+    error_message = "bench must have no 0.0.0.0/0 egress"
+  }
+
+  assert {
+    condition     = length(aws_route_table.private.route) == 0
+    error_message = "the private route table (bench) must have no routes beyond local"
+  }
+}
+
+run "bench_subnet_is_private_and_endpoints_exist" {
+  command = apply
+
+  assert {
+    condition     = aws_subnet.bench.map_public_ip_on_launch == false
+    error_message = "bench subnet must not hand out public IPs"
+  }
+
+  assert {
+    condition     = aws_vpc_endpoint.s3.vpc_endpoint_type == "Gateway"
+    error_message = "S3 must be a gateway endpoint"
+  }
+
+  assert {
+    condition     = toset([for k, e in aws_vpc_endpoint.interface : k]) == toset(["ssm", "ssmmessages", "ec2messages", "logs"])
+    error_message = "interface endpoints for ssm, ssmmessages, ec2messages and logs"
+  }
+
+  assert {
+    condition     = alltrue([for k, e in aws_vpc_endpoint.interface : e.private_dns_enabled])
+    error_message = "interface endpoints need private DNS"
+  }
+
+  assert {
+    condition = alltrue([
+      for s in jsondecode(aws_vpc_endpoint.s3.policy).Statement :
+      alltrue([for r in flatten([s.Resource]) : strcontains(r, "mock-bucket")])
+    ])
+    error_message = "the S3 endpoint policy admits only the sandbox buckets"
+  }
+}
+
+run "proxy_disabled_by_default" {
+  command = apply
+
+  assert {
+    condition     = length(aws_instance.egress_proxy) == 0 && length(aws_security_group.egress_proxy) == 0
+    error_message = "no proxy resources unless enable_egress_proxy"
+  }
+
+  assert {
+    condition     = aws_subnet.agent.map_public_ip_on_launch == true
+    error_message = "without the proxy the agent subnet is public"
+  }
+
+  assert {
+    condition     = output.network_ref.egress_proxy_url == null
+    error_message = "no proxy url when disabled"
+  }
+}
+
+run "proxy_enabled_removes_runner_internet" {
+  command = apply
+
+  variables {
+    enable_egress_proxy        = true
+    egress_proxy_extra_domains = ["registry.npmjs.org"]
+  }
+
+  assert {
+    condition     = length(aws_instance.egress_proxy) == 1 && aws_instance.egress_proxy[0].instance_type == "t4g.nano"
+    error_message = "one t4g.nano proxy"
+  }
+
+  assert {
+    condition     = aws_subnet.agent.map_public_ip_on_launch == false
+    error_message = "with the proxy the agent subnet has no public IPs"
+  }
+
+  assert {
+    condition     = !anytrue([for r in aws_security_group.agent_runner.egress : contains(coalesce(r.cidr_blocks, []), "0.0.0.0/0")])
+    error_message = "runner egress must not be open to the internet when the proxy is on"
+  }
+
+  assert {
+    condition     = strcontains(aws_instance.egress_proxy[0].user_data, "api.anthropic.com") && strcontains(aws_instance.egress_proxy[0].user_data, "registry.npmjs.org") && strcontains(aws_instance.egress_proxy[0].user_data, "http_access deny all")
+    error_message = "squid config carries the allow-list, the extra domains and a final deny"
+  }
+
+  assert {
+    condition     = startswith(output.network_ref.egress_proxy_url, "http://10.42.3.10:")
+    error_message = "network_ref exposes the proxy url"
+  }
+
+  assert {
+    condition     = aws_instance.egress_proxy[0].metadata_options[0].http_tokens == "required"
+    error_message = "proxy requires IMDSv2"
+  }
+}
+
+run "proxy_domain_wildcards_rejected" {
+  command = plan
+
+  variables {
+    egress_proxy_extra_domains = ["*.example.com"]
+  }
+
+  expect_failures = [var.egress_proxy_extra_domains]
+}
+
+run "boundary_cannot_launch_into_bench" {
+  command = apply
+
+  assert {
+    condition = anytrue([
+      for s in jsondecode(aws_iam_policy.agent_boundary.policy).Statement :
+      s.Sid == "DenyRunInstancesInInternalSecurityGroups" && s.Effect == "Deny"
+    ])
+    error_message = "boundary denies launching into the bench/endpoint security groups"
   }
 }
 

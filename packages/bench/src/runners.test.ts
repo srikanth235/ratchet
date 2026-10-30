@@ -8,6 +8,7 @@ import { RemoteBenchRunner } from './remote.js';
 import { LocalFakeCompute } from './testkit/compute.js';
 import {
   alive,
+  DirStore,
   instantClock,
   listDir,
   makeConfig,
@@ -16,6 +17,8 @@ import {
   realClock,
   type FixtureRepo,
 } from './testkit/repo.js';
+
+const STAGING_BUCKET = 'ratchet-test-artifacts';
 
 type Opts = { setup?: string; benchMs?: number; guardrailMs?: number; env?: Record<string, string> };
 interface Harness {
@@ -53,6 +56,9 @@ const remote: Factory = (fx, o = {}) => {
     clock: instantClock,
     imageRef: 'ami-test',
     artifacts: store,
+    stagingBucket: STAGING_BUCKET,
+    stagingStore: new DirStore(join(s3, STAGING_BUCKET)),
+    isolation: 'none', // scripts run as the developer here; the 'user' path is exercised with shims below
     workRoot: join(fx.dir, 'work'),
     ...(o.setup ? { setup: o.setup } : {}),
     timeouts: { ...(o.benchMs ? { benchMs: o.benchMs } : {}), ...(o.guardrailMs ? { guardrailMs: o.guardrailMs } : {}) },
@@ -376,17 +382,22 @@ describe('RemoteBenchRunner specifics', () => {
   afterAll(() => fx.cleanup());
 
   const mk = (over: Partial<ConstructorParameters<typeof RemoteBenchRunner>[0]> = {}, extraEnv: Record<string, string> = {}) => {
-    const compute = new LocalFakeCompute(join(fx.dir, 'ssm'), extraEnv);
+    const s3 = join(fx.dir, 's3');
+    const compute = new LocalFakeCompute(join(fx.dir, 'ssm'), extraEnv, s3);
+    const staging = new DirStore(join(s3, STAGING_BUCKET));
     const slept: number[] = [];
     const runner = new RemoteBenchRunner({
       compute,
       git: fx.host,
       clock: { now: () => Date.now(), sleep: async (ms) => void slept.push(ms) },
       imageRef: 'ami-test',
+      stagingBucket: STAGING_BUCKET,
+      stagingStore: staging,
+      isolation: 'none',
       workRoot: join(fx.dir, 'work'),
       ...over,
     });
-    return { compute, runner, slept };
+    return { compute, runner, slept, staging };
   };
   const cfg = () => makeConfig({ guardrails: [] });
 
@@ -440,9 +451,127 @@ describe('RemoteBenchRunner specifics', () => {
     // each is wrapped so it runs under bash even if SSM uses sh
     for (const cmd of compute.commands) expect(cmd.script).toMatch(/^f=\$\(mktemp\)\ncat > "\$f" <<'__RATCHET_STEP_EOF__'/);
     const checkout = compute.commands[1]!.script;
-    expect(checkout).toContain("git --git-dir=\"$G\" archive");
+    expect(checkout).toContain('aws s3 cp');
+    expect(checkout).toContain(`s3://${STAGING_BUCKET}/bench-inputs/opt1/`);
     expect(checkout).toContain(fx.base);
-    expect(checkout).toContain('ratchet/bench');
+  });
+
+  it('pre-stages the candidate and bench.ref in the artifacts bucket and never contacts a git remote from the instance', async () => {
+    const { compute, runner, staging } = mk();
+    await runner.run(job(fx, fx.base, { repeats: 1 }), cfg(), null);
+    expect(staging.puts).toHaveLength(2);
+    expect(staging.puts[0]).toMatch(/^bench-inputs\/opt1\/[0-9a-f-]{36}\/code\.tgz$/);
+    expect(staging.puts[1]).toMatch(/^bench-inputs\/opt1\/[0-9a-f-]{36}\/bench\.tgz$/);
+    for (const c of compute.commands) {
+      expect(c.script).not.toMatch(/git (--git-dir|fetch|clone|ls-remote)|github\.com|https?:\/\//);
+      expect(c.script).not.toContain(fx.repo); // no remote url, no token
+    }
+  });
+
+  it('refuses to run a job without a staging bucket or store (fail closed, no GitHub fallback)', async () => {
+    const { compute, runner } = mk({ stagingBucket: undefined });
+    await expect(runner.run(job(fx, fx.base), cfg(), null)).rejects.toThrow(/needs stagingBucket/);
+    expect(compute.commands).toHaveLength(0);
+    expect(compute.terminated).toHaveLength(1);
+    const noStore = mk({ stagingStore: undefined });
+    await expect(noStore.runner.run(job(fx, fx.base), cfg(), null)).rejects.toThrow(/needs stagingBucket/);
+  });
+
+  it('rejects an optimization id that is not [a-z0-9-] before anything is staged (S3 prefix injection)', async () => {
+    for (const bad of ['*', '?', '/', '..', 'a/b', '../opt2', 'opt1/..', 'a*', 'Opt1', '']) {
+      const { compute, runner, staging } = mk();
+      await expect(runner.run(job(fx, fx.base, { optimizationId: bad }), cfg(), null)).rejects.toThrow(/must match \[a-z0-9-\]/);
+      expect(staging.puts).toHaveLength(0);
+      expect(compute.commands).toHaveLength(0);
+    }
+  });
+
+  it('rejects a staging bucket that is not a plain bucket name', async () => {
+    for (const bad of ['a/b', 'bucket*', '..', "x'; rm -rf /", 'A_B']) {
+      const { runner, staging } = mk({ stagingBucket: bad });
+      await expect(runner.run(job(fx, fx.base), cfg(), null)).rejects.toThrow(/not a valid bucket name/);
+      expect(staging.puts).toHaveLength(0);
+    }
+  });
+
+  it('detects a staged archive that was swapped after upload (sha256 check on the instance)', async () => {
+    const { runner, staging } = mk();
+    const put = staging.put.bind(staging);
+    staging.put = async (key, body) => {
+      await put(key, body);
+      if (key.endsWith('code.tgz')) writeFileSync(join(fx.dir, 's3', STAGING_BUCKET, key), 'not the archive');
+    };
+    await expect(runner.run(job(fx, fx.base, { repeats: 1 }), cfg(), null)).rejects.toThrow(/sha256 mismatch/);
+  });
+
+  describe("isolation: 'user' (OS tools shimmed; the real user/iptables are image work, see bench.md)", () => {
+    const withUser = (over: Partial<ConstructorParameters<typeof RemoteBenchRunner>[0]> = {}, shims: Record<string, string> = {}) => {
+      const h = mk({ isolation: 'user', ...over });
+      const log = join(fx.dir, `shim-${Math.random().toString(36).slice(2)}.log`);
+      const defaults: Record<string, string> = {
+        // `id -u ratchet-bench` succeeds; everything else is the real id
+        id: `[ "$2" = ratchet-bench ] && exit 0; exec /usr/bin/id "$@"`,
+        // the IMDS owner rule exists
+        iptables: `echo "iptables $*" >> ${log}; exit 0`,
+        // drop privileges: record the call, skip our own options and exec the rest
+        setpriv: `echo "setpriv $*" >> ${log}; if [[ "$*" == *"/dev/tcp/169.254.169.254"* ]]; then exit 1; fi; while [ "$1" != -- ]; do shift; done; shift; exec "$@"`,
+        pkill: `echo "pkill $*" >> ${log}; exit 0`,
+        chown: `echo "chown $*" >> ${log}; exit 0`,
+        chgrp: `echo "chgrp $*" >> ${log}; exit 0`,
+        ...shims,
+      };
+      for (const [n, body] of Object.entries(defaults)) h.compute.addShim(n, body);
+      return { ...h, log: () => (existsSync(log) ? readFileSync(log, 'utf8') : '') };
+    };
+
+    it('verifies the user and the IMDS block, then runs setup/guardrails/bench as that user and kills its leftovers', async () => {
+      const { runner, compute, log } = withUser();
+      const out = await runner.run(job(fx, fx.base, { repeats: 1 }), makeConfig({ guardrails: ['- run: "true"'] }), null);
+      expect(out.samples).toEqual([100]);
+      const l = log();
+      expect(l).toContain('iptables -C OUTPUT -m owner --uid-owner ratchet-bench -d 169.254.169.254 -j REJECT');
+      expect(l).toContain('setpriv --reuid=ratchet-bench --regid=ratchet-bench --clear-groups --no-new-privs');
+      expect(l).toContain('chown -R ratchet-bench:');
+      // before and after every step: the bench user's processes are killed
+      expect((l.match(/pkill -KILL -u ratchet-bench/g) ?? []).length).toBeGreaterThanOrEqual(4);
+      const step = compute.commands.map((c) => c.script).find((s) => s.includes('bench.mjs'))!;
+      expect(step).toContain('env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN');
+    });
+
+    it('refuses to run the candidate when the image has no bench user', async () => {
+      const { runner, compute } = withUser({}, { id: 'exit 1' });
+      await expect(runner.run(job(fx, fx.base), cfg(), null)).rejects.toThrow(/bench user ratchet-bench does not exist/);
+      expect(compute.terminated).toHaveLength(1);
+      expect(compute.commands.every((c) => !c.script.includes('bench.mjs'))).toBe(true);
+    });
+
+    it('refuses to run the candidate when the IMDS block rule is missing', async () => {
+      const { runner } = withUser({}, { iptables: 'exit 1' });
+      await expect(runner.run(job(fx, fx.base), cfg(), null)).rejects.toThrow(/IMDS is not blocked/);
+    });
+
+    it('refuses to run the candidate when instance metadata is still reachable as the bench user', async () => {
+      const { runner } = withUser({}, { setpriv: 'exit 0' });
+      await expect(runner.run(job(fx, fx.base), cfg(), null)).rejects.toThrow(/metadata is reachable/);
+    });
+
+    it('fetches the confirm trace as root and exposes it to the bench user read-only (root:ratchet-bench 0440), without write access', async () => {
+      const trace = join(fx.dir, 's3', STAGING_BUCKET, 'trace.json');
+      mkdirSync(join(fx.dir, 's3', STAGING_BUCKET), { recursive: true });
+      writeFileSync(trace, '{"requests":[1,2,3]}');
+      const { runner, compute, log } = withUser();
+      const out = await runner.run(
+        job(fx, fx.base, { repeats: 1, phase: 'confirm', trace: `s3://${STAGING_BUCKET}/trace.json` }),
+        makeConfig({ guardrails: [] }),
+        null,
+      );
+      expect(out.samples).toEqual([100]);
+      const traceCmd = compute.commands.map((c) => c.script).find((s) => s.includes('trace.json') && s.includes('aws s3 cp'))!;
+      expect(traceCmd).toContain("chgrp 'ratchet-bench'");
+      expect(traceCmd).toContain('chmod 440');
+      expect(traceCmd).not.toContain('setpriv'); // the pre-step is never the bench user
+      expect(log()).toContain('chgrp ratchet-bench');
+    });
   });
 
   it('parses a very chatty bench because only the stdout tail travels', async () => {

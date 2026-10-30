@@ -47,7 +47,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
   }
 }
 
-# ---- Sealed bucket: hidden traffic traces, bench runner only ----
+# ---- Sealed bucket: hidden traffic traces, confirm runner only ----
 
 resource "aws_s3_bucket" "sealed" {
   bucket        = "${local.name_prefix}-sealed-${local.account_id}"
@@ -86,12 +86,15 @@ resource "aws_s3_bucket_versioning" "sealed" {
 }
 
 # Explicit deny for every agent identity (matched by role path and, as a second
-# net, by the ratchet:agent principal tag), plus TLS-only. An explicit deny in a
+# net, by the ratchet:agent principal tag), for the bench runner (which has no
+# business here; only the confirm runner reads, via its identity policy), plus
+# TLS-only. An explicit deny in a
 # resource policy wins over any identity policy the agent role might carry.
 resource "aws_s3_bucket_policy" "sealed_deny_agents" {
   bucket = aws_s3_bucket.sealed.id
   policy = templatefile("${path.module}/policies/sealed_bucket_policy.json.tftpl", {
     sealed_bucket_arn      = aws_s3_bucket.sealed.arn
+    bench_runner_role_arn  = aws_iam_role.bench_runner.arn
     agent_role_arn_pattern = "arn:${local.partition}:iam::${local.account_id}:role${local.agent_role_path}*"
   })
 

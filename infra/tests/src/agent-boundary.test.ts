@@ -78,6 +78,7 @@ describe("agent boundary: artifacts storage", () => {
     ["other optimization", `${artifacts}/artifacts/opt2/claude-1/events.jsonl`],
     ["bucket root", `${artifacts}/events.jsonl`],
     ["bench results", `${artifacts}/bench-results/opt1/r.json`],
+    ["staged bench inputs", `${artifacts}/bench-inputs/opt1/job/code.tgz`],
     ["prefix-collision sibling", `${artifacts}/artifacts/opt1/claude-10/events.jsonl`],
   ])("does not allow objects in %s", (_n, resource) => {
     expect(decide({ action: "s3:GetObject", resource })).toBe("ImplicitDeny");
@@ -157,14 +158,34 @@ describe("agent boundary: launching instances", () => {
     expect(decide({ ...goodRun, context: rest })).toBe("ExplicitDeny");
   });
 
-  it("allows the supporting RunInstances resources only inside the sandbox VPC", () => {
-    for (const kind of ["subnet", "security-group", "network-interface"]) {
+  it("allows security groups and ENIs only inside the sandbox VPC", () => {
+    for (const kind of ["security-group", "network-interface"]) {
       const base = { action: "ec2:RunInstances", resource: ec2(kind) };
       expect(decide({ ...base, context: { "ec2:Vpc": fixture.vpc_arn } })).toBe("Allow");
       expect(decide({ ...base, context: { "ec2:Vpc": "arn:aws:ec2:us-east-1:123456789012:vpc/vpc-other" } })).toBe("ImplicitDeny");
       expect(decide(base)).toBe("ImplicitDeny");
     }
     expect(decide({ action: "ec2:RunInstances", resource: `arn:aws:ec2:${region}::image/ami-0abc` })).toBe("Allow");
+  });
+
+  it("allows only the agent subnet - never the bench or proxy subnet", () => {
+    const inVpc = { "ec2:Vpc": fixture.vpc_arn };
+    expect(decide({ action: "ec2:RunInstances", resource: fixture.agent_subnet_arn, context: inVpc })).toBe("Allow");
+    expect(decide({ action: "ec2:RunInstances", resource: fixture.bench_subnet_arn, context: inVpc })).toBe("ImplicitDeny");
+    expect(decide({ action: "ec2:RunInstances", resource: ec2("subnet", "subnet-0proxy"), context: inVpc })).toBe("ImplicitDeny");
+    expect(decide({ action: "ec2:RunInstances", resource: fixture.agent_subnet_arn })).toBe("ImplicitDeny");
+  });
+
+  it.each([fixture.bench_sg_arn, fixture.endpoints_sg_arn, fixture.proxy_sg_arn])(
+    "explicitly denies launching into the internal security group %s",
+    (sg) => {
+      expect(decide({ action: "ec2:RunInstances", resource: sg, context: { "ec2:Vpc": fixture.vpc_arn } })).toBe("ExplicitDeny");
+    },
+  );
+  it("still allows the agent runner security group", () => {
+    expect(
+      decide({ action: "ec2:RunInstances", resource: ec2("security-group", "sg-0runner"), context: { "ec2:Vpc": fixture.vpc_arn } }),
+    ).toBe("Allow");
   });
 
   it("allows CreateTags only as part of RunInstances", () => {

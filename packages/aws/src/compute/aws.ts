@@ -55,6 +55,7 @@ import {
   TAG_SANDBOX,
   arnName,
   assertValidId,
+  assertValidInstanceId,
   boundedName,
   errName,
   shQuote,
@@ -72,11 +73,24 @@ export interface AwsComputeConfig {
   agentBoundaryArn: string;
   /** `agent_role_path` output, e.g. `/ratchet/agent/`. */
   agentRolePath: string;
+  /** Agent subnet (`network_ref.subnet_id`). */
   subnetId: string;
+  /**
+   * Private bench subnet with no route to the internet (`network_ref.bench_subnet_id`). Required to
+   * launch bench instances: there is deliberately no fallback to `subnetId`, which may be public.
+   */
+  benchSubnetId?: string;
   agentRunnerSecurityGroupId: string;
   benchSecurityGroupId: string;
-  /** Bench instance profile: ARN or name (`eval_identity_ref`). */
+  /** Bench instance profile for `baseline` and `bench` phases: ARN or name (`eval_identity_ref`). NO sealed access. */
   benchInstanceProfile: string;
+  /**
+   * Instance profile for `confirm` runs only (`confirm_identity_ref`): the only identity that can read the
+   * sealed bucket. Required to launch a confirm instance; must differ from `benchInstanceProfile`.
+   */
+  confirmInstanceProfile?: string;
+  /** `network_ref.egress_proxy_url`; when set, agent runners get HTTPS_PROXY. Null/undefined: no proxy. */
+  egressProxyUrl?: string | null;
   artifactsBucket: string;
   /** Local self-destruct for runners/bench (`shutdown` + terminate-on-shutdown). Default 2. */
   maxInstanceLifetimeHours?: number;
@@ -89,9 +103,12 @@ export function awsComputeConfigFromOutputs(o: AwsSandboxOutputs, sandboxId: str
     agentBoundaryArn: o.agentBoundaryRef,
     agentRolePath: o.agentRolePath,
     subnetId: o.network.subnetId,
+    benchSubnetId: o.network.benchSubnetId,
     agentRunnerSecurityGroupId: o.network.agentRunnerSecurityGroupId,
     benchSecurityGroupId: o.network.benchSecurityGroupId,
     benchInstanceProfile: o.evalIdentity.instanceProfileArn,
+    confirmInstanceProfile: o.confirmIdentity.instanceProfileArn,
+    egressProxyUrl: o.network.egressProxyUrl,
     artifactsBucket: o.artifactsBucket,
     maxInstanceLifetimeHours: o.limits.maxInstanceLifetimeHours,
   };
@@ -136,6 +153,9 @@ export class AwsCloudCompute implements CloudCompute {
     this.clock = opts.clock ?? systemClock;
     if (!cfg.agentRolePath.startsWith('/') || !cfg.agentRolePath.endsWith('/')) {
       throw new Error(`agentRolePath must start and end with "/": ${cfg.agentRolePath}`);
+    }
+    if (cfg.confirmInstanceProfile && cfg.confirmInstanceProfile === cfg.benchInstanceProfile) {
+      throw new Error('confirmInstanceProfile must differ from benchInstanceProfile: baseline/bench phases must not hold sealed access');
     }
   }
 
@@ -315,7 +335,7 @@ export class AwsCloudCompute implements CloudCompute {
   async putSecret(optimizationId: OptimizationId, agentId: AgentId, name: string, value: string): Promise<SecretRef> {
     assertValidId('optimization', optimizationId);
     assertValidId('agent', agentId);
-    if (!SECRET_NAME.test(name)) throw new Error(`invalid secret name ${JSON.stringify(name)}`);
+    if (!SECRET_NAME.test(name) || name.includes('..')) throw new Error(`invalid secret name ${JSON.stringify(name)}`);
     const ref = `${secretPrefix(optimizationId, agentId)}${name}`;
     const { ssm } = this.clients;
     // PutParameter rejects Tags together with Overwrite, so tag separately.
@@ -359,9 +379,10 @@ export class AwsCloudCompute implements CloudCompute {
     const params = this.baseRunParams({
       imageRef: spec.imageRef,
       instanceType: spec.instanceType,
+      subnetId: this.cfg.subnetId,
       securityGroupId: this.cfg.agentRunnerSecurityGroupId,
       profile: { Arn: spec.identity.instanceProfileRef },
-      userData: runnerUserData(spec, this.cfg.maxInstanceLifetimeHours ?? 2),
+      userData: runnerUserData(spec, this.cfg.maxInstanceLifetimeHours ?? 2, { region: this.cfg.region, proxyUrl: this.cfg.egressProxyUrl }),
       tags: [
         { Key: TAG_OPT, Value: spec.optimizationId },
         { Key: TAG_AGENT, Value: spec.agentId },
@@ -373,12 +394,21 @@ export class AwsCloudCompute implements CloudCompute {
     return this.runInstance(params, 'agent_runner', spec.optimizationId, spec.agentId, spec.instanceType);
   }
 
+  /**
+   * Bench instances sit in the private bench subnet. The instance profile depends on the phase:
+   * only `confirm` gets the identity that can read the sealed bucket; `baseline` and `bench` run
+   * candidate code with no sealed access at all. Anything else, or a missing profile, fails closed.
+   */
   async launchBenchInstance(spec: BenchLaunchSpec): Promise<InstanceInfo> {
     assertValidId('optimization', spec.optimizationId);
-    const p = this.cfg.benchInstanceProfile;
+    const p = benchProfileFor(this.cfg, spec.purpose);
+    if (!this.cfg.benchSubnetId) {
+      throw new Error('benchSubnetId is not configured (network_ref.bench_subnet_id): refusing to launch a bench instance in a subnet that may have internet access');
+    }
     const params = this.baseRunParams({
       imageRef: spec.imageRef,
       instanceType: spec.instanceType,
+      subnetId: this.cfg.benchSubnetId,
       securityGroupId: this.cfg.benchSecurityGroupId,
       profile: p.startsWith('arn:') ? { Arn: p } : { Name: p },
       userData: benchUserData(spec, this.cfg.maxInstanceLifetimeHours ?? 2),
@@ -396,6 +426,7 @@ export class AwsCloudCompute implements CloudCompute {
   private baseRunParams(a: {
     imageRef: string;
     instanceType: string;
+    subnetId: string;
     securityGroupId: string;
     profile: { Arn?: string; Name?: string };
     userData: string;
@@ -406,7 +437,7 @@ export class AwsCloudCompute implements CloudCompute {
       InstanceType: a.instanceType as RunInstancesCommandInput['InstanceType'],
       MinCount: 1,
       MaxCount: 1,
-      SubnetId: this.cfg.subnetId,
+      SubnetId: a.subnetId,
       SecurityGroupIds: [a.securityGroupId],
       IamInstanceProfile: a.profile,
       MetadataOptions: { HttpTokens: 'required', HttpEndpoint: 'enabled', HttpPutResponseHopLimit: 1 },
@@ -455,6 +486,7 @@ export class AwsCloudCompute implements CloudCompute {
 
   async terminate(instanceIds: string[]): Promise<void> {
     if (instanceIds.length === 0) return;
+    instanceIds.forEach(assertValidInstanceId);
     try {
       await this.clients.ec2.send(new TerminateInstancesCommand({ InstanceIds: instanceIds }));
     } catch (e) {
@@ -463,6 +495,8 @@ export class AwsCloudCompute implements CloudCompute {
   }
 
   async listTagged(optimizationId?: OptimizationId): Promise<InstanceInfo[]> {
+    // `*` and `?` are wildcards in EC2 filter values, so an unvalidated id could list other optimizations.
+    if (optimizationId !== undefined) assertValidId('optimization', optimizationId);
     const filters = optimizationId
       ? [{ Name: `tag:${TAG_OPT}`, Values: [optimizationId] }]
       : [{ Name: 'tag-key', Values: [TAG_OPT] }];
@@ -482,6 +516,7 @@ export class AwsCloudCompute implements CloudCompute {
   // ---- remote commands ----------------------------------------------------
 
   async runCommand(instanceId: string, command: RemoteCommand): Promise<RemoteCommandResult> {
+    assertValidInstanceId(instanceId);
     const timeout = command.timeoutSeconds ?? 600;
     const script = [
       ...Object.entries(command.env ?? {}).map(([k, v]) => {
@@ -532,11 +567,31 @@ export class AwsCloudCompute implements CloudCompute {
 // ---- helpers ----------------------------------------------------------------
 
 export function agentRoleName(opt: string, agent: string): string {
+  assertValidId('optimization', opt);
+  assertValidId('agent', agent);
   return boundedName(`ratchet-agent-${opt}-${agent}`);
 }
 
 export function secretPrefix(opt: string, agent: string): string {
+  assertValidId('optimization', opt);
+  assertValidId('agent', agent);
   return `/ratchet/${opt}/${agent}/`;
+}
+
+/** Picks the instance profile for a bench phase; the sealed-capable one only for `confirm`. */
+export function benchProfileFor(cfg: Pick<AwsComputeConfig, 'benchInstanceProfile' | 'confirmInstanceProfile'>, purpose: BenchLaunchSpec['purpose']): string {
+  switch (purpose) {
+    case 'baseline':
+    case 'bench':
+      return cfg.benchInstanceProfile;
+    case 'confirm':
+      if (!cfg.confirmInstanceProfile) {
+        throw new Error('confirmInstanceProfile is not configured (confirm_identity_ref): refusing to run a confirm job under the bench identity');
+      }
+      return cfg.confirmInstanceProfile;
+    default:
+      throw new Error(`unknown bench purpose ${JSON.stringify(purpose)}`);
+  }
 }
 
 function ignoreCodes(...names: string[]) {
@@ -614,9 +669,41 @@ function envFile(vars: Record<string, string>): string {
   return `install -d -m 700 /etc/ratchet\numask 077\ncat > /etc/ratchet/runner.env <<'RATCHET_ENV_EOF'\n${lines.join('\n')}\nRATCHET_ENV_EOF\n`;
 }
 
+export interface RunnerNetworkOptions {
+  region: string;
+  /** Egress proxy URL (`http://ip:3128`); null/undefined = direct HTTPS. */
+  proxyUrl?: string | null;
+}
+
+/** Service hostnames reached through the VPC interface/gateway endpoints, never through the proxy. */
+function noProxyList(region: string): string {
+  return [
+    'localhost',
+    '127.0.0.1',
+    '169.254.169.254',
+    `ssm.${region}.amazonaws.com`,
+    `ssmmessages.${region}.amazonaws.com`,
+    `ec2messages.${region}.amazonaws.com`,
+    `logs.${region}.amazonaws.com`,
+    `s3.${region}.amazonaws.com`,
+    `.s3.${region}.amazonaws.com`,
+  ].join(',');
+}
+
 /** Starts `ratchet runner`. Secret VALUES never appear here: only SSM refs, fetched with the instance profile. */
-export function runnerUserData(spec: RunnerLaunchSpec, maxLifetimeHours: number): string {
+export function runnerUserData(spec: RunnerLaunchSpec, maxLifetimeHours: number, net?: RunnerNetworkOptions): string {
   const refs = spec.secrets.map((s) => `${s.name}=${s.ref}`).join('\n');
+  const proxy: Record<string, string> = net?.proxyUrl
+    ? {
+        HTTPS_PROXY: net.proxyUrl,
+        https_proxy: net.proxyUrl,
+        HTTP_PROXY: net.proxyUrl,
+        http_proxy: net.proxyUrl,
+        NO_PROXY: noProxyList(net.region),
+        no_proxy: noProxyList(net.region),
+      }
+    : {};
+  if (net?.proxyUrl && !/^http:\/\/[0-9.]+:\d+$/.test(net.proxyUrl)) throw new Error(`invalid egress proxy url ${JSON.stringify(net.proxyUrl)}`);
   return (
     COMMON_SCRIPT_HEAD +
     lifetimeGuard(maxLifetimeHours) +
@@ -627,16 +714,33 @@ export function runnerUserData(spec: RunnerLaunchSpec, maxLifetimeHours: number)
       RATCHET_REPO_URL: spec.repoUrl,
       RATCHET_BRANCH: spec.branch,
       RATCHET_SECRET_REFS: refs,
+      ...proxy,
     }) +
     'set -a; . /etc/ratchet/runner.env; set +a\n' +
+    // Login shells (SSM sessions, agents spawning bash) get the proxy too.
+    (net?.proxyUrl
+      ? "grep -E '^(HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy)=' /etc/ratchet/runner.env | sed 's/^/export /' > /etc/profile.d/ratchet-proxy.sh\nchmod 644 /etc/profile.d/ratchet-proxy.sh\n"
+      : '') +
     'nohup ratchet runner >/var/log/ratchet-runner.log 2>&1 &\n'
   );
 }
 
+/** Unprivileged OS user that runs setup, guardrails and the bench (candidate code). Must match remote-scripts `BENCH_USER`. */
+export const BENCH_OS_USER = 'ratchet-bench';
+
+/**
+ * The bench user may not read instance metadata: an iptables owner match rejects 169.254.169.254 for
+ * its uid, so candidate code cannot fetch the instance-profile credentials (IMDSv2 with hop limit 1
+ * is also set at launch). The bench runner's checkout step verifies both the user and the rule and
+ * refuses to run the candidate otherwise, so a failure here cannot silently weaken the bench.
+ */
 export function benchUserData(spec: BenchLaunchSpec, maxLifetimeHours: number): string {
   return (
     COMMON_SCRIPT_HEAD +
     lifetimeGuard(maxLifetimeHours) +
+    `id -u ${BENCH_OS_USER} >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin ${BENCH_OS_USER}\n` +
+    `iptables -I OUTPUT 1 -m owner --uid-owner ${BENCH_OS_USER} -d 169.254.169.254 -j REJECT\n` +
+    `command -v ip6tables >/dev/null 2>&1 && ip6tables -I OUTPUT 1 -m owner --uid-owner ${BENCH_OS_USER} -d fd00:ec2::254 -j REJECT || true\n` +
     envFile({ RATCHET_OPTIMIZATION_ID: spec.optimizationId, RATCHET_BENCH_PURPOSE: spec.purpose }) +
     'set -a; . /etc/ratchet/runner.env; set +a\n' +
     'nohup ratchet bench-agent >/var/log/ratchet-bench.log 2>&1 &\n'

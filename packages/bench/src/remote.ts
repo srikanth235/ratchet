@@ -31,18 +31,31 @@ import {
   stripSentinels,
   traceScript,
   wrapStep,
+  type Isolation,
   type Layout,
 } from './remote-scripts.js';
+import { stageSource, type StagedSource } from './stage.js';
 
 export interface RemoteBenchRunnerOptions {
   compute: CloudCompute;
-  /** Only `remoteUrl()` is used: the instance fetches the candidate itself. */
-  git: Pick<GitHost, 'remoteUrl'>;
+  /**
+   * Used on the controller to materialize the candidate and `bench.ref` before the job ("pre-staging"):
+   * bench instances have no route to GitHub and never fetch from it.
+   */
+  git: Pick<GitHost, 'checkout' | 'resolveRef'>;
   clock: Clock;
-  /** AMI / image reference of the bench instance (git, tar, GNU coreutils + grep -P, bash; `aws` CLI for s3:// traces). */
+  /** AMI / image reference of the bench instance (tar, GNU coreutils + findutils + grep -P, bash, setpriv, iptables; `aws` CLI for s3:// downloads; see docs/real-env/bench.md). */
   imageRef: string;
-  /** Override `git.remoteUrl()` (e.g. a URL with a short-lived token). Beware: scripts are visible in SSM history. */
-  repoUrl?: string;
+  /** Name of the artifacts bucket (`artifacts_bucket` output): staged inputs are uploaded under `bench-inputs/` and downloaded from there by the instance. Required to run a job. */
+  stagingBucket?: string;
+  /** Where staged inputs are written. Default: `artifacts`, which must then write to `stagingBucket` (e.g. `S3ArtifactStore`). */
+  stagingStore?: ArtifactStore;
+  /**
+   * `user` (default): setup, guardrails and bench run as an unprivileged OS user whose access to instance
+   * metadata is blocked, and the job is refused if the image lacks that user or the block. `none` runs
+   * everything as root and is only for tests that execute the scripts on a developer machine.
+   */
+  isolation?: Isolation;
   setup?: string;
   artifacts?: ArtifactStore;
   /** Default: `config.bench.hardware`. */
@@ -65,8 +78,9 @@ export interface RemoteBenchRunnerOptions {
  * generated script per step through `CloudCompute.runCommand`, and ALWAYS terminates the instance
  * in a `finally`. See remote-scripts.ts for the scripts and the sentinel protocol.
  *
- * Steps: ping (wait for SSM) -> checkout (fetch sha + bench.ref, git archive both, overlay) ->
- * [trace download for confirm] -> setup -> guardrails -> bench x N. Aborting stops waiting
+ * Steps: stage on the controller (candidate + bench.ref tarballs into the artifacts bucket) -> ping (wait
+ * for SSM) -> checkout (download from S3, verify digest, overlay) -> [trace download for confirm, as root] ->
+ * setup -> guardrails -> bench x N (as the unprivileged bench user). Aborting stops waiting
  * immediately and terminates the instance, which kills whatever is running there.
  */
 export class RemoteBenchRunner implements ProgressBenchRunner {
@@ -125,17 +139,40 @@ class RemoteExecutor implements PipelineExecutor {
     this.timeouts = { ...DEFAULT_TIMEOUTS, ...o.timeouts };
   }
 
+  private get isolation(): Isolation {
+    return this.o.isolation ?? 'user';
+  }
+
+  private async stage(): Promise<StagedSource> {
+    const store = this.o.stagingStore ?? this.o.artifacts;
+    if (!this.o.stagingBucket || !store) {
+      throw new BenchError('RemoteBenchRunner needs stagingBucket (and an artifacts/stagingStore that writes to it): bench instances have no internet and cannot fetch the candidate themselves');
+    }
+    const staged = await stageSource({
+      git: this.o.git,
+      store,
+      bucket: this.o.stagingBucket,
+      optimizationId: this.job.optimizationId,
+      sha: this.job.sha,
+      benchRef: this.config.bench.ref,
+    });
+    this.log.line(`staged candidate ${staged.code.commit} and bench.ref ${staged.bench.commit} for the instance (no GitHub access from the bench)`);
+    return staged;
+  }
+
   async checkout(opts: { trace?: string }): Promise<void> {
+    // Staging overlaps with the instance booting (it was launched before checkout started).
+    const staged = await this.stage();
     await this.waitReady();
     const res = await this.call(
       'checkout',
       checkoutScript({
         layout: this.layout,
-        repoUrl: this.o.repoUrl ?? this.o.git.remoteUrl(),
-        sha: this.job.sha,
-        benchRef: this.config.bench.ref,
+        code: staged.code,
+        bench: staged.bench,
         globs: this.config.protected,
         prune: this.o.pruneExtraProtected ?? true,
+        isolation: this.isolation,
       }),
       this.timeouts.checkoutMs,
     );
@@ -154,7 +191,7 @@ class RemoteExecutor implements PipelineExecutor {
 
     if (opts.trace !== undefined && opts.trace.startsWith('s3://')) {
       const localPath = localTracePath(this.layout, opts.trace);
-      const t = await this.call('trace', traceScript({ layout: this.layout, uri: opts.trace, localPath }), this.timeouts.checkoutMs);
+      const t = await this.call('trace', traceScript({ layout: this.layout, uri: opts.trace, localPath, isolation: this.isolation }), this.timeouts.checkoutMs);
       if (t.exitCode !== 0) throw new BenchError(`downloading the confirm trace failed (exit ${t.exitCode}): ${tail(t.stderr || t.stdout)}`);
       this.tracePath = localPath;
     }
@@ -166,7 +203,7 @@ class RemoteExecutor implements PipelineExecutor {
     this.log.section(spec.name);
     const res = await this.call(
       spec.name,
-      stepScript({ layout: this.layout, kind: spec.kind, name: spec.name, command: spec.command, timeoutMs: spec.timeoutMs, env }),
+      stepScript({ layout: this.layout, kind: spec.kind, name: spec.name, command: spec.command, timeoutMs: spec.timeoutMs, env, isolation: this.isolation }),
       spec.timeoutMs,
     );
     const sentinels = parseSentinels(res.stdout);

@@ -48,6 +48,13 @@ export class LocalFakeCompute implements CloudCompute {
   }
   private readonly shim: string;
 
+  /** Install an executable shim ahead of the real binary on the fake instance's PATH. */
+  addShim(name: string, body: string): void {
+    const p = join(this.shim, name);
+    writeFileSync(p, `#!/bin/bash\n${body}\n`);
+    chmodSync(p, 0o755);
+  }
+
   async launchBenchInstance(spec: BenchLaunchSpec): Promise<InstanceInfo> {
     this.launched.push(spec);
     return {

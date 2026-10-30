@@ -9,11 +9,29 @@ import type {
 import { assertValidSandboxId } from '../util.js';
 import { NodeProcessRunner, type ProcessResult, type ProcessRunner } from './process.js';
 
+export interface AwsIdentityRef {
+  roleArn: string;
+  roleName: string;
+  instanceProfileArn: string;
+  instanceProfileName: string;
+}
+
 /** Contract outputs plus the AWS-specific detail the compute layer needs. */
 export interface AwsSandboxOutputs extends SandboxOutputs {
   region: string;
   vpcId: string;
-  evalIdentity: { roleArn: string; roleName: string; instanceProfileArn: string; instanceProfileName: string };
+  /** Bench runner for baseline/bench phases (`eval_identity_ref`): NO sealed access. */
+  evalIdentity: AwsIdentityRef;
+  /** Confirm runner (`confirm_identity_ref`): the only identity that reads the sealed bucket. Use only for confirm runs. */
+  confirmIdentity: AwsIdentityRef;
+  /** Key prefix of the confirm traces in the sealed bucket. */
+  sealedConfirmPrefix: string;
+  network: SandboxOutputs['network'] & {
+    /** Private bench subnet: no route to the internet. */
+    benchSubnetId: string;
+    /** Null when the egress proxy is disabled. */
+    egressProxyUrl: string | null;
+  };
   limits: { maxInstancesPerAgent: number; maxInstanceLifetimeHours: number };
 }
 
@@ -257,8 +275,22 @@ export function parseTofuOutputs(json: string, region?: string): AwsSandboxOutpu
     if (!o) throw new Error(`tofu output "${k}" missing (infra/contract.md)`);
     return o.value as T;
   };
-  const eval_ = get<{ role_arn: string; role_name: string; instance_profile_arn: string; instance_profile_name: string }>('eval_identity_ref');
-  const net = get<{ vpc_id: string; subnet_id: string; security_group_ids: { agent_runner: string; bench: string } }>('network_ref');
+  type RawIdentity = { role_arn: string; role_name: string; instance_profile_arn: string; instance_profile_name: string };
+  const identity = (r: RawIdentity): AwsIdentityRef => ({
+    roleArn: r.role_arn,
+    roleName: r.role_name,
+    instanceProfileArn: r.instance_profile_arn,
+    instanceProfileName: r.instance_profile_name,
+  });
+  const eval_ = get<RawIdentity>('eval_identity_ref');
+  const confirm = get<RawIdentity>('confirm_identity_ref');
+  const net = get<{
+    vpc_id: string;
+    subnet_id: string;
+    bench_subnet_id: string;
+    security_group_ids: { agent_runner: string; bench: string };
+    egress_proxy_url: string | null;
+  }>('network_ref');
   const limits = get<{ max_instances_per_agent: number; max_instance_lifetime_hours: number }>('limits');
   return {
     artifactsBucket: get('artifacts_bucket'),
@@ -271,15 +303,14 @@ export function parseTofuOutputs(json: string, region?: string): AwsSandboxOutpu
       subnetId: net.subnet_id,
       agentRunnerSecurityGroupId: net.security_group_ids.agent_runner,
       benchSecurityGroupId: net.security_group_ids.bench,
+      benchSubnetId: net.bench_subnet_id,
+      egressProxyUrl: net.egress_proxy_url ?? null,
     },
     region: region ?? '',
     vpcId: net.vpc_id,
-    evalIdentity: {
-      roleArn: eval_.role_arn,
-      roleName: eval_.role_name,
-      instanceProfileArn: eval_.instance_profile_arn,
-      instanceProfileName: eval_.instance_profile_name,
-    },
+    evalIdentity: identity(eval_),
+    confirmIdentity: identity(confirm),
+    sealedConfirmPrefix: get<string>('sealed_confirm_prefix'),
     limits: { maxInstancesPerAgent: limits.max_instances_per_agent, maxInstanceLifetimeHours: limits.max_instance_lifetime_hours },
   };
 }

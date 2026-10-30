@@ -31,7 +31,20 @@ import {
   SSMClient,
 } from '@aws-sdk/client-ssm';
 import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts';
-import { AwsCloudCompute, KILL_SWITCH_POLICY_NAME, agentRoleName, listAgentRoles, toInstanceInfo, type AwsComputeConfig } from './aws.js';
+import {
+  AwsCloudCompute,
+  KILL_SWITCH_POLICY_NAME,
+  agentRoleName,
+  awsComputeConfigFromOutputs,
+  benchProfileFor,
+  benchUserData,
+  listAgentRoles,
+  runnerUserData,
+  secretPrefix,
+  toInstanceInfo,
+  type AwsComputeConfig,
+} from './aws.js';
+import { MockSandboxProvider } from '../sandbox/mock.js';
 import { ManualClock } from '../util.js';
 
 const cfg: AwsComputeConfig = {
@@ -39,10 +52,12 @@ const cfg: AwsComputeConfig = {
   region: 'us-east-1',
   agentBoundaryArn: 'arn:aws:iam::123456789012:policy/ratchet/ratchet-demo-agent-boundary',
   agentRolePath: '/ratchet/agent/',
-  subnetId: 'subnet-1',
+  subnetId: 'subnet-agent',
+  benchSubnetId: 'subnet-bench',
   agentRunnerSecurityGroupId: 'sg-runner',
   benchSecurityGroupId: 'sg-bench',
   benchInstanceProfile: 'arn:aws:iam::123456789012:instance-profile/ratchet/bench/ratchet-demo-bench-runner',
+  confirmInstanceProfile: 'arn:aws:iam::123456789012:instance-profile/ratchet/bench/ratchet-demo-confirm-runner',
   artifactsBucket: 'ratchet-demo-artifacts',
   maxInstanceLifetimeHours: 2,
 };
@@ -80,17 +95,63 @@ const identity = {
   instanceProfileRef: 'arn:aws:iam::123456789012:instance-profile/ratchet/agent/ratchet-agent-opt1-a1',
 };
 
+// Ids are substituted into IAM role names, tag values, SSM paths, S3 prefixes and policy variables
+// (`${aws:PrincipalTag/ratchet:opt}` inside Resource ARNs), where `*`, `?`, `/` and `..` would widen a pattern.
+const INJECTION = ['*', '?', '/', '..', 'a*', 'a?b', 'a/b', '../x', 'opt1/../opt2', 'opt1/*', 'Opt', 'a b', '', 'a_b', 'a:b', 'a${b}', 'x'.repeat(65)];
+
 describe('id validation (security requirement)', () => {
-  it.each(['Opt', 'a/b', 'a b', '', 'a_b', '../x', 'a*', 'x'.repeat(65)])('rejects %j', async (bad) => {
-    await expect(compute.createAgentIdentity(bad, 'a1')).rejects.toThrow(/invalid optimization id/);
-    await expect(compute.createAgentIdentity('opt1', bad)).rejects.toThrow(/invalid agent id/);
-    await expect(compute.putSecret(bad, 'a1', 'K', 'v')).rejects.toThrow();
-    await expect(compute.deleteSecrets('opt1', bad)).rejects.toThrow();
+  const spec = { instanceType: 't3.medium', imageRef: 'ami-1' };
+  const runner = (opt: string, agent: string) => ({
+    ...spec,
+    optimizationId: opt,
+    agentId: agent,
+    kind: 'claude-code' as const,
+    repoUrl: 'https://github.com/o/r',
+    branch: 'ratchet/opt/a',
+    identity: { ...identity, optimizationId: opt, agentId: agent },
+    secrets: [],
+  });
+  const bench = (opt: string, purpose: 'baseline' | 'bench' | 'confirm' = 'bench') => ({ ...spec, optimizationId: opt, purpose });
+  const untouched = () => {
     expect(iam.calls()).toHaveLength(0);
     expect(ssm.calls()).toHaveLength(0);
+    expect(ec2.calls()).toHaveLength(0);
+  };
+
+  it.each(INJECTION)('rejects %j at every id entry point', async (bad) => {
+    await expect(compute.createAgentIdentity(bad, 'a1')).rejects.toThrow(/invalid optimization id/);
+    await expect(compute.createAgentIdentity('opt1', bad)).rejects.toThrow(/invalid agent id/);
+    await expect(compute.putSecret(bad, 'a1', 'K', 'v')).rejects.toThrow(/invalid optimization id/);
+    await expect(compute.putSecret('opt1', bad, 'K', 'v')).rejects.toThrow(/invalid agent id/);
+    await expect(compute.deleteSecrets(bad, 'a1')).rejects.toThrow(/invalid optimization id/);
+    await expect(compute.deleteSecrets('opt1', bad)).rejects.toThrow(/invalid agent id/);
+    await expect(compute.launchRunner(runner(bad, 'a1') as never)).rejects.toThrow(/invalid optimization id/);
+    await expect(compute.launchRunner(runner('opt1', bad) as never)).rejects.toThrow(/invalid agent id/);
+    await expect(compute.launchBenchInstance(bench(bad))).rejects.toThrow(/invalid optimization id/);
+    await expect(compute.launchBenchInstance(bench(bad, 'confirm'))).rejects.toThrow(/invalid optimization id/);
+    await expect(compute.listTagged(bad)).rejects.toThrow(/invalid optimization id/);
+    expect(() => agentRoleName(bad, 'a1')).toThrow(/invalid optimization id/);
+    expect(() => agentRoleName('opt1', bad)).toThrow(/invalid agent id/);
+    expect(() => secretPrefix(bad, 'a1')).toThrow(/invalid optimization id/);
+    expect(() => secretPrefix('opt1', bad)).toThrow(/invalid agent id/);
+    untouched();
   });
-  it('rejects bad secret names', async () => {
-    await expect(compute.putSecret('opt1', 'a1', '../../x', 'v')).rejects.toThrow(/invalid secret name/);
+
+  it.each(['*', '?', 'i-*', 'i-1/../i-2', '../x', '', 'i-', 'I-ABC'])('rejects instance id %j in terminate and runCommand', async (bad) => {
+    await expect(compute.terminate([bad])).rejects.toThrow(/invalid instance id/);
+    await expect(compute.terminate(['i-0ok', bad])).rejects.toThrow(/invalid instance id/);
+    await expect(compute.runCommand(bad, { script: 'true' })).rejects.toThrow(/invalid instance id/);
+    untouched();
+  });
+
+  it('rejects bad secret names, including "..", "/" and wildcards', async () => {
+    for (const bad of ['../../x', '..', 'a/b', 'a*', 'a?', '', 'a b']) {
+      await expect(compute.putSecret('opt1', 'a1', bad, 'v')).rejects.toThrow(/invalid secret name/);
+    }
+    untouched();
+  });
+  it('accepts well-formed ids', async () => {
+    await expect(compute.putSecret('opt-1', 'claude-code-2', 'ANTHROPIC_API_KEY', 'v')).resolves.toBeDefined();
   });
   it('shortens very long role names but keeps them unique and <= 64 chars', () => {
     const a = agentRoleName('o'.repeat(60), 'a'.repeat(60));
@@ -287,7 +348,7 @@ describe('launch', () => {
       InstanceType: 'c7i.large',
       MinCount: 1,
       MaxCount: 1,
-      SubnetId: 'subnet-1',
+      SubnetId: 'subnet-agent',
       SecurityGroupIds: ['sg-runner'],
       IamInstanceProfile: { Arn: identity.instanceProfileRef },
       MetadataOptions: { HttpTokens: 'required', HttpEndpoint: 'enabled', HttpPutResponseHopLimit: 1 },
@@ -313,16 +374,19 @@ describe('launch', () => {
     expect(ud).toContain(`RATCHET_REPO_URL='https://github.com/o/r'\\''; rm -rf / #.git'`);
   });
 
-  it('launchBenchInstance uses the eval profile + bench SG, no agent tag', async () => {
+  const benchSpec = (purpose: 'baseline' | 'bench' | 'confirm') => ({ optimizationId: 'opt1', instanceType: 'c7i.2xlarge', imageRef: 'ami-bench', purpose });
+
+  it('launchBenchInstance (confirm) uses the confirm profile, the private bench subnet + bench SG, no agent tag', async () => {
     ec2.on(RunInstancesCommand).resolves({ Instances: [{ InstanceId: 'i-b' }] });
-    const info = await compute.launchBenchInstance({ optimizationId: 'opt1', instanceType: 'c7i.2xlarge', imageRef: 'ami-bench', purpose: 'confirm' });
+    const info = await compute.launchBenchInstance(benchSpec('confirm'));
     expect(info.role).toBe('bench');
     expect(info.agentId).toBeUndefined();
     expect(info.launchedAt).toBe(1_000_000); // clock fallback when LaunchTime is absent
     const input = ec2.commandCalls(RunInstancesCommand)[0]!.args[0].input;
-    expect(input.IamInstanceProfile).toEqual({ Arn: cfg.benchInstanceProfile });
+    expect(input.IamInstanceProfile).toEqual({ Arn: cfg.confirmInstanceProfile });
+    expect(input.SubnetId).toBe('subnet-bench');
     expect(input.SecurityGroupIds).toEqual(['sg-bench']);
-    expect(input.MetadataOptions?.HttpTokens).toBe('required');
+    expect(input.MetadataOptions).toEqual({ HttpTokens: 'required', HttpEndpoint: 'enabled', HttpPutResponseHopLimit: 1 });
     expect(input.InstanceInitiatedShutdownBehavior).toBe('terminate');
     const tags = input.TagSpecifications![0]!.Tags!;
     expect(tags).toEqual(expect.arrayContaining([{ Key: 'ratchet:opt', Value: 'opt1' }, { Key: 'ratchet:role', Value: 'bench' }, { Key: 'ratchet:purpose', Value: 'confirm' }]));
@@ -330,11 +394,93 @@ describe('launch', () => {
     expect(Buffer.from(input.UserData!, 'base64').toString()).toContain('ratchet bench-agent');
   });
 
+  it.each(['baseline', 'bench'] as const)('launchBenchInstance (%s) never gets the sealed-capable profile', async (purpose) => {
+    ec2.on(RunInstancesCommand).resolves({ Instances: [{ InstanceId: 'i-b' }] });
+    await compute.launchBenchInstance(benchSpec(purpose));
+    const input = ec2.commandCalls(RunInstancesCommand)[0]!.args[0].input;
+    expect(input.IamInstanceProfile).toEqual({ Arn: cfg.benchInstanceProfile });
+    expect(JSON.stringify(input)).not.toContain('confirm-runner');
+    expect(input.SubnetId).toBe('subnet-bench');
+  });
+
+  it('picks the profile by purpose, and fails closed for anything else', () => {
+    expect(benchProfileFor(cfg, 'baseline')).toBe(cfg.benchInstanceProfile);
+    expect(benchProfileFor(cfg, 'bench')).toBe(cfg.benchInstanceProfile);
+    expect(benchProfileFor(cfg, 'confirm')).toBe(cfg.confirmInstanceProfile);
+    expect(() => benchProfileFor(cfg, 'confirm-ish' as never)).toThrow(/unknown bench purpose/);
+    expect(() => benchProfileFor({ benchInstanceProfile: 'b' }, 'confirm')).toThrow(/confirmInstanceProfile is not configured/);
+  });
+
+  it('refuses a confirm launch without a confirm profile instead of falling back to the bench one', async () => {
+    const { confirmInstanceProfile: _drop, ...noConfirm } = cfg;
+    const c = new AwsCloudCompute(noConfirm, { clients: { ec2: new EC2Client({}) }, clock });
+    await expect(c.launchBenchInstance(benchSpec('confirm'))).rejects.toThrow(/confirmInstanceProfile is not configured/);
+    expect(ec2.commandCalls(RunInstancesCommand)).toHaveLength(0);
+    ec2.on(RunInstancesCommand).resolves({ Instances: [{ InstanceId: 'i-b' }] });
+    await expect(c.launchBenchInstance(benchSpec('bench'))).resolves.toBeDefined(); // bench phases need no sealed identity
+  });
+
+  it('refuses to share one profile between bench and confirm', () => {
+    expect(() => new AwsCloudCompute({ ...cfg, confirmInstanceProfile: cfg.benchInstanceProfile }, { clients: {} })).toThrow(/must differ/);
+  });
+
+  it('refuses to launch bench instances without a bench subnet (no fallback to the agent subnet)', async () => {
+    const { benchSubnetId: _drop, ...noBench } = cfg;
+    const c = new AwsCloudCompute(noBench, { clients: { ec2: new EC2Client({}) }, clock });
+    await expect(c.launchBenchInstance(benchSpec('bench'))).rejects.toThrow(/benchSubnetId is not configured/);
+    expect(ec2.commandCalls(RunInstancesCommand)).toHaveLength(0);
+  });
+
+  it('launches agent runners in the agent subnet', async () => {
+    ec2.on(RunInstancesCommand).resolves({ Instances: [{ InstanceId: 'i-r' }] });
+    await compute.launchRunner(runnerSpec);
+    expect(ec2.commandCalls(RunInstancesCommand)[0]!.args[0].input.SubnetId).toBe('subnet-agent');
+  });
+
   it('accepts a bare profile name for bench', async () => {
     const c = new AwsCloudCompute({ ...cfg, benchInstanceProfile: 'bench-profile' }, { clients: { ec2: new EC2Client({}) }, clock });
     ec2.on(RunInstancesCommand).resolves({ Instances: [{ InstanceId: 'i-b' }] });
     await c.launchBenchInstance({ optimizationId: 'opt1', instanceType: 'c7i.2xlarge', imageRef: 'ami', purpose: 'bench' });
     expect(ec2.commandCalls(RunInstancesCommand)[0]!.args[0].input.IamInstanceProfile).toEqual({ Name: 'bench-profile' });
+  });
+
+  it('bench user-data creates the unprivileged user and blocks its access to IMDS', () => {
+    const ud = benchUserData({ optimizationId: 'opt1', instanceType: 'c7i.large', imageRef: 'ami', purpose: 'confirm' }, 2);
+    expect(ud).toContain('useradd --system');
+    expect(ud).toContain('ratchet-bench');
+    expect(ud).toContain('iptables -I OUTPUT 1 -m owner --uid-owner ratchet-bench -d 169.254.169.254 -j REJECT');
+    // the rule is installed before the bench agent starts
+    expect(ud.indexOf('iptables')).toBeLessThan(ud.indexOf('ratchet bench-agent'));
+  });
+
+  it('runner user-data exports the proxy only when one is configured', () => {
+    const none = runnerUserData(runnerSpec, 2, { region: 'us-east-1' });
+    expect(none).not.toMatch(/HTTPS_PROXY|profile\.d/);
+    const ud = runnerUserData(runnerSpec, 2, { region: 'us-east-1', proxyUrl: 'http://10.42.3.10:3128' });
+    expect(ud).toContain("HTTPS_PROXY='http://10.42.3.10:3128'");
+    expect(ud).toContain("https_proxy='http://10.42.3.10:3128'");
+    // AWS service endpoints and IMDS bypass the proxy
+    expect(ud).toMatch(/NO_PROXY='[^']*169\.254\.169\.254[^']*ssm\.us-east-1\.amazonaws\.com[^']*'/);
+    expect(ud).toContain('/etc/profile.d/ratchet-proxy.sh');
+    expect(() => runnerUserData(runnerSpec, 2, { region: 'us-east-1', proxyUrl: "http://x:1'; curl evil #" })).toThrow(/invalid egress proxy url/);
+  });
+
+  it('launchRunner passes the configured proxy into user-data', async () => {
+    ec2.on(RunInstancesCommand).resolves({ Instances: [{ InstanceId: 'i-r' }] });
+    const c = new AwsCloudCompute({ ...cfg, egressProxyUrl: 'http://10.42.3.10:3128' }, { clients: { ec2: new EC2Client({}) }, clock });
+    await c.launchRunner(runnerSpec);
+    const ud = Buffer.from(ec2.commandCalls(RunInstancesCommand)[0]!.args[0].input.UserData!, 'base64').toString();
+    expect(ud).toContain("HTTPS_PROXY='http://10.42.3.10:3128'");
+  });
+
+  it('derives the compute config from sandbox outputs: bench profile for bench, confirm profile for confirm', async () => {
+    const out = await new MockSandboxProvider().apply({ sandboxId: 'sim', region: 'us-east-1', allowedInstanceTypes: ['t3.medium'], maxInstancesPerAgent: 4, maxInstanceLifetimeHours: 2 } as never);
+    const derived = awsComputeConfigFromOutputs(out, 'sim');
+    expect(derived.benchInstanceProfile).toBe(out.evalIdentity.instanceProfileArn);
+    expect(derived.confirmInstanceProfile).toBe(out.confirmIdentity.instanceProfileArn);
+    expect(derived.benchInstanceProfile).not.toBe(derived.confirmInstanceProfile);
+    expect(derived.benchSubnetId).toBe(out.network.benchSubnetId);
+    expect(derived.benchSubnetId).not.toBe(derived.subnetId);
   });
 
   it('retries while the fresh instance profile propagates, then succeeds', async () => {

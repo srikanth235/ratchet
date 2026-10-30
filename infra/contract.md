@@ -21,7 +21,7 @@ guard rails this module provisions.
 | `max_instance_lifetime_hours` | number | Maximum lifetime of any agent-launched machine (default 2). **Enforced by the app reaper**, not by IAM. Echoed in the `limits` output. |
 | `tags` | map(string) | Extra tags applied to every resource created by the module (e.g. owner, cost centre). The reserved `ratchet:*` keys are set by the module/app and cannot be overridden. |
 
-Cloud-specific *optional* inputs (e.g. AWS `vpc_id`, `subnet_id`) are allowed
+Cloud-specific *optional* inputs (e.g. AWS `vpc_cidr`, `enable_egress_proxy`) are allowed
 as long as they have defaults and the app can run without them.
 
 ## Outputs
@@ -29,10 +29,11 @@ as long as they have defaults and the app can run without them.
 | Output | Meaning |
 |---|---|
 | `artifacts_bucket` | Name of the object store agents read/write. One prefix per agent: `artifacts/<opt>/<agent>/`. Holds event streams and build outputs. |
-| `sealed_bucket` | Name of the object store holding hidden traces. Readable **only** by the eval identity. |
+| `sealed_bucket` | Name of the object store holding hidden traces. Readable **only** by the confirm identity, and only under its holdout prefix. |
 | `agent_boundary_ref` | Reference to the permission cap that every per-agent identity must be created under (AWS: permission boundary policy ARN). |
-| `eval_identity_ref` | The identity trusted bench machines run as (AWS: object with `role_arn`, `role_name`, `instance_profile_arn`, `instance_profile_name`). |
-| `network_ref` | Where machines are launched (AWS: object with `vpc_id`, `subnet_id`, `security_group_ids.agent_runner`, `security_group_ids.bench`). |
+| `eval_identity_ref` | The identity trusted bench machines run as in the `baseline` and `bench` phases (AWS: object with `role_arn`, `role_name`, `instance_profile_arn`, `instance_profile_name`). **No access to the sealed store.** |
+| `confirm_identity_ref` | The identity a bench machine runs as in the `confirm` phase only; the sole identity that can read `sealed_bucket` (same shape as `eval_identity_ref`). |
+| `network_ref` | Where machines are launched (AWS: object with `vpc_id`, `subnet_id` (agent runners), `bench_subnet_id` (bench machines; no route to the internet), `security_group_ids.agent_runner`, `security_group_ids.bench`, `egress_proxy_url` (null unless the optional allow-list proxy is enabled)). |
 | `agent_role_path` | The path/name-space under which per-agent identities MUST be created (AWS: `/ratchet/agent/`). The sealed-store deny matches on it. |
 | `limits` | Echo of `max_instances_per_agent` and `max_instance_lifetime_hours` so the app reads limits from the sandbox, not from its own config. |
 
@@ -58,9 +59,12 @@ An implementation that cannot satisfy one of these is not a valid sandbox.
 1. **Sealed isolation.** No agent identity can read, list, write, or delete
    anything in `sealed_bucket`, whatever its identity-level permissions say.
    Enforced twice: an explicit deny on the store *and* an explicit deny in the
-   agent boundary.
-2. **Eval isolation.** The eval identity is outside `agent_role_path`; agents
-   cannot assume it, pass it to a machine, or alter it.
+   agent boundary. The same explicit deny covers the `eval_identity_ref`
+   identity: only `confirm_identity_ref` can read the store, and only the
+   holdout prefix.
+2. **Eval isolation.** The eval and confirm identities are outside
+   `agent_role_path`; agents cannot assume them, pass them to a machine, or
+   alter them.
 3. **Per-agent storage.** An agent can touch only
    `artifacts/<its opt>/<its agent>/` in `artifacts_bucket` - not other agents,
    not other optimizations, not the bucket root listing.
@@ -71,21 +75,37 @@ An implementation that cannot satisfy one of these is not a valid sandbox.
    only inside the sandbox network, and only with hardened metadata access
    (AWS: IMDSv2 required). It can start/stop/terminate only machines carrying
    its own tags. Launched machines get no identity of their own (no privilege
-   escalation through instance roles).
+   escalation through instance roles). They cannot launch into the bench or
+   proxy subnets nor with the bench, endpoint or proxy security groups.
 6. **No control-plane access.** Agents have no access to identity management,
    organisation, billing/cost, or the ability to assume other roles. The
    boundary cannot be detached or edited by the agent.
 7. **Fail closed.** An identity lacking the `ratchet:opt` / `ratchet:agent`
    attributes is denied everything.
 8. **Network.** Agent runner machines have no inbound access and egress only to
-   HTTPS and name resolution. Bench machines accept no inbound traffic from
-   agent runners.
+   HTTPS and name resolution (with the optional proxy: only to the proxy, the
+   private service endpoints and the object store, and the allow-list is by
+   domain). Bench machines accept no inbound traffic from agent runners and
+   have **no route to the internet**: they reach only each other, the object
+   store (through an endpoint whose policy admits just the two sandbox
+   buckets) and the machine-management/log endpoints. Candidate code is
+   delivered by pre-staging in the artifacts store, never fetched from a git
+   host. The module owns the network (a dedicated VPC); the account's default
+   VPC is never used.
 9. **No public data.** Both stores block public access, encrypt at rest, and
    accept only encrypted transport.
 10. **Reversible.** Destroying the module removes everything it created, with
     no manual cleanup beyond runtime-created resources (below).
 11. **No secrets in state.** The module never receives or stores model keys or
     tokens.
+12. **Least identity per bench phase.** The `baseline`/`bench` phases run under
+    an identity with no access to the sealed store; the `confirm` phase runs
+    under a separate identity that can read the holdout prefix. The app picks
+    the identity from the job's phase and fails closed when the confirm
+    identity is not configured. Because candidate code runs on the same
+    machine, the bench image must additionally run candidate code as an
+    unprivileged OS user that cannot reach instance metadata
+    (`docs/real-env/bench.md`).
 
 ## Limits IAM cannot express (app-enforced)
 
@@ -95,11 +115,14 @@ An implementation that cannot satisfy one of these is not a valid sandbox.
 | `max_instance_lifetime_hours` | IAM has no time-to-live condition. | App reaper terminates tagged instances older than the limit; runners also enforce locally. |
 | Terminate-on-shutdown (AWS `InstanceInitiatedShutdownBehavior=terminate`) | No IAM condition key exists for this `RunInstances` parameter. | Runner image/CLI wrapper sets it; reaper terminates `stopped` agent instances. |
 | Spend budget | IAM is not cost aware. | App cost meter + kill switch (deny-all on the agent identity). |
-| Outbound destination allow-list (by domain) | Security groups filter by IP/port only. | Egress is limited to 443/DNS; a domain-filtering proxy/firewall is a later hardening. |
+| Outbound destination allow-list (by domain) for agent runners | Security groups filter by IP/port only. | Optional (`enable_egress_proxy`, default off): a forward proxy allow-lists domains and the runners' route to the internet is removed, so the allow-list is enforced by routing, not only by a security group. Without it, runners have HTTPS egress to anywhere. |
+| DNS exfiltration from bench machines | Security groups do not filter traffic to the VPC resolver. | Residual risk; a DNS firewall on the VPC is the follow-up (`docs/real-env/bench.md`). |
+| Which OS user can reach instance metadata | IAM/network groups see the instance, not a Unix user. | The bench image blocks 169.254.169.254 for the unprivileged bench user (owner-match firewall rule) and the bench runner refuses to run otherwise. |
 
 ## Runtime-created resources (not in the module)
 
 Per-agent identity under `agent_role_path` + attached boundary + instance
 profile; agent runner machines; experiment machines launched by agents; secret
 parameters under `/ratchet/<opt>/<agent>/`; the kill-switch deny-all policy
-attachment. See `infra/README.md`.
+attachment; bench machines (one fresh machine per job) and the staged candidate
+archives under `bench-inputs/`. See `infra/README.md`.
