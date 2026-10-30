@@ -96,6 +96,11 @@ export function LiveAgents() {
         tabs={<OptTabs current="agents" />}
       />
       <ErrorNote error={error ?? (startError ? `Could not start: ${startError}` : null)} />
+      {d.calibration ? (
+        <p className="calibration-note" role="note" data-testid="calibration">{d.calibration}</p>
+      ) : (
+        live && <p className="calibration-note calibration-note--pending" role="note" data-testid="calibration">Noise is measured during the baseline; the runs per candidate and the win threshold are set from it.</p>
+      )}
 
       <section className="stat-cards" aria-label="Run summary">
         <Card className="stat-card">

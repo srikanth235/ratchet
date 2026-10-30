@@ -42,7 +42,7 @@ describe('SettingsStore secrets', () => {
     const dir = mkdtempSync(join(tmpdir(), 'rt-'));
     const file = join(dir, 'settings.json');
     require('node:fs').writeFileSync(file, '{not json');
-    expect(new SettingsStore(file, rot, {}).mode).toBe('simulation');
+    expect(new SettingsStore(file, rot, {}).awsProfile).toBe('');
   });
 });
 
@@ -50,13 +50,13 @@ describe('secrets never cross to the renderer', () => {
   it('getSettings exposes only configured yes/no, and no response contains the secret value', async () => {
     const ledger = openLedger(':memory:');
     const settings = new SettingsStore(null, rot, {});
-    const service = createService({ ledger, settings, createApp: (m) => createEngineForApp(ledger, m, { tickMs: 600_000, engine: "dev" }) });
+    const service = createService({ ledger, settings, createApp: () => createEngineForApp(ledger, { tickMs: 600_000, engine: 'dev' }) });
     const secret = 'sk-ant-TOPSECRET-VALUE';
     const afterSet = await service.setSecret('anthropicApiKey', secret);
     expect(afterSet.secrets).toEqual({ anthropicApiKey: true, openaiApiKey: false, githubToken: false });
     const everything = JSON.stringify([
-      afterSet, await service.getSettings(), await service.listOptimizations(), await service.sandboxInfo(),
-      await service.preflight({ agents: ['claude-code'], configYaml: '' }), await service.setAwsProfile('p'),
+      afterSet, await service.getSettings(), await service.listOptimizations(), await service.environments(), await service.githubStatus(),
+      await service.preflight({ agents: ['claude-code'], agentsWhere: 'cloud', source: 'github' }), await service.setAwsProfile('p'),
     ]);
     expect(everything).not.toContain('TOPSECRET');
     expect((await service.clearSecret('anthropicApiKey')).secrets.anthropicApiKey).toBe(false);

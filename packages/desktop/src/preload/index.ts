@@ -11,10 +11,11 @@ const call =
 
 const methods: Invoke[] = [
   'listOptimizations', 'getOptimization', 'ratchetHistory', 'winningChange', 'candidatesWithResults', 'spendBreakdown',
-  'recentActivity', 'agentEvents', 'validateConfig', 'preflight', 'sandboxInfo', 'getSettings',
-  'planSandbox', 'applySandbox', 'destroySandbox',
+  'recentActivity', 'agentEvents', 'validateConfig', 'preflight', 'getSettings', 'environments',
+  'githubStatus', 'githubSignIn', 'githubSignOut', 'listRepos', 'inspectRepo', 'pickLocalFolder',
+  'awsProfiles', 'detectHarnesses', 'redetectHarnesses', 'listTemplates', 'proposeTemplate',
   'createOptimization', 'startOptimization', 'stopOptimization', 'pauseAgent', 'resumeAgent',
-  'messageAgent', 'openPullRequest', 'teardown', 'exportReport', 'setMode', 'setAwsProfile',
+  'messageAgent', 'openPullRequest', 'exportReport', 'endSandbox', 'setAwsProfile',
   'setSecret', 'clearSecret', 'saveLiveSettings', 'testConnection',
 ];
 

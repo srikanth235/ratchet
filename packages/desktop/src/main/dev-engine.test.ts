@@ -123,7 +123,7 @@ describe('DevEngine', () => {
 describe('createEngineForApp', () => {
   it('seeds an empty ledger, resumes the running demo optimization, and reports the dev engine', async () => {
     const l = openLedger(':memory:');
-    const app = createEngineForApp(l, 'simulation', { tickMs: 60_000, engine: 'dev' });
+    const app = createEngineForApp(l, { tickMs: 60_000, engine: 'dev' });
     try {
       expect(app.kind).toBe('dev');
       expect(app.engine.mode()).toBe('simulation');
@@ -136,9 +136,9 @@ describe('createEngineForApp', () => {
 
   it('does not reseed a ledger that already has data', () => {
     const l = openLedger(':memory:');
-    const a = createEngineForApp(l, 'simulation', { tickMs: 60_000, engine: 'dev' });
+    const a = createEngineForApp(l, { tickMs: 60_000, engine: 'dev' });
     a.dispose();
-    const b = createEngineForApp(l, 'live', { tickMs: 60_000 });
+    const b = createEngineForApp(l, { tickMs: 60_000, engine: 'dev' });
     b.dispose();
     expect(l.listOptimizations()).toHaveLength(4);
   });

@@ -12,7 +12,7 @@ afterEach(() => service?.dispose());
 describe('winning change (dev engine: real demo patches committed onto examples/demo-search)', () => {
   it('diffs the best verified commit of the seeded search run: real files and line counts, a real hunk', async () => {
     const ledger = openLedger(':memory:');
-    service = createService({ ledger, settings: new SettingsStore(null, cipher, {}), createApp: (m) => createDevEngine(ledger, m, { tickMs: 3_600_000 }) });
+    service = createService({ ledger, settings: new SettingsStore(null, cipher, {}), createApp: () => createDevEngine(ledger, 'simulation', { tickMs: 3_600_000 }) });
     const w = await service.winningChange(DEMO_RUNNING_ID);
     expect(w.unavailable).toBeNull();
     expect(w.commits).toBe(5);
@@ -26,7 +26,7 @@ describe('winning change (dev engine: real demo patches committed onto examples/
 
   it('says why when there is nothing to diff: no win yet, or a repo the dev engine has no history for', async () => {
     const ledger = openLedger(':memory:');
-    service = createService({ ledger, settings: new SettingsStore(null, cipher, {}), createApp: (m) => createDevEngine(ledger, m, { tickMs: 3_600_000 }) });
+    service = createService({ ledger, settings: new SettingsStore(null, cipher, {}), createApp: () => createDevEngine(ledger, 'simulation', { tickMs: 3_600_000 }) });
     expect(await service.winningChange('opt_demo_web')).toMatchObject({ commits: 0, unavailable: 'No verified win yet.' });
     const ingest = await service.winningChange('opt_demo_ingest');
     expect(ingest.commits).toBe(2);

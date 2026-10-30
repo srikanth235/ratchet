@@ -2,11 +2,14 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { openLedger } from '@ratchet/core';
 import { createConnectionTester } from '@ratchet/runtime';
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, powerSaveBlocker, safeStorage, shell } from 'electron';
 import { IPC } from '../shared/channels.js';
 import { createEngineForApp } from './engine.js';
+import { createGithubApi } from './github.js';
+import { HarnessCache } from './harnesses.js';
 import { isTrustedUrl, registerIpc } from './ipc.js';
 import { defaultLivePaths } from './live-config.js';
+import { createPowerSaveHook } from './power.js';
 import { createService } from './service.js';
 import { SettingsStore } from './settings.js';
 
@@ -67,20 +70,39 @@ app.whenReady().then(() => {
     decrypt: (b) => safeStorage.decryptString(b),
   });
 
-  // Live mode: the bundled OpenTofu module (packaged: Resources/infra/aws) and, per sandbox, state under userData.
+  // The bundled OpenTofu module (packaged: Resources/infra/aws) and, per sandbox, state under userData. Hidden from the UI.
   const liveDefaults = defaultLivePaths({
     isPackaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
     repoRoot: resolve(process.env['RATCHET_REPO_ROOT'] ?? join(__dirname, '../../../..')),
   });
-  const live = { settings, stateRoot: join(userData, 'sandboxes'), defaults: liveDefaults };
+  // Agent CLIs on this machine: probed in the main process on launch, again on "Re-detect".
+  const harnesses = new HarnessCache();
+  void harnesses.get();
+  const github = createGithubApi({ clientId: process.env['RATCHET_GITHUB_CLIENT_ID'] });
+  const stateRoot = join(userData, 'sandboxes');
 
   const service = createService({
     ledger,
     settings,
     liveDefaults,
+    harnesses,
+    github,
+    openExternal: (url) => {
+      if (/^https:\/\//.test(url)) void shell.openExternal(url);
+    },
     connectionTester: createConnectionTester(),
-    createApp: (mode) => createEngineForApp(ledger, mode, { live }),
+    // Test/CI override: answer the native folder dialog from the environment.
+    pickFolder: async () => {
+      const preset = process.env['RATCHET_E2E_PICK_FOLDER'];
+      if (preset !== undefined) return preset || null;
+      const res = await dialog.showOpenDialog({ properties: ['openDirectory'], title: 'Choose a local repository' });
+      return res.canceled || !res.filePaths[0] ? null : res.filePaths[0];
+    },
+    createApp: ({ configFor }) =>
+      createEngineForApp(ledger, {
+        live: { settings, stateRoot, defaults: liveDefaults, harnesses, appVersion: app.getVersion(), configFor },
+      }),
     saveReport: async (defaultName, markdown) => {
       // Test/CI override: write the report into this directory instead of asking through a native dialog.
       const autoDir = process.env['RATCHET_E2E_SAVE_DIR'];
@@ -103,9 +125,15 @@ app.whenReady().then(() => {
       return isTrustedUrl(url, process.env['ELECTRON_RENDERER_URL']);
     },
   });
-  service.onEvent((e) => mainWindow?.webContents.send(IPC.event, e));
+  // Keep the machine awake while a run is active (agents run on this machine and the control loop must keep ticking).
+  const power = createPowerSaveHook(powerSaveBlocker);
+  service.onEvent((e) => {
+    power.onEvent(e);
+    mainWindow?.webContents.send(IPC.event, e);
+  });
 
   app.on('before-quit', () => {
+    power.release();
     service.dispose();
     ledger.close();
   });

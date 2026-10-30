@@ -12,16 +12,18 @@ export function Sidebar() {
   const live = snap?.optimizations.find((o) => o.id === snap.featuredId && (o.status === 'running' || o.status === 'baselining'));
   const detail = useQuery(() => window.ratchet.getOptimization(live!.id), [live?.id], { skip: !live, intervalMs: 10_000 });
   const settings = useQuery(() => window.ratchet.getSettings(), [], { intervalMs: 15_000 });
+  const github = useQuery(() => window.ratchet.githubStatus(), [], { intervalMs: 15_000 });
+  const harnesses = useQuery(() => window.ratchet.detectHarnesses(), [], { intervalMs: 30_000 });
   const repos = new Set(snap?.optimizations.map((o) => o.repo) ?? []).size;
   const total = snap?.optimizations.length ?? 0;
   const liveAgents = live?.agents.length ?? 0;
   const s = settings.data;
-  const sim = s?.mode === 'simulation';
+  const ready = (kind: string) => !!harnesses.data?.find((h) => h.kind === kind && h.installed && h.auth !== 'signed-out');
   const integrations: { label: string; on: boolean }[] = [
-    { label: 'GitHub', on: !!s?.secrets.githubToken },
-    { label: 'AWS', on: !!s && (s.awsProfile !== '' || sim) },
-    { label: 'Claude Code', on: !!s?.secrets.anthropicApiKey },
-    { label: 'Codex', on: !!s?.secrets.openaiApiKey },
+    { label: 'GitHub', on: !!github.data?.signedIn },
+    { label: 'AWS', on: !!s && s.awsProfile !== '' },
+    { label: 'Claude Code', on: ready('claude-code') },
+    { label: 'Codex', on: ready('codex') },
   ];
   const counts: Record<string, string | undefined> = {
     optimizations: total > 0 ? String(total) : undefined,

@@ -10,8 +10,6 @@ export interface LiveSettings {
   awsProfile: string;
   awsRegion: string;
   awsAuth: AwsAuthKind;
-  /** `owner/name` of the repository to optimize. */
-  githubRepo: string;
   /** AMI that agent runners boot from. */
   runnerImageRef: string;
   /** AMI that bench / confirm instances boot from. */
@@ -31,7 +29,6 @@ export const LIVE_SETTING_DEFAULTS: LiveSettings = {
   awsProfile: '',
   awsRegion: DEFAULT_AWS_REGION,
   awsAuth: 'profile',
-  githubRepo: '',
   runnerImageRef: '',
   benchImageRef: '',
   tofuBinary: '',
@@ -40,7 +37,6 @@ export const LIVE_SETTING_DEFAULTS: LiveSettings = {
 
 const PROFILE_RE = /^[A-Za-z0-9_.@:-]*$/;
 const REGION_RE = /^[a-z]{2}(?:-[a-z]+)+-\d$/;
-const REPO_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/;
 const AMI_RE = /^ami-(?:[0-9a-f]{8}|[0-9a-f]{17})$/;
 // A path or a bare command name: no shell metacharacters, no control characters, no leading dash (would read as a flag).
 const PATHLIKE_RE = /^[^\0\r\n;&|`$<>*?"'\\]+$/;
@@ -50,7 +46,6 @@ export const SETTING_LABELS: Record<LiveSettingKey, string> = {
   awsProfile: 'AWS profile',
   awsRegion: 'AWS region',
   awsAuth: 'AWS sign-in',
-  githubRepo: 'GitHub repository',
   runnerImageRef: 'Runner AMI',
   benchImageRef: 'Bench AMI',
   tofuBinary: 'OpenTofu binary',
@@ -69,8 +64,6 @@ export function validateLiveSetting(key: LiveSettingKey, raw: unknown): string |
       return v === '' || REGION_RE.test(v) ? null : 'Use a region id such as us-east-1 or eu-west-2';
     case 'awsAuth':
       return v === 'profile' || v === 'sso' ? null : 'Choose "profile" or "sso"';
-    case 'githubRepo':
-      return v === '' || REPO_RE.test(v.replace(/\.git$/, '')) ? null : 'Use owner/name, for example acme/search-api';
     case 'runnerImageRef':
     case 'benchImageRef':
       return v === '' || AMI_RE.test(v) ? null : 'Use an AMI id such as ami-0123456789abcdef0';
@@ -98,9 +91,6 @@ export function validateLiveSettings(input: LiveSettingsInput): Partial<Record<L
   }
   return errors;
 }
-
-/** `owner/name` without a trailing `.git`, trimmed. */
-export const normalizeRepo = (v: string): string => v.trim().replace(/\.git$/, '');
 
 // ------------------------------------------------------------------ secret formats (checked before anything is stored)
 

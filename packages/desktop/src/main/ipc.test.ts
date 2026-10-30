@@ -28,7 +28,7 @@ const cipher = { isAvailable: () => true, encrypt: (s: string) => Buffer.from(`e
 function setup(trusted?: (e: unknown) => boolean) {
   const ledger = openLedger(':memory:');
   const settings = new SettingsStore(null, cipher, {});
-  const service = createService({ ledger, settings, createApp: (mode) => createEngineForApp(ledger, mode, { tickMs: 600_000, engine: "dev" }) });
+  const service = createService({ ledger, settings, createApp: () => createEngineForApp(ledger, { tickMs: 600_000, engine: 'dev' }) });
   const ipc = new FakeIpc();
   registerIpc(ipc, service, trusted ? { isTrustedSender: trusted } : {});
   return { ledger, settings, service, ipc };
@@ -77,7 +77,16 @@ describe('registerIpc', () => {
     ['validateConfig', [{ not: 'a string' }]],
     ['messageAgent', ['agt', '   ']],
     ['messageAgent', ['agt', 'x'.repeat(5000)]],
-    ['setMode', ['yolo']],
+    ['inspectRepo', [{ kind: 'github', repo: 'not a repo' }]],
+    ['inspectRepo', [{ kind: 'github', repo: 'https://evil.example/x/y' }]],
+    ['inspectRepo', [{ kind: 'local', path: '' }]],
+    ['inspectRepo', [{ kind: 'ftp', path: '/x' }]],
+    ['listRepos', [42]],
+    ['proposeTemplate', [{ repoUrl: 'a/b', baseRef: 'main', templateId: 'Bad Id' }]],
+    ['proposeTemplate', [{ repoUrl: 'a/b', baseRef: 'main', templateId: 'http-latency', files: ['/etc/passwd'] }]],
+    ['preflight', [{ agents: ['codex'], agentsWhere: 'moon', source: 'github' }]],
+    ['endSandbox', []],
+    ['githubSignIn', ['extra']],
     ['setAwsProfile', ['bad profile; rm -rf /']],
     ['setSecret', ['anthropicApiKey', 'short']],
     ['setSecret', ['rootPassword', 'long-enough-secret']],
@@ -85,22 +94,24 @@ describe('registerIpc', () => {
     ['setSecret', ['githubToken', 'not-a-github-token']],
     ['saveLiveSettings', [{ awsRegion: 'mars-north-9' }]],
     ['saveLiveSettings', [{ runnerImageRef: 'i-0123456789abcdef0' }]],
-    ['saveLiveSettings', [{ githubRepo: 'https://evil.example/x/y' }]],
+    ['saveLiveSettings', [{ githubRepo: 'acme/api' }]],
     ['saveLiveSettings', [{ tofuBinary: 'tofu --version; id' }]],
     ['saveLiveSettings', [{ moduleDir: '../../etc' }]],
     ['saveLiveSettings', [{ awsAuth: 'password' }]],
     ['saveLiveSettings', [{ anthropicApiKey: 'sk-ant-smuggled-through-settings' }]],
     ['saveLiveSettings', [{}, {}]],
     ['testConnection', ['stripe']],
+    ['testConnection', ['tofu']],
     ['testConnection', []],
-    ['planSandbox', ['extra']],
-    ['destroySandbox', [{ sandboxId: 'other' }]],
     ['recentActivity', [{ limit: 0 }]],
     ['recentActivity', [{ unknown: 1 }]],
     ['createOptimization', [{ repoUrl: 'x', baseRef: 'main', agents: [], budgetUsd: 10, timeLimitSeconds: 60, plateauEvals: 3 }]],
     ['createOptimization', [{ repoUrl: 'x', baseRef: 'main', agents: ['codex'], budgetUsd: -5, timeLimitSeconds: 60, plateauEvals: 3 }]],
     ['createOptimization', [{ repoUrl: 'x', baseRef: 'main', agents: ['gpt-9'], budgetUsd: 5, timeLimitSeconds: 60, plateauEvals: 3 }]],
     ['createOptimization', [{ repoUrl: 'x', baseRef: 'main', agents: ['codex'], budgetUsd: 5, timeLimitSeconds: 60, plateauEvals: 3, isAdmin: true }]],
+    ['createOptimization', [{ repoUrl: '', baseRef: 'main', agents: ['codex'], budgetUsd: 5, timeLimitSeconds: 60, plateauEvals: 3 }]],
+    ['createOptimization', [{ repoUrl: 'a/b', baseRef: 'main', demo: 'demo-evil', agents: ['codex'], budgetUsd: 5, timeLimitSeconds: 60, plateauEvals: 3 }]],
+    ['createOptimization', [{ repoUrl: 'a/b', baseRef: 'main', configYaml: 'version: 0', agents: ['codex'], budgetUsd: 5, timeLimitSeconds: 60, plateauEvals: 3 }]],
     ['createOptimization', ['not an object']],
   ];
   it.each(bad)('rejects invalid arguments to %s %j before executing anything', async (method, args) => {
@@ -112,16 +123,24 @@ describe('registerIpc', () => {
 
   it('accepts a well-formed createOptimization and returns the new id', async () => {
     const id = (await ctx.ipc.invoke(IPC.createOptimization, {
-      repoUrl: 'https://github.com/acme/api', baseRef: 'main', agents: ['claude-code'], budgetUsd: 25, timeLimitSeconds: 3600, plateauEvals: 10,
+      repoUrl: 'acme/api', baseRef: 'main', agents: ['claude-code'], agentsWhere: 'local', budgetUsd: 25, timeLimitSeconds: 3600, plateauEvals: 10,
     })) as string;
     expect(ctx.ledger.getOptimization(id)?.status).toBe('draft');
     ctx.service.dispose();
   });
 
-  it('surfaces config errors from createOptimization', async () => {
+  it('a demo needs no repository', async () => {
+    const id = (await ctx.ipc.invoke(IPC.createOptimization, {
+      demo: 'demo-search', repoUrl: '', baseRef: 'main', agents: ['claude-code', 'codex'], budgetUsd: 50, timeLimitSeconds: 7200, plateauEvals: 25,
+    })) as string;
+    expect(ctx.ledger.getOptimization(id)?.name).toBe('Search API latency (demo)');
+    ctx.service.dispose();
+  });
+
+  it('says so when the repository is not a GitHub owner/name', async () => {
     await expect(
-      ctx.ipc.invoke(IPC.createOptimization, { repoUrl: 'a/b', baseRef: 'main', configYaml: 'version: 3', agents: ['codex'], budgetUsd: 5, timeLimitSeconds: 60, plateauEvals: 3 }),
-    ).rejects.toThrow(/invalid ratchet.yaml/);
+      ctx.ipc.invoke(IPC.createOptimization, { repoUrl: '/some/local/path', baseRef: 'main', agents: ['codex'], budgetUsd: 5, timeLimitSeconds: 60, plateauEvals: 3 }),
+    ).rejects.toThrow(/not a GitHub repository/);
     ctx.service.dispose();
   });
 
@@ -158,13 +177,13 @@ describe('RatchetService commands & events', () => {
     service.dispose();
   });
 
-  it('opens a PR (stored for the UI), exports a report, tears down', async () => {
+  it('opens a PR (stored for the UI) and exports a report', async () => {
     const saved: string[] = [];
     const ledger = openLedger(':memory:');
     const settings = new SettingsStore(null, cipher, {});
     const service = createService({
       ledger, settings,
-      createApp: (m) => createEngineForApp(ledger, m, { tickMs: 600_000, engine: "dev" }),
+      createApp: () => createEngineForApp(ledger, { tickMs: 600_000, engine: 'dev' }),
       saveReport: async (name, md) => (saved.push(name, md), '/tmp/r.md'),
     });
     const pr = await service.openPullRequest('opt_demo_ingest');
@@ -173,73 +192,14 @@ describe('RatchetService commands & events', () => {
     expect((await service.getOptimization('opt_demo_ingest')).summary.status).toBe('pr-open');
     expect(await service.exportReport('opt_demo_ingest')).toEqual({ saved: true, path: '/tmp/r.md' });
     expect(saved[1]).toContain('Ratchet report: Ingest throughput');
-    expect((await service.getOptimization('opt_demo_ingest')).teardown.every((t) => t.done)).toBe(false);
-    await service.teardown('opt_demo_ingest');
-    expect((await service.getOptimization('opt_demo_ingest')).teardown.every((t) => t.done)).toBe(true);
+    // The dev engine has no sandbox: no receipt, and no calibration before a baseline.
+    expect((await service.getOptimization('opt_demo_ingest')).receipt).toBeNull();
     service.dispose();
   });
 
   it('exportReport reports cancellation', async () => {
     const { service } = setup();
     expect(await service.exportReport('opt_demo_search')).toEqual({ saved: false });
-    service.dispose();
-  });
-
-  it('switching mode rebuilds the engine and keeps forwarding events', async () => {
-    const { service, ledger } = setup();
-    const events: string[] = [];
-    service.onEvent((e) => events.push(e.type));
-    const s = await service.setMode('live');
-    expect(s.mode).toBe('live');
-    expect(s.engine.mode).toBe('live');
-    await service.stopOptimization('opt_demo_search');
-    expect(events).toContain('optimization');
-    expect(ledger.getOptimization('opt_demo_search')!.status).toBe('stopped');
-    service.dispose();
-  });
-
-  it('preflight reflects mode and configured credentials', async () => {
-    const { service } = setup();
-    const yaml = 'version: 0\nobjective: { metric: m, direction: minimize, min_gain: 0.05 }\nbench: { ref: r, run: x, repeats: 3, hardware: h }\nagent: { instructions: R.md, allowed_instance_types: [a] }\n';
-    const sim = await service.preflight({ agents: ['claude-code'], configYaml: yaml });
-    expect(sim.find((i) => i.id === 'config')!.state).toBe('ok');
-    expect(sim.find((i) => i.id === 'anthropic')!.state).toBe('warn');
-    await service.setMode('live');
-    const live = await service.preflight({ agents: ['claude-code', 'codex'], configYaml: 'bad: [' });
-    expect(live.find((i) => i.id === 'config')!.state).toBe('fail');
-    expect(live.find((i) => i.id === 'anthropic')!.state).toBe('fail');
-    expect(live.find((i) => i.id === 'openai')!.state).toBe('fail');
-    expect(live.find((i) => i.id === 'aws')!.state).toBe('fail');
-    expect(live.find((i) => i.id === 'repo')!.state).toBe('fail');
-    expect(live.find((i) => i.id === 'images')!.state).toBe('fail');
-    expect(live.find((i) => i.id === 'sandbox')).toMatchObject({ state: 'fail', detail: expect.stringContaining('apply it under Environments') });
-    expect(sim.find((i) => i.id === 'sandbox')!.state).toBe('warn');
-    expect(sim.find((i) => i.id === 'repo')).toBeUndefined();
-    await service.setAwsProfile('sandbox');
-    await service.setSecret('anthropicApiKey', 'sk-ant-test-123456');
-    const after = await service.preflight({ agents: ['claude-code'], configYaml: yaml });
-    expect(after.find((i) => i.id === 'anthropic')!.state).toBe('ok');
-    expect(after.find((i) => i.id === 'aws')!.detail).toBe('sandbox');
-    await service.applySandbox();
-    expect((await service.preflight({ agents: ['claude-code'], configYaml: yaml })).find((i) => i.id === 'sandbox')).toMatchObject({ state: 'ok' });
-    service.dispose();
-  });
-
-  it('sandboxInfo plans for free in simulation; apply records the outputs and destroy clears them', async () => {
-    const { service, ledger } = setup();
-    const before = await service.sandboxInfo();
-    expect(before).toMatchObject({ status: 'planned', outputs: null, canApply: true, canDestroy: false, account: { sandboxId: 'ratchet-sim', region: 'us-east-1', simulated: true } });
-    expect(before.plan?.summary).toMatch(/^Plan: \d+ to add/);
-    expect(before.limits.allowedInstanceTypes).toContain('c7i.2xlarge');
-
-    const applied = await service.applySandbox();
-    expect(applied).toMatchObject({ status: 'applied', canDestroy: true, account: { accountId: '000000000000' } });
-    expect(applied.outputs?.artifactsBucket).toContain('artifacts');
-    expect(applied.plan?.changes.every((c) => c.action === 'no-op')).toBe(true);
-    expect(ledger.getSandbox('ratchet-sim')).toMatchObject({ status: 'applied', provider: 'mock' });
-
-    const gone = await service.destroySandbox();
-    expect(gone).toMatchObject({ status: 'destroyed', outputs: null, canDestroy: false });
     service.dispose();
   });
 });

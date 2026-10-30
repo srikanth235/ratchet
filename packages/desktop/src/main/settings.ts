@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { LIVE_SETTING_DEFAULTS, SETTING_LABELS, normalizeRepo, validateLiveSettings, type LiveSettings, type LiveSettingsInput } from '../shared/live-settings.js';
-import type { Mode, SecretName } from '../shared/types.js';
+import { LIVE_SETTING_DEFAULTS, SETTING_LABELS, validateLiveSettings, type LiveSettings, type LiveSettingsInput } from '../shared/live-settings.js';
+import type { SecretName } from '../shared/types.js';
 
 /** Matches Electron's `safeStorage` (OS keychain: Keychain on macOS, DPAPI, libsecret). */
 export interface SecretCipher {
@@ -10,19 +10,23 @@ export interface SecretCipher {
   decrypt(data: Buffer): string;
 }
 
+/** How the stored GitHub token got here (the token itself is a secret; the login and source are not). */
+export type GithubSource = 'device' | 'token';
+
 interface Persisted {
-  mode: Mode;
   awsProfile: string;
+  /** The signed-in GitHub account, shown in Settings. Not a secret. */
+  githubLogin: string;
+  githubSource: GithubSource | '';
   /** Live-mode settings other than the profile and the secrets (those live in `awsProfile` and `secrets`). */
   live: Omit<LiveSettings, 'awsProfile'>;
   pullRequests: Record<string, string>;
-  tornDown: Record<string, true>;
   /** base64 of the cipher text; plaintext never touches disk. */
   secrets: Partial<Record<SecretName, string>>;
 }
 
 const { awsProfile: _profile, ...LIVE_DEFAULTS } = LIVE_SETTING_DEFAULTS;
-const DEFAULTS: Persisted = { mode: 'simulation', awsProfile: '', live: LIVE_DEFAULTS, pullRequests: {}, tornDown: {}, secrets: {} };
+const DEFAULTS: Persisted = { awsProfile: '', githubLogin: '', githubSource: '', live: LIVE_DEFAULTS, pullRequests: {}, secrets: {} };
 
 const ENV_FOR: Record<SecretName, string[]> = {
   anthropicApiKey: ['ANTHROPIC_API_KEY'],
@@ -31,7 +35,7 @@ const ENV_FOR: Record<SecretName, string[]> = {
 };
 
 /**
- * Small JSON-file store for app settings and the few facts the ledger does not hold (PR urls, teardown state),
+ * Small JSON-file store for app settings and the few facts the ledger does not hold (PR urls),
  * plus secrets encrypted with the OS keychain. Secret values only leave via `getSecret` (main process only).
  */
 export class SettingsStore {
@@ -42,20 +46,17 @@ export class SettingsStore {
     private readonly cipher: SecretCipher,
     private readonly env: NodeJS.ProcessEnv = process.env,
   ) {
-    this.data = { ...DEFAULTS, live: { ...LIVE_DEFAULTS }, pullRequests: {}, tornDown: {}, secrets: {} };
+    this.data = { ...DEFAULTS, live: { ...LIVE_DEFAULTS }, pullRequests: {}, secrets: {} };
     if (file && existsSync(file)) {
       try {
         const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<Persisted>;
-        this.data = { ...this.data, ...raw, live: { ...LIVE_DEFAULTS, ...raw.live }, secrets: { ...raw.secrets }, pullRequests: { ...raw.pullRequests }, tornDown: { ...raw.tornDown } };
+        this.data = { ...this.data, ...raw, live: { ...LIVE_DEFAULTS, ...raw.live }, secrets: { ...raw.secrets }, pullRequests: { ...raw.pullRequests } };
       } catch {
         /* corrupt settings file: start from defaults rather than crash the app */
       }
     }
   }
 
-  get mode(): Mode {
-    return this.data.mode;
-  }
   get awsProfile(): string {
     return this.data.awsProfile;
   }
@@ -67,10 +68,6 @@ export class SettingsStore {
     return this.cipher.isAvailable();
   }
 
-  setMode(mode: Mode): void {
-    this.data.mode = mode;
-    this.save();
-  }
   setAwsProfile(profile: string): void {
     this.data.awsProfile = profile;
     this.save();
@@ -84,7 +81,7 @@ export class SettingsStore {
     const { awsProfile, ...rest } = patch;
     const next = { ...this.data.live };
     for (const [k, v] of Object.entries(rest) as [keyof typeof next, string][]) {
-      (next as Record<string, string>)[k] = k === 'githubRepo' ? normalizeRepo(v) : v.trim();
+      (next as Record<string, string>)[k] = v.trim();
     }
     this.data.live = next;
     if (awsProfile !== undefined) this.data.awsProfile = awsProfile.trim();
@@ -98,11 +95,21 @@ export class SettingsStore {
     this.data.pullRequests[id] = url;
     this.save();
   }
-  tornDown(id: string): boolean {
-    return this.data.tornDown[id] === true;
+  /** The signed-in GitHub account (non-secret), '' when unknown. */
+  get githubLogin(): string {
+    return this.data.githubLogin;
   }
-  markTornDown(id: string): void {
-    this.data.tornDown[id] = true;
+  get githubSource(): GithubSource | null {
+    return this.data.githubSource || null;
+  }
+  setGithubAccount(login: string, source: GithubSource): void {
+    this.data.githubLogin = login;
+    this.data.githubSource = source;
+    this.save();
+  }
+  clearGithubAccount(): void {
+    this.data.githubLogin = '';
+    this.data.githubSource = '';
     this.save();
   }
 

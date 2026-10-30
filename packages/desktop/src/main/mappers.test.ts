@@ -10,7 +10,7 @@ import { metricOptions } from './metrics.js';
 import { seedDemo } from './seed.js';
 
 const NOW = Date.UTC(2026, 9, 30, 12, 0, 0);
-const meta: MetaView = { prUrl: () => null, teardownDone: () => false };
+const meta: MetaView = { prUrl: () => null };
 let ledger: Ledger;
 
 beforeEach(() => {
@@ -218,7 +218,7 @@ describe('ledger rows → view models', () => {
     expect(cc.stats.verified).toBe(3);
     expect(cc.stats.spendUsd).toBeGreaterThan(0);
     expect(d.elapsedS).toBeGreaterThan(0);
-    expect(d.teardown.find((t) => t.id === 'agents')!.done).toBe(false);
+    expect(d.receipt).toBeNull(); // the receipt comes from the engine, not the ledger
   });
 
   it('ignores user messages when picking the hypothesis', () => {

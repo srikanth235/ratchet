@@ -1,4 +1,5 @@
-import type { EngineApi, FileDiff, Ledger, Mode } from '@ratchet/core';
+import type { EngineApi, EngineCreateOptimizationInput, FileDiff, Ledger, Mode } from '@ratchet/core';
+import type { DemoId } from '../shared/types.js';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DevEngine } from './dev-engine.js';
@@ -9,8 +10,13 @@ import { isLedgerEmpty, seedDemo } from './seed.js';
 export interface AppEngine {
   /** `dev` = the in-repo stub with seeded demo data; `real` = the core engine. Shown in the UI. */
   kind: 'dev' | 'real';
-  /** Includes the sandbox lifecycle (plan / apply / destroy); there is no separate provider handle. */
   engine: EngineApi;
+  /** Start a demo template in simulation (mock agents, no setup). Absent: the engine runs every optimization the same way (the dev stub). */
+  createDemo?(demo: DemoId, input: EngineCreateOptimizationInput): Promise<string>;
+  /** What still blocks a real run on this GitHub repo ("what's missing"); builds the repo's runtime. Absent: nothing blocks. */
+  missingFor?(slug: string): Promise<string[]>;
+  /** Settings or the GitHub sign-in changed: runtimes built from them are rebuilt on next use. */
+  invalidate?(): void;
   /**
    * Diff of a verified commit against the optimization's base ref (GitHost.diff), for the Result screen's
    * "Winning change". Resolves null when the commit is unknown to this engine's git; absent without git access.

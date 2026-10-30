@@ -75,3 +75,9 @@ export function fmtUsdCompact(v: number): string {
 /** Return on spend: `12.4×`, `184×`, `18.2k×`. */
 export const fmtRoi = (x: number): string =>
   x >= 1_000_000 ? `${(x / 1_000_000).toFixed(1)}M×` : x >= 10_000 ? `${(x / 1000).toFixed(1)}k×` : `${x >= 100 ? x.toFixed(0) : x.toFixed(1)}×`;
+
+/** "Demo: search API latency" -> "Search API latency" (the demo section already says it is a demo). */
+export function demoTitle(title: string): string {
+  const t = title.replace(/^Demo:\s*/i, '');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}

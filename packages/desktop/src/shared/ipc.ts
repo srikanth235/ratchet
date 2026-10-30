@@ -6,6 +6,12 @@ import { SETTING_LABELS, validateLiveSetting, validateSecretFormat, type LiveSet
 
 const id = z.string().min(1).max(200);
 const agentKind = z.enum(['claude-code', 'codex', 'mock']);
+const agentsWhere = z.enum(['local', 'cloud']);
+/** A GitHub `owner/name`, or a local folder path (checked as a path by the main process). */
+const repoSource = z.union([
+  z.object({ kind: z.literal('github'), repo: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/, 'use owner/name') }).strict(),
+  z.object({ kind: z.literal('local'), path: z.string().trim().min(1).max(1000) }).strict(),
+]);
 const secretName = z.enum(['anthropicApiKey', 'openaiApiKey', 'githubToken']);
 
 /** A live setting: a string that passes the same format check the Settings screen shows while typing. */
@@ -26,26 +32,44 @@ export const ARGS = {
   recentActivity: z.tuple([z.object({ optimizationId: id.optional(), limit: z.number().int().min(1).max(200).optional() }).strict().optional()]),
   agentEvents: z.tuple([id, z.number().int().min(0).optional(), z.number().int().min(1).max(1000).optional()]),
   validateConfig: z.tuple([z.string().max(200_000)]),
-  preflight: z.tuple([z.object({ agents: z.array(agentKind).max(8), configYaml: z.string().max(200_000) }).strict()]),
-  sandboxInfo: z.tuple([]),
+  preflight: z.tuple([z.object({ agents: z.array(agentKind).max(8), agentsWhere: agentsWhere, source: z.enum(['github', 'local', 'demo']) }).strict()]),
   getSettings: z.tuple([]),
-  planSandbox: z.tuple([]),
-  applySandbox: z.tuple([]),
-  destroySandbox: z.tuple([]),
+  environments: z.tuple([]),
+  githubStatus: z.tuple([]),
+  githubSignIn: z.tuple([]),
+  githubSignOut: z.tuple([]),
+  listRepos: z.tuple([z.string().max(200).optional()]),
+  inspectRepo: z.tuple([repoSource]),
+  pickLocalFolder: z.tuple([]),
+  awsProfiles: z.tuple([]),
+  detectHarnesses: z.tuple([]),
+  redetectHarnesses: z.tuple([]),
+  listTemplates: z.tuple([]),
+  proposeTemplate: z.tuple([
+    z
+      .object({
+        repoUrl: z.string().trim().min(1).max(500),
+        baseRef: z.string().trim().min(1).max(200),
+        templateId: z.string().trim().regex(/^[a-z][a-z0-9-]*$/).max(80),
+        overwrite: z.boolean().optional(),
+      })
+      .strict(),
+  ]),
   createOptimization: z.tuple([
     z
       .object({
         name: z.string().trim().min(1).max(120).optional(),
-        repoUrl: z.string().trim().min(1).max(500),
+        repoUrl: z.string().trim().max(500),
         baseRef: z.string().trim().min(1).max(200),
-        configPath: z.string().trim().min(1).max(300).optional(),
-        configYaml: z.string().max(200_000).optional(),
+        demo: z.enum(['demo-search', 'demo-cli', 'demo-forecast']).optional(),
         agents: z.array(agentKind).min(1).max(8),
+        agentsWhere: agentsWhere.optional(),
         budgetUsd: z.number().positive().max(100_000),
         timeLimitSeconds: z.number().int().positive().max(14 * 24 * 3600),
         plateauEvals: z.number().int().min(1).max(10_000),
       })
-      .strict(),
+      .strict()
+      .refine((v) => v.demo !== undefined || v.repoUrl.length > 0, { message: 'repoUrl is required', path: ['repoUrl'] }),
   ]),
   startOptimization: z.tuple([id]),
   stopOptimization: z.tuple([id, z.string().max(500).optional()]),
@@ -53,9 +77,8 @@ export const ARGS = {
   resumeAgent: z.tuple([id]),
   messageAgent: z.tuple([id, z.string().trim().min(1).max(4000)]),
   openPullRequest: z.tuple([id]),
-  teardown: z.tuple([id]),
   exportReport: z.tuple([id]),
-  setMode: z.tuple([z.enum(['live', 'simulation'])]),
+  endSandbox: z.tuple([id]),
   setAwsProfile: z.tuple([z.string().trim().max(120).regex(/^[A-Za-z0-9_.@:-]*$/, 'profile names may only contain letters, digits and _ . @ : -')]),
   setSecret: z.tuple([
     secretName,
@@ -71,7 +94,6 @@ export const ARGS = {
         awsProfile: liveField('awsProfile'),
         awsRegion: liveField('awsRegion'),
         awsAuth: z.enum(['profile', 'sso']),
-        githubRepo: liveField('githubRepo'),
         runnerImageRef: liveField('runnerImageRef'),
         benchImageRef: liveField('benchImageRef'),
         tofuBinary: liveField('tofuBinary'),
@@ -80,5 +102,5 @@ export const ARGS = {
       .partial()
       .strict(),
   ]),
-  testConnection: z.tuple([z.enum(['aws', 'github', 'anthropic', 'openai', 'tofu'])]),
+  testConnection: z.tuple([z.enum(['aws', 'github', 'anthropic', 'openai'])]),
 } as const satisfies Record<InvokeMethod, z.ZodType>;

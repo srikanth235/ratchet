@@ -1,4 +1,6 @@
 import {
+  effectiveProtected,
+  getTemplate,
   parseConfig,
   spendEvents,
   type FileDiff,
@@ -8,7 +10,9 @@ import {
   type CandidateWithResults,
   type Ledger,
   type OptimizationSummary,
+  type SandboxTeardownReceipt,
   type SpendBreakdown,
+  type TemplateInfo,
   CALIBRATION,
 } from '@ratchet/core';
 import type {
@@ -27,7 +31,8 @@ import type {
   RatchetPoint,
   RatchetSeries,
   SpendVM,
-  TeardownItem,
+  TeardownReceiptVM,
+  TemplateVM,
   ValidateConfigResult,
   WinningChangeVM,
 } from '../shared/types.js';
@@ -41,7 +46,6 @@ export { unitForMetric } from './metrics.js';
 /** State the ledger does not hold (kept in the settings store by the service). */
 export interface MetaView {
   prUrl(optimizationId: string): string | null;
-  teardownDone(optimizationId: string): boolean;
 }
 
 const MIN = 60_000;
@@ -416,17 +420,6 @@ export function buildPipeline(cands: CandidateWithResults[]): BenchPipelineVM {
 
 // ------------------------------------------------------------------ detail
 
-export function buildTeardown(status: string, agentCount: number, tornDown: boolean): TeardownItem[] {
-  const stopped = ['completed', 'stopped', 'failed'].includes(status) && agentCount >= 0;
-  return [
-    { id: 'agents', label: 'Agents stopped', done: stopped },
-    { id: 'identities', label: 'Agent IAM identities revoked and deleted', done: stopped },
-    { id: 'instances', label: 'Runner, experiment and bench instances terminated', done: stopped },
-    { id: 'secrets', label: 'Per-agent secrets deleted from the sandbox', done: tornDown },
-    { id: 'sandbox', label: 'Sandbox resources destroyed (tofu destroy)', done: tornDown },
-  ];
-}
-
 export function buildDetail(ledger: Ledger, id: string, meta: MetaView, now: number): OptimizationDetail {
   const summary = ledger.listOptimizations().find((o) => o.id === id);
   const opt = ledger.getOptimization(id);
@@ -455,7 +448,8 @@ export function buildDetail(ledger: Ledger, id: string, meta: MetaView, now: num
     agents,
     pipeline: buildPipeline(cands),
     prUrl: meta.prUrl(id),
-    teardown: buildTeardown(opt.status, agents.length, meta.teardownDone(id)),
+    receipt: null,
+    calibration: null,
     configYaml: opt.configYaml,
     metrics: baseline ? metricOptions(opt.metric, opt.configYaml, baseStats) : [],
     compare: baseline ? compareRows(opt.metric, opt.direction, opt.configYaml, baseStats, bestStats) : [],
@@ -520,10 +514,13 @@ export function validateConfigText(text: string): ValidateConfigResult {
     direction: c.objective.direction,
     // Absent in ratchet.yaml means "calibrated from the baseline" (EngineApi.calibration shows the real figure); the default stands in here.
     minGain: c.objective.min_gain ?? CALIBRATION.fallbackGain,
-    evaluator: { kind: c.evaluator.kind, ref: c.evaluator.ref, run: c.evaluator.run, repeats: c.evaluator.repeats ?? CALIBRATION.baselineRepeats, hardware: c.evaluator.hardware, holdout: c.evaluator.holdout ?? null },
+    // Absent in ratchet.yaml means "calibrated from the baseline": null, not a made-up number.
+    evaluator: { kind: c.evaluator.kind, ref: c.evaluator.ref, run: c.evaluator.run, repeats: c.evaluator.repeats ?? null, hardware: c.evaluator.hardware, holdout: c.evaluator.holdout ?? (c.evaluator.template ? (getTemplate(c.evaluator.template)?.holdout ?? null) : null), template: c.evaluator.template ?? null },
+    environment: { image: c.environment?.image ?? null, machine: c.evaluator.hardware, region: c.environment?.region ?? null, network: c.environment?.network ?? [] },
     value: v ? { usdPerUnit: v.usd_per_unit, period: v.period, basis: v.basis, unit: v.unit ?? null } : null,
     guardrails: c.guardrails.map((g) => (g.kind === 'command' ? `run: ${g.run}` : `${g.metric} ${g.raw}`)),
     protectedGlobs: c.protected,
+    protectedEntries: effectiveProtected(c).entries.map((e) => ({ glob: e.glob, reason: e.reason })),
     instanceTypes: c.agent.allowed_instance_types,
   };
   return { ok: true, summary };
@@ -570,4 +567,42 @@ export function buildReport(ledger: Ledger, id: string, meta: MetaView, now: num
     '',
   ];
   return lines.join('\n');
+}
+
+// ------------------------------------------------------------------ environments and templates
+
+/** The receipt shown on Result and Environments (counts instead of ids; ids stay in the ledger). */
+export function toReceiptVM(r: SandboxTeardownReceipt): TeardownReceiptVM {
+  return {
+    sandboxId: r.sandboxId,
+    region: r.region,
+    trigger: r.trigger,
+    destroyedAt: r.destroyedAt,
+    spendUsd: r.spendUsd,
+    spendByCategory: Object.entries(r.spendByCategory)
+      .filter(([, usd]) => usd > 0)
+      .map(([k, usd]) => ({ label: CATEGORY_LABEL[k] ?? k, usd })),
+    runs: r.runs.map((x) => ({ optimizationId: x.optimizationId, status: x.status, spendUsd: x.spendUsd })),
+    removed: { instances: r.removed.instances.length, agentIdentities: r.removed.agentIdentities.length, secrets: r.removed.secrets.length, resources: r.removed.resources },
+    nothingRunning: r.nothingRunning,
+    orphans: r.orphans.map((o) => `${o.role} ${o.id} (${o.state})`),
+    errors: r.errors,
+    summary: r.summary,
+  };
+}
+
+export function toTemplateVM(t: TemplateInfo): TemplateVM {
+  return {
+    id: t.id,
+    kind: t.kind,
+    category: t.category,
+    title: t.title,
+    description: t.description,
+    measures: t.measures,
+    holdout: t.holdout,
+    machine: t.machine,
+    evaluatorKind: t.evaluatorKind,
+    objective: t.objective,
+    files: t.files,
+  };
 }

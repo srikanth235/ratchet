@@ -8,6 +8,7 @@ import '@fontsource/jetbrains-mono/500.css';
 import '@ratchet/ui/tokens.css';
 import './styles.css';
 import './lifecycle.css';
+import './simplified.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';

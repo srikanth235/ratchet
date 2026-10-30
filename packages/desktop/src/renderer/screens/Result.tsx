@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { AgentAvatar, Button, Card, Eyebrow, agentColor, agentLabel } from '@ratchet/ui';
 import { Crumbs, Empty, ErrorNote, OptimizationPicker, PageHeader, StateBadge, useSelectedId } from '../components/common';
 import { Icon } from '../components/icons';
-import { errMsg, forOptimization, useQuery } from '../data';
+import { Receipt } from '../components/Receipt';
+import { errMsg, forOptimization, useNav, useQuery } from '../data';
 import { fmtDuration, fmtMetric, fmtNum, fmtRoi, fmtUsd, fmtUsdCompact, gainLabel } from '../format';
 import type { CompareRow, SpanRow, WinningChangeVM } from '../../shared/types';
 
@@ -106,9 +107,10 @@ function WinningChange({ w }: { w: WinningChangeVM }) {
 }
 
 export function Result() {
+  const { go } = useNav();
   const id = useSelectedId();
   const opts = { skip: id === null, relevant: forOptimization(id), intervalMs: 8000 };
-  const detail = useQuery(() => window.ratchet.getOptimization(id!), [id], opts);
+  const detail = useQuery(() => window.ratchet.getOptimization(id!), [id], { ...opts, relevant: (e) => e.type === 'sandbox' || forOptimization(id)(e) });
   const cands = useQuery(() => window.ratchet.candidatesWithResults(id!), [id], opts);
   const spend = useQuery(() => window.ratchet.spendBreakdown(id!), [id], opts);
   const series = useQuery(() => window.ratchet.ratchetHistory(id!), [id], opts);
@@ -310,21 +312,17 @@ export function Result() {
             <span className="card-note">{sp.estimated > 0 ? `Includes ${fmtUsd(sp.estimated)} estimated` : 'Reconciled with billing'}</span>
           </Card>
           <Card className="side-card side-card--gap" style={{ padding: '18px 20px' }}>
-            <Eyebrow>Teardown</Eyebrow>
-            <ul className="checklist" aria-label="Teardown checklist">
-              {d.teardown.map((t) => (
-                <li key={t.id} data-done={t.done}>
-                  <span className="check-icon"><Icon name={t.done ? 'check' : 'clock'} size={15} /></span>
-                  <span>{t.label}</span>
-                  <span className="sr-only">{t.done ? 'done' : 'pending'}</span>
-                </li>
-              ))}
-            </ul>
-            {!finished && <span className="card-note">Available once the optimization has finished or been stopped.</span>}
-            <Button variant="danger-outline" className="teardown-btn" disabled={busy !== null || !finished || d.teardown.every((t) => t.done)}
-              onClick={() => run('teardown', async () => { await window.ratchet.teardown(id); return 'Sandbox torn down'; })}>
-              Destroy sandbox…
-            </Button>
+            <Eyebrow>Teardown receipt</Eyebrow>
+            {d.receipt ? (
+              <Receipt r={d.receipt} compact />
+            ) : (
+              <p className="muted" data-testid="no-receipt">
+                {finished
+                  ? 'The environment is removed automatically after the idle window, and its receipt appears here. You can end it sooner under Environments.'
+                  : 'Available once the run has finished and its environment has been removed.'}
+              </p>
+            )}
+            {!d.receipt && <div><Button variant="subtle" onClick={() => go('sandbox')}>Open Environments</Button></div>}
           </Card>
         </aside>
       </section>

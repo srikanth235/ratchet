@@ -166,10 +166,22 @@ export interface BenchPipelineVM {
   stages: PipelineStage[];
 }
 
-export interface TeardownItem {
-  id: string;
-  label: string;
-  done: boolean;
+/** The receipt of the sandbox teardown that covered a run (core `SandboxTeardownReceipt`, trimmed for the UI). */
+export interface TeardownReceiptVM {
+  sandboxId: string;
+  region: string;
+  /** `idle`: removed automatically after the idle window; `manual`: "End sandbox now". */
+  trigger: 'idle' | 'manual';
+  destroyedAt: number;
+  spendUsd: number;
+  spendByCategory: { label: string; usd: number }[];
+  runs: { optimizationId: string; status: string; spendUsd: number }[];
+  removed: { instances: number; agentIdentities: number; secrets: number; resources: string[] };
+  /** Verified after the destroy: nothing tagged is left, so nothing is billing. */
+  nothingRunning: boolean;
+  orphans: string[];
+  errors: string[];
+  summary: string;
 }
 
 /** One row of "Baseline vs best" / "Before and after": objective family and guardrail metrics. */
@@ -206,7 +218,11 @@ export interface OptimizationDetail {
   agents: AgentVM[];
   pipeline: BenchPipelineVM;
   prUrl: string | null;
-  teardown: TeardownItem[];
+  /** The sandbox teardown receipt; null while the environment is still alive (or the run never used one). */
+  receipt: TeardownReceiptVM | null;
+  /** Plain-words calibration ("this metric is noisy (±9%); wins must beat 9%"); null until the baseline has run. */
+  calibration: string | null;
+  /** Read-only: the repo owns ratchet.yaml, changes go through a pull request. */
   configYaml: string;
   /** Metrics comparable with the objective (see MetricOption), from the baseline's stats. */
   metrics: MetricOption[];
@@ -302,10 +318,15 @@ export interface ConfigSummary {
   metric: string;
   direction: 'minimize' | 'maximize';
   minGain: number;
-  evaluator: { kind: 'benchmark' | 'backtest' | 'eval' | 'simulation'; ref: string; run: string; repeats: number; hardware: string; holdout: string | null };
+  evaluator: { kind: 'benchmark' | 'backtest' | 'eval' | 'simulation'; ref: string; run: string; repeats: number | null; hardware: string; holdout: string | null; template: string | null };
+  /** `environment:` of ratchet.yaml (all optional). `image` null = the evaluator runs on the host. */
+  environment: { image: string | null; machine: string; region: string | null; network: string[] };
   value: { usdPerUnit: number; period: 'month' | 'year'; basis: 'estimated' | 'measured'; unit: string | null } | null;
   guardrails: string[];
+  /** The user's own `protected:` additions. */
   protectedGlobs: string[];
+  /** Everything that is protected (automatic set plus the user's), with why: core `effectiveProtected`. */
+  protectedEntries: { glob: string; reason: string }[];
   instanceTypes: string[];
 }
 
@@ -320,64 +341,82 @@ export interface PreflightItem {
   detail: string;
 }
 
-export interface PlanChangeVM {
-  action: 'create' | 'update' | 'delete' | 'replace' | 'no-op';
-  address: string;
-  type: string;
-}
-
-/** Where a sandbox is in its lifecycle (`absent` = never planned). */
-export type SandboxStatusVM = 'absent' | 'planned' | 'applying' | 'applied' | 'destroying' | 'destroyed' | 'failed';
-
-export interface SandboxOutputsVM {
-  artifactsBucket: string;
-  sealedBucket: string;
-  agentBoundaryRef: string;
-  evalIdentityRef: string;
-  agentRolePath: string;
-  network: { subnetId: string; agentRunnerSecurityGroupId: string; benchSecurityGroupId: string };
-}
-
-export interface SandboxInfo {
-  /**
-   * The OpenTofu plan: free in simulation (always present), but a real `tofu plan` in live mode, so it is `null`
-   * until the user asks for it (`planSandbox`) and again after an apply or destroy.
-   */
-  plan: { changes: PlanChangeVM[]; summary: string } | null;
-  /** Contract outputs recorded in the ledger by the last apply; `null` unless the sandbox is applied. */
-  outputs: SandboxOutputsVM | null;
-  status: SandboxStatusVM;
-  /** Why the last apply / destroy failed. */
-  lastError: string | null;
-  appliedAt: number | null;
-  /** Optimizations linked to this sandbox. */
-  optimizations: { id: string; status: string }[];
-  /** Apply is possible (not busy, live settings complete in live mode). */
-  canApply: boolean;
-  /** Destroy is possible; otherwise `destroyBlockedReason` says why (a running optimization, un-torn-down runs). */
-  canDestroy: boolean;
-  destroyBlockedReason: string | null;
-  /** Live mode: what has to be configured before the sandbox can be planned or applied. */
-  setupProblems: string[];
-  account: { sandboxId: string; region: string; profile: string; accountId: string | null; simulated: boolean };
-  limits: { allowedInstanceTypes: string[]; maxInstancesPerAgent: number; maxInstanceLifetimeHours: number };
-}
+// ------------------------------------------------------------------ settings: GitHub, AWS, agents
 
 export type SecretName = 'anthropicApiKey' | 'openaiApiKey' | 'githubToken';
 
-/** Live mode: non-secret settings, what the paths default to, and what still blocks a live run. */
-export interface LiveSettingsVM extends LiveSettings {
-  /** What empty `tofuBinary` / `moduleDir` resolve to (bundled `infra/aws` in a packaged app). */
-  defaults: { tofuBinary: string; moduleDir: string };
-  /** One line per requirement (AWS sign-in, region, OpenTofu, GitHub, model keys, AMIs, sandbox). */
-  readiness: PreflightItem[];
-  /** Nothing in `readiness` fails. */
-  ready: boolean;
-  /** Settings changed while an optimization was running; they apply once it has stopped. */
-  restartRequired: boolean;
+/** The GitHub row of Settings. The token itself never leaves the main process. */
+export interface GithubStatusVM {
+  signedIn: boolean;
+  /** The signed-in account. */
+  login: string | null;
+  /** `device`: "Sign in with GitHub"; `token`: pasted (Advanced); `env`: GITHUB_TOKEN / GH_TOKEN. */
+  source: 'device' | 'token' | 'env' | null;
+  /** False while the built-in placeholder OAuth client id is in use (set RATCHET_GITHUB_CLIENT_ID). */
+  clientIdConfigured: boolean;
+  /** The device-flow sign-in in progress (or the reason the last one ended). */
+  flow: GithubFlowVM | null;
 }
 
-export type ConnectionTarget = 'aws' | 'github' | 'anthropic' | 'openai' | 'tofu';
+export interface GithubFlowVM {
+  state: 'pending' | 'expired' | 'denied' | 'error';
+  /** Shown to the user, who types it at `verificationUri`. */
+  userCode: string;
+  verificationUri: string;
+  expiresAt: number;
+  message: string | null;
+}
+
+/** A profile found in ~/.aws/config or ~/.aws/credentials (names only, never a key). */
+export interface AwsProfileVM {
+  name: string;
+  kind: 'sso' | 'role' | 'keys' | 'process' | 'other';
+  /** Where the name was found. */
+  source: 'config' | 'credentials';
+  /** The `sso-session` a profile uses. */
+  ssoSession: string | null;
+}
+
+export interface AwsProfilesVM {
+  profiles: AwsProfileVM[];
+  /** `[sso-session x]` names in ~/.aws/config. */
+  ssoSessions: string[];
+  /** The profile Ratchet uses ('' = none chosen). */
+  selected: string;
+  region: string;
+  defaultRegion: string;
+  /** False when neither file exists. */
+  filesFound: boolean;
+}
+
+export type HarnessKind = 'claude-code' | 'codex';
+
+/** One detected agent CLI (core `HarnessInfo`). */
+export interface HarnessVM {
+  kind: HarnessKind;
+  installed: boolean;
+  version: string | null;
+  path: string | null;
+  auth: 'signed-in' | 'api-key' | 'signed-out';
+  /** What to do next, or what was found. Never contains a credential. */
+  hint: string;
+}
+
+export interface SettingsVM {
+  awsProfile: string;
+  awsRegion: string;
+  secrets: Record<SecretName, boolean>;
+  /** Development overrides (AMI ids, OpenTofu paths): under "Advanced (development)" in Settings. */
+  dev: LiveSettings & {
+    /** What empty `tofuBinary` / `moduleDir` resolve to (bundled `infra/aws` in a packaged app). */
+    defaults: { tofuBinary: string; moduleDir: string };
+  };
+  /** False when the OS keychain (safeStorage) is unavailable, so secrets cannot be stored. */
+  encryptionAvailable: boolean;
+  engine: EngineInfo;
+}
+
+export type ConnectionTarget = 'aws' | 'github' | 'anthropic' | 'openai';
 
 export interface ConnectionResultVM {
   target: ConnectionTarget;
@@ -386,18 +425,101 @@ export interface ConnectionResultVM {
   detail: string;
 }
 
-/** Secrets never cross to the renderer: only whether each one is configured. */
-export interface SettingsVM {
-  mode: Mode;
-  awsProfile: string;
-  secrets: Record<SecretName, boolean>;
-  live: LiveSettingsVM;
-  /** False when the OS keychain (safeStorage) is unavailable, so secrets cannot be stored. */
-  encryptionAvailable: boolean;
-  engine: EngineInfo;
+export type ExportReportResult = { saved: true; path: string } | { saved: false };
+
+// ------------------------------------------------------------------ repos and templates
+
+export interface RepoVM {
+  /** `owner/name` */
+  fullName: string;
+  defaultBranch: string;
+  private: boolean;
+  description: string | null;
+  pushedAt: string | null;
 }
 
-export type ExportReportResult = { saved: true; path: string } | { saved: false };
+/** Where an optimization starts from: a GitHub repo of the signed-in account, or a local folder (this-machine runs). */
+export type RepoSourceInput = { kind: 'github'; repo: string } | { kind: 'local'; path: string };
+
+export interface TemplateVM {
+  id: string;
+  kind: 'template' | 'demo';
+  category: 'perf' | 'forecasting' | 'llm';
+  title: string;
+  description: string;
+  measures: string;
+  holdout: string | null;
+  machine: string;
+  evaluatorKind: 'benchmark' | 'backtest' | 'eval' | 'simulation';
+  objective: { metric: string; direction: 'minimize' | 'maximize'; unit: string };
+  files: string[];
+}
+
+/** What step 1 learned about the chosen repo (read from the default branch, never typed). */
+export interface RepoInspectVM {
+  source: RepoSourceInput;
+  /** `owner/name` (also for a local folder, from its `origin`); null for a local folder with no GitHub remote. */
+  repo: string | null;
+  baseRef: string;
+  /** The ratchet.yaml text, read-only; null when the repo has none. */
+  configYaml: string | null;
+  /** Parsed summary, or why it does not parse. Both empty when there is no ratchet.yaml. */
+  config: ConfigSummary | null;
+  errors: { path: string; message: string }[];
+  /** Offered when there is no ratchet.yaml: "Add via pull request". */
+  templates: TemplateVM[];
+  /** Why the repo cannot be used here (a local folder with no GitHub remote, not a git repo, ...). */
+  problem: string | null;
+}
+
+export interface ProposeTemplateInput {
+  /** `owner/name` or a GitHub URL. */
+  repoUrl: string;
+  baseRef: string;
+  templateId: string;
+  overwrite?: boolean;
+}
+
+export interface ProposeTemplateVM {
+  prUrl: string;
+  branch: string;
+  sha: string;
+  templateId: string;
+  files: string[];
+}
+
+export type DemoId = 'demo-search' | 'demo-cli' | 'demo-forecast';
+
+// ------------------------------------------------------------------ environments (read-only)
+
+export type SandboxPhaseVM = 'creating' | 'ready' | 'idle' | 'destroying' | 'destroyed' | 'failed';
+
+/** One automatic environment, as seen from outside. */
+export interface EnvironmentVM {
+  sandboxId: string;
+  region: string | null;
+  phase: SandboxPhaseVM | 'none';
+  /** The last phase message ("environment ready"). */
+  text: string;
+  simulated: boolean;
+  activeRuns: string[];
+  instancesRunning: number | null;
+  /** Estimated spend of the runs that are active in it. */
+  spendUsd: number;
+  /** When the automatic destroy is due. */
+  destroyAt: number | null;
+  idleSince: number | null;
+  /** Ending it now is possible (no run is active). */
+  canEnd: boolean;
+}
+
+export interface EnvironmentsVM {
+  environments: EnvironmentVM[];
+  /** The most recent teardown across environments. */
+  lastReceipt: TeardownReceiptVM | null;
+  /** Idle window before an unused environment is removed, minutes. */
+  idleMinutes: number;
+}
 
 export type EngineEventVM =
   | { type: 'optimization'; optimizationId: string; status: string }
@@ -413,17 +535,30 @@ export type EngineEventVM =
 
 // ------------------------------------------------------------------ inputs (renderer → main), validated by zod in shared/ipc.ts
 
+
+// ------------------------------------------------------------------ inputs (renderer → main), validated by zod in shared/ipc.ts
+
+export type AgentsWhere = 'local' | 'cloud';
+
 export interface CreateOptimizationInput {
   name?: string;
+  /** A GitHub repo (`owner/name`). Ignored for a demo. */
   repoUrl: string;
   baseRef: string;
-  configPath?: string;
-  /** The reviewed ratchet.yaml text (the engine reads the repo's copy; the dev engine uses this one). */
-  configYaml?: string;
+  /** Run a demo template in simulation (mock agents, no setup) instead of a repo. */
+  demo?: DemoId;
   agents: AgentKind[];
+  agentsWhere?: AgentsWhere;
   budgetUsd: number;
   timeLimitSeconds: number;
   plateauEvals: number;
+}
+
+export interface PreflightInput {
+  agents: AgentKind[];
+  agentsWhere: AgentsWhere;
+  /** `demo` needs nothing; `github` / `local` need GitHub, AWS and agents. */
+  source: 'github' | 'local' | 'demo';
 }
 
 /** The only surface the renderer gets from the main process (`window.ratchet`). */
@@ -438,14 +573,30 @@ export interface RatchetApi {
   spendBreakdown(id: string): Promise<SpendVM>;
   recentActivity(opts?: { optimizationId?: string; limit?: number }): Promise<ActivityItem[]>;
   agentEvents(agentId: string, cursor?: number, limit?: number): Promise<AgentEventsPage>;
+  /** Parse ratchet.yaml text (read-only; the repo owns the file). */
   validateConfig(text: string): Promise<ValidateConfigResult>;
-  preflight(input: { agents: AgentKind[]; configYaml: string }): Promise<PreflightItem[]>;
-  sandboxInfo(): Promise<SandboxInfo>;
+  /** "What's missing" for a run: the short list on the New optimization page. */
+  preflight(input: PreflightInput): Promise<PreflightItem[]>;
   getSettings(): Promise<SettingsVM>;
-  // sandbox lifecycle (planned -> applying -> applied -> destroying -> destroyed / failed, recorded in the ledger)
-  planSandbox(): Promise<SandboxInfo>;
-  applySandbox(): Promise<SandboxInfo>;
-  destroySandbox(): Promise<SandboxInfo>;
+  environments(): Promise<EnvironmentsVM>;
+  // GitHub
+  githubStatus(): Promise<GithubStatusVM>;
+  /** Start the device flow: returns the code to show; the main process polls and stores the token. */
+  githubSignIn(): Promise<GithubStatusVM>;
+  githubSignOut(): Promise<GithubStatusVM>;
+  listRepos(query?: string): Promise<RepoVM[]>;
+  inspectRepo(source: RepoSourceInput): Promise<RepoInspectVM>;
+  /** Native folder dialog; null when cancelled. */
+  pickLocalFolder(): Promise<string | null>;
+  // AWS and agents
+  awsProfiles(): Promise<AwsProfilesVM>;
+  detectHarnesses(): Promise<HarnessVM[]>;
+  /** Probe the machine again ("Re-detect"). */
+  redetectHarnesses(): Promise<HarnessVM[]>;
+  // templates
+  listTemplates(): Promise<TemplateVM[]>;
+  /** "Use template" / "Add via pull request": commit the template's files on a branch and open the PR. */
+  proposeTemplate(input: ProposeTemplateInput): Promise<ProposeTemplateVM>;
   // commands (mirror EngineApi)
   createOptimization(input: CreateOptimizationInput): Promise<string>;
   startOptimization(id: string): Promise<void>;
@@ -454,16 +605,16 @@ export interface RatchetApi {
   resumeAgent(agentId: string): Promise<void>;
   messageAgent(agentId: string, text: string): Promise<void>;
   openPullRequest(id: string): Promise<{ url: string }>;
-  teardown(id: string): Promise<void>;
   exportReport(id: string): Promise<ExportReportResult>;
+  /** "End sandbox now": tear the environment down without waiting for the idle window. Refused while a run is active. */
+  endSandbox(sandboxId: string): Promise<EnvironmentsVM>;
   // settings
-  setMode(mode: Mode): Promise<SettingsVM>;
   setAwsProfile(profile: string): Promise<SettingsVM>;
   setSecret(name: SecretName, value: string): Promise<SettingsVM>;
   clearSecret(name: SecretName): Promise<SettingsVM>;
-  /** Validated as a whole; nothing is saved if any field is invalid. */
+  /** Region and the development overrides; validated as a whole, nothing is saved if any field is invalid. */
   saveLiveSettings(input: LiveSettingsInput): Promise<SettingsVM>;
-  /** Read-only probe of one live setting (STS, GitHub, a model API, `tofu version`); secrets are read in the main process. */
+  /** Read-only probe (STS, GitHub, a model API); secrets are read in the main process. */
   testConnection(target: ConnectionTarget): Promise<ConnectionResultVM>;
   // events
   onEvent(listener: (e: EngineEventVM) => void): () => void;

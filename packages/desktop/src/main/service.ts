@@ -1,8 +1,38 @@
-import type { EngineEvent, Ledger, SandboxInput, SandboxOutputs, SandboxPlan } from '@ratchet/core';
-import type { AppEngine } from './engine.js';
-import { sandboxIdFor } from './constants.js';
-import { effectivePaths, liveReadiness, sandboxSetupProblems, type LivePaths } from './live-config.js';
+import { getTemplate, listTemplates, parseConfig, type EngineEvent, type Ledger } from '@ratchet/core';
 import { validateSecretFormat } from '../shared/live-settings.js';
+import type {
+  AwsProfilesVM,
+  ConnectionResultVM,
+  ConnectionTarget,
+  CreateOptimizationInput,
+  EngineEventVM,
+  EnvironmentVM,
+  EnvironmentsVM,
+  ExportReportResult,
+  GithubStatusVM,
+  HarnessVM,
+  OptimizationsSnapshot,
+  PreflightInput,
+  PreflightItem,
+  ProposeTemplateInput,
+  ProposeTemplateVM,
+  RatchetApi,
+  RepoInspectVM,
+  RepoSourceInput,
+  RepoVM,
+  SandboxPhaseVM,
+  SecretName,
+  SettingsVM,
+  TemplateVM,
+} from '../shared/types.js';
+import { listAwsProfiles, type AwsProfileList } from './aws-profiles.js';
+import type { AppEngine } from './dev-app.js';
+import { slugOf } from './repo-slug.js';
+import type { GithubApi } from './github.js';
+import { GithubSignIn } from './github-signin.js';
+import { toHarnessVM, type HarnessCache } from './harnesses.js';
+import { effectivePaths, type LivePaths } from './live-config.js';
+import { inspectLocalFolder, type LocalRepoInfo } from './local-repo.js';
 import {
   agentEventsPage,
   buildActivity,
@@ -13,38 +43,22 @@ import {
   buildSeries,
   buildSpend,
   toOptimization,
+  toReceiptVM,
+  toTemplateVM,
   toWinningChange,
   validateConfigText,
   type MetaView,
 } from './mappers.js';
 import type { SettingsStore } from './settings.js';
-import type {
-  AgentKind,
-  ConnectionResultVM,
-  ConnectionTarget,
-  CreateOptimizationInput,
-  EngineEventVM,
-  ExportReportResult,
-  Mode,
-  OptimizationsSnapshot,
-  LiveSettingsInput,
-  PreflightItem,
-  RatchetApi,
-  SandboxInfo,
-  SecretName,
-  SettingsVM,
-} from '../shared/types.js';
 
-/** The live sandbox id (kept for importers); simulation uses its own, see `sandboxIdFor`. */
-export { SANDBOX_IDS, sandboxIdFor } from './constants.js';
-export const SANDBOX_ID = sandboxIdFor('live');
-const DEFAULT_INSTANCE_TYPES = ['c7i.2xlarge', 'c7i.xlarge', 'm7i.large'];
+const DEFAULT_REGION = 'us-east-1';
+const DEFAULT_IDLE_MINUTES = 30;
 
 export interface ServiceDeps {
   ledger: Ledger;
   settings: SettingsStore;
-  /** Builds the engine for a mode; called at startup and on every mode switch. */
-  createApp: (mode: Mode) => AppEngine;
+  /** Builds the engine; called at startup. `configFor` hands it the parsed ratchet.yaml of repos seen in step 1 (region). */
+  createApp: (hooks: { configFor(slug: string): unknown }) => AppEngine;
   now?: () => number;
   /** Ask the user where to save the report; resolves to the written path, or null if cancelled. */
   saveReport?: (defaultName: string, markdown: string) => Promise<string | null>;
@@ -52,15 +66,29 @@ export interface ServiceDeps {
   connectionTester?: ConnectionTesterLike;
   /** What empty tofu settings resolve to (the bundled infra/aws in a packaged app). */
   liveDefaults?: LivePaths;
+  /** GitHub REST + device flow. Without it GitHub features report that they are unavailable. */
+  github?: GithubApi;
+  /** Open a URL in the system browser (the device-flow verification page). */
+  openExternal?: (url: string) => void;
+  /** Injectable pause for the device-flow poll loop (tests). */
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
+  /** The AWS profiles on this machine; default: parse ~/.aws. */
+  listAwsProfiles?: () => AwsProfileList;
+  /** The detected agent CLIs. Without it nothing is detected. */
+  harnesses?: HarnessCache;
+  /** Native folder dialog for "Local folder…". */
+  pickFolder?: () => Promise<string | null>;
+  /** Read a local folder (GitHub remote, default branch, ratchet.yaml). */
+  inspectLocal?: (path: string) => Promise<LocalRepoInfo>;
+  /** Idle window of the automatic environment, minutes (shown in Environments). */
+  idleMinutes?: number;
 }
 
 /** The slice of @ratchet/runtime's ConnectionTester the service uses (kept structural so renderer tests need no AWS SDK). */
 export interface ConnectionTesterLike {
-  aws(i: { region: string; profile?: string | undefined; expectedAccountId?: string | undefined }): Promise<ConnectionResultVM>;
-  github(i: { repo: string; token: string }): Promise<ConnectionResultVM>;
-  anthropic(i: { apiKey: string }): Promise<ConnectionResultVM>;
-  openai(i: { apiKey: string }): Promise<ConnectionResultVM>;
-  tofu(i: { binary: string; moduleDir: string }): Promise<ConnectionResultVM>;
+  aws(i: { region: string; profile?: string | undefined; expectedAccountId?: string | undefined }): Promise<{ ok: boolean; detail: string }>;
+  anthropic(i: { apiKey: string }): Promise<{ ok: boolean; detail: string }>;
+  openai(i: { apiKey: string }): Promise<{ ok: boolean; detail: string }>;
 }
 
 export type RatchetService = Omit<RatchetApi, 'onEvent'> & {
@@ -68,136 +96,210 @@ export type RatchetService = Omit<RatchetApi, 'onEvent'> & {
   dispose(): void;
 };
 
+const demoName = (id: string): string => getTemplate(id)?.title.replace(/^Demo:\s*/i, '').replace(/^./, (c) => c.toUpperCase()) + ' (demo)';
+
 /** Everything the renderer can ask for, backed by the ledger (reads) and `EngineApi` (commands). */
 export function createService(deps: ServiceDeps): RatchetService {
   const { ledger, settings } = deps;
   const now = deps.now ?? Date.now;
   const listeners = new Set<(e: EngineEventVM) => void>();
-  let app = deps.createApp(settings.mode);
-  let unsubscribe = wire(app);
+  const configs = new Map<string, unknown>();
+  const phases = new Map<string, { phase: SandboxPhaseVM; region: string | null; text: string }>();
+  const app = deps.createApp({ configFor: (slug) => configs.get(slug) });
+  const unsubscribe = app.engine.subscribe((e) => {
+    if (e.type === 'sandbox') phases.set(e.sandboxId, { phase: e.phase, region: e.region, text: e.text });
+    const vm = toEventVM(e);
+    for (const l of listeners) l(vm);
+  });
   const liveDefaults: LivePaths = deps.liveDefaults ?? { tofuBinary: 'tofu', moduleDir: 'infra/aws' };
-  /** The last plan the user asked for (live) or the free one (simulation), per sandbox; dropped after apply / destroy. */
-  const plans = new Map<string, SandboxPlan>();
-  /** Settings changed while an optimization was running: the engine is rebuilt as soon as none is. */
-  let rebuildPending = false;
+  const github = deps.github;
+  const signIn = github
+    ? new GithubSignIn({
+        api: github,
+        settings,
+        ...(deps.openExternal ? { openExternal: deps.openExternal } : {}),
+        ...(deps.sleep ? { sleep: deps.sleep } : {}),
+        now,
+        onSignedIn: () => app.invalidate?.(),
+      })
+    : null;
+  /** The login of a token that came from the environment (no stored account). */
+  let envLogin: { token: string; login: string | null } | null = null;
 
-  const meta: MetaView = { prUrl: (id) => settings.prUrl(id), teardownDone: (id) => settings.tornDown(id) };
-
-  function wire(a: AppEngine): () => void {
-    return a.engine.subscribe((e) => {
-      const vm = toEventVM(e);
-      for (const l of listeners) l(vm);
-    });
-  }
-
+  const meta: MetaView = { prUrl: (id) => settings.prUrl(id) };
   const engineInfo = () => ({ kind: app.kind, mode: app.engine.mode() });
+  const idleMinutes = deps.idleMinutes ?? DEFAULT_IDLE_MINUTES;
+  const awsProfiles = (): AwsProfileList => (deps.listAwsProfiles ?? listAwsProfiles)();
 
-  const sandboxApplied = (): boolean => ledger.getSandbox(sandboxIdFor('live'))?.status === 'applied';
-
-  const settingsVM = (): SettingsVM => {
-    const readiness = liveReadiness({ live: settings.live, hasSecret: (n) => settings.hasSecret(n), sandboxApplied: sandboxApplied(), defaults: liveDefaults });
-    return {
-      mode: settings.mode,
-      awsProfile: settings.awsProfile,
-      secrets: {
-        anthropicApiKey: settings.hasSecret('anthropicApiKey'),
-        openaiApiKey: settings.hasSecret('openaiApiKey'),
-        githubToken: settings.hasSecret('githubToken'),
-      },
-      live: { ...settings.live, defaults: liveDefaults, readiness, ready: readiness.every((r) => r.state !== 'fail'), restartRequired: rebuildPending },
-      encryptionAvailable: settings.encryptionAvailable,
-      engine: engineInfo(),
-    };
-  };
-
-  /** Throw away the engine and build it again from the current settings (mode switch, new credentials, new outputs). */
-  function rebuild(): void {
-    unsubscribe();
-    app.dispose();
-    plans.clear();
-    app = deps.createApp(settings.mode);
-    unsubscribe = wire(app);
-    rebuildPending = false;
-  }
-
-  /**
-   * Live engines are built from Settings and the applied sandbox's outputs, so they are rebuilt when those change.
-   * Rebuilding stops the control loop, so while an optimization is running it waits until none is.
-   */
-  function rebuildLiveEngine(): void {
-    if (settings.mode !== 'live') {
-      rebuildPending = false;
-      return;
-    }
-    if (ledger.listOptimizations({ status: ['baselining', 'running', 'stopping'] }).length > 0) {
-      rebuildPending = true;
-      return;
-    }
-    rebuild();
-  }
-
-  const currentSandboxId = (): string => sandboxIdFor(settings.mode);
-
-  const sandboxInput = (types: string[] = DEFAULT_INSTANCE_TYPES): SandboxInput => ({
-    sandboxId: currentSandboxId(),
-    region: settings.live.awsRegion || 'us-east-1',
-    allowedInstanceTypes: types,
-    maxInstancesPerAgent: 2,
-    maxInstanceLifetimeHours: 4,
-    tags: { 'ratchet:managed': 'true' },
+  const settingsVM = (): SettingsVM => ({
+    awsProfile: settings.awsProfile,
+    awsRegion: settings.live.awsRegion || DEFAULT_REGION,
+    secrets: {
+      anthropicApiKey: settings.hasSecret('anthropicApiKey'),
+      openaiApiKey: settings.hasSecret('openaiApiKey'),
+      githubToken: settings.hasSecret('githubToken'),
+    },
+    dev: { ...settings.live, defaults: { tofuBinary: effectivePaths(settings.live, liveDefaults).tofuBinary, moduleDir: effectivePaths(settings.live, liveDefaults).moduleDir } },
+    encryptionAvailable: settings.encryptionAvailable,
+    engine: engineInfo(),
   });
 
-  const instanceTypes = (): string[] => {
-    const latest = ledger.listOptimizations()[0];
-    const cfg = latest ? validateConfigText(ledger.getOptimization(latest.id)!.configYaml) : null;
-    return cfg?.ok ? cfg.summary.instanceTypes : DEFAULT_INSTANCE_TYPES;
+  const needToken = (): string => {
+    const token = settings.getSecret('githubToken');
+    if (!token) throw new Error('Sign in with GitHub first (Settings).');
+    return token;
+  };
+  const needGithub = (): GithubApi => {
+    if (!github) throw new Error('GitHub is not available in this build.');
+    return github;
   };
 
-  const isSimulated = (): boolean => app.kind === 'dev' || settings.mode === 'simulation';
-
-  const setupProblems = (): string[] => (settings.mode === 'live' ? sandboxSetupProblems(settings.live, liveDefaults) : []);
-
-  async function buildSandboxInfo(): Promise<SandboxInfo> {
-    const input = sandboxInput(instanceTypes());
-    const simulated = isSimulated();
-    const isBusy = (st: string): boolean => st === 'applying' || st === 'destroying';
-    // Planning is free in simulation, so it is always current; a real `tofu plan` runs only when the user asks for it.
-    if (simulated && !isBusy((await app.engine.sandboxState(input.sandboxId)).status)) {
-      try {
-        plans.set(input.sandboxId, await app.engine.planSandbox(input));
-      } catch {
-        /* shown as "no plan yet" */
+  async function githubStatus(): Promise<GithubStatusVM> {
+    const token = settings.getSecret('githubToken');
+    const flow = signIn?.current() ?? null;
+    const clientIdConfigured = github?.clientIdConfigured ?? false;
+    if (!token) return { signedIn: false, login: null, source: null, clientIdConfigured, flow };
+    let login = settings.githubLogin || null;
+    const source = settings.githubSource ?? 'env';
+    if (!login && github) {
+      if (envLogin?.token !== token) {
+        envLogin = { token, login: await github.user(token).then((u) => u.login, () => null) };
       }
+      login = envLogin.login;
     }
-    const state = await app.engine.sandboxState(input.sandboxId); // after planning: the first plan records the sandbox
-    const busy = isBusy(state.status);
-    const problems = setupProblems();
-    const outputs: SandboxOutputs | null = state.status === 'applied' ? state.outputs : null;
-    const active = state.optimizations.filter((o) => ['baselining', 'running', 'stopping'].includes(o.status));
-    let destroyBlockedReason: string | null = null;
-    if (state.status !== 'applied' && state.status !== 'failed') destroyBlockedReason = state.status === 'applying' || state.status === 'destroying' ? `The sandbox is ${state.status}.` : 'There is nothing to destroy.';
-    else if (active.length > 0) destroyBlockedReason = `Stop ${active.length === 1 ? `optimization ${active[0]!.id}` : `${active.length} running optimizations`} first.`;
-    const accountId = state.accountId ?? /arn:aws:[^:]*::(\d{12}):/.exec(outputs?.evalIdentityRef ?? '')?.[1] ?? null;
-    return {
-      plan: plans.get(input.sandboxId) ?? null,
-      outputs,
-      status: state.status,
-      lastError: state.lastError,
-      appliedAt: state.appliedAt,
-      optimizations: state.optimizations,
-      canApply: !busy && problems.length === 0,
-      canDestroy: destroyBlockedReason === null,
-      destroyBlockedReason,
-      setupProblems: problems,
-      account: { sandboxId: input.sandboxId, region: input.region, profile: settings.awsProfile || 'default', accountId, simulated },
-      limits: { allowedInstanceTypes: input.allowedInstanceTypes, maxInstancesPerAgent: input.maxInstancesPerAgent, maxInstanceLifetimeHours: input.maxInstanceLifetimeHours },
-    };
+    return { signedIn: true, login, source, clientIdConfigured, flow };
   }
 
-  const requireSetup = (): void => {
-    const problems = setupProblems();
-    if (problems.length > 0) throw new Error(problems.join(' '));
-  };
+  async function environments(): Promise<EnvironmentVM[]> {
+    const rows = ledger.listSandboxes().filter((r) => r.status !== 'destroyed' && r.status !== 'planned');
+    const out: EnvironmentVM[] = [];
+    for (const r of rows) {
+      const act = await app.engine.sandboxActivity?.(r.id).catch(() => null);
+      const seen = phases.get(r.id);
+      const derived: SandboxPhaseVM = r.status === 'applying' ? 'creating' : r.status === 'destroying' ? 'destroying' : r.status === 'failed' ? 'failed' : (act?.activeRuns.length ?? 0) > 0 ? 'ready' : 'idle';
+      const phase = seen && (seen.phase === 'failed' || seen.phase === 'destroying' || seen.phase === 'creating') ? seen.phase : derived;
+      out.push({
+        sandboxId: r.id,
+        region: act?.region ?? r.region ?? seen?.region ?? null,
+        phase,
+        text: seen?.text ?? (phase === 'idle' ? 'idle: no run is active' : phase === 'ready' ? 'environment ready' : phase),
+        simulated: r.provider === 'mock',
+        activeRuns: act?.activeRuns ?? [],
+        instancesRunning: act?.instancesRunning ?? null,
+        spendUsd: act?.spendUsd ?? 0,
+        destroyAt: act?.destroyAt ?? null,
+        idleSince: act?.idleSince ?? null,
+        canEnd: r.status === 'applied' && (act?.activeRuns.length ?? 0) === 0 && !!app.engine.endSandbox,
+      });
+    }
+    return out;
+  }
+
+  async function environmentsVM(): Promise<EnvironmentsVM> {
+    const envs = await environments();
+    let last: Awaited<ReturnType<NonNullable<typeof app.engine.sandboxActivity>>>['lastReceipt'] = null;
+    for (const r of ledger.listSandboxes()) {
+      const act = await app.engine.sandboxActivity?.(r.id).catch(() => null);
+      if (act?.lastReceipt && (!last || act.lastReceipt.destroyedAt > last.destroyedAt)) last = act.lastReceipt;
+    }
+    return { environments: envs, lastReceipt: last ? toReceiptVM(last) : null, idleMinutes };
+  }
+
+  /** Parse a repo's ratchet.yaml for step 2 and remember its config for the region. */
+  function inspectResult(source: RepoSourceInput, repo: string | null, baseRef: string, configYaml: string | null, problem: string | null): RepoInspectVM {
+    let config: RepoInspectVM['config'] = null;
+    let errors: RepoInspectVM['errors'] = [];
+    if (configYaml !== null) {
+      const v = validateConfigText(configYaml);
+      if (v.ok) {
+        config = v.summary;
+        const parsed = parseConfig(configYaml);
+        if (parsed.ok && repo) configs.set(repo, parsed.config);
+      } else errors = v.errors;
+    }
+    const templates = configYaml === null && problem === null ? listTemplates({ kind: 'template' }).map(toTemplateVM) : [];
+    return { source, repo, baseRef, configYaml, config, errors, templates, problem };
+  }
+
+  async function preflight({ agents, agentsWhere, source }: PreflightInput): Promise<PreflightItem[]> {
+    if (source === 'demo') {
+      return [{ id: 'demo', label: 'Demo run', state: 'ok', detail: 'simulation: scripted agents, mock AWS, nothing is installed or billed' }];
+    }
+    const items: PreflightItem[] = [];
+    const gh = await githubStatus();
+    items.push(
+      gh.signedIn
+        ? { id: 'github', label: 'GitHub', state: 'ok', detail: gh.login ? `signed in as ${gh.login}` : 'signed in' }
+        : { id: 'github', label: 'Sign in with GitHub', state: 'fail', detail: 'Ratchet pushes candidate branches and opens the pull request as you' },
+    );
+    items.push(
+      settings.awsProfile
+        ? { id: 'aws', label: 'AWS', state: 'ok', detail: `${settings.awsProfile} · ${settings.live.awsRegion || DEFAULT_REGION}` }
+        : { id: 'aws', label: 'Connect AWS', state: 'fail', detail: 'the evaluator runs in a sandbox in your AWS account' },
+    );
+    if (agentsWhere === 'local') {
+      const found = deps.harnesses ? (await deps.harnesses.get()).harnesses : [];
+      const kinds = agents.filter((a): a is 'claude-code' | 'codex' => a === 'claude-code' || a === 'codex');
+      if (kinds.length === 0) items.push({ id: 'agents', label: 'Choose an agent', state: 'fail', detail: 'no agent is selected' });
+      for (const k of kinds) {
+        const h = found.find((x) => x.kind === k);
+        const label = k === 'codex' ? 'Codex' : 'Claude Code';
+        if (h && h.installed && h.auth !== 'signed-out') items.push({ id: `agent-${k}`, label, state: 'ok', detail: `${h.version ?? 'installed'} · ${h.auth === 'api-key' ? 'API key' : 'signed in'}` });
+        else items.push({ id: `agent-${k}`, label: `${label} is not ready`, state: 'fail', detail: h?.hint ?? `install ${label} on this machine` });
+      }
+    } else {
+      for (const a of agents) {
+        const name: SecretName | null = a === 'claude-code' ? 'anthropicApiKey' : a === 'codex' ? 'openaiApiKey' : null;
+        if (name && !settings.hasSecret(name)) items.push({ id: `key-${a}`, label: `${a === 'codex' ? 'OpenAI' : 'Anthropic'} API key`, state: 'fail', detail: 'cloud runners need an API key (Settings > Agents)' });
+        else if (name) items.push({ id: `key-${a}`, label: `${a === 'codex' ? 'OpenAI' : 'Anthropic'} API key`, state: 'ok', detail: 'stored in the keychain' });
+      }
+    }
+    return items;
+  }
+
+  async function testConnection(target: ConnectionTarget): Promise<ConnectionResultVM> {
+    const t = deps.connectionTester;
+    const l = settings.live;
+    const result = ((): Promise<ConnectionResultVM> => {
+      const need = (what: string): Promise<ConnectionResultVM> => Promise.resolve({ target, ok: false, detail: what });
+      if (target === 'github') {
+        const token = settings.getSecret('githubToken');
+        if (!github) return need('GitHub is not available in this build.');
+        if (!token) return need('Sign in with GitHub first.');
+        return github.user(token).then((u) => ({ target, ok: true, detail: `signed in as ${u.login}` }));
+      }
+      if (!t) return need('Connection tests are not available in this build.');
+      switch (target) {
+        case 'aws':
+          if (!l.awsProfile) return need('Choose an AWS profile first.');
+          return t.aws({ region: l.awsRegion || DEFAULT_REGION, profile: l.awsProfile }).then((x) => ({ target, ...x }));
+        case 'anthropic': {
+          const apiKey = settings.getSecret('anthropicApiKey');
+          return apiKey ? t.anthropic({ apiKey }).then((x) => ({ target, ...x })) : need('Store an Anthropic API key first.');
+        }
+        case 'openai': {
+          const apiKey = settings.getSecret('openaiApiKey');
+          return apiKey ? t.openai({ apiKey }).then((x) => ({ target, ...x })) : need('Store an OpenAI API key first.');
+        }
+      }
+    })();
+    let r: ConnectionResultVM;
+    try {
+      r = await result;
+    } catch (err) {
+      r = { target, ok: false, detail: (err as Error).message.split('\n')[0] ?? 'failed' };
+    }
+    // Belt and braces: no stored secret value may ever leave in a message, whatever the tester returned.
+    let detail = r.detail;
+    for (const name of ['anthropicApiKey', 'openaiApiKey', 'githubToken'] as SecretName[]) {
+      const v = settings.getSecret(name);
+      if (v && v.length >= 4) detail = detail.split(v).join('***');
+    }
+    if (target === 'aws' && !r.ok && l.awsProfile && awsProfiles().profiles.find((p) => p.name === l.awsProfile)?.kind === 'sso') {
+      detail += ` Run "aws sso login --profile ${l.awsProfile}" in a terminal, then test again.`;
+    }
+    return { target, ok: r.ok, detail };
+  }
 
   return {
     async listOptimizations(opts): Promise<OptimizationsSnapshot> {
@@ -217,7 +319,12 @@ export function createService(deps: ServiceDeps): RatchetService {
       };
     },
     async getOptimization(id) {
-      return buildDetail(ledger, id, meta, now());
+      const d = buildDetail(ledger, id, meta, now());
+      const [receipt, calibration] = await Promise.all([
+        app.engine.teardownReceipt?.(id).catch(() => null) ?? null,
+        app.engine.calibration?.(id).catch(() => null) ?? null,
+      ]);
+      return { ...d, receipt: receipt ? toReceiptVM(receipt) : null, calibration: calibration?.explanation ?? null };
     },
     async ratchetHistory(id, metric) {
       return buildSeries(ledger, id, now(), metric);
@@ -250,44 +357,102 @@ export function createService(deps: ServiceDeps): RatchetService {
     async validateConfig(text) {
       return validateConfigText(text);
     },
-    async preflight({ agents, configYaml }) {
-      return preflight(agents, configYaml);
-    },
-    async sandboxInfo(): Promise<SandboxInfo> {
-      return buildSandboxInfo();
-    },
-    async planSandbox() {
-      requireSetup();
-      const input = sandboxInput(instanceTypes());
-      plans.set(input.sandboxId, await app.engine.planSandbox(input));
-      return buildSandboxInfo();
-    },
-    async applySandbox() {
-      requireSetup();
-      const input = sandboxInput(instanceTypes());
-      await app.engine.applySandbox(input);
-      plans.delete(input.sandboxId);
-      rebuildLiveEngine(); // the live engine needs the new outputs
-      return buildSandboxInfo();
-    },
-    async destroySandbox() {
-      const id = currentSandboxId();
-      await app.engine.destroySandbox(id);
-      plans.delete(id);
-      rebuildLiveEngine();
-      return buildSandboxInfo();
-    },
+    preflight,
     async getSettings() {
       return settingsVM();
     },
+    environments: environmentsVM,
 
-    async createOptimization(input: CreateOptimizationInput) {
-      if (input.configYaml !== undefined) {
-        const v = validateConfigText(input.configYaml);
-        if (!v.ok) throw new Error(`invalid ratchet.yaml: ${v.errors.map((e) => (e.path ? `${e.path}: ${e.message}` : e.message)).join('; ')}`);
+    // ------------------------------------------------------------ GitHub
+    githubStatus,
+    async githubSignIn() {
+      await needSignIn().start();
+      return githubStatus();
+    },
+    async githubSignOut() {
+      signIn?.cancel();
+      settings.clearSecret('githubToken');
+      settings.clearGithubAccount();
+      envLogin = null;
+      app.invalidate?.();
+      return githubStatus();
+    },
+    async listRepos(query): Promise<RepoVM[]> {
+      return needGithub().repos(needToken(), query);
+    },
+    async inspectRepo(source): Promise<RepoInspectVM> {
+      if (source.kind === 'github') {
+        const token = needToken();
+        const gh = needGithub();
+        const repo = await gh.repo(token, source.repo);
+        const configYaml = await gh.file(token, repo.fullName, repo.defaultBranch, 'ratchet.yaml');
+        return inspectResult(source, repo.fullName, repo.defaultBranch, configYaml, null);
       }
-      if (settings.mode === 'live') assertSameRepo(input.repoUrl, settings.live.githubRepo);
-      return app.engine.createOptimization({ ...input, sandboxId: currentSandboxId() });
+      const info = await (deps.inspectLocal ?? inspectLocalFolder)(source.path);
+      return inspectResult(source, info.repo, info.baseRef, info.configYaml, info.problem);
+    },
+    async pickLocalFolder() {
+      return deps.pickFolder ? deps.pickFolder() : null;
+    },
+
+    // ------------------------------------------------------------ AWS and agents
+    async awsProfiles(): Promise<AwsProfilesVM> {
+      const found = awsProfiles();
+      return {
+        profiles: found.profiles,
+        ssoSessions: found.ssoSessions,
+        selected: settings.awsProfile,
+        region: settings.live.awsRegion || DEFAULT_REGION,
+        defaultRegion: DEFAULT_REGION,
+        filesFound: found.filesFound,
+      };
+    },
+    async detectHarnesses(): Promise<HarnessVM[]> {
+      return deps.harnesses ? (await deps.harnesses.get()).harnesses.map(toHarnessVM) : [];
+    },
+    async redetectHarnesses(): Promise<HarnessVM[]> {
+      if (!deps.harnesses) return [];
+      const r = await deps.harnesses.refresh();
+      app.invalidate?.();
+      return r.harnesses.map(toHarnessVM);
+    },
+
+    // ------------------------------------------------------------ templates
+    async listTemplates(): Promise<TemplateVM[]> {
+      return listTemplates().map(toTemplateVM);
+    },
+    async proposeTemplate(input: ProposeTemplateInput): Promise<ProposeTemplateVM> {
+      if (!app.engine.proposeTemplate) throw new Error('This engine cannot open template pull requests.');
+      needToken();
+      const slug = slugOf(input.repoUrl);
+      if (!slug) throw new Error(`${input.repoUrl} is not a GitHub repository (owner/name).`);
+      const r = await app.engine.proposeTemplate({ ...input, repoUrl: slug });
+      return { prUrl: r.prUrl, branch: r.branch, sha: r.sha, templateId: r.templateId, files: r.files };
+    },
+
+    // ------------------------------------------------------------ commands
+    async createOptimization(input: CreateOptimizationInput) {
+      const base = {
+        agents: input.agents,
+        budgetUsd: input.budgetUsd,
+        timeLimitSeconds: input.timeLimitSeconds,
+        plateauEvals: input.plateauEvals,
+      };
+      if (input.demo) {
+        const demoInput = { ...base, name: input.name ?? demoName(input.demo), repoUrl: `acme/${input.demo}`, baseRef: 'main' };
+        return app.createDemo ? app.createDemo(input.demo, demoInput) : app.engine.createOptimization(demoInput);
+      }
+      const slug = slugOf(input.repoUrl);
+      if (!slug) throw new Error(`${input.repoUrl} is not a GitHub repository (owner/name).`);
+      const missing = (await app.missingFor?.(slug)) ?? [];
+      if (missing.length > 0) throw new Error(`Not ready: ${missing.join('; ')}`);
+      return app.engine.createOptimization({
+        ...base,
+        ...(input.name ? { name: input.name } : {}),
+        repoUrl: slug,
+        baseRef: input.baseRef,
+        ...(input.agentsWhere ? { agentsWhere: input.agentsWhere } : {}),
+      });
     },
     async startOptimization(id) {
       await app.engine.start(id);
@@ -309,44 +474,54 @@ export function createService(deps: ServiceDeps): RatchetService {
       settings.setPrUrl(id, pr.url);
       return pr;
     },
-    async teardown(id) {
-      await app.engine.teardown(id);
-      settings.markTornDown(id);
-    },
     async exportReport(id): Promise<ExportReportResult> {
       const md = buildReport(ledger, id, meta, now());
       const name = `ratchet-report-${id}.md`;
       const path = deps.saveReport ? await deps.saveReport(name, md) : null;
       return path ? { saved: true, path } : { saved: false };
     },
-
-    async setMode(mode) {
-      if (mode !== settings.mode) {
-        settings.setMode(mode);
-        rebuild();
-      }
-      return settingsVM();
+    async endSandbox(sandboxId) {
+      if (!app.engine.endSandbox) throw new Error('This engine cannot end the sandbox.');
+      await app.engine.endSandbox(sandboxId);
+      return environmentsVM();
     },
+
+    // ------------------------------------------------------------ settings
     async setAwsProfile(profile) {
       settings.setAwsProfile(profile);
-      rebuildLiveEngine();
+      // The auth kind follows the chosen profile (SSO sessions need `aws sso login`).
+      const kind = awsProfiles().profiles.find((p) => p.name === profile)?.kind;
+      if (profile) settings.setLive({ awsAuth: kind === 'sso' ? 'sso' : 'profile' });
+      app.invalidate?.();
       return settingsVM();
     },
     async setSecret(name: SecretName, value) {
       const problem = validateSecretFormat(name, value);
       if (problem) throw new Error(problem);
-      settings.setSecret(name, value);
-      rebuildLiveEngine();
+      if (name === 'githubToken' && github) {
+        // A pasted token (Advanced): prove it works and learn the account before keeping it.
+        let login: string;
+        try {
+          login = (await github.user(value)).login;
+        } catch (err) {
+          throw new Error((err as Error).message.split(value).join('***'));
+        }
+        settings.setSecret(name, value);
+        settings.setGithubAccount(login, 'token');
+        envLogin = null;
+      } else settings.setSecret(name, value);
+      app.invalidate?.();
       return settingsVM();
     },
     async clearSecret(name: SecretName) {
       settings.clearSecret(name);
-      rebuildLiveEngine();
+      if (name === 'githubToken') settings.clearGithubAccount();
+      app.invalidate?.();
       return settingsVM();
     },
-    async saveLiveSettings(input: LiveSettingsInput) {
+    async saveLiveSettings(input) {
       settings.setLive(input); // validates the whole batch first
-      rebuildLiveEngine();
+      app.invalidate?.();
       return settingsVM();
     },
     async testConnection(target: ConnectionTarget): Promise<ConnectionResultVM> {
@@ -358,107 +533,16 @@ export function createService(deps: ServiceDeps): RatchetService {
       return () => listeners.delete(listener);
     },
     dispose() {
+      signIn?.cancel();
       unsubscribe();
       app.dispose();
       listeners.clear();
     },
   };
 
-  async function preflight(agents: AgentKind[], configYaml: string): Promise<PreflightItem[]> {
-    const live = settings.mode === 'live';
-    const miss = (ok: boolean, needed: boolean): PreflightItem['state'] => (ok ? 'ok' : needed ? 'fail' : 'warn');
-    const cfg = validateConfigText(configYaml);
-    const items: PreflightItem[] = [
-      {
-        id: 'config',
-        label: 'ratchet.yaml is valid',
-        state: cfg.ok ? 'ok' : 'fail',
-        detail: cfg.ok ? `${cfg.summary.metric} (${cfg.summary.direction})` : `${cfg.errors.length} error${cfg.errors.length === 1 ? '' : 's'}`,
-      },
-      { id: 'agents', label: 'At least one agent selected', state: agents.length > 0 ? 'ok' : 'fail', detail: agents.join(', ') || 'none' },
-      {
-        id: 'engine',
-        label: live ? 'Live mode' : 'Simulation mode',
-        state: app.kind === 'dev' ? 'warn' : 'ok',
-        detail: app.kind === 'dev' ? 'dev engine stub: results are simulated' : live ? 'real AWS resources will be created' : 'no cloud resources are used',
-      },
-    ];
-    if (agents.includes('claude-code')) {
-      const ok = settings.hasSecret('anthropicApiKey');
-      items.push({ id: 'anthropic', label: 'Anthropic API key', state: miss(ok, live), detail: ok ? 'configured' : live ? 'required in live mode (Settings)' : 'not needed in simulation' });
-    }
-    if (agents.includes('codex')) {
-      const ok = settings.hasSecret('openaiApiKey');
-      items.push({ id: 'openai', label: 'OpenAI API key', state: miss(ok, live), detail: ok ? 'configured' : live ? 'required in live mode (Settings)' : 'not needed in simulation' });
-    }
-    {
-      const ok = settings.hasSecret('githubToken');
-      items.push({ id: 'github', label: 'GitHub token', state: miss(ok, live), detail: ok ? 'configured' : live ? 'required to push branches and open the PR' : 'not needed in simulation' });
-    }
-    {
-      const ok = settings.awsProfile !== '';
-      items.push({ id: 'aws', label: 'AWS profile', state: miss(ok, live), detail: ok ? settings.awsProfile : live ? 'required in live mode (Settings)' : 'not needed in simulation' });
-    }
-    if (live) {
-      const repoOk = settings.live.githubRepo !== '';
-      items.push({ id: 'repo', label: 'GitHub repository', state: repoOk ? 'ok' : 'fail', detail: repoOk ? settings.live.githubRepo : 'required in live mode (Settings)' });
-      const imagesOk = settings.live.runnerImageRef !== '' && settings.live.benchImageRef !== '';
-      items.push({ id: 'images', label: 'Runner and bench AMIs', state: imagesOk ? 'ok' : 'fail', detail: imagesOk ? 'configured' : 'required in live mode (Settings)' });
-    }
-    const sandbox = await app.engine.sandboxState(currentSandboxId());
-    const applied = sandbox.status === 'applied' && sandbox.outputs;
-    items.push({
-      id: 'sandbox',
-      label: 'Sandbox applied',
-      state: applied ? 'ok' : live ? 'fail' : 'warn',
-      detail: applied ? sandbox.outputs!.artifactsBucket : live ? 'required in live mode: apply it under Environments' : 'not applied yet; apply it under Environments',
-    });
-    return items;
-  }
-
-  async function testConnection(target: ConnectionTarget): Promise<ConnectionResultVM> {
-    const t = deps.connectionTester;
-    const l = settings.live;
-    const paths = effectivePaths(l, liveDefaults);
-    const result = ((): Promise<ConnectionResultVM> => {
-      if (!t) return Promise.resolve({ target, ok: false, detail: 'Connection tests are not available in this build.' });
-      const need = (what: string): Promise<ConnectionResultVM> => Promise.resolve({ target, ok: false, detail: what });
-      switch (target) {
-        case 'aws': {
-          const state = ledger.getSandbox(sandboxIdFor('live'));
-          return t.aws({ region: l.awsRegion || 'us-east-1', profile: l.awsProfile || undefined, expectedAccountId: state?.status === 'applied' ? (state.accountId ?? undefined) : undefined });
-        }
-        case 'github': {
-          const token = settings.getSecret('githubToken');
-          if (!l.githubRepo) return need('Set the GitHub repository (owner/name) first.');
-          return token ? t.github({ repo: l.githubRepo, token }) : need('Store a GitHub token first.');
-        }
-        case 'anthropic': {
-          const apiKey = settings.getSecret('anthropicApiKey');
-          return apiKey ? t.anthropic({ apiKey }) : need('Store an Anthropic API key first.');
-        }
-        case 'openai': {
-          const apiKey = settings.getSecret('openaiApiKey');
-          return apiKey ? t.openai({ apiKey }) : need('Store an OpenAI API key first.');
-        }
-        case 'tofu':
-          return t.tofu({ binary: paths.tofuBinary, moduleDir: paths.moduleDir });
-      }
-    })();
-    let r: ConnectionResultVM;
-    try {
-      r = await result;
-    } catch (err) {
-      r = { target, ok: false, detail: (err as Error).message.split('\n')[0] ?? 'failed' };
-    }
-    // Belt and braces: no stored secret value may ever leave in a message, whatever the tester returned.
-    let detail = r.detail;
-    for (const name of ['anthropicApiKey', 'openaiApiKey', 'githubToken'] as SecretName[]) {
-      const v = settings.getSecret(name);
-      if (v && v.length >= 4) detail = detail.split(v).join('***');
-    }
-    if (target === 'aws' && !r.ok && l.awsAuth === 'sso' && l.awsProfile) detail += ` Run "aws sso login --profile ${l.awsProfile}" in a terminal, then test again.`;
-    return { target, ok: r.ok, detail };
+  function needSignIn(): GithubSignIn {
+    if (!signIn) throw new Error('GitHub is not available in this build.');
+    return signIn;
   }
 }
 
@@ -470,18 +554,5 @@ function toEventVM(e: EngineEvent): EngineEventVM {
       return { type: 'candidate', optimizationId: e.optimizationId, candidateId: e.candidateId, verdict: e.verdict };
     default:
       return e;
-  }
-}
-
-/** `acme/api`, `https://github.com/acme/api.git` and `git@github.com:acme/api` all name the same repository. */
-function repoSlug(url: string): string {
-  return (/(?:github\.com[/:])?([\w.-]+\/[\w.-]+?)(?:\.git)?\/?$/.exec(url.trim())?.[1] ?? url.trim()).toLowerCase();
-}
-
-/** Live mode runs on the one repository in Settings (its token, its clone); a different one in the form would silently be ignored. */
-function assertSameRepo(formRepo: string, settingsRepo: string): void {
-  if (settingsRepo === '') throw new Error('Set the GitHub repository in Settings before starting a live optimization.');
-  if (repoSlug(formRepo) !== repoSlug(settingsRepo)) {
-    throw new Error(`The repository ${formRepo} differs from the one in Settings (${settingsRepo}). Live optimizations run on the Settings repository.`);
   }
 }

@@ -1,12 +1,40 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { Card, Eyebrow, Histogram, StairChart, VerdictPill, agentColor, agentLabel, agentSoft, type Verdict } from '@ratchet/ui';
 import { Crumbs, Empty, ErrorNote, OptTabs, OptimizationPicker, PageHeader, StateBadge, useSelectedId } from '../components/common';
 import { forOptimization, useQuery } from '../data';
 import { fmtMetric, fmtNum } from '../format';
+import { TemplateGallery } from './TemplateGallery';
 
 const FILTERS: (Verdict | 'all')[] = ['all', 'verified', 'rejected', 'failed_confirm', 'blocked', 'pending'];
 
+type View = 'history' | 'templates';
+
+/** `Benchmark history | Templates`: the two views of the Benchmarks tab. */
+function ViewSwitch({ view, onChange }: { view: View; onChange(v: View): void }) {
+  return (
+    <div className="segmented segmented--sm view-switch" role="radiogroup" aria-label="Benchmarks view">
+      {([['history', 'Benchmark history'], ['templates', 'Templates']] as const).map(([k, label]) => (
+        <button key={k} type="button" role="radio" aria-checked={view === k} className={view === k ? 'segmented__on' : ''} onClick={() => onChange(k)}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
 export function Benchmarks() {
+  const [view, setView] = useState<View>('history');
+  const switcher = <ViewSwitch view={view} onChange={setView} />;
+  if (view === 'templates') {
+    return (
+      <>
+        <PageHeader title="Benchmarks" sub="Evaluator templates for your repositories, and demos you can run without any setup." actions={<>{switcher}</>} />
+        <TemplateGallery />
+      </>
+    );
+  }
+  return <BenchmarkHistory switcher={switcher} onTemplates={() => setView('templates')} />;
+}
+
+function BenchmarkHistory({ switcher, onTemplates }: { switcher: ReactNode; onTemplates(): void }) {
   const id = useSelectedId();
   const opts = { skip: id === null, relevant: forOptimization(id), intervalMs: 8000 };
   const [metric, setMetric] = useState<string | null>(null);
@@ -18,10 +46,18 @@ export function Benchmarks() {
 
   const rows = useMemo(() => (cands.data ?? []).filter((c) => filter === 'all' || c.verdict === filter), [cands.data, filter]);
 
-  if (id === null) return <><PageHeader title="Benchmarks" /><Empty title="No optimization selected">Start one from Optimizations.</Empty></>;
+  if (id === null) {
+    return (
+      <>
+        <PageHeader title="Benchmarks" actions={<>{switcher}</>} />
+        <Empty title="No optimization selected">Start one from Optimizations, or browse the <button type="button" className="text-link" onClick={onTemplates}>evaluator templates</button>.</Empty>
+      </>
+    );
+  }
   const err = series.error ?? cands.error ?? detail.error;
-  if (err && !series.data) return <ErrorNote error={err} />;
-  if (!series.data || !cands.data || !detail.data) return <p className="muted">Loading…</p>;
+  const header = <PageHeader title="Benchmarks" actions={<>{switcher}</>} />;
+  if (err && !series.data) return <>{header}<ErrorNote error={err} /></>;
+  if (!series.data || !cands.data || !detail.data) return <>{header}<p className="muted">Loading…</p></>;
 
   const sr = series.data;
   const d = detail.data;
@@ -54,7 +90,7 @@ export function Benchmarks() {
         eyebrow={<Crumbs repo={s.repo} />}
         title={s.name}
         badge={<StateBadge detail={d} />}
-        actions={<OptimizationPicker />}
+        actions={<>{switcher}<OptimizationPicker /></>}
         tabs={<OptTabs current="benchmarks" />}
       />
 
