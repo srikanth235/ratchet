@@ -1,1 +1,11 @@
-export {};
+export { Engine } from './engine.js';
+export type { CreateOptimizationInput, EngineOptions, ResumeReport, TeardownReport } from './engine.js';
+export { EngineError, assertValidId } from './errors.js';
+export type { EngineErrorCode } from './errors.js';
+export type { EnginePorts } from './ports.js';
+export { DEFAULT_SECRET_NAMES, DEFAULT_TOKEN_PRICING } from './settings.js';
+export type { EngineSettings, ReportBuilder, SecretSource } from './settings.js';
+export { defaultReport } from './report.js';
+export { KvStore } from './kv.js';
+export { CostMeter } from './cost.js';
+export { reap } from './reaper.js';
