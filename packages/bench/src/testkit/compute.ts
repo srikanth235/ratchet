@@ -55,6 +55,11 @@ export class LocalFakeCompute implements CloudCompute {
     chmodSync(p, 0o755);
   }
 
+  /** Absolute path of a shim installed with `addShim` (for options that take a path, like the candidate launcher). */
+  shimPath(name: string): string {
+    return join(this.shim, name);
+  }
+
   async launchBenchInstance(spec: BenchLaunchSpec): Promise<InstanceInfo> {
     this.launched.push(spec);
     return {

@@ -504,73 +504,241 @@ describe('RemoteBenchRunner specifics', () => {
     await expect(runner.run(job(fx, fx.base, { repeats: 1 }), cfg(), null)).rejects.toThrow(/sha256 mismatch/);
   });
 
-  describe("isolation: 'user' (OS tools shimmed; the real user/iptables are image work, see bench.md)", () => {
-    const withUser = (over: Partial<ConstructorParameters<typeof RemoteBenchRunner>[0]> = {}, shims: Record<string, string> = {}) => {
-      const h = mk({ isolation: 'user', ...over });
+  describe("isolation: 'user' (OS tools shimmed; the real users/iptables/sudo are image work, see bench.md)", () => {
+    const userRunner = (shims: Record<string, string> = {}, over: Partial<ConstructorParameters<typeof RemoteBenchRunner>[0]> = {}) => {
+      const s3 = join(fx.dir, 's3');
+      const compute = new LocalFakeCompute(join(fx.dir, 'ssm'), {}, s3);
       const log = join(fx.dir, `shim-${Math.random().toString(36).slice(2)}.log`);
       const defaults: Record<string, string> = {
-        // `id -u ratchet-bench` succeeds; everything else is the real id
-        id: `[ "$2" = ratchet-bench ] && exit 0; exec /usr/bin/id "$@"`,
-        // the IMDS owner rule exists
+        id: `[ "$2" = ratchet-bench ] || [ "$2" = ratchet-holdout ] && exit 0; exec /usr/bin/id "$@"`,
         iptables: `echo "iptables $*" >> ${log}; exit 0`,
-        // drop privileges: record the call, skip our own options and exec the rest
-        setpriv: `echo "setpriv $*" >> ${log}; if [[ "$*" == *"/dev/tcp/169.254.169.254"* ]]; then exit 1; fi; while [ "$1" != -- ]; do shift; done; shift; exec "$@"`,
+        setpriv: `echo "setpriv $*" >> ${log}; if [[ "$*" == *"/dev/tcp/169.254.169.254"* ]]; then exit 1; fi; if [[ "$*" == *"--reuid=ratchet-bench"* && "$*" == *"holdout/.probe"* ]]; then exit 1; fi; while [ "$1" != -- ]; do shift; done; shift; exec "$@"`,
         pkill: `echo "pkill $*" >> ${log}; exit 0`,
         chown: `echo "chown $*" >> ${log}; exit 0`,
-        chgrp: `echo "chgrp $*" >> ${log}; exit 0`,
+        'ratchet-candidate': `echo "launcher $*" >> ${log}; if [ "$*" = "id -un" ]; then echo ratchet-bench; exit 0; fi; exec env "$@"`,
         ...shims,
       };
-      for (const [n, body] of Object.entries(defaults)) h.compute.addShim(n, body);
-      return { ...h, log: () => (existsSync(log) ? readFileSync(log, 'utf8') : '') };
+      for (const [n, body] of Object.entries(defaults)) compute.addShim(n, body);
+      const runner = new RemoteBenchRunner({
+        compute,
+        git: fx.host,
+        clock: { now: () => Date.now(), sleep: async () => undefined },
+        imageRef: 'ami-test',
+        stagingBucket: STAGING_BUCKET,
+        stagingStore: new DirStore(join(s3, STAGING_BUCKET)),
+        isolation: 'user',
+        candidateLauncher: compute.shimPath('ratchet-candidate'),
+        workRoot: join(fx.dir, 'work'),
+        ...over,
+      });
+      return { runner, compute, log: () => (existsSync(log) ? readFileSync(log, 'utf8') : '') };
+    };
+    const holdoutFile = () => {
+      const root = join(fx.dir, 'work');
+      return listDir(root)
+        .map((d) => join(root, d, 'holdout'))
+        .filter((d) => existsSync(d))
+        .flatMap((d) => listDir(d).filter((f) => f.startsWith('trace')).map((f) => join(d, f)));
+    };
+    const seedTrace = (body = '{"requests":[1,2,3]}') => {
+      mkdirSync(join(fx.dir, 's3', STAGING_BUCKET), { recursive: true });
+      writeFileSync(join(fx.dir, 's3', STAGING_BUCKET, 'trace.json'), body);
+      return `s3://${STAGING_BUCKET}/trace.json`;
     };
 
-    it('verifies the user and the IMDS block, then runs setup/guardrails/bench as that user and kills its leftovers', async () => {
-      const { runner, compute, log } = withUser();
+    it('verifies both users, the IMDS block, the holdout permissions and the launcher, then splits the principals', async () => {
+      const { runner, compute, log } = userRunner();
       const out = await runner.run(job(fx, fx.base, { repeats: 1 }), makeConfig({ guardrails: ['- run: "true"'] }), null);
       expect(out.samples).toEqual([100]);
       const l = log();
-      expect(l).toContain('iptables -C OUTPUT -m owner --uid-owner ratchet-bench -d 169.254.169.254 -j REJECT');
-      expect(l).toContain('setpriv --reuid=ratchet-bench --regid=ratchet-bench --clear-groups --no-new-privs');
+      for (const u of ['ratchet-bench', 'ratchet-holdout']) {
+        expect(l).toContain(`iptables -C OUTPUT -m owner --uid-owner ${u} -d 169.254.169.254 -j REJECT`);
+      }
       expect(l).toContain('chown -R ratchet-bench:');
-      // before and after every step: the bench user's processes are killed
+      expect(l).toContain('chown -R ratchet-holdout:');
+      // setup / guardrails: candidate user, no new privileges. Bench harness: the OTHER user, from the snapshot
+      expect(l).toContain('setpriv --reuid=ratchet-bench --regid=ratchet-bench --clear-groups --no-new-privs -- env -u AWS_ACCESS_KEY_ID');
+      expect(l).toMatch(/setpriv --reuid=ratchet-holdout --regid=ratchet-holdout --clear-groups -- env -u AWS_ACCESS_KEY_ID/);
+      // before and after every step: both users' processes are killed
       expect((l.match(/pkill -KILL -u ratchet-bench/g) ?? []).length).toBeGreaterThanOrEqual(4);
+      expect((l.match(/pkill -KILL -u ratchet-holdout/g) ?? []).length).toBeGreaterThanOrEqual(4);
       const step = compute.commands.map((c) => c.script).find((s) => s.includes('bench.mjs'))!;
       expect(step).toContain('env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN');
+      expect(step).toContain('RATCHET_CANDIDATE_EXEC=');
+    });
+
+    it('runs the harness from a root-owned read-only snapshot of the built tree, not from the candidate-writable tree', async () => {
+      const { runner, compute, log } = userRunner();
+      const bench = 'node -e "console.log(JSON.stringify({http_req_duration:{p95:1},cwd_is_snapshot:process.cwd().endsWith(\'/harness\')?1:0,src_visible:require(\'fs\').existsSync(\'src/p95.txt\')?1:0}))"';
+      const out = await runner.run(job(fx, fx.base, { repeats: 1 }), makeConfig({ guardrails: [], run: bench }), null);
+      expect(out.runs[0]!.metrics).toMatchObject({ cwd_is_snapshot: 1, src_visible: 1 });
+      expect(log()).toMatch(/chown -hR root:root .*harness\.tmp/);
+      const bs = compute.commands.map((c) => c.script).filter((s) => s.includes('snapshot()'));
+      expect(bs).toHaveLength(1); // one bench run, one script; the snapshot is made once and reused by later runs
+    });
+
+    it('reuses the snapshot for later runs instead of copying the tree again', async () => {
+      const { runner, compute } = userRunner();
+      await runner.run(job(fx, fx.base, { repeats: 2 }), makeConfig({ guardrails: [] }), null);
+      const scripts = compute.commands.map((c) => c.script).filter((s) => s.includes('snapshot()'));
+      expect(scripts).toHaveLength(2);
+      expect(scripts.every((s) => s.includes('[ -d "$H" ] || snapshot'))).toBe(true);
     });
 
     it('refuses to run the candidate when the image has no bench user', async () => {
-      const { runner, compute } = withUser({}, { id: 'exit 1' });
+      const { runner, compute } = userRunner({ id: 'exit 1' });
       await expect(runner.run(job(fx, fx.base), cfg(), null)).rejects.toThrow(/bench user ratchet-bench does not exist/);
       expect(compute.terminated).toHaveLength(1);
       expect(compute.commands.every((c) => !c.script.includes('bench.mjs'))).toBe(true);
     });
 
+    it('refuses when the image has no holdout user', async () => {
+      const { runner } = userRunner({ id: `[ "$2" = ratchet-bench ] && exit 0; exit 1` });
+      await expect(runner.run(job(fx, fx.base), cfg(), null)).rejects.toThrow(/holdout user ratchet-holdout does not exist/);
+    });
+
     it('refuses to run the candidate when the IMDS block rule is missing', async () => {
-      const { runner } = withUser({}, { iptables: 'exit 1' });
+      const { runner } = userRunner({ iptables: 'exit 1' });
       await expect(runner.run(job(fx, fx.base), cfg(), null)).rejects.toThrow(/IMDS is not blocked/);
     });
 
+    it('refuses when the IMDS rule exists for the bench user but not for the holdout user', async () => {
+      const { runner } = userRunner({ iptables: 'case "$*" in *ratchet-holdout*) exit 1;; esac; exit 0' });
+      await expect(runner.run(job(fx, fx.base), cfg(), null)).rejects.toThrow(/IMDS is not blocked for ratchet-holdout/);
+    });
+
     it('refuses to run the candidate when instance metadata is still reachable as the bench user', async () => {
-      const { runner } = withUser({}, { setpriv: 'exit 0' });
+      const { runner } = userRunner({ setpriv: 'exit 0' });
       await expect(runner.run(job(fx, fx.base), cfg(), null)).rejects.toThrow(/metadata is reachable/);
     });
 
-    it('fetches the confirm trace as root and exposes it to the bench user read-only (root:ratchet-bench 0440), without write access', async () => {
-      const trace = join(fx.dir, 's3', STAGING_BUCKET, 'trace.json');
-      mkdirSync(join(fx.dir, 's3', STAGING_BUCKET), { recursive: true });
-      writeFileSync(trace, '{"requests":[1,2,3]}');
-      const { runner, compute, log } = withUser();
-      const out = await runner.run(
-        job(fx, fx.base, { repeats: 1, phase: 'confirm', trace: `s3://${STAGING_BUCKET}/trace.json` }),
-        makeConfig({ guardrails: [] }),
-        null,
-      );
-      expect(out.samples).toEqual([100]);
-      const traceCmd = compute.commands.map((c) => c.script).find((s) => s.includes('trace.json') && s.includes('aws s3 cp'))!;
-      expect(traceCmd).toContain("chgrp 'ratchet-bench'");
-      expect(traceCmd).toContain('chmod 440');
-      expect(traceCmd).not.toContain('setpriv'); // the pre-step is never the bench user
-      expect(log()).toContain('chgrp ratchet-bench');
+    it('refuses when the holdout directory could be read by the bench user', async () => {
+      // a setpriv that lets the bench user open anything
+      const { runner } = userRunner({ setpriv: `if [[ "$*" == *"/dev/tcp/169.254.169.254"* ]]; then exit 1; fi; while [ "$1" != -- ]; do shift; done; shift; exec "$@"` });
+      await expect(runner.run(job(fx, fx.base), cfg(), null)).rejects.toThrow(/holdout directory is readable by ratchet-bench/);
+    });
+
+    it('refuses when the launcher does not run commands as the bench user', async () => {
+      const { runner } = userRunner({ 'ratchet-candidate': 'echo root' });
+      await expect(runner.run(job(fx, fx.base), cfg(), null)).rejects.toThrow(/candidate launcher .* does not run commands as ratchet-bench/);
+    });
+
+    describe('the holdout (confirm)', () => {
+      const confirmJob = (uri: string) => job(fx, fx.base, { repeats: 2, phase: 'confirm', trace: uri });
+
+      it('is fetched by root only after setup and guardrails have finished, and is gone again after every run', async () => {
+        const uri = seedTrace();
+        const { runner, compute, log } = userRunner();
+        // setup and the command guardrail FAIL if the holdout exists while they run (cwd is <work>/code)
+        const gone = 'test -z "$(ls ../holdout 2>/dev/null)"';
+        const out = await runner.run(confirmJob(uri), makeConfig({ guardrails: [`- run: '${gone}'`] }), null, undefined, undefined);
+        expect(out.guardrails.find((g) => g.name === 'bench.run')).toBeUndefined();
+        expect(out.samples).toEqual([100, 100]);
+        expect(out.runs.map((r) => [r.metrics.trace_set, r.metrics.trace_bytes])).toEqual([[1, 20], [1, 20]]);
+        expect(holdoutFile()).toEqual([]); // wiped after the last run
+        // order of remote steps: ping/checkout, then every bench step; the sealed location is only in bench steps
+        const scripts = compute.commands.map((c) => c.script);
+        const withTrace = scripts.map((s, i) => [i, s.includes('trace.json')] as const).filter(([, has]) => has).map(([i]) => i);
+        const firstBench = scripts.findIndex((s) => s.includes('bench.mjs'));
+        expect(withTrace.length).toBe(2);
+        expect(withTrace.every((i) => i >= firstBench)).toBe(true);
+        for (const s of scripts.slice(0, firstBench)) expect(s).not.toContain('aws s3 cp --only-show-errors "$URI"');
+        // permissions: fetched as root (no setpriv before the fetch), handed to the harness user alone, mode 0600
+        const benchScript = scripts[firstBench]!;
+        expect(benchScript.indexOf('aws s3 cp')).toBeGreaterThan(-1);
+        expect(benchScript.indexOf('chown "$HU:" "$TRACE"')).toBeGreaterThan(benchScript.indexOf('aws s3 cp'));
+        expect(benchScript.indexOf('chmod 600 "$TRACE"')).toBeGreaterThan(benchScript.indexOf('chown "$HU:" "$TRACE"'));
+        expect(benchScript.indexOf('setpriv')).toBeGreaterThan(benchScript.indexOf('chmod 600 "$TRACE"'));
+        expect(benchScript).not.toMatch(/chmod 4[0-9]0|chgrp/);
+        expect(log()).toMatch(/chown ratchet-holdout: .*holdout\/trace\.json/);
+        expect(compute.terminated).toHaveLength(1);
+      });
+
+      it('keeps RATCHET_TRACE and the sealed location out of everything the candidate user runs', async () => {
+        const uri = seedTrace();
+        const { runner, compute } = userRunner({}, { setup: 'true' });
+        await runner.run(confirmJob(uri), makeConfig({ guardrails: [] }), null);
+        const candidateSteps = compute.commands.map((c) => c.script).filter((s) => s.includes('--no-new-privs'));
+        expect(candidateSteps.length).toBeGreaterThanOrEqual(2); // checkout (probes) and setup
+        for (const s of candidateSteps) {
+          expect(s).not.toContain('RATCHET_TRACE');
+          expect(s).not.toContain('trace.json');
+        }
+      });
+
+      it('never passes the holdout to candidate processes: the launcher starts them with a clean environment', async () => {
+        const uri = seedTrace();
+        const { runner } = userRunner({
+          // like the real launcher: `env -i`
+          'ratchet-candidate': `if [ "$*" = "id -un" ]; then echo ratchet-bench; exit 0; fi; exec env -i PATH="$PATH" "$@"`,
+        });
+        // single-quoted for the shell, so $RATCHET_TRACE reaches the inner sh unexpanded
+        const probe = [
+          'const {execFileSync}=require("child_process");',
+          'const out=execFileSync(process.env.RATCHET_CANDIDATE_EXEC,["sh","-c","test -n \\"$RATCHET_TRACE\\" && echo 1 || echo 0"],{encoding:"utf8"}).trim();',
+          'console.log(JSON.stringify({http_req_duration:{p95:1},leaked:Number(out),harness_has_trace:process.env.RATCHET_TRACE?1:0}));',
+        ].join('');
+        const out = await runner.run(confirmJob(uri), makeConfig({ guardrails: [], run: `node -e '${probe}'` }), null);
+        expect(out.runs[0]!.metrics).toMatchObject({ harness_has_trace: 1, leaked: 0 });
+      });
+
+      it('is fetched once per run, and the harness has it at that run', async () => {
+        const uri = seedTrace('0123456789');
+        const { runner } = userRunner();
+        const out = await runner.run(confirmJob(uri), makeConfig({ guardrails: [] }), null);
+        expect(out.runs.map((r) => r.metrics.trace_bytes)).toEqual([10, 10]);
+      });
+
+      it('is wiped when the harness crashes or times out', async () => {
+        const uri = seedTrace();
+        const { runner } = userRunner({}, { timeouts: { benchMs: 1500 } });
+        const hang = 'node -e "setTimeout(()=>{}, 60000)"';
+        const out = await runner.run(confirmJob(uri), makeConfig({ guardrails: [], run: hang }), null);
+        expect(out.guardrails.some((g) => g.name === 'bench.run' && !g.passed)).toBe(true);
+        expect(holdoutFile()).toEqual([]);
+        const { runner: r2 } = userRunner();
+        const crash = 'exit 3';
+        const out2 = await r2.run(confirmJob(uri), makeConfig({ guardrails: [], run: crash }), null);
+        expect(out2.guardrails.some((g) => g.name === 'bench.run' && !g.passed)).toBe(true);
+        expect(holdoutFile()).toEqual([]);
+      });
+
+      it('turns a failed fetch into an infrastructure error, not a candidate failure', async () => {
+        const { runner, compute } = userRunner();
+        await expect(runner.run(confirmJob(`s3://${STAGING_BUCKET}/missing.json`), makeConfig({ guardrails: [] }), null)).rejects.toThrow(/fetching the holdout .* failed/);
+        expect(compute.terminated).toHaveLength(1);
+      });
+
+      it('does not write the output of a holdout run to the stored log', async () => {
+        const uri = seedTrace();
+        const store = new MemoryStore();
+        const { runner: r } = userRunner({}, { artifacts: store });
+        const noisy = `node -e "console.error('SECRET-STDERR'); console.log('SECRET-STDOUT'); console.log(JSON.stringify({http_req_duration:{p95:2}}))"`;
+        const out = await r.run(confirmJob(uri), makeConfig({ guardrails: [], run: noisy }), null);
+        expect(out.samples).toEqual([2, 2]);
+        const log = store.files.get(out.logsKey!)!;
+        expect(log).not.toContain('SECRET-STDERR');
+        expect(log).not.toContain('SECRET-STDOUT');
+        expect(log).toMatch(/holdout: 20 bytes fetched/);
+        // a bench-phase run of the same command does keep its tails (debuggability)
+        const out2 = await r.run(job(fx, fx.base, { repeats: 1, candidateId: 'c2' }), makeConfig({ guardrails: [], run: noisy }), null);
+        expect(store.files.get(out2.logsKey!)).toContain('SECRET-STDERR');
+      });
+    });
+
+    describe('bench and baseline phases', () => {
+      it('never contain the sealed location or a fetch, even if a trace is passed in the job', async () => {
+        const uri = seedTrace();
+        const { runner, compute } = userRunner();
+        const out = await runner.run(job(fx, fx.base, { repeats: 2, trace: uri }), makeConfig({ guardrails: [] }), null);
+        expect(out.runs.map((r) => r.metrics.trace_set)).toEqual([0, 0]);
+        for (const c of compute.commands) {
+          expect(c.script).not.toContain('trace.json');
+          expect(c.script).not.toContain('aws s3 cp --only-show-errors "$URI"');
+          expect(c.script).not.toContain('RATCHET_TRACE');
+        }
+        expect(compute.launched.map((l) => l.purpose)).toEqual(['bench']);
+      });
     });
   });
 

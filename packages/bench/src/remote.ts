@@ -24,12 +24,11 @@ import {
 } from './pipeline.js';
 import {
   checkoutScript,
-  localTracePath,
+  HOLDOUT_FETCH_EXIT,
   parseSentinels,
   pingScript,
   stepScript,
   stripSentinels,
-  traceScript,
   wrapStep,
   type Isolation,
   type Layout,
@@ -51,11 +50,16 @@ export interface RemoteBenchRunnerOptions {
   /** Where staged inputs are written. Default: `artifacts`, which must then write to `stagingBucket` (e.g. `S3ArtifactStore`). */
   stagingStore?: ArtifactStore;
   /**
-   * `user` (default): setup, guardrails and bench run as an unprivileged OS user whose access to instance
-   * metadata is blocked, and the job is refused if the image lacks that user or the block. `none` runs
-   * everything as root and is only for tests that execute the scripts on a developer machine.
+   * `user` (default): setup and guardrails run as the unprivileged candidate user (`ratchet-bench`); each bench
+   * run executes the evaluator harness as a second unprivileged user (`ratchet-holdout`) from a read-only snapshot
+   * of the built tree, and the harness starts candidate processes through the root-installed launcher. Instance
+   * metadata is blocked for both users, and the job is refused if the image lacks the users, the block, the
+   * launcher or the holdout directory permissions. `none` runs everything as root and is only for tests that
+   * execute the scripts on a developer machine.
    */
   isolation?: Isolation;
+  /** Path of the candidate launcher on the image. Default `/usr/local/bin/ratchet-candidate` (installed by the bench user-data). Test seam. */
+  candidateLauncher?: string;
   setup?: string;
   artifacts?: ArtifactStore;
   /** Default: `config.bench.hardware`. */
@@ -79,9 +83,11 @@ export interface RemoteBenchRunnerOptions {
  * in a `finally`. See remote-scripts.ts for the scripts and the sentinel protocol.
  *
  * Steps: stage on the controller (candidate + bench.ref tarballs into the artifacts bucket) -> ping (wait
- * for SSM) -> checkout (download from S3, verify digest, overlay) -> [trace download for confirm, as root] ->
- * setup -> guardrails -> bench x N (as the unprivileged bench user). Aborting stops waiting
- * immediately and terminates the instance, which kills whatever is running there.
+ * for SSM) -> checkout (download from S3, verify digest, overlay, check the isolation) -> setup ->
+ * guardrails (both as the candidate user) -> bench x N (the harness as the holdout user). For a confirm job
+ * the sealed holdout is fetched by root inside each bench run, after the build is over, and wiped when the run
+ * ends: nothing candidate-controlled ever runs while it exists as a file the candidate user could open.
+ * Aborting stops waiting immediately and terminates the instance, which kills whatever is running there.
  */
 export class RemoteBenchRunner implements ProgressBenchRunner {
   constructor(private readonly o: RemoteBenchRunnerOptions) {}
@@ -123,8 +129,6 @@ export class RemoteBenchRunner implements ProgressBenchRunner {
 class RemoteExecutor implements PipelineExecutor {
   private readonly layout: Layout;
   private readonly timeouts: StepTimeouts;
-  /** Set when the trace was downloaded to the instance. */
-  private tracePath: string | undefined;
 
   constructor(
     private readonly o: RemoteBenchRunnerOptions,
@@ -173,6 +177,7 @@ class RemoteExecutor implements PipelineExecutor {
         globs: this.config.protected,
         prune: this.o.pruneExtraProtected ?? true,
         isolation: this.isolation,
+        ...(this.o.candidateLauncher ? { candidateLauncher: this.o.candidateLauncher } : {}),
       }),
       this.timeouts.checkoutMs,
     );
@@ -189,24 +194,34 @@ class RemoteExecutor implements PipelineExecutor {
     }
     this.log.line(`overlay: ${copied} protected file(s) from ${this.config.bench.ref}, ${String(s.data.removed)} candidate-only protected file(s) removed`);
 
-    if (opts.trace !== undefined && opts.trace.startsWith('s3://')) {
-      const localPath = localTracePath(this.layout, opts.trace);
-      const t = await this.call('trace', traceScript({ layout: this.layout, uri: opts.trace, localPath, isolation: this.isolation }), this.timeouts.checkoutMs);
-      if (t.exitCode !== 0) throw new BenchError(`downloading the confirm trace failed (exit ${t.exitCode}): ${tail(t.stderr || t.stdout)}`);
-      this.tracePath = localPath;
-    }
+    // The holdout is NOT fetched here: setup and guardrails (candidate code) run before the first bench
+    // step, and nothing sealed may exist on the instance while they do. Each bench step fetches it.
+    if (opts.trace !== undefined) this.log.line('holdout is fetched by each bench run, after setup and guardrails, and wiped when the run ends');
   }
 
   async runStep(spec: StepSpec): Promise<StepOutcome> {
-    const env = { ...spec.env };
-    if (spec.trace !== undefined) env.RATCHET_TRACE = this.tracePath ?? spec.trace;
     this.log.section(spec.name);
     const res = await this.call(
       spec.name,
-      stepScript({ layout: this.layout, kind: spec.kind, name: spec.name, command: spec.command, timeoutMs: spec.timeoutMs, env, isolation: this.isolation }),
+      stepScript({
+        layout: this.layout,
+        kind: spec.kind,
+        name: spec.name,
+        command: spec.command,
+        timeoutMs: spec.timeoutMs,
+        env: { ...spec.env },
+        isolation: this.isolation,
+        ...(spec.trace !== undefined ? { holdout: { uri: spec.trace } } : {}),
+        ...(this.o.candidateLauncher ? { candidateLauncher: this.o.candidateLauncher } : {}),
+      }),
       spec.timeoutMs,
     );
     const sentinels = parseSentinels(res.stdout);
+    if (spec.trace !== undefined && (Object.values(HOLDOUT_FETCH_EXIT) as number[]).includes(res.exitCode)) {
+      throw new BenchError(`fetching the holdout on the bench instance failed (exit ${res.exitCode}): ${tail(res.stderr || res.stdout)}`);
+    }
+    const held = sentinels.find((x) => x.kind === 'holdout');
+    if (held) this.log.line(`holdout: ${String(held.data.bytes)} bytes fetched for this run, readable by the evaluator user only, wiped afterwards`);
     const tampered = sentinels.find((s) => s.kind === 'tampered');
     if (tampered) {
       const paths = Buffer.from(String(tampered.data.paths_b64 ?? ''), 'base64').toString('utf8').split('\n').filter(Boolean);
@@ -225,7 +240,9 @@ class RemoteExecutor implements PipelineExecutor {
     }
     const exitCode = typeof r.data.exit === 'number' ? r.data.exit : null;
     const stdout = typeof r.data.stdout_b64 === 'string' ? Buffer.from(r.data.stdout_b64, 'base64').toString('utf8') : '';
-    if (stdout) this.log.line(`[bench stdout tail]\n${stdout}`);
+    // A holdout run's output tail is not written to the stored log: it is the only free-text channel from
+    // the confirm run to whoever reads logs. The parsed numbers still travel in the outcome.
+    if (stdout && spec.trace === undefined) this.log.line(`[bench stdout tail]\n${stdout}`);
     this.log.line(`[exit ${exitCode}${r.data.timedOut === true ? ', timed out' : ''} after ${String(r.data.ms)}ms]`);
     return { exitCode, timedOut: r.data.timedOut === true, stdout, durationMs: Number(r.data.ms) || 0 };
   }

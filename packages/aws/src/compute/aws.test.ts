@@ -1,3 +1,4 @@
+import { execFileSync, spawnSync } from 'node:child_process';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { mockClient } from 'aws-sdk-client-mock';
 import {
@@ -33,6 +34,13 @@ import {
 import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts';
 import {
   AwsCloudCompute,
+  BENCH_OS_USER,
+  CANDIDATE_EXEC_PATH,
+  CANDIDATE_EXEC_SCRIPT,
+  CANDIDATE_LAUNCHER_PATH,
+  CANDIDATE_LAUNCHER_SCRIPT,
+  CANDIDATE_SUDOERS,
+  HOLDOUT_OS_USER,
   KILL_SWITCH_POLICY_NAME,
   agentRoleName,
   awsComputeConfigFromOutputs,
@@ -444,13 +452,68 @@ describe('launch', () => {
     expect(ec2.commandCalls(RunInstancesCommand)[0]!.args[0].input.IamInstanceProfile).toEqual({ Name: 'bench-profile' });
   });
 
-  it('bench user-data creates the unprivileged user and blocks its access to IMDS', () => {
+  describe('bench user-data: candidate / holdout split', () => {
     const ud = benchUserData({ optimizationId: 'opt1', instanceType: 'c7i.large', imageRef: 'ami', purpose: 'confirm' }, 2);
-    expect(ud).toContain('useradd --system');
-    expect(ud).toContain('ratchet-bench');
-    expect(ud).toContain('iptables -I OUTPUT 1 -m owner --uid-owner ratchet-bench -d 169.254.169.254 -j REJECT');
-    // the rule is installed before the bench agent starts
-    expect(ud.indexOf('iptables')).toBeLessThan(ud.indexOf('ratchet bench-agent'));
+    const idx = (needle: string) => {
+      const i = ud.indexOf(needle);
+      expect(i, `user data contains ${needle}`).toBeGreaterThan(-1);
+      return i;
+    };
+
+    it('creates both unprivileged users and blocks IMDS for both, before the bench agent starts', () => {
+      for (const u of ['ratchet-bench', 'ratchet-holdout']) {
+        expect(ud).toContain(`useradd --system --no-create-home --shell /usr/sbin/nologin ${u}`);
+        expect(ud).toContain(`iptables -I OUTPUT 1 -m owner --uid-owner ${u} -d 169.254.169.254 -j REJECT`);
+        expect(ud).toContain(`ip6tables -I OUTPUT 1 -m owner --uid-owner ${u} -d fd00:ec2::254 -j REJECT`);
+        expect(idx(`--uid-owner ${u} -d 169.254.169.254`)).toBeLessThan(idx('ratchet bench-agent'));
+      }
+    });
+
+    it('hides each user from the other (hidepid) and installs the launcher and sudo rule before the agent starts', () => {
+      expect(ud).toContain('hidepid=2');
+      for (const p of [CANDIDATE_EXEC_PATH, CANDIDATE_LAUNCHER_PATH, '/etc/sudoers.d/ratchet-holdout']) {
+        expect(idx(p)).toBeLessThan(idx('ratchet bench-agent'));
+      }
+      // the sudoers rule is validated before it is moved into place; an invalid one aborts the boot
+      expect(idx('visudo -cf')).toBeLessThan(idx('mv /etc/sudoers.d/ratchet-holdout.tmp'));
+      expect(ud).toMatch(/visudo -cf [^\n]*\|\| \{ rm -f [^\n]*exit 1; \}/);
+    });
+
+    it('the launcher scripts and the user data are valid bash', () => {
+      for (const body of [ud, CANDIDATE_EXEC_SCRIPT, CANDIDATE_LAUNCHER_SCRIPT]) {
+        expect(() => execFileSync('bash', ['-n'], { input: body })).not.toThrow();
+      }
+    });
+
+    it('the sudo rule gives ratchet-holdout exactly one thing: the launcher script, as ratchet-bench, without a password', () => {
+      const rules = CANDIDATE_SUDOERS.split('\n').filter((l) => l && !l.startsWith('Defaults'));
+      expect(rules).toEqual([`ratchet-holdout ALL=(ratchet-bench) NOPASSWD: ${CANDIDATE_EXEC_PATH}`]);
+      expect(CANDIDATE_SUDOERS).not.toMatch(/ALL=\(ALL|\(root\)|NOPASSWD: ALL|SETENV/);
+      // only the location of the job's checkout crosses sudo; the holdout never does
+      expect(CANDIDATE_SUDOERS).toContain('env_keep += "RATCHET_CANDIDATE_DIR RATCHET_CANDIDATE_HOME RATCHET_CANDIDATE_TMP RATCHET_CANDIDATE_PATH"');
+      expect(CANDIDATE_SUDOERS).not.toContain('RATCHET_TRACE');
+      expect(CANDIDATE_SUDOERS).toContain('!use_pty'); // stdin/stdout pipes between harness and candidate stay pipes
+    });
+
+    it('the launcher starts candidate code with a clean environment and refuses to forward the holdout or credentials', () => {
+      expect(CANDIDATE_EXEC_SCRIPT).toContain('exec env -i PATH=');
+      expect(CANDIDATE_EXEC_SCRIPT).toContain('RATCHET_TRACE=*|AWS_*=*');
+      expect(CANDIDATE_EXEC_SCRIPT).toContain('must run as ratchet-bench');
+      // it enters the candidate's checkout, set by root, and never reads the holdout path itself
+      expect(CANDIDATE_EXEC_SCRIPT).toContain('cd "$RATCHET_CANDIDATE_DIR"');
+      expect(CANDIDATE_LAUNCHER_SCRIPT).toContain(`sudo -n -u ratchet-bench ${CANDIDATE_EXEC_PATH}`);
+    });
+
+    it('the launcher script refuses to run as anyone but the bench user', () => {
+      const env = { ...process.env, RATCHET_CANDIDATE_DIR: '/', RATCHET_CANDIDATE_HOME: '/', RATCHET_CANDIDATE_TMP: '/', RATCHET_CANDIDATE_PATH: '/bin' };
+      const r = spawnSync('bash', ['-c', CANDIDATE_EXEC_SCRIPT, 'x', 'id'], { encoding: 'utf8', env });
+      expect(r.status).toBe(77);
+      expect(r.stderr).toContain('must run as ratchet-bench');
+    });
+
+    it('the constants the bench scripts rely on match', () => {
+      expect([BENCH_OS_USER, HOLDOUT_OS_USER, CANDIDATE_LAUNCHER_PATH]).toEqual(['ratchet-bench', 'ratchet-holdout', '/usr/local/bin/ratchet-candidate']);
+    });
   });
 
   it('runner user-data exports the proxy only when one is configured', () => {

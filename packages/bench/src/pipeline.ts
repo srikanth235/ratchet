@@ -67,7 +67,11 @@ export interface StepSpec {
   timeoutMs: number;
   /** Extra environment (RATCHET_* variables). */
   env: Record<string, string>;
-  /** Confirm bench steps only: the hidden trace reference; the executor exports it as `RATCHET_TRACE`. */
+  /**
+   * Confirm bench steps only: the hidden trace reference. The executor makes it available to the evaluator for that
+   * step alone and exports it as `RATCHET_TRACE`; the remote executor fetches it after setup and guardrails, readable by
+   * the harness user only, and wipes it when the step ends.
+   */
   trace?: string;
 }
 
@@ -84,7 +88,7 @@ export interface StepOutcome {
 }
 
 export interface PipelineExecutor {
-  /** Materialize the candidate, overlay the protected files from bench.ref, fetch the trace if any. */
+  /** Materialize the candidate and overlay the protected files from bench.ref. `opts.trace` is only announced here: the holdout is not fetched before the bench steps. */
   checkout(opts: { trace?: string }): Promise<void>;
   /** Run one step. Throws BenchAbortedError when aborted. Must verify/restore protected files first. */
   runStep(spec: StepSpec): Promise<StepOutcome>;
