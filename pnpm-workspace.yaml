@@ -1,5 +1,6 @@
 packages:
   - packages/*
+  - infra/tests
   - examples/*
 onlyBuiltDependencies:
   - better-sqlite3
