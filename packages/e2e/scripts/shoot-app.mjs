@@ -1,4 +1,5 @@
 // Screenshot every app screen: node scripts/shoot-app.mjs [outDir]   (run under xvfb-run, desktop built)
+// The seeded dev engine; the three New optimization steps (a demo picked), and the Benchmarks Templates gallery are captured too.
 import { join } from 'node:path';
 import { ARTIFACTS, SCREENS, goTo, launchApp, openNewOptimization, screenshotScreen, waitForScreen } from '../harness/launch.mjs';
 
@@ -15,6 +16,19 @@ try {
   await openNewOptimization(win);
   await win.waitForTimeout(800);
   console.log(await screenshotScreen(app, win, 'new-optimization', dir));
+  await win.getByRole('group', { name: 'Demos' }).getByRole('button').first().click();
+  await win.getByRole('button', { name: 'Continue to review' }).click();
+  await win.getByRole('heading', { name: 'Review', level: 2 }).waitFor();
+  await win.waitForTimeout(800);
+  console.log(await screenshotScreen(app, win, 'new-optimization-review', dir));
+  await win.getByRole('button', { name: 'Continue to budget' }).click();
+  await win.getByRole('heading', { name: 'Budget & time', level: 2 }).waitFor();
+  console.log(await screenshotScreen(app, win, 'new-optimization-budget', dir));
+  await goTo(win, 'Benchmarks');
+  await win.getByRole('radio', { name: 'Templates' }).click();
+  await win.getByRole('region', { name: 'Evaluator templates' }).waitFor();
+  await win.waitForTimeout(500);
+  console.log(await screenshotScreen(app, win, 'benchmarks-templates', dir));
 } finally {
   await close();
 }

@@ -24,7 +24,7 @@ const electronPath = () => createRequire(join(DESKTOP_ROOT, 'package.json'))('el
  * Launch the app with a fresh, isolated userData dir (so the ledger DB and settings are new for every run) and
  * resolve the first window at 1440x1000. Console errors and uncaught page errors are collected in `errors`.
  */
-export async function launchApp({ width = VIEWPORT.width, height = VIEWPORT.height, engine = 'real' } = {}) {
+export async function launchApp({ width = VIEWPORT.width, height = VIEWPORT.height, engine = 'real', env: extraEnv = {} } = {}) {
   const userDataDir = mkdtempSync(join(tmpdir(), 'ratchet-e2e-'));
   const saveDir = join(userDataDir, 'exports');
   const env = {
@@ -34,7 +34,12 @@ export async function launchApp({ width = VIEWPORT.width, height = VIEWPORT.heig
     RATCHET_REPO_ROOT: REPO_ROOT,
     ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
   };
-  // `real` = the core Engine in simulation mode (default). `dev` = the seeded stub, for design screenshots only.
+  // Nothing of the machine running the tests leaks in: no credentials, no ~/.aws, no GitHub.
+  for (const k of ['GITHUB_TOKEN', 'GH_TOKEN', 'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', 'AWS_PROFILE', 'RATCHET_GITHUB_API_URL', 'RATCHET_GITHUB_WEB_URL', 'RATCHET_GITHUB_CLIENT_ID']) delete env[k];
+  env.AWS_CONFIG_FILE = join(userDataDir, 'no-aws', 'config');
+  env.AWS_SHARED_CREDENTIALS_FILE = join(userDataDir, 'no-aws', 'credentials');
+  Object.assign(env, extraEnv);
+  // `real` = the product engine: demos in simulation, repositories on the hybrid runtime (default). `dev` = the seeded stub, for design screenshots only.
   // Design tools compare screens against the design: the dev agents tick once an hour so the seeded ledger holds still.
   if (engine === 'dev') {
     env.RATCHET_ENGINE = 'dev';

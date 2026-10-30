@@ -15,10 +15,10 @@ const prev = existsSync(join(root, 'artifacts', 'design-check', 'prev.json')) ? 
 const TITLES = {
   optimizations: '1 · Optimizations',
   'new-optimization': '2 · New optimization',
-  sandbox: '3 · AWS sandbox (Environments)',
+  sandbox: '3 · Environments (read-only)',
   'live-agents': '4 · Live agents',
   benchmarks: '5 · Benchmark history',
-  result: '6 · Result & teardown',
+  result: '6 · Result & teardown receipt',
 };
 const key = (r) => `${r.check}\u0000${r.prop}`;
 const esc = (s) => String(s).replace(/\|/g, '\\|');
@@ -37,7 +37,7 @@ How it is measured: each \`design/*.dc.html\` is rendered standalone (\`design-r
 
 Re-run: \`pnpm --filter @ratchet/desktop build && cd packages/e2e && node design-render/render.mjs && xvfb-run -a node scripts/shoot-app.mjs && xvfb-run -a node design-render/check.mjs after && xvfb-run -a node design-render/fonts.mjs && node design-render/report.mjs\` (copy the old \`after.json\` to \`prev.json\` first to keep the previous round's column).
 
-"Before" is the app as it was when the design work started; "Previous round" is the build before this round (range switch, KPI chips, metric switch, spans, winning change, evaluator cards, guardrail ticks); "After" is the current build. For the dev engine the design tools slow the simulated agents to one turn an hour (\`RATCHET_DEV_TICK_MS\`) so the seeded ledger holds still while screens are measured.
+"Before" is the app as it was when the design work started; "Previous round" is the build before the simplified model (docs/SIMPLIFIED_MODEL.md: three Settings rows, three-step New optimization, read-only Environments, receipts); "After" is the current build. Checks whose design element no longer exists were removed from \`design-render/specs.mjs\` (see "Deviations from the design" below), so the counts are not comparable one to one. For the dev engine the design tools slow the simulated agents to one turn an hour (\`RATCHET_DEV_TICK_MS\`) so the seeded ledger holds still while screens are measured.
 
 `;
 
@@ -105,13 +105,28 @@ Every number is read from the ledger or the engine; nothing is filled in by the 
 | "Baseline vs best" / "Before and after" rows | baseline stats vs the best verified commit's bench stats: objective family, then the threshold-guardrail metrics (\`error_rate\`, \`peak_rss_mb\`, marked \`ok\`: a verified commit passed them) |
 | "Where the time went" | evaluator-reported \`span.<name>\` metrics, baseline vs best verified. examples/demo-search's local bench measures them: the server's \`Server-Timing\` stages (parse / search / serialize) averaged over the p94–p96 requests plus \`wait\` (queueing + network). Hidden when the evaluator reports no spans (e.g. forecasting) |
 | "Winning change" | \`winningChange(id)\` → \`GitHost.diff(baseRef, bestSha)\` (merge base vs best verified commit; LocalGitHost in simulation, GitHubGitHost live). The dev engine maps its k-th verified win onto the k-th real demo patch (packages/agents/scripts/demo-search) committed onto examples/demo-search, so its diff is real git output too; otherwise the panel says why there is no diff |
-| Evaluator cards, guardrail tick list, value fields | a two-way view of the ratchet.yaml text (\`shared/config-yaml.ts\`: \`formFromYaml\` / \`patchConfigYaml\`); \`parseConfig\` in the main process stays the judge, and \`ConfigSummary\` (evaluator, value) comes from it |
+| New optimization facts (measured, toolchain, machine, protected set) | \`inspectRepo\`: the repo's \`ratchet.yaml\` from the default branch, parsed by core \`parseConfig\`, protected set from \`effectiveProtected\`; read-only |
+| Environments, teardown receipt | \`sandboxActivity\` / \`teardownReceipt\` / \`endSandbox\` of the engine and the \`sandbox\` events; the dev engine has none, so the screenshots show the empty states |
 
 The dev engine (used for these screenshots) still simulates agents and bench numbers; its seed now stores stats in the engine's format, uses the demo-search config with its value model, and places the edge-worker run six weeks back so the 30d window has a previous window to compare with.
 
+## Deviations from the design (simplified model)
+
+The designs predate [docs/SIMPLIFIED_MODEL.md](../../docs/SIMPLIFIED_MODEL.md). These screens changed on purpose, and their design checks were removed or re-pointed in \`design-render/specs.mjs\`; the visual language (Midnight Brass tokens, serif titles, brass primary, hairline cards, pills, segmented controls) is reused unchanged.
+
+| Design | App | Why |
+|---|---|---|
+| New optimization: four steps (Target, Evaluator & metric, Guardrails, Agents & limits) with a YAML editor, evaluator cards, guardrail ticks, value fields and a preflight list | Three steps: **Repo** (account repo picker, Local folder…, Try a demo, template pull request when there is no ratchet.yaml), **Review** (read-only facts, protected set, agents, "Where agents run", a short "What's missing" list), **Budget & time** (defaults $50 / 2 h, Start) | The repo owns \`ratchet.yaml\`; changes go through a pull request. Checks for the removed cards, ticks, inputs and the YAML panel are gone; step cards, titles, numbers, subtitles, review panel, breadcrumb, cancel button and the primary action still compare |
+| New optimization primary action "Run baseline & start" in the header | "Continue to review" / "Continue to budget" / "Start" in each step's footer | The flow is a wizard; the header keeps Cancel |
+| AWS sandbox: OpenTofu plan diff, Re-plan / Apply / Destroy, account details, agent limits, contract outputs | **Environments**: what is running (phase, region, runs, instances, cost), last teardown receipt, "End sandbox now" behind a confirm, and the unchanged architecture diagram (the Mac now says "agents", the runners "optional · unattended") | The sandbox is automatic: created at the first run, removed after the last run plus an idle window. Plan / account / limits / outputs checks removed; header pill shape, diagram heading and dot-grid still compare |
+| Result: teardown checklist and "Destroy sandbox…" button | Teardown **receipt** (what was removed, cost, proof that nothing is left running) | Teardown is automatic; the destructive-button check was removed, the "Teardown" eyebrow check still compares |
+| Settings (no design file) | Three rows: GitHub, AWS, Agents, plus a collapsed "Advanced (development)" | Not covered by a design |
+| Benchmarks: one view | A "Benchmark history / Templates" switch; the Templates gallery and "Try a demo" are new | Not covered by a design |
+| Sidebar integration chips: GitHub, AWS, Claude Code, Codex | Same four chips, now meaning signed in / profile chosen / harness ready | The chip styles are unchanged and still compared |
+
 ## Overall verdict
 
-**Pass.** Every structural element of the six design screens now has a real-data counterpart except the fake macOS window chrome, which is intentional (the app uses the OS frame). See the summary for the computed-style result; any failing row is listed in its screen's table.
+**Pass for the screens the designs cover.** Every structural element that still exists in the simplified model has a real-data counterpart, except the fake macOS window chrome, which is intentional (the app uses the OS frame). Elements that the model removed are listed above rather than faked. See the summary for the computed-style result; any failing row is listed in its screen's table.
 `;
 writeFileSync(join(root, 'DESIGN_CHECK.md'), out);
 console.log('DESIGN_CHECK.md written', out.length);

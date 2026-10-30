@@ -6,19 +6,19 @@ How it is measured: each `design/*.dc.html` is rendered standalone (`design-rend
 
 Re-run: `pnpm --filter @ratchet/desktop build && cd packages/e2e && node design-render/render.mjs && xvfb-run -a node scripts/shoot-app.mjs && xvfb-run -a node design-render/check.mjs after && xvfb-run -a node design-render/fonts.mjs && node design-render/report.mjs` (copy the old `after.json` to `prev.json` first to keep the previous round's column).
 
-"Before" is the app as it was when the design work started; "Previous round" is the build before this round (range switch, KPI chips, metric switch, spans, winning change, evaluator cards, guardrail ticks); "After" is the current build. For the dev engine the design tools slow the simulated agents to one turn an hour (`RATCHET_DEV_TICK_MS`) so the seeded ledger holds still while screens are measured.
+"Before" is the app as it was when the design work started; "Previous round" is the build before the simplified model (docs/SIMPLIFIED_MODEL.md: three Settings rows, three-step New optimization, read-only Environments, receipts); "After" is the current build. Checks whose design element no longer exists were removed from `design-render/specs.mjs` (see "Deviations from the design" below), so the counts are not comparable one to one. For the dev engine the design tools slow the simulated agents to one turn an hour (`RATCHET_DEV_TICK_MS`) so the seeded ledger holds still while screens are measured.
 
 ## Summary
 
 | | Before | Previous round | After |
 |---|---|---|---|
-| Computed-style checks passing | 104 / 303 | 394 / 395 | **509 / 509** |
-| 1 · Optimizations: style / structure | 41/113 · 2/16 | 130/130 · 14/16 | 144/144 · 15/16 |
-| 2 · New optimization: style / structure | 18/52 · 1/10 | 66/66 · 8/10 | 103/103 · 10/10 |
-| 3 · AWS sandbox (Environments): style / structure | 8/27 · 2/7 | 43/43 · 7/7 | 43/43 · 7/7 |
+| Computed-style checks passing | 104 / 303 | 509 / 509 | **405 / 405** |
+| 1 · Optimizations: style / structure | 41/113 · 2/16 | 144/144 · 15/16 | 144/144 · 15/16 |
+| 2 · New optimization: style / structure | 18/52 · 1/10 | 103/103 · 10/10 | 33/33 · 5/5 |
+| 3 · Environments (read-only): style / structure | 8/27 · 2/7 | 43/43 · 7/7 | 13/13 · 2/2 |
 | 4 · Live agents: style / structure | 16/53 · 3/7 | 75/75 · 7/7 | 75/75 · 7/7 |
-| 5 · Benchmark history: style / structure | 6/20 · 0/8 | 37/38 · 7/8 | 52/52 · 8/8 |
-| 6 · Result & teardown: style / structure | 15/38 · 3/10 | 43/43 · 8/10 | 92/92 · 10/10 |
+| 5 · Benchmark history: style / structure | 6/20 · 0/8 | 52/52 · 8/8 | 52/52 · 8/8 |
+| 6 · Result & teardown receipt: style / structure | 15/38 · 3/10 | 92/92 · 10/10 | 88/88 · 10/10 |
 
 ## Fonts actually rendered
 
@@ -218,11 +218,9 @@ Screenshots: `artifacts/design/new-optimization.png` (design), `artifacts/app/ne
 | Page title · letterSpacing | -0.46px | -0.46px | pass | pass |
 | Subtitle · fontSize | 14px | 14px | — | pass |
 | Subtitle · color | #A7B1C2 | #A7B1C2 | — | pass |
-| Primary action · h | 38 | 38 | FAIL | pass |
-| Primary action · borderRadius | 10px | 10px | pass | pass |
-| Primary action · backgroundImage | linear-gradient(#E6C487, #C99C55) | linear-gradient(#E6C487, #C99C55) | FAIL | pass |
-| Primary action · color | #1A1408 | #1A1408 | FAIL | pass |
-| Primary action · fontWeight | 600 | 600 | pass | pass |
+| Primary action (the app moves it into the step: Continue / Start) · h | 38 | 38 | — | pass |
+| Primary action (the app moves it into the step: Continue / Start) · borderRadius | 10px | 10px | — | pass |
+| Primary action (the app moves it into the step: Continue / Start) · fontWeight | 600 | 600 | — | pass |
 | Cancel button (design uses a content-box <a>, so its height is not compared) · borderRadius | 10px | 10px | — | pass |
 | Cancel button (design uses a content-box <a>, so its height is not compared) · borderTopColor | #94A3BE/0.2 | #94A3BE/0.2 | — | pass |
 | Cancel button (design uses a content-box <a>, so its height is not compared) · color | #ECEFF4 | #ECEFF4 | — | pass |
@@ -233,85 +231,17 @@ Screenshots: `artifacts/design/new-optimization.png` (design), `artifacts/app/ne
 | Step title · fontSize | 16px | 16px | — | pass |
 | Step title · fontWeight | 600 | 600 | — | pass |
 | Step title · fontFamily | Instrument Sans | Instrument Sans | — | pass |
-| Step number badge · w | 36 | 36 | — | pass |
-| Step number badge · borderRadius | 18px | 18px | — | pass |
-| Step number badge · fontFamily | Instrument Serif | Instrument Serif | — | pass |
-| Step number badge · fontSize | 20px | 20px | — | pass |
-| Step number badge · backgroundColor | #7BD8B0/0.12 | #7BD8B0/0.12 | — | pass |
-| Step number badge · color | #7BD8B0 | #7BD8B0 | — | pass |
+| Step number badge (shape; its colour follows the step state: ready / focus) · w | 36 | 36 | — | pass |
+| Step number badge (shape; its colour follows the step state: ready / focus) · borderRadius | 18px | 18px | — | pass |
+| Step number badge (shape; its colour follows the step state: ready / focus) · fontFamily | Instrument Serif | Instrument Serif | — | pass |
+| Step number badge (shape; its colour follows the step state: ready / focus) · fontSize | 20px | 20px | — | pass |
 | Step subtitle · fontSize | 12.5px | 12.5px | — | pass |
 | Step subtitle · color | #8592A6 | #8592A6 | — | pass |
-| Field label · fontSize | 12.5px | 12.5px | FAIL | pass |
-| Field label · color | #A7B1C2 | #A7B1C2 | FAIL | pass |
-| Field label · textTransform | none | none | pass | pass |
-| Field label · rowGap | 7px | 7px | FAIL | pass |
-| Text input · h | 40 | 40 | pass | pass |
-| Text input · borderRadius | 9px | 9px | FAIL | pass |
-| Text input · backgroundColor | #0C121D | #0C121D | FAIL | pass |
-| Text input · borderTopColor | #94A3BE/0.18 | #94A3BE/0.18 | FAIL | pass |
-| Text input · fontSize | 13px | 13px | FAIL | pass |
-| Text input · pad | 0 12 0 12 | 0 12 0 12 | FAIL | pass |
-| Segmented control · backgroundColor | #0C121D | #0C121D | FAIL | pass |
-| Segmented control · borderRadius | 10px | 10px | pass | pass |
-| Segmented control · borderTopColor | #94A3BE/0.14 | #94A3BE/0.14 | pass | pass |
-| Segmented control · pad | 3 3 3 3 | 3 3 3 3 | FAIL | pass |
-| Segmented option (on) · h | 32 | 32 | FAIL | pass |
-| Segmented option (on) · backgroundColor | #1E2738 | #1E2738 | FAIL | pass |
-| Segmented option (on) · color | #F4E3C0 | #F4E3C0 | FAIL | pass |
-| Segmented option (on) · borderRadius | 7px | 7px | FAIL | pass |
-| Agent choice card · borderRadius | 12px | 12px | FAIL | pass |
-| Agent choice card · borderTopColor | #B8A6FF/0.4 | #B8A6FF/0.4 | FAIL | pass |
-| Agent choice card · backgroundColor | #B8A6FF/0.06 | #B8A6FF/0.06 | FAIL | pass |
-| Agent choice card · pad | 14 14 14 14 | 14 14 14 14 | FAIL | pass |
-| Budget readout · fontFamily | Instrument Serif | Instrument Serif | — | pass |
-| Budget readout · fontSize | 28px | 28px | — | pass |
-| Budget readout · color | #F4E3C0 | #F4E3C0 | — | pass |
-| Evaluator card (selected) · borderRadius | 12px | 12px | — | pass |
-| Evaluator card (selected) · borderTopColor | #D9B26F | #D9B26F | — | pass |
-| Evaluator card (selected) · backgroundColor | #D9B26F/0.07 | #D9B26F/0.07 | — | pass |
-| Evaluator card (selected) · pad | 14 14 14 14 | 14 14 14 14 | — | pass |
-| Evaluator card (selected) · rowGap | 10px | 10px | — | pass |
-| Evaluator card (idle) · borderRadius | 12px | 12px | — | pass |
-| Evaluator card (idle) · borderTopColor | #94A3BE/0.16 | #94A3BE/0.16 | — | pass |
-| Evaluator card (idle) · backgroundColor | #0C121D | #0C121D | — | pass |
-| Evaluator card (idle) · pad | 14 14 14 14 | 14 14 14 14 | — | pass |
-| Evaluator tag tile · w | 30 | 30 | — | pass |
-| Evaluator tag tile · h | 30 | 30 | — | pass |
-| Evaluator tag tile · borderRadius | 8px | 8px | — | pass |
-| Evaluator tag tile · backgroundColor | #1C2332 | #1C2332 | — | pass |
-| Evaluator tag tile · color | #EBCB8E | #EBCB8E | — | pass |
-| Evaluator tag tile · fontSize | 11px | 11px | — | pass |
-| Evaluator tag tile · fontFamily | JetBrains Mono | JetBrains Mono | — | pass |
-| Evaluator card title · fontWeight | 600 | 600 | — | pass |
-| Evaluator card command line · fontFamily | JetBrains Mono | JetBrains Mono | — | pass |
-| Evaluator card command line · fontSize | 11.5px | 11.5px | — | pass |
-| Evaluator card command line · color | #8592A6 | #8592A6 | — | pass |
-| Evaluator radio · w | 16 | 16 | — | pass |
-| Evaluator radio · h | 16 | 16 | — | pass |
-| Evaluator radio · accentColor | #D9B26F | #D9B26F | — | pass |
-| Guardrail list frame · borderRadius | 12px | 12px | — | pass |
-| Guardrail list frame · borderTopColor | #94A3BE/0.12 | #94A3BE/0.12 | — | pass |
-| Guardrail row · pad | 13 16 13 16 | 13 16 13 16 | — | pass |
-| Guardrail row · backgroundColor | #0C121D | #0C121D | — | pass |
-| Guardrail row · columnGap | 14px | 14px | — | pass |
-| Guardrail checkbox · w | 16 | 16 | — | pass |
-| Guardrail checkbox · h | 16 | 16 | — | pass |
-| Guardrail checkbox · accentColor | #D9B26F | #D9B26F | — | pass |
-| Guardrail title · fontWeight | 500 | 500 | — | pass |
-| Guardrail subtitle · fontSize | 12px | 12px | — | pass |
-| Guardrail subtitle · color | #8592A6 | #8592A6 | — | pass |
-| Guardrail scope tag · fontFamily | JetBrains Mono | JetBrains Mono | — | pass |
-| Guardrail scope tag · fontSize | 11.5px | 11.5px | — | pass |
-| Guardrail scope tag · color | #8592A6 | #8592A6 | — | pass |
 | Review heading · fontFamily | Instrument Serif | Instrument Serif | — | pass |
 | Review heading · fontSize | 26px | 26px | — | pass |
 | Review card · backgroundColor | #111827 | #111827 | pass | pass |
 | Review card · borderRadius | 14px | 14px | pass | pass |
 | Review card · pad | 20 20 20 20 | 20 20 20 20 | pass | pass |
-| YAML panel title · backgroundColor | #111827 | #111827 | — | pass |
-| YAML panel title · borderRadius | 14px | 14px | — | pass |
-| Preflight eyebrow · fontSize | 10.5px | 10.5px | pass | pass |
-| Preflight eyebrow · letterSpacing | 1.47px | 1.47px | pass | pass |
 
 **Structure** (does the design element have an app counterpart?)
 
@@ -322,13 +252,8 @@ Screenshots: `artifacts/design/new-optimization.png` (design), `artifacts/app/ne
 | Step subtitles | yes | yes | no |  |
 | Review panel (serif heading + key/value rows) | yes | yes | no |  |
 | "Baseline first" callout | yes | yes | no |  |
-| Preflight list with check icons | yes | yes | yes |  |
-| Agent cards with CC/CX avatars | yes | yes | no |  |
-| Budget panel with serif readout | yes | yes | no |  |
-| Benchmark picker cards (k6 / pb / custom) | yes | yes | no |  |
-| Guardrail checkbox list | yes | yes | no |  |
 
-## 3 · AWS sandbox (Environments)
+## 3 · Environments (read-only)
 
 Screenshots: `artifacts/design/sandbox.png` (design), `artifacts/app/sandbox.png` (app).
 
@@ -343,40 +268,10 @@ Screenshots: `artifacts/design/sandbox.png` (design), `artifacts/app/sandbox.png
 | Plan status pill (shape; colour depends on plan state) · h | 26 | 26 | — | pass |
 | Plan status pill (shape; colour depends on plan state) · borderRadius | 13px | 13px | — | pass |
 | Plan status pill (shape; colour depends on plan state) · fontSize | 12px | 12px | — | pass |
-| Header ghost button · h | 38 | 38 | — | pass |
-| Header ghost button · borderRadius | 10px | 10px | — | pass |
-| Header ghost button · borderTopColor | #94A3BE/0.2 | #94A3BE/0.2 | — | pass |
 | Diagram card heading · fontFamily | Instrument Serif | Instrument Serif | — | pass |
 | Diagram card heading · fontSize | 26px | 26px | — | pass |
 | Diagram dot-grid backdrop · backgroundImage | radial-gradient(#94A3BE/0.13 1px, transparent 1px) | radial-gradient(#94A3BE/0.13 1px, transparent 1px) | — | pass |
 | Diagram dot-grid backdrop · borderRadius | 10px | 10px | — | pass |
-| Plan heading · fontFamily | Instrument Serif | Instrument Serif | — | pass |
-| Plan heading · fontSize | 26px | 26px | — | pass |
-| Plan row · pad | 12 20 12 20 | 12 20 12 20 | FAIL | pass |
-| Plan row · borderTopColor | #94A3BE/0.08 | #94A3BE/0.08 | FAIL | pass |
-| Plan resource name · fontFamily | JetBrains Mono | JetBrains Mono | pass | pass |
-| Plan resource name · fontSize | 12.5px | 12.5px | FAIL | pass |
-| Plan kind tile · w | 34 | 34 | — | pass |
-| Plan kind tile · h | 34 | 34 | — | pass |
-| Plan kind tile · borderRadius | 9px | 9px | — | pass |
-| Plan kind tile · backgroundColor | #7BD8B0/0.12 | #7BD8B0/0.12 | — | pass |
-| Plan kind tile · color | #7BD8B0 | #7BD8B0 | — | pass |
-| Plan kind tile · fontSize | 10px | 10px | — | pass |
-| Plan action chip · borderRadius | 6px | 6px | FAIL | pass |
-| Plan action chip · backgroundColor | #7BD8B0/0.12 | #7BD8B0/0.12 | FAIL | pass |
-| Plan action chip · color | #7BD8B0 | #7BD8B0 | pass | pass |
-| Plan action chip · fontSize | 11px | 11px | FAIL | pass |
-| Account eyebrow · fontSize | 10.5px | 10.5px | pass | pass |
-| Account eyebrow · letterSpacing | 1.47px | 1.47px | pass | pass |
-| Instance-type chip · borderRadius | 7px | 7px | — | pass |
-| Instance-type chip · backgroundColor | #0C121D | #0C121D | — | pass |
-| Instance-type chip · borderTopColor | #94A3BE/0.16 | #94A3BE/0.16 | — | pass |
-| Instance-type chip · fontFamily | JetBrains Mono | JetBrains Mono | — | pass |
-| Instance-type chip · fontSize | 11.5px | 11.5px | — | pass |
-| Limit tile · backgroundColor | #0C121D | #0C121D | — | pass |
-| Limit tile · pad | 12 12 12 12 | 12 12 12 12 | — | pass |
-| Limit number · fontFamily | Instrument Serif | Instrument Serif | — | pass |
-| Limit number · fontSize | 28px | 28px | — | pass |
 
 **Structure** (does the design element have an app counterpart?)
 
@@ -384,11 +279,6 @@ Screenshots: `artifacts/design/sandbox.png` (design), `artifacts/app/sandbox.png
 |---|---|---|---|---|
 | Eyebrow + status pill in header | yes | yes | yes |  |
 | Architecture diagram with trusted-path brass boxes | yes | yes | no |  |
-| Plan rows with S3/IAM/EC2 tiles | yes | yes | no |  |
-| Plan summary counters (+n ~n -n) | yes | yes | no |  |
-| Account key/value rows | yes | yes | yes |  |
-| Agent limit tiles | yes | yes | no |  |
-| Outputs list | yes | yes | no |  |
 
 ## 4 · Live agents
 
@@ -556,7 +446,7 @@ Screenshots: `artifacts/design/benchmarks.png` (design), `artifacts/app/benchmar
 | Baseline vs best percentile rows | yes | yes | no |  |
 | Candidates table with guardrail dots | yes | yes | no |  |
 
-## 6 · Result & teardown
+## 6 · Result & teardown receipt
 
 Screenshots: `artifacts/design/result.png` (design), `artifacts/app/result.png` (app).
 
@@ -650,10 +540,6 @@ Screenshots: `artifacts/design/result.png` (design), `artifacts/app/result.png` 
 | By-agent avatar · color | #CFC2FF | #CFC2FF | FAIL | pass |
 | Spend breakdown eyebrow · fontSize | 10.5px | 10.5px | pass | pass |
 | Teardown eyebrow · fontSize | 10.5px | 10.5px | pass | pass |
-| Destructive outline button · h | 34 | 34 | pass | pass |
-| Destructive outline button · borderRadius | 9px | 9px | FAIL | pass |
-| Destructive outline button · borderTopColor | #F08A93/0.4 | #F08A93/0.4 | FAIL | pass |
-| Destructive outline button · color | #F5A8AF | #F5A8AF | FAIL | pass |
 
 **Structure** (does the design element have an app counterpart?)
 
@@ -693,10 +579,25 @@ Every number is read from the ledger or the engine; nothing is filled in by the 
 | "Baseline vs best" / "Before and after" rows | baseline stats vs the best verified commit's bench stats: objective family, then the threshold-guardrail metrics (`error_rate`, `peak_rss_mb`, marked `ok`: a verified commit passed them) |
 | "Where the time went" | evaluator-reported `span.<name>` metrics, baseline vs best verified. examples/demo-search's local bench measures them: the server's `Server-Timing` stages (parse / search / serialize) averaged over the p94–p96 requests plus `wait` (queueing + network). Hidden when the evaluator reports no spans (e.g. forecasting) |
 | "Winning change" | `winningChange(id)` → `GitHost.diff(baseRef, bestSha)` (merge base vs best verified commit; LocalGitHost in simulation, GitHubGitHost live). The dev engine maps its k-th verified win onto the k-th real demo patch (packages/agents/scripts/demo-search) committed onto examples/demo-search, so its diff is real git output too; otherwise the panel says why there is no diff |
-| Evaluator cards, guardrail tick list, value fields | a two-way view of the ratchet.yaml text (`shared/config-yaml.ts`: `formFromYaml` / `patchConfigYaml`); `parseConfig` in the main process stays the judge, and `ConfigSummary` (evaluator, value) comes from it |
+| New optimization facts (measured, toolchain, machine, protected set) | `inspectRepo`: the repo's `ratchet.yaml` from the default branch, parsed by core `parseConfig`, protected set from `effectiveProtected`; read-only |
+| Environments, teardown receipt | `sandboxActivity` / `teardownReceipt` / `endSandbox` of the engine and the `sandbox` events; the dev engine has none, so the screenshots show the empty states |
 
 The dev engine (used for these screenshots) still simulates agents and bench numbers; its seed now stores stats in the engine's format, uses the demo-search config with its value model, and places the edge-worker run six weeks back so the 30d window has a previous window to compare with.
 
+## Deviations from the design (simplified model)
+
+The designs predate [docs/SIMPLIFIED_MODEL.md](../../docs/SIMPLIFIED_MODEL.md). These screens changed on purpose, and their design checks were removed or re-pointed in `design-render/specs.mjs`; the visual language (Midnight Brass tokens, serif titles, brass primary, hairline cards, pills, segmented controls) is reused unchanged.
+
+| Design | App | Why |
+|---|---|---|
+| New optimization: four steps (Target, Evaluator & metric, Guardrails, Agents & limits) with a YAML editor, evaluator cards, guardrail ticks, value fields and a preflight list | Three steps: **Repo** (account repo picker, Local folder…, Try a demo, template pull request when there is no ratchet.yaml), **Review** (read-only facts, protected set, agents, "Where agents run", a short "What's missing" list), **Budget & time** (defaults $50 / 2 h, Start) | The repo owns `ratchet.yaml`; changes go through a pull request. Checks for the removed cards, ticks, inputs and the YAML panel are gone; step cards, titles, numbers, subtitles, review panel, breadcrumb, cancel button and the primary action still compare |
+| New optimization primary action "Run baseline & start" in the header | "Continue to review" / "Continue to budget" / "Start" in each step's footer | The flow is a wizard; the header keeps Cancel |
+| AWS sandbox: OpenTofu plan diff, Re-plan / Apply / Destroy, account details, agent limits, contract outputs | **Environments**: what is running (phase, region, runs, instances, cost), last teardown receipt, "End sandbox now" behind a confirm, and the unchanged architecture diagram (the Mac now says "agents", the runners "optional · unattended") | The sandbox is automatic: created at the first run, removed after the last run plus an idle window. Plan / account / limits / outputs checks removed; header pill shape, diagram heading and dot-grid still compare |
+| Result: teardown checklist and "Destroy sandbox…" button | Teardown **receipt** (what was removed, cost, proof that nothing is left running) | Teardown is automatic; the destructive-button check was removed, the "Teardown" eyebrow check still compares |
+| Settings (no design file) | Three rows: GitHub, AWS, Agents, plus a collapsed "Advanced (development)" | Not covered by a design |
+| Benchmarks: one view | A "Benchmark history / Templates" switch; the Templates gallery and "Try a demo" are new | Not covered by a design |
+| Sidebar integration chips: GitHub, AWS, Claude Code, Codex | Same four chips, now meaning signed in / profile chosen / harness ready | The chip styles are unchanged and still compared |
+
 ## Overall verdict
 
-**Pass.** Every structural element of the six design screens now has a real-data counterpart except the fake macOS window chrome, which is intentional (the app uses the OS frame). See the summary for the computed-style result; any failing row is listed in its screen's table.
+**Pass for the screens the designs cover.** Every structural element that still exists in the simplified model has a real-data counterpart, except the fake macOS window chrome, which is intentional (the app uses the OS frame). Elements that the model removed are listed above rather than faked. See the summary for the computed-style result; any failing row is listed in its screen's table.

@@ -1,5 +1,6 @@
-// The main flow against the REAL core engine in simulation mode (git copy of examples/demo-search, mock AWS, local
-// evaluator running a real build + tests + load generator, scripted agents applying real patches), on a fresh ledger.
+// The main flow against the REAL core engine on a demo (New optimization -> "Try a demo" -> review -> budget & time -> Start): a copy
+// of examples/demo-search served as the repository, mock AWS with the automatic environment, a local evaluator running a real
+// build + tests + load generator, scripted agents applying real patches, on a fresh ledger.
 //
 // Every wait polls on UI state with generous timeouts; the run takes about 10 minutes. Screenshots of each screen made
 // during the real run land in artifacts/app-live/.
@@ -7,10 +8,9 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { ARTIFACTS, REPO_ROOT, fmtNum, goTo, launchApp, openNewOptimization, poll, rpc, screenshotScreen, waitForScreen, waitSettled } from '../harness/launch.mjs';
+import { ARTIFACTS, fmtNum, goTo, launchApp, openNewOptimization, poll, rpc, screenshotScreen, waitForScreen, waitSettled } from '../harness/launch.mjs';
 
-const YAML = readFileSync(join(REPO_ROOT, 'examples/demo-search/ratchet.yaml'), 'utf8');
-const NAME = 'search-api p95 latency'; // objective.name of the demo config
+const NAME = 'Search API latency (demo)'; // the demo's name in the ledger
 const SHOTS = join(ARTIFACTS, 'app-live');
 const MIN = 60_000;
 
@@ -45,91 +45,68 @@ describe('main flow (real engine, simulation mode)', () => {
     const snap = await rpc(h.win, 'listOptimizations');
     assert.equal(snap.optimizations.length, 0);
     assert.equal(snap.engine.kind, 'real', 'the real engine, not the dev stub');
-    assert.equal(snap.engine.mode, 'simulation');
   });
 
-  test('pasting the demo ratchet.yaml validates and summarizes metric, evaluator and value', async () => {
+  test('step 1 (Repo): "Try a demo" picks the search demo; nothing else is needed', async () => {
     await openNewOptimization(h.win);
-    await h.win.getByRole('button', { name: 'Edit', exact: true }).click();
-    await h.win.getByLabel('ratchet.yaml', { exact: true }).fill(YAML);
-    // The form's own default config is valid too: wait until the pasted one (4 guardrails) is what is being summarized.
-    await poll('the pasted config to be summarized', async () => /4 guardrails/.test(await h.win.locator('.file-bar').innerText()), { timeout: 15_000 });
-    await h.win.locator('.validation').getByText('Valid config').waitFor({ timeout: 15_000 });
-    const bar = await h.win.locator('.file-bar').innerText();
-    assert.match(bar, /http_req_duration\.p95/);
-    assert.match(bar, /benchmark evaluator/);
-    assert.match(bar, /\$1,200 per ms \/ year · estimated/);
-    assert.match(bar, /4 guardrails/);
-    assert.match(bar, /4 protected paths/);
-    const review = await h.win.locator('.review').innerText();
-    assert.match(review, /Evaluator\s+benchmark · ratchet\/bench/);
-    assert.match(review, /Value\s+\$1,200 per ms \/ year · estimated/);
-    assert.match(review, /http_req_duration\.p95 ↓ · min 3%/);
-    assert.equal(await h.win.locator('.preflight li[data-state="fail"]').count(), 0, 'preflight has no blocking item');
-    assert.equal(await h.win.getByRole('button', { name: /Run baseline & start/ }).isEnabled(), true);
+    const demos = h.win.getByRole('group', { name: 'Demos' });
+    await demos.getByRole('button', { name: /Search API latency/ }).click();
+    assert.equal(await demos.getByRole('button', { name: /Search API latency/ }).getAttribute('aria-pressed'), 'true');
+    assert.match(await h.win.locator('.step__head', { hasText: 'Repo' }).innerText(), /Ready/);
+    assert.match(await h.win.locator('.review').innerText(), /Repository\s+Search API latency/);
+    await h.win.getByRole('button', { name: 'Continue to review' }).click();
+  });
+
+  test('step 2 (Review): what is measured, toolchain, machine and calibration; agents and where they run; nothing missing', async () => {
+    await h.win.getByRole('heading', { name: 'Review', level: 2 }).waitFor();
+    const facts = await h.win.getByLabel('What will run').innerText();
+    assert.match(facts, /http_req_duration\.p95\s*↓ lower is better/);
+    assert.match(facts, /Toolchain\s+simulation/i);
+    assert.match(facts, /Machine\s+mock AWS/i);
+    assert.match(facts, /Noise is measured during the baseline/);
+    // the repo owns the config: no yaml editor, no evaluator cards, no guardrail ticks
+    assert.equal(await h.win.getByLabel('ratchet.yaml', { exact: true }).count(), 0);
+    assert.equal(await h.win.locator('main input[name=evaluator]').count(), 0);
+    assert.equal(await h.win.locator('.guardrail-list').count(), 0);
+    const agents = h.win.getByRole('group', { name: 'Agents' });
+    assert.equal(await agents.getByRole('button', { name: /Claude Code/ }).getAttribute('aria-pressed'), 'true');
+    assert.equal(await agents.getByRole('button', { name: /Codex/ }).getAttribute('aria-pressed'), 'true');
+    assert.match(await agents.innerText(), /scripted demo agent/);
+    const where = h.win.getByRole('radiogroup', { name: 'Where agents run' });
+    assert.equal(await where.getByRole('radio', { name: 'This Mac' }).getAttribute('aria-checked'), 'true', 'This Mac is the default');
+    assert.equal(await where.getByRole('radio', { name: 'Cloud (unattended)' }).isDisabled(), true, 'a demo runs in simulation');
+    await h.win.getByTestId('missing').getByText(/Everything this run needs is in place/).waitFor({ timeout: 15_000 });
+    assert.equal(await h.win.getByTestId('missing').locator('li').count(), 0, 'no "what is missing" items');
+    assert.equal(await h.win.getByRole('button', { name: 'Continue to budget' }).isEnabled(), true);
+    assert.deepEqual(h.errors, []);
+  });
+
+  test('step 3 (Budget & time): defaults are $50 and 2 hours', async () => {
+    await h.win.getByRole('button', { name: 'Continue to budget' }).click();
+    await h.win.getByRole('heading', { name: 'Budget & time', level: 2 }).waitFor();
+    assert.equal(await h.win.getByLabel('Budget', { exact: true }).inputValue(), '50');
+    assert.match(await h.win.locator('.budget').innerText(), /Budget · \$50/);
+    assert.equal(await h.win.getByLabel('Time limit').inputValue(), '7200');
+    assert.match(await h.win.locator('.review').innerText(), /Limits\s+\$50 · 2 h/);
+    assert.equal(await h.win.getByRole('button', { name: 'Start', exact: true }).isEnabled(), true);
     await shot('new-optimization');
-  });
-
-  test('evaluator cards and the guardrail tick list edit the same ratchet.yaml; editing it updates the form', async () => {
-    const editor = h.win.getByLabel('ratchet.yaml', { exact: true });
-    const cards = h.win.locator('main input[name=evaluator]');
-    assert.equal(await cards.count(), 4, 'benchmark / backtest / eval / simulation');
-    assert.equal(await h.win.getByRole('radio', { name: 'Benchmark' }).isChecked(), true, 'the pasted config says kind: benchmark');
-    await h.win.locator('.eval-choice', { hasText: 'Backtest' }).click();
-    await poll('kind: backtest in the yaml', async () => /kind: backtest/.test(await editor.inputValue()), { timeout: 10_000 });
-    assert.match(await editor.inputValue(), /usd_per_unit: 1200/, 'the rest of the pasted config survives');
-    assert.match(await editor.inputValue(), /# domain pack: code performance/, 'and so do its comments');
-
-    const guards = h.win.locator('.guardrail-list input[type=checkbox]');
-    assert.equal(await guards.count(), 4);
-    await h.win.getByRole('checkbox', { name: 'peak_rss: < 1.2x' }).uncheck();
-    await poll('peak_rss gone from the yaml', async () => !/peak_rss/.test(await editor.inputValue()), { timeout: 10_000 });
-    await poll('3 guardrails summarized', async () => /3 guardrails/.test(await h.win.locator('.file-bar').innerText()), { timeout: 15_000 });
-    assert.equal(await guards.count(), 4, 'an unticked guardrail stays in the list');
-
-    // and back: the text drives the form
-    await editor.fill(YAML.replace('kind: benchmark', 'kind: simulation'));
-    await poll('the Simulation card selected', async () => h.win.getByRole('radio', { name: 'Simulation' }).isChecked(), { timeout: 10_000 });
-    assert.equal(await h.win.getByRole('checkbox', { name: 'peak_rss: < 1.2x' }).isChecked(), true);
-    await editor.fill(YAML);
-    await h.win.locator('.validation').getByText('Valid config').waitFor({ timeout: 15_000 });
+    // the steps can be walked back and forward without losing the choice
+    await h.win.getByRole('button', { name: 'Back' }).click();
+    await h.win.getByRole('heading', { name: 'Review', level: 2 }).waitFor();
+    await h.win.getByRole('button', { name: 'Continue to budget' }).click();
     assert.deepEqual(h.errors, []);
   });
 
-  test('a broken ratchet.yaml gives a path-precise error and blocks submit; fixing it recovers', async () => {
-    const editor = h.win.getByLabel('ratchet.yaml', { exact: true });
-    const run = h.win.getByRole('button', { name: /Run baseline & start/ });
-
-    await editor.fill(YAML.replace('direction: minimize', 'direction: sideways'));
-    const err = h.win.locator('.validation .errors li').first();
-    await err.waitFor({ timeout: 15_000 });
-    assert.equal(await err.locator('code').innerText(), 'objective.direction');
-    assert.match(await err.innerText(), /must be "minimize" or "maximize"/);
-    assert.match(await h.win.locator('.validation').innerText(), /1 error\b/);
-    assert.equal(await run.isDisabled(), true, 'cannot submit an invalid config');
-    assert.match(await h.win.locator('.file-bar').innerText(), /needs attention/);
-
-    await editor.fill(YAML.replace('kind: benchmark', 'kind: vibes').replace('usd_per_unit: 1200', 'usd_per_unit: lots'));
-    await poll('two path-precise errors', async () => (await h.win.locator('.validation .errors li code').allInnerTexts()).length >= 2, { timeout: 15_000 });
-    const paths = await h.win.locator('.validation .errors li code').allInnerTexts();
-    assert.ok(paths.includes('evaluator.kind'), `paths: ${paths}`);
-    assert.ok(paths.includes('objective.value.usd_per_unit'), `paths: ${paths}`);
-    assert.equal(await run.isDisabled(), true);
-
-    await editor.fill(YAML);
-    await h.win.locator('.validation').getByText('Valid config').waitFor({ timeout: 15_000 });
-    assert.equal(await run.isEnabled(), true);
-    assert.deepEqual(h.errors, []);
-  });
-
-  test('Run baseline & start opens Live agents with the new optimization', async () => {
-    await h.win.getByRole('button', { name: /Run baseline & start/ }).click();
+  test('Start opens Agents with the new optimization (a simulation run, mock agents)', async () => {
+    await h.win.getByRole('button', { name: 'Start', exact: true }).click();
     await waitForScreen(h.win, 'agents');
     assert.equal((await h.win.locator('main h1').first().innerText()).trim(), NAME);
     id = await poll('the optimization in the ledger', async () => (await rpc(h.win, 'listOptimizations')).optimizations[0]?.id, { timeout: T.start });
     const text = await badge().innerText();
     assert.match(text, /Baselining|Live|Draft|Starting/i, `status badge: ${text}`);
-    assert.match(await h.win.locator('.page-header .rt-eyebrow').innerText(), /OPTIMIZATIONS\s*\/\s*local · remote\.git/i);
+    assert.match(await h.win.locator('.page-header .rt-eyebrow').innerText(), /OPTIMIZATIONS\s*\/\s*\S+/i);
+    assert.equal((await rpc(h.win, 'getOptimization', id)).summary.budgetUsd, 50);
+    assert.equal((await rpc(h.win, 'getOptimization', id)).timeLimitS, 7200);
     // The sidebar announces it as soon as it is baselining / running.
     await h.win.locator('.live-card').waitFor({ timeout: 60_000 });
     assert.match(await h.win.locator('.live-card').innerText(), new RegExp(NAME.slice(0, 12)));
@@ -144,6 +121,7 @@ describe('main flow (real engine, simulation mode)', () => {
     assert.equal(d.summary.status, 'running');
     assert.ok(d.summary.baseline > 0, 'baseline recorded');
     assert.ok(d.baselineSamples.length >= 3, 'baseline has repeated samples');
+    await poll('the calibration in plain words', async () => /noise|stable|measured/i.test(await h.win.getByTestId('calibration').innerText()), { timeout: 30_000 });
     await poll('baseline in the stat card', async () => (await h.win.locator('.stat-card').first().innerText()).includes(`baseline ${fmtNum(d.summary.baseline)}`), { timeout: 30_000 });
   });
 
@@ -256,7 +234,7 @@ describe('main flow (real engine, simulation mode)', () => {
     await waitSettled(h.win);
     const f = h.win.locator('[data-testid=featured]');
     await f.waitFor();
-    assert.match(await f.innerText(), new RegExp(NAME, 'i'));
+    assert.match(await f.innerText(), new RegExp(NAME.replace(/[()]/g, '\\$&'), 'i'));
     assert.match(await f.locator('.featured__eyebrow').innerText(), /Live/i);
     const d = await api();
     await poll('hero number = best verified', async () => (await f.locator('[data-testid=featured-best]').innerText()).trim() === fmtNum(d.summary.best), { timeout: 30_000 });
@@ -278,21 +256,30 @@ describe('main flow (real engine, simulation mode)', () => {
     await shot('optimizations');
   });
 
-  test('Environments shows the plan, account and limits while the run is live', async () => {
+  test('Environments shows the automatic environment of the live run: phase, region, cost, no Apply or Destroy', async () => {
     needId();
     await goTo(h.win, 'Environments');
     await waitForScreen(h.win, 'sandbox');
     await waitSettled(h.win);
-    const info = await rpc(h.win, 'sandboxInfo');
-    const text = await h.win.locator('main').innerText();
-    assert.match(text, /Simulated sandbox/);
-    assert.ok(info.plan.changes.length > 0);
-    for (const c of info.plan.changes) assert.ok(text.includes(c.address), `plan lists ${c.address}`);
-    for (const t of info.limits.allowedInstanceTypes) assert.ok(text.includes(t), `limits list ${t}`);
-    // The app has no "apply" control and the simulation never applies the sandbox: outputs stay "after apply".
-    assert.equal(info.outputs, null);
-    assert.match(text, /Plan ready · \d+ to add/);
-    assert.match(await h.win.locator('.outputs').innerText(), /after apply/);
+    const env = h.win.getByTestId('environment');
+    await env.waitFor({ timeout: 30_000 });
+    const info = (await rpc(h.win, 'environments')).environments[0];
+    assert.match(info.sandboxId, /^ratchet-sim-search/);
+    assert.equal(info.simulated, true);
+    assert.equal(info.region, 'us-east-1');
+    assert.deepEqual(info.activeRuns, [id]);
+    const text = await env.innerText();
+    assert.match(text, /ratchet-sim-search/);
+    assert.match(text, /us-east-1/);
+    assert.match(text, /simulated/);
+    assert.match(text, /Ready/);
+    assert.match(text, /Runs active\s*1/);
+    assert.match(text, /Cost so far\s*\$\d/);
+    assert.match(text, /Removed automatically 30 min after the last run ends/);
+    assert.equal(await env.getByRole('button', { name: 'End sandbox now' }).isDisabled(), true, 'cannot end it while a run is active');
+    const buttons = (await h.win.locator('main button').allInnerTexts()).map((t) => t.trim());
+    assert.deepEqual(buttons.filter((t) => /plan|apply|destroy sandbox/i.test(t)), []);
+    assert.equal(await h.win.getByTestId('last-receipt').locator('.receipt').count(), 0, 'no receipt while the environment is alive');
     await shot('sandbox');
   });
 
@@ -302,7 +289,7 @@ describe('main flow (real engine, simulation mode)', () => {
     await waitForScreen(h.win, 'result');
     await waitSettled(h.win);
     assert.equal(await h.win.getByRole('button', { name: /pull request/i }).isDisabled(), true);
-    assert.equal(await h.win.getByRole('button', { name: 'Destroy sandbox…' }).isDisabled(), true);
+    assert.match(await h.win.getByTestId('no-receipt').innerText(), /Available once the run has finished/);
   });
 
   test('wait (bounded) for a verified win from the ratchet', async (t) => {
@@ -363,7 +350,7 @@ describe('main flow (real engine, simulation mode)', () => {
     assert.ok(m, `export note: ${await note.innerText()}`);
     assert.ok(existsSync(m[1]), `report file exists at ${m[1]}`);
     const md = readFileSync(m[1], 'utf8');
-    assert.match(md, new RegExp(`# Ratchet report: ${NAME}`));
+    assert.match(md, new RegExp(`# Ratchet report: ${NAME.replace(/[()]/g, '\\$&')}`));
     assert.match(md, /## Result/);
     assert.match(md, /## Verified wins/);
 
@@ -402,17 +389,53 @@ describe('main flow (real engine, simulation mode)', () => {
     await shot('result');
   });
 
-  test('teardown destroys the sandbox and ticks the checklist', async () => {
+  test('the environment goes idle after the run; "End sandbox now" (behind a confirm) removes it and writes the receipt', async () => {
     needId();
-    const destroy = h.win.getByRole('button', { name: 'Destroy sandbox…' });
-    assert.equal(await destroy.isEnabled(), true, 'enabled once the run has stopped');
-    await destroy.click();
-    await h.win.locator('.ok-note', { hasText: 'Sandbox torn down' }).waitFor({ timeout: 90_000 });
-    await poll('every teardown item done', async () => {
-      const items = h.win.locator('.checklist li');
-      return (await items.count()) > 0 && (await items.count()) === (await h.win.locator('.checklist li[data-done=true]').count());
-    }, { timeout: 30_000 });
-    assert.equal(await destroy.isDisabled(), true);
+    await goTo(h.win, 'Environments');
+    await waitForScreen(h.win, 'sandbox');
+    const env = h.win.getByTestId('environment');
+    await env.waitFor({ timeout: 30_000 });
+    await poll('the environment to be idle', async () => /Idle/.test(await env.innerText()), { timeout: 2 * MIN, interval: 1000 });
+    const end = env.getByRole('button', { name: 'End sandbox now' });
+    await poll('End sandbox now enabled', async () => end.isEnabled(), { timeout: 60_000 });
+    assert.match(await env.innerText(), /Removes itself at \d/);
+    await end.click();
+    const confirm = h.win.getByRole('group', { name: 'Confirm end sandbox' });
+    await confirm.waitFor();
+    await confirm.getByRole('button', { name: 'Cancel' }).click();
+    assert.equal(await h.win.getByRole('group', { name: 'Confirm end sandbox' }).count(), 0);
+    assert.equal((await rpc(h.win, 'environments')).environments.length, 1, 'cancel ends nothing');
+    await end.click();
+    await h.win.getByRole('button', { name: 'Confirm end sandbox' }).click();
+    const receipt = h.win.getByTestId('last-receipt').getByTestId('receipt');
+    await receipt.waitFor({ timeout: 90_000 });
+    assert.equal(await h.win.getByTestId('environment').count(), 0, 'the environment is gone');
+    const text = await receipt.innerText();
+    assert.match(text, /Nothing left running/);
+    assert.match(text, /ended by you/);
+    assert.match(text, /Cost\s+\$\d/i);
+    assert.match(text, /instances? terminated/);
+    const vm = (await rpc(h.win, 'environments')).lastReceipt;
+    assert.equal(vm.trigger, 'manual');
+    assert.equal(vm.nothingRunning, true);
+    assert.deepEqual(vm.runs.map((r) => r.optimizationId), [id]);
+    assert.deepEqual(vm.orphans, []);
+    await shot('sandbox-receipt');
+    assert.deepEqual(h.errors, []);
+  });
+
+  test('Result now shows the teardown receipt instead of a checklist', async () => {
+    needId();
+    await goTo(h.win, 'Result');
+    await waitForScreen(h.win, 'result');
+    await waitSettled(h.win);
+    const receipt = h.win.getByTestId('receipt');
+    await receipt.waitFor({ timeout: 30_000 });
+    assert.match(await receipt.innerText(), /Nothing left running/);
+    assert.equal(await h.win.getByRole('list', { name: 'Teardown checklist' }).count(), 0);
+    assert.equal(await h.win.getByRole('button', { name: /Destroy sandbox/ }).count(), 0);
+    assert.equal((await api()).receipt.sandboxId, (await rpc(h.win, 'environments')).lastReceipt.sandboxId);
+    await shot('result-receipt');
   });
 
   test('Optimizations afterwards lists the finished run; Settings still renders', async () => {
