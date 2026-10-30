@@ -50,7 +50,7 @@ describe('secrets never cross to the renderer', () => {
   it('getSettings exposes only configured yes/no, and no response contains the secret value', async () => {
     const ledger = openLedger(':memory:');
     const settings = new SettingsStore(null, rot, {});
-    const service = createService({ ledger, settings, createApp: (m) => createEngineForApp(ledger, m, { tickMs: 600_000 }) });
+    const service = createService({ ledger, settings, createApp: (m) => createEngineForApp(ledger, m, { tickMs: 600_000, engine: "dev" }) });
     const secret = 'sk-ant-TOPSECRET-VALUE';
     const afterSet = await service.setSecret('anthropicApiKey', secret);
     expect(afterSet.secrets).toEqual({ anthropicApiKey: true, openaiApiKey: false, githubToken: false });

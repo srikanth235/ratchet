@@ -1,33 +1,97 @@
-import type { EngineApi, Ledger, Mode, SandboxProvider } from '@ratchet/core';
-import { DevEngine } from './dev-engine.js';
-import { DevSandboxProvider } from './dev-sandbox.js';
-import { isLedgerEmpty, seedDemo } from './seed.js';
+import { mkdirSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { EngineApi, EngineEvent, Ledger, Mode, SandboxProvider } from '@ratchet/core';
+import { createSimulationRuntime, type SimulationRuntime } from '@ratchet/runtime';
+import { createDevEngine } from './dev-app.js';
 
 /** Everything the main process needs from "the engine side". */
-export interface AppEngine {
-  /** `dev` = the in-repo simulated stub; `real` = the core engine. Shown in the UI. */
-  kind: 'dev' | 'real';
-  engine: EngineApi;
-  sandbox: SandboxProvider;
-  /** Release timers / connections (called on mode switch and app quit). */
-  dispose(): void;
-}
+export type { AppEngine } from './dev-app.js';
+import type { AppEngine } from './dev-app.js';
 
 export interface CreateEngineOptions {
   tickMs?: number;
   seed?: number;
-  /** Seed demo data into an empty ledger. Default true for the dev engine. */
+  /** Seed demo data into an empty ledger (dev engine only). Default true. */
   seedDemo?: boolean;
+  /** Which engine to build. Default: `real`, unless RATCHET_ENGINE=dev. */
+  engine?: 'dev' | 'real';
+  /** Monorepo root (simulation needs examples/ and node_modules). Default: RATCHET_REPO_ROOT or derived from this file. */
+  repoRoot?: string;
+  /** Scratch root for simulation runs. Default: <repoRoot>/.ratchet-app-sim */
+  workRoot?: string;
 }
 
 /**
  * THE composition point. The desktop app builds its engine here and nowhere else.
- * The orchestrator replaces this body with the real engine + sandbox provider; keep the signature.
+ *
+ * - `simulation` mode: the real Engine on mock AWS + local git + local bench + scripted agents
+ *   (@ratchet/runtime createSimulationRuntime) against examples/demo-search.
+ * - `live` mode: needs sandbox outputs, GitHub and API keys from Settings; until those flows land
+ *   it reports a clear error instead of pretending (see docs/REAL_ENV_TESTING.md).
  */
 export function createEngineForApp(ledger: Ledger, mode: Mode, opts: CreateEngineOptions = {}): AppEngine {
-  const engine = new DevEngine(ledger, { mode, ...(opts.tickMs !== undefined && { tickMs: opts.tickMs }), ...(opts.seed !== undefined && { seed: opts.seed }) });
-  if ((opts.seedDemo ?? true) && isLedgerEmpty(ledger)) seedDemo(ledger);
-  // Resume anything that was running when the app last closed (the real engine does this from the ledger).
-  for (const o of ledger.listOptimizations({ status: ['baselining', 'running'] })) void engine.start(o.id);
-  return { kind: 'dev', engine, sandbox: new DevSandboxProvider(), dispose: () => engine.dispose() };
+  const which = opts.engine ?? (process.env.RATCHET_ENGINE === 'dev' ? 'dev' : 'real');
+  if (which === 'dev') return createDevEngine(ledger, mode, opts);
+  if (mode === 'live') return createUnconfiguredLive();
+
+  const repoRoot = resolve(opts.repoRoot ?? process.env.RATCHET_REPO_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '../../../..'));
+  const workRoot = resolve(opts.workRoot ?? join(repoRoot, '.ratchet-app-sim', String(Date.now())));
+  mkdirSync(workRoot, { recursive: true });
+  const ready: Promise<SimulationRuntime> = createSimulationRuntime({ ledger, repoRoot, workRoot });
+  const listeners = new Set<(e: EngineEvent) => void>();
+  const ac = new AbortController();
+  void ready.then((rt) => {
+    rt.engine.subscribe((e) => listeners.forEach((l) => l(e)));
+    void rt.engine.run(ac.signal);
+  });
+  const call = async <T>(f: (rt: SimulationRuntime) => Promise<T>): Promise<T> => f(await ready);
+
+  const engine: EngineApi = {
+    mode: () => 'simulation',
+    // In simulation the repo is the prepared copy of examples/demo-search, whatever the form said.
+    createOptimization: (input) => call((rt) => rt.engine.createOptimization({ ...input, repoUrl: rt.repoUrl, baseRef: rt.baseRef })),
+    start: (id) => call((rt) => rt.engine.start(id)),
+    stop: (id, reason) => call((rt) => rt.engine.stop(id, reason)),
+    pauseAgent: (id) => call((rt) => rt.engine.pauseAgent(id)),
+    resumeAgent: (id) => call((rt) => rt.engine.resumeAgent(id)),
+    messageAgent: (id, text) => call((rt) => rt.engine.messageAgent(id, text)),
+    openPullRequest: (id) => call((rt) => rt.engine.openPullRequest(id)),
+    teardown: (id) => call((rt) => rt.engine.teardown(id)),
+    subscribe: (l) => (listeners.add(l), () => listeners.delete(l)),
+  };
+  const sandbox: SandboxProvider = {
+    plan: (i) => call((rt) => rt.sandbox.plan(i)),
+    apply: (i) => call((rt) => rt.sandbox.apply(i)),
+    destroy: (i) => call((rt) => rt.sandbox.destroy(i)),
+    outputs: (id) => call((rt) => rt.sandbox.outputs(id)),
+  };
+  return {
+    kind: 'real',
+    engine,
+    sandbox,
+    dispose: () => {
+      ac.abort();
+      void ready.then((rt) => rt.dispose());
+    },
+  };
+}
+
+function createUnconfiguredLive(): AppEngine {
+  const fail = async (): Promise<never> => {
+    throw new Error('Live mode needs a sandbox, GitHub token and API keys (Settings). Use simulation mode until the real-environment setup in docs/REAL_ENV_TESTING.md is done.');
+  };
+  const engine: EngineApi = {
+    mode: () => 'live',
+    createOptimization: fail,
+    start: fail,
+    stop: fail,
+    pauseAgent: fail,
+    resumeAgent: fail,
+    messageAgent: fail,
+    openPullRequest: fail,
+    teardown: fail,
+    subscribe: () => () => {},
+  };
+  return { kind: 'real', engine, sandbox: { plan: fail, apply: fail, destroy: fail, outputs: async () => null }, dispose: () => {} };
 }

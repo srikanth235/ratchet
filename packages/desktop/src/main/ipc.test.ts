@@ -26,7 +26,7 @@ const cipher = { isAvailable: () => true, encrypt: (s: string) => Buffer.from(`e
 function setup(trusted?: (e: unknown) => boolean) {
   const ledger = openLedger(':memory:');
   const settings = new SettingsStore(null, cipher, {});
-  const service = createService({ ledger, settings, createApp: (mode) => createEngineForApp(ledger, mode, { tickMs: 600_000 }) });
+  const service = createService({ ledger, settings, createApp: (mode) => createEngineForApp(ledger, mode, { tickMs: 600_000, engine: "dev" }) });
   const ipc = new FakeIpc();
   registerIpc(ipc, service, trusted ? { isTrustedSender: trusted } : {});
   return { ledger, settings, service, ipc };
@@ -138,7 +138,7 @@ describe('RatchetService commands & events', () => {
     const settings = new SettingsStore(null, cipher, {});
     const service = createService({
       ledger, settings,
-      createApp: (m) => createEngineForApp(ledger, m, { tickMs: 600_000 }),
+      createApp: (m) => createEngineForApp(ledger, m, { tickMs: 600_000, engine: "dev" }),
       saveReport: async (name, md) => (saved.push(name, md), '/tmp/r.md'),
     });
     const pr = await service.openPullRequest('opt_demo_ingest');
