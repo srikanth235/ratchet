@@ -45,6 +45,29 @@ resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
       days_after_initiation = 7
     }
   }
+
+  # Staged candidate / bench.ref tarballs are only needed while a bench
+  # instance downloads them (minutes), yet one pair is written per job. Expire
+  # them well before the general retention. The bucket is not versioned today,
+  # so the noncurrent rule is a no-op; it is here so that turning versioning on
+  # later cannot make superseded copies of staged code live forever.
+  rule {
+    id     = "expire-bench-inputs"
+    status = "Enabled"
+    filter {
+      prefix = "bench-inputs/"
+    }
+
+    expiration {
+      days = var.bench_inputs_retention_days
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = var.bench_inputs_retention_days
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 1
+    }
+  }
 }
 
 # ---- Sealed bucket: hidden traffic traces, confirm runner only ----

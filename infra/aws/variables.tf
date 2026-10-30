@@ -84,6 +84,17 @@ variable "artifacts_retention_days" {
   default     = 30
 }
 
+variable "bench_inputs_retention_days" {
+  description = "Days after which staged bench inputs (bench-inputs/ in the artifacts bucket: candidate and bench.ref tarballs) expire. They are only needed while the bench instance downloads them, so keep this short; it is only useful below artifacts_retention_days."
+  type        = number
+  default     = 7
+
+  validation {
+    condition     = var.bench_inputs_retention_days >= 1 && floor(var.bench_inputs_retention_days) == var.bench_inputs_retention_days
+    error_message = "bench_inputs_retention_days must be a positive integer (S3 lifecycle rules work in whole days)."
+  }
+}
+
 variable "force_destroy" {
   description = "Allow `tofu destroy` to delete non-empty buckets (all versions). The sandbox account is dedicated and ephemeral, so true by default."
   type        = bool
@@ -98,6 +109,25 @@ variable "sealed_confirm_prefix" {
   validation {
     condition     = can(regex("^[a-z0-9][a-z0-9_-]*(/[a-z0-9][a-z0-9_-]*)*/$", var.sealed_confirm_prefix))
     error_message = "sealed_confirm_prefix must look like \"holdout/\" or \"traces/v1/\": lowercase letters, digits, \"-\" and \"_\" segments, each followed by \"/\"; no wildcards, \"..\" or empty segments."
+  }
+}
+
+# ---- DNS Firewall (Route 53 Resolver), default on ----
+
+variable "enable_dns_firewall" {
+  description = "Associate a Route 53 Resolver DNS Firewall rule group with the sandbox VPC: only the AWS service names the bench needs (S3, ssm, ssmmessages, ec2messages, logs of var.region), the VPC's own internal names and the agent allow-list (egress_proxy_domains + extras) resolve; every other name gets NXDOMAIN. This closes DNS tunnelling out of the bench subnet. The association is per VPC, so it also applies to agent runners: see docs/real-env/aws.md. Roughly $0.60/month per rule group association plus $0.60 per million queries."
+  type        = bool
+  default     = true
+}
+
+variable "dns_firewall_extra_domains" {
+  description = "Extra names the DNS firewall lets through, e.g. a package registry agent runners install from (\"registry.npmjs.org\", \"*.pythonhosted.org\"). Lowercase; a leading \"*.\" matches subdomains only (list the bare name too). A bare \"*\" is rejected: it would turn the firewall off."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for d in var.dns_firewall_extra_domains : can(regex("^(\\*\\.)?[a-z0-9][a-z0-9_-]*(\\.[a-z0-9][a-z0-9_-]*)*\\.[a-z]{2,}$", d))])
+    error_message = "dns_firewall_extra_domains entries must be lowercase domain names, optionally with one leading \"*.\"; a bare \"*\", spaces and ports are not allowed."
   }
 }
 
