@@ -43,3 +43,47 @@ Funding flows mostly to orchestration and hyperscalers; pure perf optimizers are
 3. Be the verification layer: open spec + CLI others' outputs run through; partner with CodSpeed/Bencher/Nyrkiö.
 
 Unverified items: several prices, funding amounts and verification claims; see the research thread.
+
+---
+
+# Round 2 — generic "verified business-metric improvement" platforms
+
+**Verdict: partly unique.** The core loop (agent proposes → user eval scores → keep
+winners) is commoditizing fast across hyperscalers, seed startups, YC and OSS. Not
+found anywhere: a sealed-holdout, tamper-proof evaluator *as the product*; budget-capped
+campaigns with $ value per $ spent as the headline; outcome/gain-share pricing outside
+FinOps; packs spanning perf → forecasting.
+
+## Closest five
+
+| Player | Domain | Rigor | Deploy | Pricing | Stage |
+|---|---|---|---|---|---|
+| [hiloop / Autoresearch Inc](https://www.ycombinator.com/companies/autoresearch-inc) | ML/post-training, "any measurable" | "Statistical verification" (paired confirm runs); no holdout detail | Hosted or your cloud | Unknown | YC S26, 3 people |
+| [Weco](https://www.weco.ai/platform) | Any scripted metric (ML, kernels, prompts) | Your eval script | CLI + hosted | Credits / BYOK / enterprise | $8M seed |
+| [AlphaEvolve on GCP](https://blog.google/innovation-and-ai/infrastructure-and-cloud/google-cloud/alphaevolve-on-cloud/) | Algorithms, logistics, runtimes | Your scorer | Google Cloud | Unpublished | GA |
+| [Applied Compute](https://www.appliedcompute.com/) | Bespoke RL agents | Customer graders | VPC option | Services + compute | ~$160M raised |
+| [TensorZero Autopilot](https://www.tensorzero.com/blog/automated-ai-engineer/) | LLM-app metrics | A/B on prod feedback | Self-hosted | Unpublished | $7.3M seed |
+
+Also notable: [Autolab](https://www.autolab.ai/autoresearch.html), [Autoheal](https://venturebeat.com/orchestration/autoheal-wants-to-manage-the-work-ai-coding-agents-leave-behind-claiming-cost-reductions-of-up-to-30-per-task) (evaluator-gated PRs, per-session pricing),
+[Hightouch AI Decisioning](https://hightouch.com/docs/ai-decisioning/agents) (best holdout rigor, marketing only),
+[Databricks Agent Bricks](https://www.databricks.com/blog/introducing-agent-bricks), [SageMaker agent skills](https://aws.amazon.com/about-aws/whats-new/2026/10/bring-sagemaker-ai-expertise-to-your-coding-agent/),
+Sedai / Cast AI / ProsperOps (FinOps, gain-share pricing), Nixtla / o9 / Blue Yonder (forecasting suites).
+
+## Pack crowding
+- ML model quality — most crowded (hiloop, Weco, Autolab, Applied Compute, hyperscalers).
+- Code perf — crowded (CodSpeed, Codeflash, TurinTech, AlphaEvolve, Weco).
+- FinOps — crowded and mature, but runtime-config, not code/model changes.
+- Pricing/marketing — incumbents with RL decisioning (Hightouch, Aampe/MoEngage, Optimizely).
+- **Forecasting — most open** for a backtest-gated "improve your own pipeline" loop (absence of evidence, not proof).
+
+## Threats
+1. Hyperscaler bundling (AlphaEvolve, free SageMaker skills, Databricks).
+2. Weco (first mover, logos, harness-agnostic).
+3. hiloop (same pitch incl. "verified" and "your cloud").
+4. Coding agents + OSS autoresearch skill = 80% for free.
+5. Incumbents moving down-stack (Datadog+Eppo, Sedai, Hightouch).
+
+## Implication
+The agent loop is not a moat. Differentiate on **verification + ROI accounting as the
+product** (sealed holdouts, noise floor, tamper-proof evaluator, $ value per $ spent,
+outcome pricing), start in perf, move to **forecasting** next.
