@@ -553,6 +553,21 @@ describe('launch', () => {
         expect(proxied).toContain("RATCHET_BENCH_PURPOSE='deps'");
         expect(() => depsUserData(depsSpec, 2, { region: 'us-east-1', proxyUrl: "http://10.0.0.1:3128'; rm -rf /" })).toThrow(/invalid egress proxy url/);
       });
+      it('blocks instance metadata for the containers it builds and fetches in (forwarded traffic), before docker starts', () => {
+        expect(ud).toContain('iptables -I DOCKER-USER 1 -d 169.254.169.254 -j REJECT');
+        expect(ud).toContain('iptables -I FORWARD 1 -d 169.254.169.254 -j REJECT');
+        expect(ud).toContain('ip6tables -I FORWARD 1 -d fd00:ec2::254 -j REJECT');
+        expect(ud.indexOf('DOCKER-USER 1')).toBeLessThan(ud.indexOf('systemctl start docker'));
+        expect(() => execFileSync('bash', ['-n'], { input: ud })).not.toThrow();
+      });
+      it('gives the docker daemon the allow-list proxy (its registry pulls do not use the client environment) only when there is one', () => {
+        expect(ud).not.toContain('docker.service.d');
+        const proxied = depsUserData(depsSpec, 2, { region: 'us-east-1', proxyUrl: 'http://10.42.3.10:3128' });
+        expect(proxied).toContain('/etc/systemd/system/docker.service.d/ratchet-proxy.conf');
+        expect(proxied).toContain('Environment="HTTPS_PROXY=http://10.42.3.10:3128"');
+        expect(proxied.indexOf('daemon-reload')).toBeLessThan(proxied.indexOf('systemctl start docker'));
+        expect(() => execFileSync('bash', ['-n'], { input: proxied })).not.toThrow();
+      });
       it('reaches the launched instance (proxy from the sandbox outputs)', async () => {
         const c = new AwsCloudCompute({ ...cfg, egressProxyUrl: 'http://10.42.3.10:3128' }, { clients: { ec2: new EC2Client({}) }, clock });
         const { input } = await launch(c);
@@ -588,6 +603,11 @@ describe('launch', () => {
       // the sudoers rule is validated before it is moved into place; an invalid one aborts the boot
       expect(idx('visudo -cf')).toBeLessThan(idx('mv /etc/sudoers.d/ratchet-holdout.tmp'));
       expect(ud).toMatch(/visudo -cf [^\n]*\|\| \{ rm -f [^\n]*exit 1; \}/);
+    });
+
+    it('starts the docker engine the repo container runs on (skipped on images without docker), and never adds a user to the docker group', () => {
+      expect(ud).toContain('command -v docker >/dev/null 2>&1 && systemctl start docker >/dev/null 2>&1 || true');
+      expect(ud).not.toMatch(/usermod|gpasswd|docker.sock/);
     });
 
     it('the launcher scripts and the user data are valid bash', () => {

@@ -7,6 +7,7 @@ import type {
   SandboxProvider,
 } from '@ratchet/core';
 import { assertValidSandboxId } from '../util.js';
+import { assertSandboxContract, type ContractCheckOptions } from './override.js';
 import { NodeProcessRunner, type ProcessResult, type ProcessRunner } from './process.js';
 
 export interface AwsIdentityRef {
@@ -56,6 +57,12 @@ export interface TofuSandboxProviderOptions {
   runner?: ProcessRunner;
   /** Extra env for every tofu invocation (e.g. AWS_PROFILE). */
   env?: Record<string, string>;
+  /**
+   * Validate the module's outputs against the sandbox contract (infra/contract.md) after every apply and when outputs are read,
+   * failing with a `ContractViolationError` that lists every problem. Off for the module that ships with the app (its own tests
+   * pin the contract); ON for a custom module (`infra:` in ratchet.yaml, see override.ts).
+   */
+  validateContract?: boolean | ContractCheckOptions;
 }
 
 export class TofuError extends Error {
@@ -190,6 +197,8 @@ export class TofuSandboxProvider implements SandboxProvider {
 
   private async readOutputs(ctx: Ctx): Promise<AwsSandboxOutputs | null> {
     const res = await this.tofu(ctx, ['output', '-json', '-no-color', `-state=${ctx.statePath}`]);
+    const v = this.opts.validateContract;
+    if (v && Object.keys(JSON.parse(res.stdout) as object).length > 0) assertSandboxContract(res.stdout, v === true ? {} : v);
     return parseTofuOutputs(res.stdout, (ctx.input as Partial<SandboxInput>).region);
   }
 
