@@ -58,9 +58,36 @@ killed) and the runner exits 0 with `done.json.reason = "aborted"`. Exit code 1 
 
 ## Testing the real adapters on an EC2 runner
 
-Prerequisites: the runner AMI with Node 22, git, `claude`, `codex`, AWS CLI, profilers; an agent role with the IAM
-boundary from `docs/real-env/aws.md`; the model key in SSM (`/ratchet/<opt>/<agent>/ANTHROPIC_API_KEY`, `.../OPENAI_API_KEY`)
-and a repo-scoped GitHub token; a test repo (use a fork of `examples/demo-search`).
+Prerequisites: the runner AMI (built in "Build images" below) with Node 22, git, `claude`, `codex`, AWS CLI, profilers;
+an agent role with the IAM boundary from `docs/real-env/aws.md`; the model key in SSM
+(`/ratchet/<opt>/<agent>/ANTHROPIC_API_KEY`, `.../OPENAI_API_KEY`) and a repo-scoped GitHub token; a test repo (use a
+fork of `examples/demo-search`).
+
+### Build images
+
+The runner AMI is defined in `infra/images/runner.pkr.hcl` (scripts in `infra/images/scripts`). It installs Node 22,
+pnpm, git, AWS CLI v2, the SSM agent, perf/strace/sysstat, hyperfine, k6, the `claude` and `codex` CLIs at pinned,
+checksum-verified versions (`infra/images/scripts/versions-agents.sh`) and `ratchet-runner` from tarballs packed out of
+this checkout (`@ratchet/core` + `@ratchet/agents`). No model keys or tokens are baked in: the key and the GitHub token
+come from SSM at launch (`RATCHET_SECRET_REFS`).
+
+```sh
+export AWS_PROFILE=ratchet-sandbox AWS_REGION=us-east-1
+infra/images/build.sh runner        # `both` also builds the bench AMI (see aws.md, "Build images")
+# runnerImageRef: ami-0123456789abcdef0
+```
+
+Pass the id as `runnerImageRef` to `createLiveRuntime` (`packages/runtime/src/live.ts`; it reaches the engine as
+`settings.runnerImageRef` and `RunInstances.ImageId`), next to `benchImageRef` for the bench AMI. On the instance:
+
+| What | Where |
+|---|---|
+| `ratchet-runner` | `/usr/local/bin/ratchet-runner`: a launcher that first loads `/etc/ratchet/runner.env` (written by the instance user data: secret refs, proxy) without overriding variables the caller already set, then runs the bin installed in `/usr/local/lib/ratchet-runner` |
+| `claude`, `codex` | `/usr/local/bin`, version-pinned; Claude Code's auto-updater is disabled in `/etc/claude-code/managed-settings.json` so the pin holds |
+| `ratchet runner`, `ratchet bench-agent` | no-op shims: the user data calls them, but the loop is started over SSM by `SsmRunnerControl` (a second runner would race it) |
+
+When you bump a CLI pin, rebuild and rerun sections 0-2 below: the adapters parse the CLIs' output formats. Known gaps
+(secret-ref separator, proxy variables not reaching the agent CLIs) are listed at the end of `infra/images/README.md`.
 
 ### 0. Smoke the binaries by hand (this is Phase 0 spike A)
 

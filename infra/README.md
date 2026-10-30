@@ -7,7 +7,8 @@ contract.md   what every sandbox module must accept, produce and guarantee
 aws/          OpenTofu module (v0)
   policies/   IAM/bucket policy templates (*.json.tftpl), the single source of truth
   tests/      `tofu test` files (mocked provider)
-tests/        vitest suite: renders the policies, simulates IAM decisions, checks module wiring
+images/       Packer definitions of the runner and bench machine images (AMIs) live mode launches; see images/README.md
+tests/        vitest suite: renders the policies, simulates IAM decisions, checks module wiring and the image scripts
 ```
 
 ## How the app drives it
