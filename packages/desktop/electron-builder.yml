@@ -1,0 +1,12 @@
+appId: dev.ratchet.desktop
+productName: Ratchet
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+mac:
+  category: public.app-category.developer-tools
+linux:
+  target: [AppImage]
+  category: Development

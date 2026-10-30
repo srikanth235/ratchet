@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false,
+    "types": ["node", "vite/client"],
+    "paths": { "@ratchet/ui": ["../ui/src/index.ts"] }
+  },
+  "include": ["src", "electron.vite.config.ts", "vitest.config.ts"]
+}
