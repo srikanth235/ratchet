@@ -13,7 +13,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const E2E_ROOT = join(here, '..');
 export const DESKTOP_ROOT = join(E2E_ROOT, '..', 'desktop');
 export const ARTIFACTS = join(E2E_ROOT, 'artifacts');
-export const MAIN_ENTRY = join(DESKTOP_ROOT, 'out', 'main', 'index.js');
+export const MAIN_ENTRY = process.env.RATCHET_MAIN ?? join(DESKTOP_ROOT, 'out', 'main', 'index.js');
 export const VIEWPORT = { width: 1440, height: 1000 };
 
 /** The electron binary shipped in packages/desktop's node_modules (Playwright only looks in the cwd). */
