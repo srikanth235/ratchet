@@ -1,4 +1,5 @@
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { ArtifactStore } from '@ratchet/core';
@@ -61,7 +62,13 @@ export class S3ArtifactStore implements ArtifactStore {
   }
 }
 
-/** Local-directory ArtifactStore for simulation. Keys map to files under `root`. */
+/** Staging directory for atomic writes, inside the root (same filesystem, so rename is atomic); never listed. */
+const FS_TMP = '.put-tmp';
+
+/**
+ * Local-directory ArtifactStore for simulation. Keys map to files under `root`. Writes are atomic (temp file + rename),
+ * like S3 PUTs: readers polling event and inbox batches must never see a half-written object, or they would skip it.
+ */
 export class FsArtifactStore implements ArtifactStore {
   private readonly root: string;
   constructor(root: string) {
@@ -77,8 +84,16 @@ export class FsArtifactStore implements ArtifactStore {
 
   async put(key: string, body: string | Uint8Array): Promise<void> {
     const p = this.path(key);
-    await mkdir(dirname(p), { recursive: true });
-    await writeFile(p, body);
+    const tmpDir = join(this.root, FS_TMP);
+    await Promise.all([mkdir(dirname(p), { recursive: true }), mkdir(tmpDir, { recursive: true })]);
+    const tmp = join(tmpDir, randomBytes(8).toString('hex'));
+    try {
+      await writeFile(tmp, body);
+      await rename(tmp, p);
+    } catch (e) {
+      await rm(tmp, { force: true });
+      throw e;
+    }
   }
 
   async get(key: string): Promise<string | null> {
@@ -100,6 +115,7 @@ export class FsArtifactStore implements ArtifactStore {
         return;
       }
       for (const e of entries) {
+        if (!rel && e.name === FS_TMP) continue;
         const k = rel ? `${rel}/${e.name}` : e.name;
         if (e.isDirectory()) await walk(join(dir, e.name), k);
         else if (k.startsWith(prefix)) out.push(k);

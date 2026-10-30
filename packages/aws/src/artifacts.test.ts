@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { mockClient } from 'aws-sdk-client-mock';
@@ -67,6 +67,13 @@ describe('FsArtifactStore', () => {
     expect(await s.list('zzz')).toEqual([]);
     await s.put('o1/a1/events.jsonl', 'overwritten');
     expect(await s.get('o1/a1/events.jsonl')).toBe('overwritten');
+  });
+
+  it('writes through a staging file that never shows up as a key, and overwrites in place', async () => {
+    const s = new FsArtifactStore(dir);
+    await Promise.all(Array.from({ length: 20 }, (_, i) => s.put(`events/${String(i + 1).padStart(8, '0')}.jsonl`, `batch ${i + 1}\n`)));
+    expect(await s.list('')).toHaveLength(20);
+    expect(await readdir(join(dir, '.put-tmp'))).toEqual([]); // every staging file was renamed into place
   });
 
   it('refuses path traversal', async () => {

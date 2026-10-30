@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BenchJob } from '@ratchet/core';
@@ -77,6 +77,11 @@ interface Rig {
   /** Objects in the artifacts bucket. */
   objects: (prefix: string) => string[];
 }
+
+/** What the snapshot builder will pick on this machine (it uses zstd when present). */
+const HOST_COMPRESSION: 'zstd' | 'gzip' = spawnSync('sh', ['-c', 'command -v zstd']).status === 0 ? 'zstd' : 'gzip';
+const listArchive = (path: string): string =>
+  execFileSync('sh', ['-c', HOST_COMPRESSION === 'zstd' ? 'zstd -dc -- "$1" | tar -tf -' : 'tar -tzf "$1"', 'sh', path], { encoding: 'utf8' });
 
 function rig(fx: FixtureRepo, over: Partial<RemoteBenchRunnerOptions> = {}, shims: Record<string, string> = {}): Rig {
   const n = ++seq;
@@ -166,8 +171,9 @@ describe('dependency snapshots (RemoteBenchRunner)', () => {
       const parsed = parseDepsManifest(manifestText, { strategy: PNPM, lockfiles: { 'pnpm-lock.yaml': sha256(LOCK) }, image: 'ami-test', arch: 'x86_64', key });
       expect(parsed.ok).toBe(true);
       const m = (parsed as { manifest: DepsManifest }).manifest;
-      expect(m.compression).toBe('gzip'); // no zstd on this machine; the zstd branch is tested below with a shim
-      expect(r.objects(`bench-deps/${key}/`)).toEqual([`bench-deps/${key}/${m.sha256}.tgz`]);
+      // The builder packs with zstd when the machine has it (CI runners do), else gzip; the shimmed zstd test below covers both.
+      expect(m.compression).toBe(HOST_COMPRESSION);
+      expect(r.objects(`bench-deps/${key}/`)).toEqual([`bench-deps/${key}/${m.sha256}.${HOST_COMPRESSION === 'zstd' ? 'tar.zst' : 'tgz'}`]);
       expect(m.node).toBe(process.version);
       expect(m.pm).toBe('10.99.0');
     });
@@ -177,7 +183,7 @@ describe('dependency snapshots (RemoteBenchRunner)', () => {
       await r.runner.run(job(fx.base), cfg(), null);
       const key = keyFor(LOCK);
       const archive = r.objects(`bench-deps/${key}/`)[0]!;
-      const listing = execFileSync('tar', ['-tzf', join(r.s3, BUCKET, archive)], { encoding: 'utf8' });
+      const listing = listArchive(join(r.s3, BUCKET, archive));
       expect(listing).toContain('v10/files/left-pad');
       expect(listing).toContain('v10/files/is-odd');
       expect(listing).not.toContain('projects/');
@@ -511,7 +517,7 @@ describe('dependency snapshots (RemoteBenchRunner)', () => {
       const archive = `bench-deps/${key}/${sum}.tgz`;
       mkdirSync(join(r.s3, BUCKET, `bench-deps/${key}`), { recursive: true });
       writeFileSync(join(r.s3, BUCKET, archive), bytes);
-      writeFileSync(mp, JSON.stringify({ ...m, archive, sha256: sum }));
+      writeFileSync(mp, JSON.stringify({ ...m, compression: 'gzip', archive, sha256: sum, bytes: bytes.length }));
       await expect(r.runner.run(job(fx.base), cfg(), null)).rejects.toThrow(/contains symlinks/);
     });
   });
@@ -548,7 +554,7 @@ describe('dependency snapshots (RemoteBenchRunner)', () => {
         const key = r.objects('bench-deps/').find((k) => k.endsWith('.json'))!;
         expect(key).toMatch(/^bench-deps\/npm-[0-9a-f]{40}\.json$/);
         const m = JSON.parse(readFileSync(join(r.s3, BUCKET, key), 'utf8')) as DepsManifest;
-        const listing = execFileSync('tar', ['-tzf', join(r.s3, BUCKET, m.archive)], { encoding: 'utf8' });
+        const listing = listArchive(join(r.s3, BUCKET, m.archive));
         expect(listing).toContain('_cacache/content/left-pad');
         expect(listing).not.toContain('_logs');
         expect(listing).not.toContain('_update-notifier-last-checked');

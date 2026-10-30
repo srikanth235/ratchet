@@ -52,11 +52,17 @@ export class ArtifactInbox implements RunnerInbox {
   async next(signal?: AbortSignal): Promise<RunnerMessage | null> {
     while (!signal?.aborted) {
       if (this.buffered.length === 0) this.buffered = (await listSeqs(this.store, `${this.prefix}inbox/`)).filter((k) => k.seq > this.last);
-      const item = this.buffered.shift();
+      const item = this.buffered[0];
       if (item) {
-        this.last = item.seq;
         const body = await this.store.get(item.key);
-        if (!body) continue;
+        if (!body) {
+          // Listed but not readable yet: keep it and retry after the poll interval, rather than dropping a verdict.
+          this.buffered = [];
+          await this.clock.sleep(this.pollIntervalMs, signal);
+          continue;
+        }
+        this.buffered.shift();
+        this.last = item.seq;
         try {
           const message = JSON.parse(body) as RunnerMessage;
           if (message && typeof message.type === 'string') return message;
@@ -135,7 +141,8 @@ export async function readEvents(store: ArtifactStore, prefix: string, cursor?: 
   let last = after;
   for (const { key, seq } of batches) {
     const body = await store.get(key);
-    if (body === null) break;
+    // Not readable yet (or empty): stop before it so the next poll retries it, rather than skipping it for good.
+    if (!body) break;
     for (const line of body.split('\n')) {
       if (!line.trim()) continue;
       try {
