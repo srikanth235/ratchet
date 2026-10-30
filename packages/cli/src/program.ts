@@ -1,5 +1,6 @@
 import { Command, CommanderError, InvalidArgumentError } from 'commander';
 import { runBaseline } from './commands/baseline.js';
+import { runInit } from './commands/init.js';
 import { runValidate } from './commands/validate.js';
 import type { Io } from './io.js';
 
@@ -29,6 +30,26 @@ export function buildProgram(io: Io, setExit: (code: number) => void): Command {
     .action((path: string) => {
       setExit(runValidate(path, io));
     });
+
+  program
+    .command('init')
+    .description(
+      'scaffold ratchet.yaml, RATCHET.md and an evaluator stub for a domain pack.\n' +
+        'Refuses to overwrite existing files unless --force is given.',
+    )
+    .option('--pack <pack>', 'domain pack: perf | forecasting (see --list-packs)')
+    .option('--metric <path>', "objective metric, a dotted path into the evaluator JSON (default: the pack's)")
+    .option('--direction <dir>', "minimize | maximize (default: the pack's)")
+    .option('--value-usd <usd>', 'estimated USD per unit of improvement per year', parseNumber)
+    .option('--dir <dir>', 'directory to write into', '.')
+    .option('--force', 'overwrite existing files')
+    .option('--dry-run', 'print what would be written, write nothing')
+    .option('--list-packs', 'list the available packs and exit')
+    .action(
+      (o: { pack?: string; metric?: string; direction?: string; valueUsd?: number; dir?: string; force?: boolean; dryRun?: boolean; listPacks?: boolean }) => {
+        setExit(runInit(o, io));
+      },
+    );
 
   program
     .command('baseline')
