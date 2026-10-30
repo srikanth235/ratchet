@@ -6,7 +6,7 @@ import { App } from './App';
 import { LiveLog } from './components/LiveLog';
 import { installApi } from './test-utils';
 
-const nav = (label: string) => fireEvent.click(within(screen.getByRole('navigation', { name: 'Primary' })).getByRole('button', { name: label }));
+const nav = (label: string) => fireEvent.click(within(screen.getByRole('navigation', { name: 'Primary' })).getByRole('button', { name: new RegExp(`^${label}( \\d+| \\d+ live)?$`) }));
 
 describe('Optimizations (real ledger data)', () => {
   it('shows KPIs, the live optimization, activity and the table', async () => {
@@ -20,16 +20,17 @@ describe('Optimizations (real ledger data)', () => {
     const table = within(screen.getByRole('table'));
     expect(table.getByText('Ingest throughput')).toBeTruthy();
     expect(table.getByText('Web render p99')).toBeTruthy();
-    expect(table.getByText('182 ms → 131 ms')).toBeTruthy();
-    expect(screen.getByText('Dev engine')).toBeTruthy();
+    expect(table.getByText('182 ms')).toBeTruthy();
+    expect(table.getAllByText('131 ms').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Dev engine/)).toBeTruthy();
   });
 
   it('clicking a finished optimization opens its Result; New optimization opens the form', async () => {
     installApi();
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: 'Ingest throughput' }));
-    expect(await screen.findByRole('heading', { name: 'Result' })).toBeTruthy();
-    expect(await screen.findByText('41.2 k/s')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Ingest throughput', level: 1 })).toBeTruthy();
+    expect((await screen.findAllByText('41.2 k/s')).length).toBeGreaterThan(0);
     nav('Optimizations');
     fireEvent.click(await screen.findByRole('button', { name: /New optimization/ }));
     expect(await screen.findByRole('heading', { name: 'New optimization' })).toBeTruthy();
@@ -91,7 +92,7 @@ describe('New optimization', () => {
     const start = vi.spyOn(window.ratchet, 'startOptimization');
     fireEvent.change(screen.getByPlaceholderText('search-api p95 latency'), { target: { value: 'My run' } });
     fireEvent.click(screen.getByRole('button', { name: 'Run baseline & start' }));
-    expect(await screen.findByRole('heading', { name: 'Live agents' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'My run', level: 1 })).toBeTruthy();
     expect(create).toHaveBeenCalledOnce();
     expect(create.mock.calls[0]![0]).toMatchObject({ name: 'My run', baseRef: 'main', agents: ['claude-code', 'codex'], budgetUsd: 100, timeLimitSeconds: 28_800, plateauEvals: 25 });
     expect(create.mock.calls[0]![0].configYaml).toContain('version: 0');
@@ -115,11 +116,11 @@ describe('Live agents', () => {
     const cards = await screen.findAllByRole('generic', { name: /agent$/ });
     expect(cards).toHaveLength(2);
     const cc = within(screen.getByLabelText('Claude Code agent'));
-    expect(cc.getByTestId('hypothesis').textContent).toBe('Short-circuit empty queries before the index');
-    expect(cc.getByText('Recent evals')).toBeTruthy();
+    expect(cc.getByTestId('hypothesis').textContent).toBe('“Short-circuit empty queries before the index”');
+    expect(cc.getByText(/Recent evals/)).toBeTruthy();
     await waitFor(() => expect(cc.getAllByText(/Ratchet-Candidate/).length).toBeGreaterThan(0));
-    expect(screen.getByText('Bench runner')).toBeTruthy();
-    expect(screen.getByText('Confirm on hidden trace')).toBeTruthy();
+    expect(screen.getByText('Trusted bench runner')).toBeTruthy();
+    expect(screen.getByText(/Confirm on hidden trace/)).toBeTruthy();
   });
 
   it('message / pause / resume are wired to the engine', async () => {
@@ -131,6 +132,7 @@ describe('Live agents', () => {
     const resume = vi.spyOn(window.ratchet, 'resumeAgent');
     const agent = h.ledger.listAgents('opt_demo_search').find((a) => a.kind === 'claude-code')!;
 
+    fireEvent.click(card.getByRole('button', { name: /Message/ }));
     fireEvent.change(card.getByLabelText('Message Claude Code'), { target: { value: 'try a bloom filter' } });
     fireEvent.click(card.getByRole('button', { name: /Send/ }));
     await waitFor(() => expect(msg).toHaveBeenCalledWith(agent.id, 'try a bloom filter'));
@@ -147,7 +149,7 @@ describe('Live agents', () => {
     const h = installApi();
     render(<App initialRoute="agents" />);
     const stop = vi.spyOn(window.ratchet, 'stopOptimization');
-    fireEvent.click(await screen.findByRole('button', { name: /Stop/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Stop & revoke keys/ }));
     expect(stop).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Confirm kill switch' }));
     await waitFor(() => expect(stop).toHaveBeenCalledWith('opt_demo_search', expect.any(String)));
@@ -191,16 +193,17 @@ describe('Benchmark history', () => {
     expect(await screen.findByRole('img', { name: /Ratchet chart/ })).toBeTruthy();
     expect(document.querySelector('[data-testid="noise-band"]')).toBeTruthy();
     expect(screen.getByRole('img', { name: 'Histogram of baseline vs best' })).toBeTruthy();
-    const table = within(screen.getByText(/Candidates ·/).closest('.rt-card') as HTMLElement);
+    const table = within(screen.getByRole('heading', { name: 'Candidates' }).closest('.rt-card') as HTMLElement);
     expect(table.getAllByRole('row')).toHaveLength(12);
-    expect(table.getAllByText('Verified').length).toBe(5);
+    expect(table.getAllByText('Verified win').length).toBe(5);
     expect(table.getByText('Failed confirm')).toBeTruthy();
     expect(table.getByText('Blocked')).toBeTruthy();
 
     fireEvent.click(table.getByRole('button', { name: 'blocked' }));
     expect(table.getAllByRole('row')).toHaveLength(2);
     expect(table.getByText(/protected path changed/)).toBeTruthy();
-    expect(screen.getByText('p95')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Baseline vs best' })).toBeTruthy();
+    expect(screen.getAllByTestId('pct-row').length).toBeGreaterThan(0);
   });
 });
 
@@ -210,8 +213,9 @@ describe('Result', () => {
     render(<App initialRoute="result" />);
     // featured = running search-api; use the picker to inspect the finished ingest run
     fireEvent.change(await screen.findByLabelText('Optimization'), { target: { value: 'opt_demo_ingest' } });
-    expect(await screen.findByText('58.9 k/s')).toBeTruthy();
-    expect(screen.getByText('43.0% better')).toBeTruthy();
+    expect(await screen.findByTestId('headline')).toBeTruthy();
+    await waitFor(() => expect(within(screen.getByTestId('headline')).getByText('58.9')).toBeTruthy());
+    expect(within(screen.getByTestId('headline')).getByText('+43.0%')).toBeTruthy();
     expect(screen.getByText('Vectorise the parser inner loop')).toBeTruthy();
     expect(within(screen.getByRole('list', { name: 'Spend by category' })).getByText('Model tokens')).toBeTruthy();
     const checklist = within(screen.getByRole('list', { name: 'Teardown checklist' }));
@@ -229,7 +233,7 @@ describe('Result', () => {
     expect((await screen.findByRole('status')).textContent).toBe('Export cancelled');
 
     const td = vi.spyOn(window.ratchet, 'teardown');
-    fireEvent.click(screen.getByRole('button', { name: 'Run teardown' }));
+    fireEvent.click(screen.getByRole('button', { name: /Destroy sandbox/ }));
     await waitFor(() => expect(td).toHaveBeenCalledWith('opt_demo_ingest'));
     await waitFor(() => expect(checklist.getAllByText('done')).toHaveLength(5));
   });
@@ -237,9 +241,10 @@ describe('Result', () => {
   it('disables Open pull request when there are no verified wins, and teardown while still running', async () => {
     installApi();
     render(<App initialRoute="result" />);
-    await screen.findByText('Headline');
-    expect((screen.getByRole('button', { name: /Open pull request/ }) as HTMLButtonElement).disabled).toBe(false);
-    expect((screen.getByRole('button', { name: 'Run teardown' }) as HTMLButtonElement).disabled).toBe(true);
+    await screen.findByTestId('headline');
+    // the run is still live: neither the PR nor teardown is available yet, even though it has verified wins
+    expect((screen.getByRole('button', { name: /Open pull request/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: /Destroy sandbox/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/Available once the optimization has finished/)).toBeTruthy();
   });
 });
@@ -250,10 +255,10 @@ describe('AWS sandbox', () => {
     render(<App initialRoute="sandbox" />);
     const plan = within(await screen.findByRole('list', { name: 'Plan changes' }));
     expect(plan.getByText('aws_s3_bucket.artifacts')).toBeTruthy();
-    expect(plan.getByText('update')).toBeTruthy();
+    expect(plan.getByText('~ update')).toBeTruthy();
     expect(screen.getByText(/Plan: 9 to add, 1 to change, 0 to destroy/)).toBeTruthy();
     expect(screen.getByText('ratchet-ratchet-sandbox-sealed')).toBeTruthy();
-    expect(screen.getByText('c7i.2xlarge, c7i.xlarge, m7i.large')).toBeTruthy();
+    for (const t of ['c7i.2xlarge', 'c7i.xlarge', 'm7i.large']) expect(screen.getByText(t)).toBeTruthy();
     expect(screen.getByText('Simulated sandbox')).toBeTruthy();
     expect(screen.getByRole('img', { name: /Sandbox architecture/ })).toBeTruthy();
   });

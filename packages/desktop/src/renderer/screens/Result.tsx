@@ -198,9 +198,9 @@ export function Result() {
           <span className="stacked-bar" aria-hidden="true">
             {sp.byCategory.map((c, i) => <span key={c.id} style={{ width: `${(c.usd / total) * 100}%`, background: SPEND_COLORS[i % SPEND_COLORS.length] }} />)}
           </span>
-          <div className="legend-list" aria-label="Spend by category">
+          <div className="legend-list" role="list" aria-label="Spend by category">
             {sp.byCategory.map((c, i) => (
-              <span key={c.id}><i style={{ background: SPEND_COLORS[i % SPEND_COLORS.length] }} />{c.label}<span className="mono">{fmtUsd(c.usd)}</span></span>
+              <span key={c.id} role="listitem"><i style={{ background: SPEND_COLORS[i % SPEND_COLORS.length] }} />{c.label}<span className="mono">{fmtUsd(c.usd)}</span></span>
             ))}
           </div>
           <span className="card-note">{sp.estimated > 0 ? `Includes ${fmtUsd(sp.estimated)} estimated` : 'Reconciled with billing'}</span>

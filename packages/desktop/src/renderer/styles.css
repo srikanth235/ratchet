@@ -220,8 +220,8 @@ h1, h2, p { margin: 0; }
   text-align: left; font: 600 10.5px var(--rt-font-sans); letter-spacing: .14em; text-transform: uppercase;
   color: var(--rt-color-text-tertiary); padding: 10px 12px; border-top: 1px solid var(--rt-color-hairline-mid);
 }
-.table th:first-child, .table td:first-child { padding-left: 20px; }
-.table th:last-child, .table td:last-child { padding-right: 20px; }
+.table th:first-child, .table td:first-child { padding-left: 20px; padding-right: 20px; }
+.table th:last-child, .table td:last-child { padding-left: 20px; padding-right: 20px; }
 .table td { padding: 14px 12px; border-top: 1px solid var(--rt-color-hairline-soft); vertical-align: middle; }
 .table--sm td { padding-top: 13px; padding-bottom: 13px; }
 .table .num { text-align: right; white-space: nowrap; }
@@ -430,7 +430,7 @@ input, textarea, select { font: inherit; }
 .pct-row__bars { display: flex; flex-direction: column; gap: 3px; padding-left: 86px; }
 .pct-row__bars span { display: block; height: 3px; border-radius: 2px; }
 .pct-row .delta-badge { margin-left: auto; }
-.sha { text-decoration: none; }
+.sha { text-decoration: none; color: var(--rt-color-brass-highlight); }
 .sha:hover { text-decoration: underline; }
 .lane-chip { width: 24px; height: 24px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 600; flex: none; box-sizing: content-box; }
 .gdots { display: flex; align-items: center; gap: 4px; }
