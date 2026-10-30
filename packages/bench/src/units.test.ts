@@ -8,7 +8,7 @@ import { flattenNumeric, medianMetrics, resolveMetric } from './flatten.js';
 import { BenchLog } from './log.js';
 import { applyOverlay, listFiles, restoreProtected } from './overlay.js';
 import { evaluateThresholds, logKey, parseBenchOutput } from './pipeline.js';
-import { protectedPcre, sq, wrapStep } from './remote-scripts.js';
+import { BENCH_USER, CANDIDATE_LAUNCHER, checkoutScript, HOLDOUT_USER, protectedPcre, sq, stepScript, wrapStep } from './remote-scripts.js';
 import { alive, realClock, rmrf, tmp } from './testkit/repo.js';
 
 describe('flatten', () => {
@@ -173,5 +173,118 @@ describe('remote script helpers', () => {
     }
     // no globs: matches nothing
     expect(() => execFileSync('grep', ['-zP', protectedPcre([])], { input: 'a\0', encoding: 'utf8' })).toThrow();
+  });
+});
+
+describe('generated step scripts: candidate / holdout split', () => {
+  const layout = { work: '/var/tmp/work/job1' };
+  const base = { layout, name: 'bench run 1/3', command: 'k6 run bench/k6/search.js', timeoutMs: 60_000, env: { RATCHET_PHASE: 'confirm' } };
+  const staged = (n: string) => ({ uri: `s3://artifacts/bench-inputs/opt/job/${n}.tgz`, sha256: 'a'.repeat(64), commit: 'b'.repeat(40) });
+  const HOLDOUT_URI = 's3://sealed/holdout/trace.json';
+  const confirm = stepScript({ ...base, kind: 'bench', holdout: { uri: HOLDOUT_URI } });
+  const at = (s: string, needle: string) => {
+    const i = s.indexOf(needle);
+    expect(i, `script contains ${needle}`).toBeGreaterThan(-1);
+    return i;
+  };
+  const syntax = (s: string) => expect(() => execFileSync('bash', ['-n'], { input: s })).not.toThrow();
+
+  it('every variant is syntactically valid bash', () => {
+    syntax(confirm);
+    syntax(stepScript({ ...base, kind: 'bench' }));
+    syntax(stepScript({ ...base, kind: 'bench', isolation: 'none', holdout: { uri: HOLDOUT_URI } }));
+    syntax(stepScript({ ...base, kind: 'setup' }));
+    syntax(stepScript({ ...base, kind: 'guardrail', isolation: 'none' }));
+    syntax(checkoutScript({ layout, code: staged('code'), bench: staged('bench'), globs: ['bench/**'], prune: true, isolation: 'user' }));
+  });
+
+  it('confirm bench step order: kill leftovers, verify protected files, snapshot, THEN fetch the holdout, run the harness, kill, wipe', () => {
+    const order = ['kill_users\n', 'apply check', 'snapshot()', 'aws s3 cp', 'chown "$HU:" "$TRACE"', 'chmod 600 "$TRACE"', 'export RATCHET_TRACE="$TRACE"', 'setpriv --reuid="$HU"', '\nwipe\n'];
+    const positions = order.map((n) => at(confirm, n));
+    expect(positions).toEqual([...positions].sort((a, b) => a - b));
+    expect(confirm).toContain('trap wipe EXIT'); // also wiped when the script is killed or fails midway
+    expect(at(confirm, 'trap wipe EXIT')).toBeLessThan(at(confirm, 'aws s3 cp'));
+  });
+
+  it('the holdout lives in the 0700 holdout dir under the job dir and is never owned by or readable to the candidate user', () => {
+    expect(confirm).toContain(`TRACE='/var/tmp/work/job1/holdout/trace.json'`);
+    expect(confirm.match(/chown [^\n]*TRACE[^\n]*/g)).toEqual(['chown "$HU:" "$TRACE" || exit 42']);
+    expect(confirm.match(/chmod [^\n]*TRACE[^\n]*/g)).toEqual(['chmod 600 "$TRACE" || exit 42']);
+    expect(confirm).not.toContain('chgrp');
+    expect(confirm).toContain('shred -u');
+  });
+
+  it('the harness runs as the holdout user without a bench-user step, from the snapshot, and gets the launcher', () => {
+    expect(confirm).toContain('cd "$H"');
+    expect(confirm).toMatch(/setpriv --reuid="\$HU" --regid="\$HU" --clear-groups -- env -u AWS_ACCESS_KEY_ID .*RATCHET_CANDIDATE_EXEC='\/usr\/local\/bin\/ratchet-candidate' bash -c 'k6 run bench\/k6\/search\.js'/);
+    // sudo needs setuid: no --no-new-privs for the harness (trusted code); candidate steps keep it
+    expect(confirm).not.toContain('--no-new-privs');
+    const setup = stepScript({ ...base, kind: 'setup', command: 'pnpm build' });
+    expect(setup).toContain('setpriv --reuid="$BU" --regid="$BU" --clear-groups --no-new-privs');
+    expect(setup).toContain('cd "$CODE"');
+    expect(setup).not.toContain('$HU" --regid');
+  });
+
+  it('the snapshot is root-owned, read-only, setuid-free and made once', () => {
+    expect(confirm).toContain('cp -a');
+    expect(confirm).toContain('-type f -perm /6000 -exec chmod ug-s');
+    expect(confirm).toContain('chown -hR root:root');
+    expect(confirm).toContain('chmod -R go-w,a+rX');
+    expect(confirm).toContain('[ -d "$H" ] || snapshot');
+  });
+
+  it('only a confirm bench step carries the holdout location and fetch; nothing else does', () => {
+    const others = [
+      stepScript({ ...base, kind: 'bench' }),
+      stepScript({ ...base, kind: 'setup' }),
+      stepScript({ ...base, kind: 'guardrail' }),
+      stepScript({ ...base, kind: 'bench', isolation: 'none' }),
+      checkoutScript({ layout, code: staged('code'), bench: staged('bench'), globs: ['bench/**'], prune: true, isolation: 'user' }),
+      checkoutScript({ layout, code: staged('code'), bench: staged('bench'), globs: ['bench/**'], prune: true, isolation: 'none' }),
+    ];
+    for (const s of others) {
+      expect(s).not.toContain('RATCHET_TRACE');
+      expect(s).not.toContain('sealed');
+      expect(s).not.toContain('trace.json');
+      expect(s).not.toContain('shred');
+    }
+    // the only s3 reads in the checkout are the two staged archives (the bench-inputs prefix of the artifacts bucket)
+    const co = others[4]!;
+    expect([...co.matchAll(/s3:\/\/[^'" ]+/g)].map((m) => m[0])).toEqual([staged('code').uri, staged('bench').uri]);
+  });
+
+  it('refuses a holdout on a non-bench step, and a caller-supplied RATCHET_TRACE', () => {
+    expect(() => stepScript({ ...base, kind: 'setup', holdout: { uri: HOLDOUT_URI } })).toThrow(/only ever given to bench steps/);
+    expect(() => stepScript({ ...base, kind: 'guardrail', holdout: { uri: HOLDOUT_URI } })).toThrow(/only ever given/);
+    expect(() => stepScript({ ...base, kind: 'bench', env: { RATCHET_TRACE: '/x' } })).toThrow(/RATCHET_TRACE is set by the step script/);
+  });
+
+  it('quotes a hostile holdout uri and a hostile launcher path', () => {
+    const s = stepScript({ ...base, kind: 'bench', holdout: { uri: "s3://b/k'; touch /pwned; '.json" }, candidateLauncher: "/x'; touch /pwned2; '" });
+    syntax(s);
+    expect(s).not.toMatch(/^touch \/pwned/m);
+    expect(s).toContain(`URI=${sq("s3://b/k'; touch /pwned; '.json")}`);
+    expect(s).toContain(`RATCHET_CANDIDATE_EXEC=${sq("/x'; touch /pwned2; '")}`);
+  });
+
+  it('the checkout verifies both users, both IMDS rules, the holdout permissions and the launcher', () => {
+    const co = checkoutScript({ layout, code: staged('code'), bench: staged('bench'), globs: ['bench/**'], prune: true, isolation: 'user' });
+    for (const needle of [
+      'id -u "$BU"',
+      'id -u "$HU"',
+      'iptables -C OUTPUT -m owner --uid-owner "$u" -d 169.254.169.254 -j REJECT',
+      'the holdout directory is readable by $BU',
+      'chmod 700 "$W/holdout"',
+      'does not run commands as $BU',
+    ]) {
+      expect(co).toContain(needle);
+    }
+    expect(co).toContain("LAUNCHER='/usr/local/bin/ratchet-candidate'");
+    // the sealed bucket is not touched while checking out
+    expect(co).not.toMatch(/sealed|holdout\/trace/);
+  });
+
+  it('constants line up with the instance user-data (packages/aws): users and launcher path', () => {
+    expect([BENCH_USER, HOLDOUT_USER, CANDIDATE_LAUNCHER]).toEqual(['ratchet-bench', 'ratchet-holdout', '/usr/local/bin/ratchet-candidate']);
   });
 });

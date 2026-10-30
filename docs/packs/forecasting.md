@@ -42,6 +42,13 @@ draws them from a seed the agents do not have and writes them **outside the repo
 weeks 144 to 155 and scores them. The table handed to `predict` in that run holds no sales at or after the origin
 (only the planned calendar), so a pipeline that reads the future gets nothing.
 
+**Live-mode caveat.** `backtest.js` imports the candidate's `predict` in its own process. On a live bench instance that
+process runs as `ratchet-holdout` (the only user that can open the holdout file), so the candidate's code runs with access
+to the sealed actuals: the simulation's guarantee (the table has no future sales) holds, the file-level isolation does not.
+Before running this pack against a hostile candidate, split the runner: the harness keeps the actuals and the scoring,
+starts the model with `$RATCHET_CANDIDATE_EXEC node dist/src/model-server.js` and exchanges training rows and forecasts
+over stdin/stdout (see `docs/real-env/bench.md`, "The harness / candidate split").
+
 A candidate must beat the best's *own* holdout WAPE (`confirmBest`) by any margin; a gain that exists only on the 7
 backtest windows (constants fitted to them) is a `failed_confirm`. The holdout is also the *most recent* period
 (Oct to Dec, holiday-heavy), so it tests the deployment condition: forecasting the future from the past.

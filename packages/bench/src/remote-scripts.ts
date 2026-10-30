@@ -12,8 +12,23 @@ import { BenchError } from './errors.js';
  */
 
 export const SENTINEL = '@@RATCHET@@';
-/** Unprivileged OS user that runs setup, guardrails and the bench (= candidate code). Created and IMDS-blocked by the instance's user-data (packages/aws `benchUserData`). */
+/**
+ * Unprivileged OS user that runs setup, guardrails and every process of the CANDIDATE (its server, its build).
+ * Created and IMDS-blocked by the instance's user-data (packages/aws `benchUserData`).
+ */
 export const BENCH_USER = 'ratchet-bench';
+/**
+ * Second unprivileged user: the evaluator harness (`evaluator.run`, trusted code from bench.ref) runs as this
+ * user and is the only one that can open the holdout (file mode 0600). Also IMDS-blocked by the user-data.
+ */
+export const HOLDOUT_USER = 'ratchet-holdout';
+/**
+ * Root-installed launcher (packages/aws `benchUserData`): the harness runs `$RATCHET_CANDIDATE_EXEC <cmd...>`
+ * to start a candidate process as BENCH_USER, in the candidate's checkout, with a clean environment (no
+ * `RATCHET_TRACE`, no `AWS_*`). stdin/stdout/stderr are the caller's: give the candidate pipes or `ignore`, not
+ * the harness's own stdout, which carries the result.
+ */
+export const CANDIDATE_LAUNCHER = '/usr/local/bin/ratchet-candidate';
 
 /** Where one archive was staged (see stage.ts) and the digest the instance must see. */
 export interface StagedArchive {
@@ -24,7 +39,7 @@ export interface StagedArchive {
   commit: string;
 }
 
-/** `user`: steps run as BENCH_USER with IMDS blocked (default, fail-closed). `none`: single-user, for local tests only. */
+/** `user`: setup and guardrails run as BENCH_USER, the bench harness as HOLDOUT_USER, IMDS blocked for both (default, fail-closed). `none`: single-user, for local tests only. */
 export type Isolation = 'user' | 'none';
 const HEREDOC = '__RATCHET_STEP_EOF__';
 
@@ -73,7 +88,7 @@ export interface Layout {
 
 const prelude = (l: Layout) => `set -uo pipefail
 W=${sq(l.work)}
-CODE="$W/code"; STAGE="$W/stage"; G="$W/repo.git"
+CODE="$W/code"; STAGE="$W/stage"; G="$W/repo.git"; H="$W/harness"
 emit() { printf '%s %s %s\\n' '${SENTINEL}' "$1" "$2"; }
 b64() { base64 | tr -d '\\n'; }
 `;
@@ -119,24 +134,48 @@ apply() {
 /** Wait-for-instance probe. */
 export const pingScript = (): string => 'echo ready\n';
 
-/** Checks that the instance really has the unprivileged user and the IMDS block; refuses to continue otherwise. */
-const isolationCheck = (isolation: Isolation): string =>
+/**
+ * Environment the candidate launcher reads (it runs as BENCH_USER through sudo, which keeps exactly these
+ * variables). Set by root before any harness starts.
+ */
+const candidateEnv = `export RATCHET_CANDIDATE_DIR="$CODE" RATCHET_CANDIDATE_HOME="$W/home" RATCHET_CANDIDATE_TMP="$W/tmp" RATCHET_CANDIDATE_PATH="$PATH"
+`;
+
+/**
+ * Checks that the instance really has the two unprivileged users, the IMDS block for both, the launcher, and
+ * that the holdout directory is closed to the candidate's user and open to the harness's; refuses to continue
+ * otherwise (exit 12 to 19). Then hands the code tree to the candidate user and the scratch dirs to the harness user.
+ */
+const isolationCheck = (isolation: Isolation, launcher: string): string =>
   isolation === 'none'
     ? ''
-    : `BU=${sq(BENCH_USER)}
+    : `BU=${sq(BENCH_USER)}; HU=${sq(HOLDOUT_USER)}; LAUNCHER=${sq(launcher)}
 id -u "$BU" >/dev/null 2>&1 || { echo "bench user $BU does not exist on this image" >&2; exit 12; }
-iptables -C OUTPUT -m owner --uid-owner "$BU" -d 169.254.169.254 -j REJECT >/dev/null 2>&1 || { echo "IMDS is not blocked for $BU (iptables owner rule missing)" >&2; exit 13; }
+id -u "$HU" >/dev/null 2>&1 || { echo "holdout user $HU does not exist on this image" >&2; exit 12; }
+for u in "$BU" "$HU"; do
+  iptables -C OUTPUT -m owner --uid-owner "$u" -d 169.254.169.254 -j REJECT >/dev/null 2>&1 || { echo "IMDS is not blocked for $u (iptables owner rule missing)" >&2; exit 13; }
+done
 if setpriv --reuid="$BU" --regid="$BU" --clear-groups --no-new-privs -- timeout 3 bash -c 'exec 3<>/dev/tcp/169.254.169.254/80' 2>/dev/null; then echo "instance metadata is reachable as $BU" >&2; exit 14; fi
-mkdir -p "$W/home" "$W/tmp" || exit 15
+if setpriv --reuid="$HU" --regid="$HU" --clear-groups -- timeout 3 bash -c 'exec 3<>/dev/tcp/169.254.169.254/80' 2>/dev/null; then echo "instance metadata is reachable as $HU" >&2; exit 14; fi
+mkdir -p "$W/home" "$W/tmp" "$W/hhome" "$W/htmp" "$W/out" "$W/holdout" || exit 15
 chown -R "$BU:" "$CODE" "$W/home" "$W/tmp" || exit 16
+chown -R "$HU:" "$W/hhome" "$W/htmp" "$W/out" "$W/holdout" || exit 16
+chmod 700 "$W/holdout"
 chmod 755 "$W"
+${candidateEnv}printf x > "$W/holdout/.probe" && chown "$HU:" "$W/holdout/.probe" && chmod 600 "$W/holdout/.probe" || exit 15
+if setpriv --reuid="$BU" --regid="$BU" --clear-groups --no-new-privs -- cat "$W/holdout/.probe" >/dev/null 2>&1; then echo "the holdout directory is readable by $BU" >&2; exit 17; fi
+setpriv --reuid="$HU" --regid="$HU" --clear-groups -- cat "$W/holdout/.probe" >/dev/null 2>&1 || { echo "the holdout directory is not readable by $HU" >&2; exit 19; }
+rm -f "$W/holdout/.probe"
+[ "$(setpriv --reuid="$HU" --regid="$HU" --clear-groups -- "$LAUNCHER" id -un 2>/dev/null)" = "$BU" ] || { echo "the candidate launcher $LAUNCHER does not run commands as $BU for $HU" >&2; exit 18; }
 `;
 
 /**
  * Fetches the pre-staged candidate and bench.ref archives from the artifacts bucket (through the S3
  * gateway endpoint; the bench subnet has no other way out), verifies their digests, applies the
- * protected overlay, and - with `isolation: 'user'` - verifies the unprivileged user and the IMDS
- * block and hands the code tree to that user. No git, no GitHub, no credentials in the script.
+ * protected overlay, and - with `isolation: 'user'` - verifies the two unprivileged users, the IMDS
+ * block, the holdout directory permissions and the candidate launcher, and hands the code tree to the
+ * candidate user. No source-control access and no credentials in the script, and the sealed bucket is
+ * not touched: the holdout is fetched later, by the bench step that needs it.
  */
 export function checkoutScript(o: {
   layout: Layout;
@@ -145,6 +184,8 @@ export function checkoutScript(o: {
   globs: readonly string[];
   prune: boolean;
   isolation: Isolation;
+  /** Test seam; default `CANDIDATE_LAUNCHER`. */
+  candidateLauncher?: string;
 }): string {
   for (const a of [o.code, o.bench]) {
     assertSafeRef(a.commit, 'staged commit');
@@ -177,33 +218,7 @@ if [ ${o.prune ? 1 : 0} = 1 ]; then
   done < "$W/code.match"
 fi
 apply init || exit 24
-${isolationCheck(o.isolation)}emit checkout "{\\"code\\":\\"${o.code.commit}\\",\\"bench\\":\\"${o.bench.commit}\\",\\"removed\\":$removed,\\"copied\\":$copied,\\"isolation\\":\\"${o.isolation}\\"}"
-`;
-}
-
-/**
- * Download the hidden trace from the sealed bucket onto the instance. This pre-step runs as root (the
- * SSM agent's user), the only user with the instance-profile credentials; it is never run as the bench
- * user. With `isolation: 'user'` the file is root:BENCH_USER 0440, so the bench process can read it
- * but not replace it, and nothing the bench user runs can reach the credentials that fetched it (IMDS
- * is blocked for that uid).
- */
-export function traceScript(o: { layout: Layout; uri: string; localPath: string; isolation: Isolation }): string {
-  const perms =
-    o.isolation === 'none'
-      ? 'chmod 600 "$DST"'
-      : `chgrp ${sq(BENCH_USER)} "$W/trace" "$DST" || exit 42\nchmod 750 "$W/trace" || exit 42\nchmod 440 "$DST" || exit 42`;
-  return `${prelude(o.layout)}
-mkdir -p "$W/trace" || exit 40
-URI=${sq(o.uri)}
-DST=${sq(o.localPath)}
-case "$URI" in
-  s3://*) aws s3 cp --only-show-errors "$URI" "$DST" || exit 41 ;;
-  file://*) cp -- "\${URI#file://}" "$DST" || exit 41 ;;
-  *) cp -- "$URI" "$DST" || exit 41 ;;
-esac
-${perms}
-emit trace "{\\"bytes\\":$(wc -c < "$DST" | tr -d ' ')}"
+${isolationCheck(o.isolation, o.candidateLauncher ?? CANDIDATE_LAUNCHER)}emit checkout "{\\"code\\":\\"${o.code.commit}\\",\\"bench\\":\\"${o.bench.commit}\\",\\"removed\\":$removed,\\"copied\\":$copied,\\"isolation\\":\\"${o.isolation}\\"}"
 `;
 }
 
@@ -217,47 +232,128 @@ export interface StepScriptInput {
   env: Record<string, string>;
   /** Default 'user'. */
   isolation?: Isolation;
+  /**
+   * Confirm bench runs only: the sealed holdout to fetch for THIS run (`s3://...`, or a path / `file://` in tests).
+   * The step fetches it as root, hands it to the harness user alone (mode 0600), exports `RATCHET_TRACE` to the
+   * harness and wipes it when the run is over. Never set for setup, guardrails, baseline or bench-phase runs: those
+   * scripts do not contain the sealed location at all.
+   */
+  holdout?: { uri: string };
+  /** Test seam; default `CANDIDATE_LAUNCHER`. */
+  candidateLauncher?: string;
 }
+
+/** Exit codes of the holdout fetch inside a bench step (the executor turns them into an infrastructure error). */
+export const HOLDOUT_FETCH_EXIT = { prepare: 40, download: 41, permissions: 42 } as const;
 
 /**
  * Setup, guardrail and bench steps. Before running the command the script verifies that the
  * protected files still equal bench.ref's; if not it restores them, reports `tampered`, and exits
  * 87 without running the command.
+ *
+ * With `isolation: 'user'` there are two unprivileged principals:
+ *
+ *  - setup and guardrails run as BENCH_USER (candidate code, `--no-new-privs`);
+ *  - a BENCH step (the evaluator harness) runs as HOLDOUT_USER, from a root-owned read-only SNAPSHOT of the
+ *    built tree taken right before the first run, so the candidate cannot edit what the harness executes.
+ *    The harness starts candidate processes through `$RATCHET_CANDIDATE_EXEC`, which runs them as BENCH_USER.
+ *    The holdout (confirm only) is fetched here, after setup and guardrails have finished, written mode 0600
+ *    for HOLDOUT_USER and wiped after the run (also on any exit), so no candidate process ever has a window
+ *    in which it could open it.
+ *
+ * The harness can run unprivileged-but-not-`no-new-privs`: the launcher is a sudo rule, which setuid
+ * needs. Everything the harness executes should therefore come from `protected` paths.
  */
 export function stepScript(o: StepScriptInput): string {
   const timeoutS = Math.max(1, Math.ceil(o.timeoutMs / 1000));
   const file = o.name.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 60);
   for (const k of Object.keys(o.env)) if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) throw new BenchError(`invalid environment variable name ${k}`);
+  if (o.holdout && o.kind !== 'bench') throw new BenchError('the holdout is only ever given to bench steps');
+  if (o.env.RATCHET_TRACE !== undefined) throw new BenchError('RATCHET_TRACE is set by the step script itself, from `holdout`');
   const exports = Object.entries(o.env)
     .map(([k, v]) => `export ${k}=${sq(v)}`)
     .join('\n');
+  const isolated = (o.isolation ?? 'user') === 'user';
+  const harness = isolated && o.kind === 'bench';
+  const launcher = o.candidateLauncher ?? CANDIDATE_LAUNCHER;
   const result =
     o.kind === 'bench'
       ? `emit run "{\\"exit\\":$rc,\\"ms\\":$ms,\\"timedOut\\":$to,\\"stdout_b64\\":\\"$(tail -c 12000 "$OUT.stdout" | b64)\\"}"
-echo "--- stderr tail ---"; tail -c 3000 "$OUT.stderr"`
+${
+  o.holdout
+    ? // The log of a holdout run carries no free text from the run: not the harness's stderr (which can relay
+      // whatever the candidate's processes wrote to it).
+      'echo "--- stderr withheld: holdout run ---"'
+    : 'echo "--- stderr tail ---"; tail -c 3000 "$OUT.stderr"'
+}`
       : `emit step "{\\"exit\\":$rc,\\"ms\\":$ms,\\"timedOut\\":$to}"
 echo "--- output tail ---"; { tail -c 4000 "$OUT.stdout"; tail -c 2000 "$OUT.stderr"; }`;
-  const isolated = (o.isolation ?? 'user') === 'user';
-  // The command runs as an unprivileged user without new privileges; everything it left running is
-  // killed before the next root-side step touches the tree (no racing the overlay), and AWS credential
-  // variables are scrubbed even though a stock SSM environment has none.
-  const run = isolated
-    ? `setpriv --reuid="$BU" --regid="$BU" --clear-groups --no-new-privs -- env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN -u AWS_PROFILE HOME="$W/home" TMPDIR="$W/tmp" USER="$BU" LOGNAME="$BU" bash -c ${sq(o.command)}`
-    : `bash -c ${sq(o.command)}`;
+
+  // Setup and guardrails: candidate code as BENCH_USER without new privileges. The bench harness: HOLDOUT_USER,
+  // with its own HOME/TMPDIR/output dir. Both lose the AWS_* variables even though a stock SSM environment has none.
+  const scrub = 'env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN -u AWS_PROFILE';
+  const run = harness
+    ? `setpriv --reuid="$HU" --regid="$HU" --clear-groups -- ${scrub} HOME="$W/hhome" TMPDIR="$W/htmp" USER="$HU" LOGNAME="$HU" RATCHET_OUT_DIR="$W/out" RATCHET_CANDIDATE_EXEC=${sq(launcher)} bash -c ${sq(o.command)}`
+    : isolated
+      ? `setpriv --reuid="$BU" --regid="$BU" --clear-groups --no-new-privs -- ${scrub} HOME="$W/home" TMPDIR="$W/tmp" USER="$BU" LOGNAME="$BU" bash -c ${sq(o.command)}`
+      : `bash -c ${sq(o.command)}`;
+
+  const holdoutPath = o.holdout ? localTracePath(o.layout, o.holdout.uri) : undefined;
+  const fetchHoldout = o.holdout
+    ? `
+# ---- holdout: fetched only now (after setup and guardrails), by root, for this run alone ----
+HD="$W/holdout"; TRACE=${sq(holdoutPath ?? '')}; URI=${sq(o.holdout.uri)}
+wipe() { shred -u -- "$TRACE" 2>/dev/null || rm -f -- "$TRACE"; rm -rf -- "\${HD:?}"/* 2>/dev/null || true; }
+trap wipe EXIT
+mkdir -p "$HD" || exit ${HOLDOUT_FETCH_EXIT.prepare}
+case "$URI" in
+  s3://*) aws s3 cp --only-show-errors "$URI" "$TRACE" || exit ${HOLDOUT_FETCH_EXIT.download} ;;
+  file://*) cp -- "\${URI#file://}" "$TRACE" || exit ${HOLDOUT_FETCH_EXIT.download} ;;
+  *) cp -- "$URI" "$TRACE" || exit ${HOLDOUT_FETCH_EXIT.download} ;;
+esac
+${isolated ? 'chown "$HU:" "$TRACE" || exit ' + HOLDOUT_FETCH_EXIT.permissions + '\nchmod 600 "$TRACE" || exit ' + HOLDOUT_FETCH_EXIT.permissions : 'chmod 600 "$TRACE" || exit ' + HOLDOUT_FETCH_EXIT.permissions}
+emit holdout "{\\"bytes\\":$(wc -c < "$TRACE" | tr -d ' ')}"
+export RATCHET_TRACE="$TRACE"
+`
+    : '';
+
+  const snapshot = harness
+    ? `
+# ---- read-only snapshot of the built tree: what the harness (HOLDOUT_USER) executes ----
+snapshot() {
+  rm -rf -- "$W/harness.tmp"
+  cp -a --reflink=auto -- "$CODE" "$W/harness.tmp" || return 1
+  find "$W/harness.tmp" -type f -perm /6000 -exec chmod ug-s {} + || return 1
+  chown -hR root:root "$W/harness.tmp" || return 1
+  chmod -R go-w,a+rX "$W/harness.tmp" || return 1
+  mv -- "$W/harness.tmp" "$H"
+}
+[ -d "$H" ] || snapshot || { echo "cannot snapshot the built tree for the evaluator" >&2; exit 31; }
+`
+    : '';
+
   return `${prelude(o.layout)}${overlayFns}
-${isolated ? `BU=${sq(BENCH_USER)}\nkill_bench() { pkill -KILL -u "$BU" 2>/dev/null || true; }\nkill_bench` : ''}
+${
+  isolated
+    ? `BU=${sq(BENCH_USER)}; HU=${sq(HOLDOUT_USER)}
+kill_users() { pkill -KILL -u "$BU" 2>/dev/null || true; pkill -KILL -u "$HU" 2>/dev/null || true; }
+kill_users
+${candidateEnv}`
+    : ''
+}
 apply check
 if [ -s "$W/changed.list" ]; then
   emit tampered "{\\"paths_b64\\":\\"$(tr '\\0' '\\n' < "$W/changed.list" | head -c 4000 | b64)\\"}"
   exit 87
 fi
-cd "$CODE" || exit 30
+${snapshot}${fetchHoldout}cd ${harness ? '"$H"' : '"$CODE"'} || exit 30
 ${exports}
 OUT="$W/logs/${file}"
 s=$(date +%s%N)
 timeout -k 10 ${timeoutS} ${run} </dev/null >"$OUT.stdout" 2>"$OUT.stderr"; rc=$?
 e=$(date +%s%N); ms=$(( (e - s) / 1000000 ))
-${isolated ? 'kill_bench' : ''}
+${isolated ? 'kill_users' : ''}
+${o.holdout ? 'wipe' : ''}
 to=false
 if [ $rc -eq 124 ] || { [ $rc -eq 137 ] && [ $ms -ge $(( ${timeoutS} * 1000 )) ]; }; then to=true; fi
 ${result}
@@ -295,8 +391,8 @@ export function stripSentinels(stdout: string): string {
     .join('\n');
 }
 
-/** Where the trace lives on the instance when it was downloaded from `uri`. */
+/** Where the holdout lives on the instance (inside the 0700 holdout directory) while a bench run uses it. */
 export function localTracePath(layout: Layout, uri: string): string {
   const ext = extname(uri.split('?')[0] ?? '').replace(/[^A-Za-z0-9.]/g, '');
-  return `${layout.work}/trace/trace${ext}`;
+  return `${layout.work}/holdout/trace${ext}`;
 }

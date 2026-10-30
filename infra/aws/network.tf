@@ -295,8 +295,9 @@ resource "aws_security_group" "bench" {
   }
 
   # NOTE: security groups do not filter traffic to the Amazon DNS resolver, so
-  # these two rules document intent but do not stop DNS tunnelling; see
-  # docs/real-env/bench.md "Residual risks" (Route 53 Resolver DNS Firewall).
+  # these two rules document intent but do not stop DNS tunnelling. That is
+  # what the Route 53 Resolver DNS Firewall in dns_firewall.tf does (default
+  # on, var.enable_dns_firewall): names outside the allow-list get NXDOMAIN.
   egress {
     description = "DNS (UDP) to the VPC resolver"
     from_port   = 53

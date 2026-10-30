@@ -284,6 +284,8 @@ resources (the optional proxy is off by default):
 | `aws_security_group.bench` | Load generator ↔ target and the endpoints only; no inbound from agents, no internet |
 | `aws_security_group.endpoints` | 443 from the bench and agent subnets to the interface endpoints |
 | `aws_subnet.proxy`, `aws_security_group.egress_proxy`, `aws_instance.egress_proxy` | **Optional** (`enable_egress_proxy`): squid allow-list proxy (~$7.5/month; Network Firewall would be ~$290) |
+| `aws_route53_resolver_firewall_rule_group.sandbox` + 2 domain lists, 2 rules, `..._rule_group_association.sandbox`, `aws_route53_resolver_firewall_config.sandbox` | **On by default** (`enable_dns_firewall`): DNS Firewall on the sandbox VPC. Allow-list = the S3 / `ssm` / `ssmmessages` / `ec2messages` / `logs` names of the region, the VPC's internal names and the agent domains; everything else gets NXDOMAIN, so the bench subnet cannot tunnel data out through the resolver. Per VPC, so it also covers agent runners (extras via `dns_firewall_extra_domains`) |
+| `aws_s3_bucket_lifecycle_configuration.artifacts` | `expire-artifacts` (30 days) and `expire-bench-inputs` (`bench_inputs_retention_days`, default 7: staged tarballs, plus noncurrent versions) |
 
 Per-agent roles, runner instances, bench instances and SSM secrets are created
 by the app per optimization (below), not by OpenTofu.
@@ -312,11 +314,15 @@ by the app per optimization (below), not by OpenTofu.
    with the `bench_runner` role (`baseline`/`bench` phases) or the
    `confirm_runner` role (`confirm` only). The instance has no internet and no
    git credentials: it downloads the archives through the S3 endpoint.
-3. Setup, guardrails and the benchmark run as an unprivileged OS user that
+3. Setup and guardrails run as an unprivileged OS user (`ratchet-bench`) that
    cannot reach instance metadata (iptables owner rule, IMDSv2 hop limit 1).
-4. Runs guardrails, then the benchmark N times; if it beats the best, runs the
-   confirm on a fresh instance against the hidden trace (fetched by a root
-   pre-step; the bench process can read but not replace it).
+4. Runs guardrails, then the benchmark N times. The evaluator harness runs as a
+   second user (`ratchet-holdout`) from a read-only snapshot and starts the
+   candidate's own processes as `ratchet-bench` through a launcher. If the
+   candidate beats the best, the confirm runs on a fresh instance: the hidden
+   trace is fetched by root only after setup and guardrails, as a `0600` file
+   owned by `ratchet-holdout`, and wiped after every run. Candidate processes
+   cannot open it (see `docs/real-env/bench.md` section 3 for the limits).
 5. Writes result JSON to S3; the app updates the ledger and ratchet and
    notifies the agent.
 

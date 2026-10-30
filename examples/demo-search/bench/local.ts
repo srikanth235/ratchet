@@ -53,7 +53,15 @@ if (values.url) {
   base = new URL(values.url);
 } else {
   const serverJs = fileURLToPath(new URL("../src/main.js", import.meta.url));
-  server = spawn(process.execPath, [serverJs], { env: { ...process.env, PORT: values.port }, stdio: "inherit" });
+  // On a live bench instance the evaluator runs as a different OS user than the candidate. The candidate's
+  // server is then started through the launcher ($RATCHET_CANDIDATE_EXEC), which runs it as the candidate
+  // user in the candidate's checkout with a clean environment: it cannot open the holdout this process
+  // reads (--mix) and never sees RATCHET_TRACE. Without the launcher (simulation, a developer machine)
+  // everything runs as the current user, as before. The server's stdout is not ours: our stdout carries the result.
+  const launcher = process.env.RATCHET_CANDIDATE_EXEC;
+  server = launcher
+    ? spawn(launcher, [`PORT=${values.port}`, "node", serverJs], { stdio: ["ignore", "ignore", "inherit"] })
+    : spawn(process.execPath, [serverJs], { env: { ...process.env, PORT: values.port }, stdio: "inherit" });
   base = new URL(`http://127.0.0.1:${values.port}`);
 }
 

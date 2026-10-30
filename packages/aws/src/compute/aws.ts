@@ -725,24 +725,88 @@ export function runnerUserData(spec: RunnerLaunchSpec, maxLifetimeHours: number,
   );
 }
 
-/** Unprivileged OS user that runs setup, guardrails and the bench (candidate code). Must match remote-scripts `BENCH_USER`. */
+/** Unprivileged OS user that runs setup, guardrails and every process of the candidate. Must match remote-scripts `BENCH_USER`. */
 export const BENCH_OS_USER = 'ratchet-bench';
+/** Unprivileged OS user of the evaluator harness: the only one that can open the holdout (mode 0600). Must match remote-scripts `HOLDOUT_USER`. */
+export const HOLDOUT_OS_USER = 'ratchet-holdout';
+/** What the harness runs to start a candidate process as BENCH_OS_USER. Must match remote-scripts `CANDIDATE_LAUNCHER`. */
+export const CANDIDATE_LAUNCHER_PATH = '/usr/local/bin/ratchet-candidate';
+/** Runs as BENCH_OS_USER, only reachable through the sudo rule below. */
+export const CANDIDATE_EXEC_PATH = '/usr/local/sbin/ratchet-candidate-exec';
+const CANDIDATE_SUDOERS_PATH = '/etc/sudoers.d/ratchet-holdout';
+/** Variables sudo keeps for the launcher (set by the root-run bench scripts before the harness starts). */
+export const CANDIDATE_ENV_KEEP = ['RATCHET_CANDIDATE_DIR', 'RATCHET_CANDIDATE_HOME', 'RATCHET_CANDIDATE_TMP', 'RATCHET_CANDIDATE_PATH'] as const;
 
 /**
- * The bench user may not read instance metadata: an iptables owner match rejects 169.254.169.254 for
- * its uid, so candidate code cannot fetch the instance-profile credentials (IMDSv2 with hop limit 1
- * is also set at launch). The bench runner's checkout step verifies both the user and the rule and
- * refuses to run the candidate otherwise, so a failure here cannot silently weaken the bench.
+ * `/usr/local/sbin/ratchet-candidate-exec`: runs ONE command as `ratchet-bench` in the candidate's checkout with
+ * a clean environment (`env -i`): no `RATCHET_TRACE`, no `AWS_*`, nothing the harness (a different user) holds.
+ * Leading `NAME=value` arguments become the candidate's environment, except the holdout and credentials, which
+ * are refused. stdin, stdout and stderr are the caller's.
+ */
+export const CANDIDATE_EXEC_SCRIPT = `#!/bin/bash
+set -eu
+[ "$(id -un)" = ${BENCH_OS_USER} ] || { echo "ratchet-candidate-exec must run as ${BENCH_OS_USER}" >&2; exit 77; }
+: "\${RATCHET_CANDIDATE_DIR:?}" "\${RATCHET_CANDIDATE_HOME:?}" "\${RATCHET_CANDIDATE_TMP:?}" "\${RATCHET_CANDIDATE_PATH:?}"
+for a in "$@"; do
+  case "$a" in
+    [A-Za-z_]*=*)
+      case "$a" in
+        RATCHET_TRACE=*|AWS_*=*) echo "refusing to pass \${a%%=*} to candidate code" >&2; exit 78 ;;
+      esac ;;
+    *) break ;;
+  esac
+done
+cd "$RATCHET_CANDIDATE_DIR"
+exec env -i PATH="$RATCHET_CANDIDATE_PATH" HOME="$RATCHET_CANDIDATE_HOME" TMPDIR="$RATCHET_CANDIDATE_TMP" USER=${BENCH_OS_USER} LOGNAME=${BENCH_OS_USER} LANG=C.UTF-8 "$@"
+`;
+
+/** `/usr/local/bin/ratchet-candidate`: what the harness calls (`$RATCHET_CANDIDATE_EXEC`). */
+export const CANDIDATE_LAUNCHER_SCRIPT = `#!/bin/sh
+exec sudo -n -u ${BENCH_OS_USER} ${CANDIDATE_EXEC_PATH} "$@"
+`;
+
+/**
+ * The only privilege the harness user has: run the launcher script as the bench user. `!use_pty` so stdin/stdout
+ * pipes between harness and candidate stay pipes; `env_keep` carries the job's checkout location through sudo.
+ */
+export const CANDIDATE_SUDOERS = `Defaults:${HOLDOUT_OS_USER} !requiretty, !use_pty, !lecture, env_keep += "${CANDIDATE_ENV_KEEP.join(' ')}"
+${HOLDOUT_OS_USER} ALL=(${BENCH_OS_USER}) NOPASSWD: ${CANDIDATE_EXEC_PATH}
+`;
+
+/**
+ * Two unprivileged users (the bench runner's checkout step verifies both, the IMDS block for both, and the
+ * launcher, and refuses to run the candidate otherwise, so a failure here cannot silently weaken the bench):
+ *
+ *  - `ratchet-bench` runs setup, guardrails and every candidate process; it can never open the holdout.
+ *  - `ratchet-holdout` runs the evaluator harness (trusted code from bench.ref) and owns the holdout file
+ *    (mode 0600). Its one privilege is a sudo rule that starts a candidate process as `ratchet-bench`.
+ *
+ * Neither user may read instance metadata: an iptables owner match rejects 169.254.169.254 for both uids, so
+ * neither can fetch the instance-profile credentials (IMDSv2 with hop limit 1 is also set at launch). `hidepid=2`
+ * hides each user's processes from the other. The launcher and the sudo rule are installed here, root-owned,
+ * before the bench agent starts.
  */
 export function benchUserData(spec: BenchLaunchSpec, maxLifetimeHours: number): string {
+  const users = [BENCH_OS_USER, HOLDOUT_OS_USER];
   return (
     COMMON_SCRIPT_HEAD +
     lifetimeGuard(maxLifetimeHours) +
-    `id -u ${BENCH_OS_USER} >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin ${BENCH_OS_USER}\n` +
-    `iptables -I OUTPUT 1 -m owner --uid-owner ${BENCH_OS_USER} -d 169.254.169.254 -j REJECT\n` +
-    `command -v ip6tables >/dev/null 2>&1 && ip6tables -I OUTPUT 1 -m owner --uid-owner ${BENCH_OS_USER} -d fd00:ec2::254 -j REJECT || true\n` +
+    users.map((u) => `id -u ${u} >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin ${u}\n`).join('') +
+    users.map((u) => `iptables -I OUTPUT 1 -m owner --uid-owner ${u} -d 169.254.169.254 -j REJECT\n`).join('') +
+    users.map((u) => `command -v ip6tables >/dev/null 2>&1 && ip6tables -I OUTPUT 1 -m owner --uid-owner ${u} -d fd00:ec2::254 -j REJECT || true\n`).join('') +
+    'mount -o remount,hidepid=2 /proc >/dev/null 2>&1 || true\n' +
+    heredocInstall(CANDIDATE_EXEC_PATH, CANDIDATE_EXEC_SCRIPT, '755', 'RATCHET_CANDIDATE_EXEC_EOF') +
+    heredocInstall(CANDIDATE_LAUNCHER_PATH, CANDIDATE_LAUNCHER_SCRIPT, '755', 'RATCHET_CANDIDATE_LAUNCHER_EOF') +
+    heredocInstall(`${CANDIDATE_SUDOERS_PATH}.tmp`, CANDIDATE_SUDOERS, '440', 'RATCHET_SUDOERS_EOF') +
+    `visudo -cf ${CANDIDATE_SUDOERS_PATH}.tmp >/dev/null || { rm -f ${CANDIDATE_SUDOERS_PATH}.tmp; echo "invalid sudoers rule for ${HOLDOUT_OS_USER}" >&2; exit 1; }\n` +
+    `mv ${CANDIDATE_SUDOERS_PATH}.tmp ${CANDIDATE_SUDOERS_PATH}\n` +
     envFile({ RATCHET_OPTIMIZATION_ID: spec.optimizationId, RATCHET_BENCH_PURPOSE: spec.purpose }) +
     'set -a; . /etc/ratchet/runner.env; set +a\n' +
     'nohup ratchet bench-agent >/var/log/ratchet-bench.log 2>&1 &\n'
   );
+}
+
+function heredocInstall(path: string, body: string, mode: string, delimiter: string): string {
+  if (body.includes(delimiter)) throw new Error('script contains its heredoc delimiter');
+  return `install -D -m ${mode} -o root -g root /dev/null ${path}\ncat > ${path} <<'${delimiter}'\n${body}${delimiter}\n`;
 }

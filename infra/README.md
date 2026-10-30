@@ -33,7 +33,9 @@ tofu destroy -var sandbox_id=demo -var region=us-east-1   # teardown
   `force_destroy`, `sealed_confirm_prefix` (default `holdout/`: the only part of
   the sealed bucket the confirm runner can read), and the egress-proxy switches
   `enable_egress_proxy` (default `false`), `egress_proxy_instance_type`,
-  `egress_proxy_domains`, `egress_proxy_extra_domains`. Removed:
+  `egress_proxy_domains`, `egress_proxy_extra_domains`, the DNS firewall
+  switches `enable_dns_firewall` (default `true`) and `dns_firewall_extra_domains`,
+  and `bench_inputs_retention_days` (default 7: expiry of the staged `bench-inputs/`). Removed:
   `vpc_id`, `subnet_id`, `bench_egress_cidrs`.
 - **State** is local, one directory per sandbox:
   `~/Library/Application Support/Ratchet/sandboxes/<id>/terraform.tfstate`
@@ -49,7 +51,7 @@ tofu destroy -var sandbox_id=demo -var region=us-east-1   # teardown
 
 | Resource | |
 |---|---|
-| `aws_s3_bucket.artifacts` (+ public-access block, ownership, SSE, lifecycle) | per-agent prefixes; `bench-inputs/` (staged candidates) and `bench-results/` |
+| `aws_s3_bucket.artifacts` (+ public-access block, ownership, SSE, lifecycle: 30 days, `bench-inputs/` after `bench_inputs_retention_days`) | per-agent prefixes; `bench-inputs/` (staged candidates) and `bench-results/` |
 | `aws_s3_bucket.sealed` (+ public-access block, ownership, SSE, versioning) | hidden traces |
 | `aws_s3_bucket_policy.sealed_deny_agents` | deny agent roles (path + tag), deny the bench runner, TLS only |
 | `aws_iam_policy.agent_boundary` | cap for every agent role |
@@ -59,6 +61,7 @@ tofu destroy -var sandbox_id=demo -var region=us-east-1   # teardown
 | `aws_subnet.bench` (private), `aws_subnet.agent` (public, or private with the proxy) | where bench machines / agent runners launch |
 | `aws_vpc_endpoint.s3` (gateway, policy: the two sandbox buckets only), `aws_vpc_endpoint.interface["ssm" \| "ssmmessages" \| "ec2messages" \| "logs"]`, `aws_security_group.endpoints` | the only ways out of the bench subnet |
 | `aws_security_group.agent_runner`, `aws_security_group.bench` | network |
+| `aws_route53_resolver_firewall_*` (rule group, 2 domain lists, 2 rules, association, config; **on unless `enable_dns_firewall = false`**) | DNS Firewall on the VPC: allow the S3/SSM/ssmmessages/ec2messages/logs names of the region, internal names and the agent domains, NXDOMAIN for the rest (stops DNS tunnelling) |
 | `aws_subnet.proxy`, `aws_security_group.egress_proxy`, `aws_instance.egress_proxy` (**only with `enable_egress_proxy`**) | domain allow-list proxy for agent runners |
 
 ### Costs of the network pieces (us-east-1 list prices; check current pricing)
@@ -68,6 +71,7 @@ tofu destroy -var sandbox_id=demo -var region=us-east-1   # teardown
 | 4 interface endpoints (ssm, ssmmessages, ec2messages, logs), one AZ | yes | 4 x $0.01/h x 730 h = **~$29** + $0.01/GB |
 | S3 gateway endpoint, internet gateway, VPC, subnets, routes | yes | $0 |
 | Egress proxy: t4g.nano + public IPv4 + 8 GB gp3 | only with `enable_egress_proxy` | ~$3.1 + ~$3.65 + ~$0.65 = **~$7.5** + data out |
+| DNS Firewall: 1 rule group association | yes (unless disabled) | $0.60 + $0.60 per million queries |
 | (not used) AWS Network Firewall | no | ~$0.395/h per endpoint = ~$290 + $0.065/GB |
 
 The proxy is a single squid instance because it is ~40x cheaper and trivially

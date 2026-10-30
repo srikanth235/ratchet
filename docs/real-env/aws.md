@@ -22,8 +22,8 @@ or production account).
 - A pinned `tofu` binary (`tofu version`) and this repo built: `pnpm install && pnpm build`.
 - A runner AMI and a bench AMI (Node, git, agent CLIs, AWS CLI, SSM agent, a `ratchet` binary
   on PATH providing `ratchet runner` / `ratchet bench-agent`). The bench AMI additionally needs `iptables`,
-  `setpriv`, `pkill`, GNU `find`/`grep -P`/`sha256sum` and a world-readable toolchain (see `bench.md`); it does not
-  need git. Until those exist, use any
+  `setpriv`, `pkill`, `sudo`, `shred`, GNU `find`/`grep -P`/`sha256sum`/`cp` and a world-readable toolchain (see `bench.md`;
+  no setuid binary other than `sudo` is wanted); it does not need a source-control client. Until those exist, use any
   SSM-enabled Amazon Linux AMI: instances will launch, tag, accrue cost and be SSM-reachable,
   which is all steps 2-6 need.
 - Billing alarms on the account (the kill switch is a backstop, not a substitute).
@@ -49,7 +49,7 @@ console.log(await sandbox.plan(input));   // then apply, outputs, destroy
 
 | Step | Command | Expected |
 |---|---|---|
-| plan | `sandbox.plan(input)` | every change is `create`: buckets and their hardening, the boundary, **two** runner identities (`bench_runner`, `confirm_runner`: role, profile, policy each), the VPC, subnets, route tables, the S3 gateway endpoint, 4 interface endpoints (`ssm`, `ssmmessages`, `ec2messages`, `logs`), the endpoint/agent-runner/bench security groups. Roughly 50 resources; no proxy resources unless `enable_egress_proxy`. (`SANDBOX_RESOURCES` in `sandbox/mock.ts` lists the headline ones.) |
+| plan | `sandbox.plan(input)` | every change is `create`: buckets and their hardening, the boundary, **two** runner identities (`bench_runner`, `confirm_runner`: role, profile, policy each), the VPC, subnets, route tables, the S3 gateway endpoint, 4 interface endpoints (`ssm`, `ssmmessages`, `ec2messages`, `logs`), the endpoint/agent-runner/bench security groups, the DNS Firewall (2 domain lists, 1 rule group, 2 rules, 1 association, 1 config; skipped with `enable_dns_firewall=false`) and the second lifecycle rule on the artifacts bucket. Roughly 58 resources; no proxy resources unless `enable_egress_proxy`. (`SANDBOX_RESOURCES` in `sandbox/mock.ts` lists the headline ones.) |
 | state location | `ls /tmp/ratchet-sandboxes/rt-test` | `vars.tfvars.json`, `plan.tfplan`, `.terraform-data/`; and **no** `terraform.tfstate` or `.terraform*` in `infra/aws/` (`git status infra/` clean) |
 | apply | `sandbox.apply(input)` | resolves with `artifactsBucket`, `sealedBucket`, `agentBoundaryRef` (ARN), `agentRolePath: '/ratchet/agent/'`, network ids incl. `benchSubnetId` (different from `subnetId`) and `egressProxyUrl: null`, `evalIdentity` **and** `confirmIdentity` (different profiles), `sealedConfirmPrefix: 'holdout/'`, `limits` `{4, 2}`; `terraform.tfstate` now present under the sandbox dir; `plan.tfplan` removed |
 | idempotent | `sandbox.plan(input)` again | every change `no-op` |
@@ -111,7 +111,7 @@ const runner = await cloud.launchRunner({ optimizationId: 'opt1', agentId: 'a1',
 | SSM | `cloud.runCommand(runner.id, { script: 'echo $X; id -un', env: { X: "a'b" } })` | `{exitCode:0, stdout:"a'b\n..."}`; `exit 7` -> `exitCode 7`; a `sleep` beyond `timeoutSeconds` -> exit 124. Note: SSM truncates stdout at 24000 chars |
 | bench | `cloud.launchBenchInstance({ optimizationId:'opt1', instanceType:'c7i.2xlarge', imageRef:'ami-...', purpose:'baseline' })` | eval (bench-runner) instance profile, **bench subnet** (`network_ref.bench_subnet_id`), bench SG, no public IP, `HttpPutResponseHopLimit=1`, no `ratchet:agent` tag, role=`bench`, `ratchet:purpose=baseline` |
 | bench (confirm) | the same with `purpose:'confirm'` | the `...-confirm-runner` instance profile; every other attribute identical. With `confirmInstanceProfile` unset the call throws and launches nothing |
-| bench user-data | decode the bench instance's user-data | creates `ratchet-bench`, installs `iptables -I OUTPUT 1 -m owner --uid-owner ratchet-bench -d 169.254.169.254 -j REJECT` before starting `ratchet bench-agent`. On the instance: `sudo -u ratchet-bench curl -m 3 http://169.254.169.254/latest/meta-data/` fails, `curl` as root works |
+| bench user-data | decode the bench instance's user-data | creates `ratchet-bench` **and** `ratchet-holdout`, installs the `iptables -I OUTPUT 1 -m owner --uid-owner <user> -d 169.254.169.254 -j REJECT` rule for both, remounts `/proc` with `hidepid=2`, installs `/usr/local/sbin/ratchet-candidate-exec`, `/usr/local/bin/ratchet-candidate` and `/etc/sudoers.d/ratchet-holdout` (checked with `visudo -cf`), all before starting `ratchet bench-agent`. On the instance: `sudo -u ratchet-bench curl -m 3 http://169.254.169.254/latest/meta-data/` and the same as `ratchet-holdout` fail, `curl` as root works; `sudo -l -U ratchet-holdout` lists exactly `(ratchet-bench) NOPASSWD: /usr/local/sbin/ratchet-candidate-exec`; `sudo -l -U ratchet-bench` says it is not in the sudoers file; `sudo -u ratchet-holdout /usr/local/bin/ratchet-candidate id -un` prints `ratchet-bench` (with `RATCHET_CANDIDATE_DIR/HOME/TMP/PATH` exported) |
 | boundary network | from the runner: `run-instances` into the bench subnet, into the proxy subnet, and with `--security-group-ids <bench sg>` (each separately) | all explicitly denied (`DenyRunInstancesInInternalSecurityGroups`, subnet not in `AllowRunInstancesAgentSubnetOnly`); into the agent subnet with the agent_runner SG it succeeds |
 | experiment role | from the runner (`aws ec2 run-instances ... --tag-specifications` with only opt+agent tags, IMDSv2, no profile) | succeeds under the agent role; `listTagged` classifies it `experiment`. The same call without tags, with other tags, with `HttpTokens=optional`, or with a non-allow-listed type must be denied |
 | terminate | `cloud.terminate([ids])`, twice | no error the second time; `describe-instances` shows `shutting-down` -> `terminated` |
@@ -229,7 +229,51 @@ proxy on 3128, the interface endpoints and the S3 prefix list.
 | package installs | `pnpm install` in the runner | fails unless the registry is in `egress_proxy_extra_domains`; decide per project, do not allow `*` |
 | failure mode | stop the proxy instance | runners lose model/GitHub access, SSM and S3 keep working; `tofu apply` replaces it |
 
-## 10. Input-validation drill (tag/prefix injection)
+## 10. DNS Firewall and the `bench-inputs/` lifecycle
+
+`enable_dns_firewall` (default `true`) puts a Route 53 Resolver DNS Firewall rule group on the sandbox VPC. The allow-list
+is built in `infra/aws/dns_firewall.tf`: the regional `ssm`, `ssmmessages`, `ec2messages`, `logs` and S3 names (the first four are
+derived from the same list as the interface endpoints), the VPC's internal and reverse names, the agent domains
+(`egress_proxy_domains` + `egress_proxy_extra_domains`, converted from squid syntax) and `dns_firewall_extra_domains`; a second rule
+blocks everything else with NXDOMAIN. It fails closed (`firewall_fail_open = DISABLED`).
+
+**Why one VPC and one list.** A rule group associates with a VPC, not a subnet, so it cannot be "bench only". Moving the bench to
+its own VPC would mean a second set of the four interface endpoints (about $29/month each copy), a second S3 gateway endpoint and
+new security-group and boundary references for every path agents use to reach SSM and S3. The shared-VPC consequence is accepted:
+agent runners resolve only the allow-list too, with or without the proxy. That is a domain allow-list below squid, but it
+changes the default behaviour of an unproxied runner from "HTTPS to anywhere": `pnpm install` / `pip install` need their
+registries in `dns_firewall_extra_domains` (`registry.npmjs.org`, `*.pythonhosted.org`, `pypi.org`, ...), and the runner AMI must not
+resolve other hosts at boot. If that is wrong for an environment, set `enable_dns_firewall=false` and accept DNS tunnelling
+(see `bench.md`).
+
+| Check | Command | Expected |
+|---|---|---|
+| plan | `tofu plan` | adds `aws_route53_resolver_firewall_rule_group.sandbox`, two `..._domain_list`, two `..._rule`, `..._rule_group_association.sandbox`, `..._firewall_config.sandbox`; changes the artifacts lifecycle configuration |
+| association | `aws route53resolver list-firewall-rule-group-associations --vpc-id <vpc>` | one association, `Status: COMPLETE`, priority 101, `MutationProtection: DISABLED` |
+| rules | `aws route53resolver list-firewall-rules --firewall-rule-group-id <id>` | priority 100 `ALLOW` (allowed list), priority 200 `BLOCK` with `BlockResponse: NXDOMAIN` (`*`) |
+| allow-list | `aws route53resolver list-firewall-domains --firewall-domain-list-id <allowed>` | the regional service names, `*.s3.<region>.amazonaws.com`, `*.ec2.internal`, `*.<region>.compute.internal`, `*.<b>.<a>.in-addr.arpa`, `api.anthropic.com`, `github.com` + `*.github.com`, ...; never `*` or a bare suffix |
+| bench blocked | on a bench instance: `getent hosts example.com`; `dig +short x.attacker.example`; `dig +short TXT a.b.example.org` | no answer / NXDOMAIN, as root and as `ratchet-bench` / `ratchet-holdout` |
+| bench works | `getent hosts ssm.<region>.amazonaws.com`; `aws s3 cp s3://<artifacts>/bench-inputs/... .`; one SSM `RunCommand`; a full bench job | resolves (private endpoint addresses for `ssm`/`logs`); everything succeeds. If SSM registration breaks after enabling it, the SSM agent needs another name: read the blocked names (enable Resolver query logging on the VPC for a test run), add them to `dns_firewall_extra_domains`, and add the name to `dns_bench_domains` in `dns_firewall.tf` |
+| agent runner | on a runner: `getent hosts api.anthropic.com`, `api.github.com`, `ec2.<region>.amazonaws.com`, `sts.<region>.amazonaws.com`; then `getent hosts registry.npmjs.org` | the first four resolve; the registry does not until added to `dns_firewall_extra_domains`; `claude -p` / `codex exec` and `git clone` over HTTPS still work |
+| with proxy | `-var enable_egress_proxy=true` | the proxy instance still boots (`dnf install squid` needs `cdn.amazonlinux.com` and `*.s3.dualstack.<region>.amazonaws.com`, both added automatically) and `curl -x $HTTPS_PROXY https://api.anthropic.com` works |
+| fail closed | `aws route53resolver get-firewall-config --resource-id <vpc>` | `FirewallFailOpen: DISABLED` |
+| toggle | `tofu apply -var enable_dns_firewall=false` in a scratch sandbox | the association and rules are destroyed (no mutation-protection error), `getent hosts example.com` resolves again |
+| cost | Cost Explorer after a day | about $0.60/month for the association plus $0.60 per million queries |
+
+**`bench-inputs/` lifecycle.** The artifacts bucket has two rules: `expire-artifacts` (whole bucket, `artifacts_retention_days`, default 30)
+and `expire-bench-inputs` (prefix `bench-inputs/`, `bench_inputs_retention_days`, default 7, plus noncurrent versions and a
+1-day multipart abort). The bucket is not versioned today; the noncurrent rule is there so enabling versioning later cannot
+make superseded staged code immortal.
+
+| Check | Command | Expected |
+|---|---|---|
+| rules | `aws s3api get-bucket-lifecycle-configuration --bucket <artifacts>` | `expire-bench-inputs` `Enabled`, `Filter.Prefix: bench-inputs/`, `Expiration.Days: 7`, `NoncurrentVersionExpiration.NoncurrentDays: 7`; `expire-artifacts` unchanged |
+| staged inputs | after a bench job: `aws s3api list-objects-v2 --bucket <artifacts> --prefix bench-inputs/` | the two tarballs (`code.tgz`, `bench.tgz`) of the job |
+| expiry | the next day: `aws s3api head-object --bucket <artifacts> --key bench-inputs/<opt>/<job>/code.tgz` shows `Expiration: expiry-date=..., rule-id="expire-bench-inputs"` | the expiry date is 7 days (rounded to the next midnight UTC) after the upload; after that the object is gone |
+| not too short | set `bench_inputs_retention_days=1` in a scratch sandbox and run a job that takes 3 hours | the job still finishes (S3 expires at midnight UTC following the age, so the minimum effective life is 24 h; the instance lifetime cap is `max_instance_lifetime_hours`, default 2) |
+| other prefixes | `head-object` on an `artifacts/<opt>/<agent>/...` object | still the 30-day rule only |
+
+## 11. Input-validation drill (tag/prefix injection)
 
 The unit tests prove ids with `*`, `?`, `/`, `..` are rejected before any API call at every
 `AwsCloudCompute` entry point, `TofuSandboxProvider`/`MockSandboxProvider` (sandbox id), and
