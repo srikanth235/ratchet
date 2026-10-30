@@ -21,7 +21,8 @@ import {
 } from 'drizzle-orm/sqlite-core';
 
 export const DIRECTIONS = ['minimize', 'maximize'] as const;
-export type Direction = (typeof DIRECTIONS)[number];
+import type { Direction } from '../config/schema.js';
+export type { Direction };
 
 export const OPTIMIZATION_STATUSES = [
   'draft',
@@ -50,7 +51,7 @@ export type AgentStatus = (typeof AGENT_STATUSES)[number];
 
 /** `pending` until the bench runner decides; the rest mirror the ratchet rule (§3). */
 export const VERDICTS = ['pending', 'verified', 'rejected', 'failed_confirm', 'blocked'] as const;
-export type Verdict = (typeof VERDICTS)[number];
+export type CandidateVerdict = (typeof VERDICTS)[number];
 
 export const BENCH_PHASES = ['bench', 'confirm'] as const;
 export type BenchPhase = (typeof BENCH_PHASES)[number];
@@ -67,12 +68,9 @@ export type SpendCategory = (typeof SPEND_CATEGORIES)[number];
 /** Summary statistics of a benchmark run set. `value` is the headline number the ratchet compares. */
 export type BenchStats = { value: number } & Record<string, number>;
 
-/** Per-guardrail outcome stored on a bench result. */
-export interface GuardrailResult {
-  name: string;
-  passed: boolean;
-  detail?: string;
-}
+/** Per-guardrail outcome stored on a bench result (same shape the ratchet rule consumes). */
+import type { GuardrailResult } from '../config/guardrails.js';
+export type { GuardrailResult };
 
 const inList = (col: AnySQLiteColumn, values: readonly string[]): SQL =>
   sql`${col} in (${sql.raw(values.map((v) => `'${v}'`).join(', '))})`;

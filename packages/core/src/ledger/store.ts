@@ -28,7 +28,7 @@ import {
   type RatchetMoveRow,
   type SpendCategory,
   type SpendEventRow,
-  type Verdict,
+  type CandidateVerdict,
 } from './schema.js';
 
 export type LedgerErrorCode =
@@ -207,7 +207,7 @@ export type ActivityItem =
       agentKind: AgentKind;
       sha: string;
       message: string;
-      verdict: Verdict;
+      verdict: CandidateVerdict;
       reasons: string[];
     }
   | {
@@ -517,7 +517,7 @@ export class Ledger {
       .get();
   }
 
-  setVerdict(candidateId: string, verdict: Verdict, reasons: string[] = [], at: number = this.now()): CandidateRow {
+  setVerdict(candidateId: string, verdict: CandidateVerdict, reasons: string[] = [], at: number = this.now()): CandidateRow {
     this.requireCandidate(candidateId);
     return this.db
       .update(candidates)
