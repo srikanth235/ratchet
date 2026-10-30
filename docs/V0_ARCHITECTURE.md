@@ -149,16 +149,71 @@ movement, or a manual stop.
 
 ## 7. AWS design
 
-### One-time setup
+### Infrastructure as code: OpenTofu + sandbox contract
 
-The app ships a CloudFormation template the user deploys into a **dedicated
-sandbox account**, which creates:
+Sandbox infrastructure is defined in **OpenTofu** (open-source, Linux
+Foundation fork of Terraform; HCL; MPL-licensed, so safe to bundle). OpenTofu
+does not make resources cloud-agnostic — an IAM role is not a GCP service
+account — so cloud independence comes from a **Ratchet sandbox contract**: every
+cloud module takes the same inputs and produces the same outputs, and the app
+only depends on the contract.
+
+```
+infra/
+  contract.md        # what every sandbox must provide
+  aws/               # v0
+  gcp/               # later
+  azure/             # later
+```
+
+```hcl
+# Inputs — identical for every cloud
+variable "sandbox_id"             { type = string }
+variable "region"                 { type = string }
+variable "allowed_instance_types" { type = list(string) }
+
+# Outputs — identical for every cloud; the app consumes only these
+output "artifacts_bucket"   { value = ... }  # agent read/write, per campaign/lane prefix
+output "sealed_bucket"      { value = ... }  # eval identity only
+output "agent_boundary_ref" { value = ... }  # AWS: permission boundary ARN
+output "eval_identity_ref"  { value = ... }  # AWS: eval role / instance profile ARN
+output "network_ref"        { value = ... }  # AWS: subnet + security group
+```
+
+In Swift, a `SandboxProvider` protocol wraps the contract; `AWSSandboxProvider`
+is the only v0 implementation.
+
+**Split by lifetime:**
+
+| Layer | Lifetime | Mechanism |
+|---|---|---|
+| Sandbox (buckets, boundary, eval identity, network) | Long-lived, one-time | **OpenTofu** |
+| Per-lane credentials, kill switch | Minutes–hours, must be fast | Cloud SDK from the app (`CredentialMinter` protocol) |
+| Experiment instances | Seconds–hours | Agents via cloud CLI, inside the boundary |
+| Cost meter, reaper | Continuous | Cloud SDK from the app, filtered by tag |
+
+Per-lane credentials stay out of OpenTofu: applies are too slow for them, and
+the secrets would land in state.
+
+**Operation:**
+
+- The app bundles a pinned `tofu` binary; users don't install anything.
+- Setup runs `tofu plan` and shows the resource diff in the app ("Ratchet will
+  create these N resources") before `tofu apply`. Teardown is `tofu destroy`.
+- `plan`/`apply`/`destroy` use the user's existing AWS profile or SSO login.
+- State lives locally in
+  `~/Library/Application Support/Ratchet/sandboxes/<id>/` for v0; an optional
+  remote backend in the sandbox account (S3) for teams later.
+
+### AWS sandbox module (v0)
+
+Deployed into a **dedicated sandbox account**, `infra/aws` creates:
 
 - `ratchet-artifacts-<id>` S3 bucket (agent read/write, prefixed by campaign/lane)
 - `ratchet-sealed-<id>` S3 bucket (eval role only; holdout data)
 - `RatchetAgentBoundary` permission boundary
-- `RatchetEvalRole` for app-launched eval instances
-- Instance profile, security group, VPC (or default VPC)
+- `RatchetEvalRole` and instance profile for app-launched eval instances
+- Security group and subnet (or default VPC)
 
 ### Agent credentials (per lane)
 
@@ -204,7 +259,7 @@ sandbox account) is a good addition for when the Mac is offline.
 ## 8. Mac app
 
 **Stack:** SwiftUI, Swift Concurrency (one actor per lane), GRDB/SQLite for
-ledger, Keychain for secrets, AWS SDK for Swift, `git` / `gh` and vendor CLIs as
+ledger, Keychain for secrets, AWS SDK for Swift, a bundled `tofu` binary, `git` / `gh` and vendor CLIs as
 subprocesses. Distributed via Developer ID + notarization, outside the
 Mac App Store (the App Store sandbox would block spawning these CLIs).
 
@@ -215,7 +270,8 @@ RatchetApp/
   Campaign/     CampaignEngine, Ratchet, StopRules
   Harness/      HarnessAdapter, ClaudeCodeAdapter, CodexAdapter
   GitHub/       BranchWatcher, PRBuilder
-  AWS/          SandboxSetup, CredentialMinter, CostMeter, Reaper, EvalRunner
+  Sandbox/      SandboxProvider, TofuRunner (plan/apply/destroy), AWSSandboxProvider
+  AWS/          CredentialMinter, CostMeter, Reaper, EvalRunner
   Ledger/       Schema, Store
   UI/           NewCampaign, LiveLanes, RatchetTimeline, Spend, Result
 ```
@@ -234,7 +290,7 @@ RatchetApp/
 ## 9. Milestones
 
 1. **M0, skeleton:** app shell, `ratchet.yaml` parser, ledger, GitHub watcher.
-2. **M1, AWS sandbox:** CloudFormation template, credential minter, cost meter, reaper.
+2. **M1, AWS sandbox:** sandbox contract, OpenTofu AWS module, bundled `tofu` runner, credential minter, cost meter, reaper.
 3. **M2, trusted eval:** eval runner, gates, noise-floor baseline, ratchet rule.
 4. **M3, first lane:** Claude Code adapter end to end on a demo repo.
 5. **M4, second lane:** Codex adapter; parallel lanes; shared ratchet.
