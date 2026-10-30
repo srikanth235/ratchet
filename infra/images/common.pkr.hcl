@@ -111,6 +111,12 @@ variable "bench_volume_gb" {
   description = "Root volume of the bench image."
 }
 
+variable "host_toolchain" {
+  type        = bool
+  default     = false
+  description = "Bench image only: also install node, pnpm, k6 and hyperfine on the host, for repos without environment.image (the legacy no-container path). The default image is generic: the toolchain is the repo's container. The result is tagged ratchet:image=bench-host and is never found by the tag lookup."
+}
+
 variable "extra_tags" {
   type        = map(string)
   default     = {}
