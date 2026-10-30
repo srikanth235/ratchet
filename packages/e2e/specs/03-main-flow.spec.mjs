@@ -70,6 +70,32 @@ describe('main flow (real engine, simulation mode)', () => {
     await shot('new-optimization');
   });
 
+  test('evaluator cards and the guardrail tick list edit the same ratchet.yaml; editing it updates the form', async () => {
+    const editor = h.win.getByLabel('ratchet.yaml', { exact: true });
+    const cards = h.win.locator('main input[name=evaluator]');
+    assert.equal(await cards.count(), 4, 'benchmark / backtest / eval / simulation');
+    assert.equal(await h.win.getByRole('radio', { name: 'Benchmark' }).isChecked(), true, 'the pasted config says kind: benchmark');
+    await h.win.locator('.eval-choice', { hasText: 'Backtest' }).click();
+    await poll('kind: backtest in the yaml', async () => /kind: backtest/.test(await editor.inputValue()), { timeout: 10_000 });
+    assert.match(await editor.inputValue(), /usd_per_unit: 1200/, 'the rest of the pasted config survives');
+    assert.match(await editor.inputValue(), /# domain pack: code performance/, 'and so do its comments');
+
+    const guards = h.win.locator('.guardrail-list input[type=checkbox]');
+    assert.equal(await guards.count(), 4);
+    await h.win.getByRole('checkbox', { name: 'peak_rss: < 1.2x' }).uncheck();
+    await poll('peak_rss gone from the yaml', async () => !/peak_rss/.test(await editor.inputValue()), { timeout: 10_000 });
+    await poll('3 guardrails summarized', async () => /3 guardrails/.test(await h.win.locator('.file-bar').innerText()), { timeout: 15_000 });
+    assert.equal(await guards.count(), 4, 'an unticked guardrail stays in the list');
+
+    // and back: the text drives the form
+    await editor.fill(YAML.replace('kind: benchmark', 'kind: simulation'));
+    await poll('the Simulation card selected', async () => h.win.getByRole('radio', { name: 'Simulation' }).isChecked(), { timeout: 10_000 });
+    assert.equal(await h.win.getByRole('checkbox', { name: 'peak_rss: < 1.2x' }).isChecked(), true);
+    await editor.fill(YAML);
+    await h.win.locator('.validation').getByText('Valid config').waitFor({ timeout: 15_000 });
+    assert.deepEqual(h.errors, []);
+  });
+
   test('a broken ratchet.yaml gives a path-precise error and blocks submit; fixing it recovers', async () => {
     const editor = h.win.getByLabel('ratchet.yaml', { exact: true });
     const run = h.win.getByRole('button', { name: /Run baseline & start/ });
@@ -207,6 +233,19 @@ describe('main flow (real engine, simulation mode)', () => {
     const filtered = await rows.evaluateAll((trs) => trs.map((t) => t.getAttribute('data-verdict')));
     assert.ok(filtered.length >= 1 && filtered.every((v) => v === v0), `filter ${v0}: ${filtered}`);
     await h.win.locator('.chips[aria-label="Filter by verdict"] .chip', { hasText: /^all$/ }).click();
+
+    // Metric switch: the demo's bench reports http_req_duration.{p50,p95,p99}; the switch lists exactly those.
+    const series = await rpc(h.win, 'ratchetHistory', id);
+    assert.deepEqual(series.options.map((o) => o.label), ['p50', 'p95', 'p99']);
+    const sw = h.win.getByRole('radiogroup', { name: 'Metric' });
+    assert.deepEqual((await sw.getByRole('radio').allInnerTexts()).map((t) => t.trim()), ['p50', 'p95', 'p99']);
+    await sw.getByRole('radio', { name: 'p99' }).click();
+    await poll('the p99 view', async () => /Best verified · p99/i.test(await rc.innerText()), { timeout: 15_000 });
+    const p99 = await rpc(h.win, 'ratchetHistory', id, 'http_req_duration.p99');
+    assert.equal(p99.metric, 'http_req_duration.p99');
+    assert.equal(p99.steps[0].value, d.baselineStats['metric:http_req_duration.p99'], 'the p99 line starts at the baseline p99');
+    await sw.getByRole('radio', { name: 'p95' }).click();
+    await poll('back to the objective', async () => !/Best verified · p/i.test(await rc.innerText()), { timeout: 15_000 });
     await shot('benchmarks');
   });
 
@@ -224,7 +263,18 @@ describe('main flow (real engine, simulation mode)', () => {
     const row = h.win.locator('[data-testid=optimizations-table] tbody tr', { hasText: NAME });
     await row.waitFor();
     assert.match(await row.innerText(), /Running|Baselining/);
-    assert.equal(await h.win.locator('.kpi').count(), 4);
+    // four KPIs plus "Value created": the demo config has an objective.value
+    assert.deepEqual(await h.win.locator('.kpi').evaluateAll((ks) => ks.map((k) => k.getAttribute('data-kpi'))), ['wins', 'gain', 'spend', 'cpw', 'value']);
+    // Range switch: the cards follow the window; a fresh ledger has nothing in the window before, so no change chips.
+    for (const range of ['7d', '90d', '30d']) {
+      await h.win.getByRole('radio', { name: range }).click();
+      const snap = await rpc(h.win, 'listOptimizations', { range });
+      const wins = h.win.locator('[data-kpi=wins]');
+      await poll(`wins for ${range}`, async () => (await wins.locator('.kpi__unit').innerText()).trim() === `last ${range}`, { timeout: 15_000 });
+      assert.equal((await wins.locator('.hero-num').innerText()).trim(), snap.kpis[0].value);
+      assert.equal(await h.win.locator('.kpi__badge').count(), 0);
+    }
+    assert.doesNotMatch(await h.win.locator('.kpis').innerText(), /NaN|undefined/);
     await shot('optimizations');
   });
 
@@ -327,6 +377,27 @@ describe('main flow (real engine, simulation mode)', () => {
     } else {
       assert.equal(await pr.isDisabled(), true, 'Open pull request is disabled without a verified win');
       assert.match(await pr.getAttribute('title'), /at least one verified win/);
+    }
+
+    // Winning change: the best verified commit diffed against main by the simulated GitHub (LocalGitHost).
+    const change = h.win.locator('[data-testid=winning-change]');
+    await change.waitFor({ timeout: 30_000 });
+    const w = await rpc(h.win, 'winningChange', id);
+    if (wins > 0) {
+      assert.equal(w.unavailable, null, `diff: ${w.unavailable}`);
+      assert.equal(w.commits, wins);
+      assert.ok(w.files.length >= 1 && w.files.every((f) => f.path.startsWith('src/')), `files: ${w.files.map((f) => f.path)}`);
+      await poll('file rows', async () => (await change.locator('[data-testid=diff-file]').count()) === w.files.length, { timeout: 30_000 });
+      assert.match(await change.innerText(), new RegExp(`${wins} verified commits?, squashed`));
+      assert.match(await change.innerText(), new RegExp(`\\+${w.additions} −${w.deletions}`));
+      // Where the time went: the demo's local bench reports Server-Timing spans of its p95 requests.
+      const spans = h.win.locator('[data-testid=spans]');
+      await spans.waitFor({ timeout: 15_000 });
+      assert.deepEqual((await spans.locator('.span-row__name').allInnerTexts()).map((t) => t.trim()).sort(), ['parse', 'search', 'serialize', 'wait']);
+    } else {
+      assert.equal(w.unavailable, 'No verified win yet.');
+      assert.match(await change.innerText(), /No verified win yet/);
+      assert.equal(await h.win.locator('[data-testid=spans]').count(), 0, 'no spans panel without a verified win');
     }
     await shot('result');
   });
