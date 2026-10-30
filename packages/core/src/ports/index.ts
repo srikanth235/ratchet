@@ -1,0 +1,304 @@
+/**
+ * Ports: every external system Ratchet talks to, as an interface.
+ * Each port has a real implementation (AWS, GitHub, agent CLIs, EC2 bench)
+ * and a mock / local one, so the whole product runs in `simulation` mode.
+ * See docs/REAL_ENV_TESTING.md for which mocks must be re-tested for real.
+ */
+import type { RatchetConfig } from '../config/schema.js';
+import type { GuardrailResult } from '../config/guardrails.js';
+import type { AgentKind, CandidateVerdict } from '../ledger/schema.js';
+
+export type OptimizationId = string;
+export type AgentId = string;
+export type { AgentKind };
+export type Mode = 'live' | 'simulation';
+
+export interface Clock {
+  now(): number;
+  sleep(ms: number, signal?: AbortSignal): Promise<void>;
+}
+
+// ---------------------------------------------------------------- sandbox (OpenTofu)
+
+export interface SandboxInput {
+  sandboxId: string;
+  region: string;
+  allowedInstanceTypes: string[];
+  maxInstancesPerAgent: number;
+  maxInstanceLifetimeHours: number;
+  tags?: Record<string, string>;
+}
+
+/** Mirrors infra/contract.md outputs. */
+export interface SandboxOutputs {
+  artifactsBucket: string;
+  sealedBucket: string;
+  agentBoundaryRef: string;
+  evalIdentityRef: string;
+  agentRolePath: string;
+  network: { subnetId: string; agentRunnerSecurityGroupId: string; benchSecurityGroupId: string };
+}
+
+export interface PlanChange {
+  action: 'create' | 'update' | 'delete' | 'replace' | 'no-op';
+  address: string;
+  type: string;
+}
+
+export interface SandboxProvider {
+  plan(input: SandboxInput): Promise<{ changes: PlanChange[]; summary: string }>;
+  apply(input: SandboxInput): Promise<SandboxOutputs>;
+  destroy(input: SandboxInput): Promise<void>;
+  outputs(sandboxId: string): Promise<SandboxOutputs | null>;
+}
+
+// ---------------------------------------------------------------- cloud compute + identity
+
+export interface AgentIdentity {
+  optimizationId: OptimizationId;
+  agentId: AgentId;
+  roleRef: string;
+  instanceProfileRef: string;
+}
+
+export interface SecretRef {
+  name: string; // e.g. ANTHROPIC_API_KEY
+  ref: string; // e.g. SSM parameter name /ratchet/<opt>/<agent>/ANTHROPIC_API_KEY
+}
+
+export type InstanceRole = 'agent_runner' | 'experiment' | 'bench';
+
+export interface InstanceInfo {
+  id: string;
+  role: InstanceRole;
+  optimizationId: OptimizationId;
+  agentId?: AgentId;
+  instanceType: string;
+  state: 'pending' | 'running' | 'stopping' | 'stopped' | 'terminated';
+  launchedAt: number;
+  terminatedAt?: number;
+}
+
+export interface RunnerLaunchSpec {
+  optimizationId: OptimizationId;
+  agentId: AgentId;
+  kind: AgentKind;
+  instanceType: string;
+  imageRef: string;
+  identity: AgentIdentity;
+  secrets: SecretRef[];
+  repoUrl: string;
+  branch: string;
+}
+
+export interface BenchLaunchSpec {
+  optimizationId: OptimizationId;
+  instanceType: string;
+  imageRef: string;
+  purpose: 'baseline' | 'bench' | 'confirm';
+}
+
+export interface RemoteCommand {
+  script: string; // shell script run on the instance (SSM RunShellScript)
+  env?: Record<string, string>;
+  timeoutSeconds?: number;
+}
+
+export interface RemoteCommandResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}
+
+export interface CloudCompute {
+  createAgentIdentity(optimizationId: OptimizationId, agentId: AgentId): Promise<AgentIdentity>;
+  /** Kill switch: attach deny-all. Must take effect immediately. */
+  revokeAgentIdentity(identity: AgentIdentity): Promise<void>;
+  deleteAgentIdentity(identity: AgentIdentity): Promise<void>;
+  putSecret(optimizationId: OptimizationId, agentId: AgentId, name: string, value: string): Promise<SecretRef>;
+  deleteSecrets(optimizationId: OptimizationId, agentId: AgentId): Promise<void>;
+  launchRunner(spec: RunnerLaunchSpec): Promise<InstanceInfo>;
+  launchBenchInstance(spec: BenchLaunchSpec): Promise<InstanceInfo>;
+  terminate(instanceIds: string[]): Promise<void>;
+  /** Every instance carrying the ratchet tags (optionally for one optimization). */
+  listTagged(optimizationId?: OptimizationId): Promise<InstanceInfo[]>;
+  runCommand(instanceId: string, command: RemoteCommand): Promise<RemoteCommandResult>;
+}
+
+export interface PriceBook {
+  /** On-demand USD per hour for an instance type in the sandbox region. */
+  hourlyUsd(instanceType: string): Promise<number>;
+}
+
+export interface ArtifactStore {
+  put(key: string, body: string | Uint8Array): Promise<void>;
+  get(key: string): Promise<string | null>;
+  list(prefix: string): Promise<string[]>;
+}
+
+// ---------------------------------------------------------------- git
+
+export interface CandidateCommit {
+  sha: string;
+  branch: string;
+  message: string;
+  committedAt: number;
+}
+
+export interface GitHost {
+  /** Create `branch` at `fromRef` in the remote. */
+  createBranch(fromRef: string, branch: string): Promise<void>;
+  /** Commits on `branch` carrying the `Ratchet-Candidate: true` trailer, oldest first, after `sinceSha`. */
+  listCandidates(branch: string, sinceSha?: string): Promise<CandidateCommit[]>;
+  changedFiles(baseRef: string, sha: string): Promise<string[]>;
+  /** Materialize `sha` (code) into `dir`; used by the bench runner. */
+  checkout(sha: string, dir: string): Promise<void>;
+  /** Squash `shas` onto `base` into a new branch and open a PR. */
+  openPullRequest(input: { base: string; head: string; title: string; body: string }): Promise<{ url: string }>;
+  remoteUrl(): string;
+}
+
+// ---------------------------------------------------------------- agents
+
+export interface AgentUsage {
+  inputTokens: number;
+  outputTokens: number;
+  costUsd?: number;
+}
+
+export interface AgentEvent {
+  at: number;
+  type: 'status' | 'message' | 'tool' | 'commit' | 'usage' | 'error' | 'verdict';
+  text?: string;
+  data?: Record<string, unknown>;
+  usage?: AgentUsage;
+}
+
+export interface AgentSpec {
+  workdir: string;
+  prompt: string;
+  model?: string;
+  env?: Record<string, string>;
+  maxTurns?: number;
+}
+
+export interface AgentSession {
+  id: string;
+  kind: AgentKind;
+}
+
+/** Runs inside `ratchet runner` on an agent runner (or locally in simulation). */
+export interface AgentAdapter {
+  readonly kind: AgentKind;
+  preflight(): Promise<{ ok: boolean; problems: string[] }>;
+  /** Run one agent turn to completion, streaming events. */
+  start(spec: AgentSpec, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<AgentSession>;
+  /** Continue the same session with a new message; resolves when the turn ends. */
+  resume(session: AgentSession, spec: AgentSpec, message: string, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<void>;
+}
+
+// ---------------------------------------------------------------- runner control (engine ↔ runner loop)
+
+export type RunnerMessage =
+  | { type: 'verdict'; sha: string; verdict: CandidateVerdict; reasons: string[]; currentBest: number }
+  | { type: 'user'; text: string }
+  | { type: 'pause' }
+  | { type: 'resume' }
+  | { type: 'stop' };
+
+export interface RunnerConfig {
+  optimizationId: OptimizationId;
+  agentId: AgentId;
+  kind: AgentKind;
+  repoUrl: string;
+  branch: string;
+  baseRef: string;
+  config: RatchetConfig;
+  brief: string; // RATCHET.md contents
+  baselineValue: number;
+  budgetUsd: number;
+  deadlineAt: number;
+}
+
+export interface RunnerHandle {
+  optimizationId: OptimizationId;
+  agentId: AgentId;
+  instanceId: string;
+}
+
+export interface RunnerControl {
+  start(handle: RunnerHandle, config: RunnerConfig): Promise<void>;
+  send(handle: RunnerHandle, message: RunnerMessage): Promise<void>;
+  /** Events since `cursor` (opaque); returns the next cursor. */
+  poll(handle: RunnerHandle, cursor?: string): Promise<{ events: AgentEvent[]; cursor: string }>;
+  stop(handle: RunnerHandle): Promise<void>;
+}
+
+// ---------------------------------------------------------------- bench
+
+export interface BenchJob {
+  optimizationId: OptimizationId;
+  candidateId?: string;
+  sha: string;
+  phase: 'baseline' | 'bench' | 'confirm';
+  repeats: number;
+  /** For confirm: the hidden trace reference (S3 key or local path). */
+  trace?: string;
+}
+
+export interface BenchRun {
+  value: number; // the objective metric for this run
+  metrics: Record<string, number>; // flattened numeric output, e.g. http_req_duration.p95, error_rate, peak_rss_mb
+  durationMs: number;
+}
+
+export interface BenchOutcome {
+  runs: BenchRun[];
+  samples: number[]; // runs.map(r => r.value)
+  guardrails: GuardrailResult[];
+  logsKey?: string;
+  startedAt: number;
+  finishedAt: number;
+}
+
+export interface BenchRunner {
+  /**
+   * Check out `job.sha` (bench code from `config.bench.ref`), run command guardrails,
+   * then the benchmark `job.repeats` times, then threshold guardrails against `baseline`.
+   */
+  run(job: BenchJob, config: RatchetConfig, baseline: { metrics: Record<string, number> } | null, signal?: AbortSignal): Promise<BenchOutcome>;
+}
+
+// ---------------------------------------------------------------- engine API (desktop ↔ core over IPC)
+
+export interface EngineCreateOptimizationInput {
+  name?: string;
+  repoUrl: string;
+  baseRef: string;
+  configPath?: string; // path inside repo, default ratchet.yaml
+  agents: AgentKind[];
+  budgetUsd: number;
+  timeLimitSeconds: number;
+  plateauEvals: number;
+}
+
+export type EngineEvent =
+  | { type: 'optimization'; optimizationId: OptimizationId; status: string }
+  | { type: 'agent-event'; optimizationId: OptimizationId; agentId: AgentId; event: AgentEvent }
+  | { type: 'candidate'; optimizationId: OptimizationId; candidateId: string; verdict: CandidateVerdict }
+  | { type: 'ratchet'; optimizationId: OptimizationId; from: number; to: number }
+  | { type: 'spend'; optimizationId: OptimizationId; totalUsd: number };
+
+export interface EngineApi {
+  mode(): Mode;
+  createOptimization(input: EngineCreateOptimizationInput): Promise<OptimizationId>;
+  start(id: OptimizationId): Promise<void>;
+  /** Kill switch: revoke identities, stop agents, terminate instances. */
+  stop(id: OptimizationId, reason?: string): Promise<void>;
+  pauseAgent(agentId: AgentId): Promise<void>;
+  resumeAgent(agentId: AgentId): Promise<void>;
+  messageAgent(agentId: AgentId, text: string): Promise<void>;
+  openPullRequest(id: OptimizationId): Promise<{ url: string }>;
+  teardown(id: OptimizationId): Promise<void>;
+  subscribe(listener: (e: EngineEvent) => void): () => void;
+}

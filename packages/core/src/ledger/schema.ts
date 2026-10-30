@@ -35,7 +35,7 @@ export const OPTIMIZATION_STATUSES = [
 ] as const;
 export type OptimizationStatus = (typeof OPTIMIZATION_STATUSES)[number];
 
-export const AGENT_KINDS = ['claude-code', 'codex'] as const;
+export const AGENT_KINDS = ['claude-code', 'codex', 'mock'] as const;
 export type AgentKind = (typeof AGENT_KINDS)[number];
 
 export const AGENT_STATUSES = [

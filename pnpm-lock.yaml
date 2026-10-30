@@ -18,13 +18,31 @@ importers:
         specifier: ^3.0.0
         version: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(tsx@4.23.15)(yaml@2.9.1)
 
-  infra/tests: {}
-
   examples/demo-search:
     devDependencies:
       yaml:
         specifier: ^2.9.1
         version: 2.9.1
+
+  infra/tests: {}
+
+  packages/agents:
+    dependencies:
+      '@ratchet/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/aws:
+    dependencies:
+      '@ratchet/core':
+        specifier: workspace:*
+        version: link:../core
+
+  packages/bench:
+    dependencies:
+      '@ratchet/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/cli:
     dependencies:
