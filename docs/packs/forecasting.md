@@ -1,5 +1,9 @@
 # Pack: forecasting (demand and sales forecasts)
 
+> **Packs are template categories now** (docs/SIMPLIFIED_MODEL.md, docs/templates.md). `forecasting` groups the evaluator
+> template `forecast-backtest` and the demo `demo-forecast`. `ratchet init --pack forecasting` still works and means
+> `--template forecast-backtest`.
+
 The second pack, shipped as `examples/demo-forecast`. It proves the core is generic: the same engine, ratchet rule,
 protected paths and ledger, with a different evaluator, holdout and guardrails. Agents improve a forecasting pipeline;
 a change is kept only when a rolling-origin backtest improves **and** the pipeline scores better on a sealed, more
@@ -144,22 +148,24 @@ guardrails and ratchet rule; only AWS and the agent CLIs are mocked. Result of o
 2. **Repeated identical candidates.** A scripted agent whose patch is already in the best submits a tree identical to the
    best, which lands as `rejected` ("not better than current best"). Harmless, but it inflates the candidate count.
 
-## Scaffolding a repo: `ratchet init --pack forecasting`
+## Scaffolding a repo: `ratchet init --template forecast-backtest`
 
 ```sh
-ratchet init --pack forecasting                # ratchet.yaml, RATCHET.md, eval/backtest.mjs, src/forecast.mjs
-ratchet init --pack forecasting --metric mape --value-usd 8000 --dir ./my-forecaster
-ratchet init --pack forecasting --dry-run
+ratchet init --template forecast-backtest                # ratchet.yaml, RATCHET.md, eval/backtest.mjs, src/forecast.mjs
+ratchet init --template forecast-backtest --metric mape --value-usd 8000 --dir ./my-forecaster
+ratchet init --template forecast-backtest --dry-run
+ratchet init --pack forecasting                          # legacy alias
 ```
 
-Writes a `ratchet.yaml` for this pack (`kind: backtest`, `eval/**`, `data/**`, `ratchet.yaml` and `package.json` protected,
-a `leakage_violations: "== 0"` guardrail, a `value:` block marked `estimated`), a `RATCHET.md` brief, a rolling-origin
-backtest stub `eval/backtest.mjs` (5 origins, 4-period horizon; each forecast is handed only the history before its
-origin; prints `{ wape, bias, leakage_violations }`; `RATCHET_TRACE` names the sealed holdout series) and the model it
-scores, `src/forecast.mjs`, a mean-of-the-last-4-periods baseline to be replaced. The stub runs on a seeded synthetic
-series: replace `loadSeries()` with the real data, and add a real leakage probe if the pipeline loads data itself. Options
-as for `perf`: `--metric`, `--direction`, `--value-usd`, `--dir`, `--force` (without it existing files are never
-overwritten), `--dry-run`, `--list-packs`. The output passes `ratchet validate`.
+Writes a `ratchet.yaml` (`evaluator: { template: forecast-backtest }`, which means `kind: backtest`, `eval/**` and `data/**`
+protected automatically, a `leakage_violations: "== 0"` guardrail, a `value:` block marked `estimated`), a `RATCHET.md`
+brief, a rolling-origin backtest `eval/backtest.mjs` (5 origins, 4-period horizon; each forecast is handed only the history
+before its origin, frozen; prints `{ wape, mape, bias, leakage_violations }`; `RATCHET_TRACE` names the sealed holdout series,
+scored on the last three horizons of each series, i.e. the most recent periods) and the model it scores, `src/forecast.mjs`,
+a mean-of-the-last-4-periods baseline to be replaced. The evaluator reads `data/series.json` (`[[values of series 1], ...]`)
+and falls back to a seeded synthetic series: add your history there, and a real leakage probe if the pipeline loads data
+itself. Options as for the perf templates: `--metric`, `--direction`, `--value-usd`, `--dir`, `--force` (without it existing
+files are never overwritten), `--dry-run`, `--list-templates`. The output passes `ratchet validate`.
 
 ## Using the demo
 

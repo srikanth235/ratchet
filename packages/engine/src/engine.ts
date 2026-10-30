@@ -1,14 +1,20 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, normalize } from 'node:path';
 import {
   AGENT_KINDS,
   AGENT_STATUSES,
+  CALIBRATION,
+  buildTemplateProposal,
+  calibrate,
+  effectiveProtected,
   evaluateRatchet,
+  listTemplates,
   reconcileSpend,
   findProtectedViolations,
   formatConfigError,
+  getTemplate,
   guardrailName,
   median,
   noiseFloor as computeNoiseFloor,
@@ -20,16 +26,21 @@ import {
   type AgentRow,
   type AgentStatus,
   type BenchOutcome,
+  type Calibration,
   type CandidateWithResults,
   type Clock,
   type CostReconcileReport,
+  type EffectiveProtected,
   type EngineApi,
   type EngineCreateOptimizationInput,
   type EngineEvent,
   type GitHost,
   type Ledger,
   type Mode,
+  type NoiseFloorOptions,
   type OptimizationRow,
+  type ProposeTemplateInput,
+  type ProposeTemplateResult,
   type RatchetConfig,
   type RatchetOutcome,
   type RunnerControl,
@@ -42,6 +53,7 @@ import {
   type SandboxState,
   type SandboxTeardownReceipt,
   type SecretRef,
+  type TemplateInfo,
   SandboxLifecycle,
   SandboxLifecycleError,
 } from '@ratchet/core';
@@ -380,7 +392,8 @@ export class Engine implements EngineApi {
         baseRef: input.baseRef,
         metric: config.objective.metric,
         direction: config.objective.direction,
-        minGain: config.objective.min_gain,
+        // Provisional when ratchet.yaml leaves it out: the calibrated threshold (kv `calibration`) replaces it once the baseline ran.
+        minGain: config.objective.min_gain ?? CALIBRATION.fallbackGain,
         budgetUsd: input.budgetUsd,
         timeLimitS: input.timeLimitSeconds,
         configYaml,
@@ -559,7 +572,7 @@ export class Engine implements EngineApi {
     let baseline = this.ledger.getBaseline(id);
     if (!baseline) {
       const outcome = await this.ports.bench.run(
-        { optimizationId: id, sha: await this.baseSha(opt), phase: 'baseline', repeats: config.bench.repeats },
+        { optimizationId: id, sha: await this.baseSha(opt), phase: 'baseline', repeats: config.bench.repeats ?? CALIBRATION.baselineRepeats },
         config,
         null,
         rt.abort.signal,
@@ -578,15 +591,17 @@ export class Engine implements EngineApi {
       baseline = this.ledger.recordBaseline({
         optimizationId: id,
         samples,
-        noiseFloor: computeNoiseFloor(samples, this.settings.noise),
+        noiseFloor: computeNoiseFloor(samples, this.noiseOptions(config)),
         stats,
         value: stats.value,
         recordedAt: this.clock.now(),
       });
+      const cal = this.calibrationFor(id, config);
+      if (cal) this.emit({ type: 'notice', optimizationId: id, level: 'info', text: `Calibrated from the baseline: ${cal.explanation}` });
     }
     if (config.bench.confirm_trace && this.settings.confirmBaseline && !this.kv.has(K.confirmBest(id))) {
       const confirm = await this.ports.bench.run(
-        { optimizationId: id, sha: await this.baseSha(opt), phase: 'confirm', repeats: config.bench.repeats, trace: config.bench.confirm_trace },
+        { optimizationId: id, sha: await this.baseSha(opt), phase: 'confirm', repeats: this.repeatsFor(id, config), trace: config.bench.confirm_trace },
         config,
         { metrics: metricsFromStats(baseline.stats) },
         rt.abort.signal,
@@ -691,6 +706,7 @@ export class Engine implements EngineApi {
         config,
         brief,
         baselineValue,
+        ...(this.calibrationFor(optId, config) ? { minGain: this.calibrationFor(optId, config)!.minGain } : {}),
         budgetUsd: opt.budgetUsd,
         deadlineAt: this.kv.getNumber(K.deadline(optId)) ?? this.clock.now() + opt.timeLimitS * 1000,
       });
@@ -836,6 +852,128 @@ export class Engine implements EngineApi {
       throw new EngineError('invalid_state', `agent ${agentId} is not running (optimization ${opt.status}, agent ${agent.status})`);
     }
     return agent;
+  }
+
+  // ------------------------------------------------------------------ calibration, protected paths
+
+  /** Noise-floor options: the engine setting, with `evaluator.noise_factor` from ratchet.yaml taking precedence for k. */
+  private noiseOptions(config: RatchetConfig): NoiseFloorOptions {
+    const k = config.bench.noise_factor;
+    return k === undefined ? this.settings.noise : { ...this.settings.noise, k };
+  }
+
+  /**
+   * The calibration of an optimization (repeats per candidate, win threshold), derived from the baseline in the ledger
+   * and remembered in the kv. Recomputed from the ledger when the kv entry is missing (a restart between the two writes),
+   * so it never disagrees with the baseline. Undefined until the baseline exists.
+   */
+  private calibrationFor(id: string, config: RatchetConfig): Calibration | undefined {
+    const stored = this.kv.getJson<Calibration>(K.calibration(id));
+    if (stored) return stored;
+    const baseline = this.ledger.getBaseline(id);
+    if (!baseline) return undefined;
+    const cal = calibrate({
+      samples: baseline.samples,
+      repeats: config.bench.repeats,
+      minGain: config.objective.min_gain,
+      noiseFactor: this.noiseOptions(config).k,
+    });
+    this.kv.setJson(K.calibration(id), cal);
+    return cal;
+  }
+
+  /** Runs per candidate / confirm: ratchet.yaml's `repeats`, else the calibrated number, else the baseline default. */
+  private repeatsFor(id: string, config: RatchetConfig): number {
+    return config.bench.repeats ?? this.calibrationFor(id, config)?.repeats ?? CALIBRATION.baselineRepeats;
+  }
+
+  async calibration(id: string): Promise<Calibration | null> {
+    assertValidId('optimization id', id);
+    await this.resumed;
+    this.requireOpt(id);
+    return this.calibrationFor(id, this.config(id)) ?? null;
+  }
+
+  async protectedPaths(id: string): Promise<EffectiveProtected> {
+    assertValidId('optimization id', id);
+    await this.resumed;
+    this.requireOpt(id);
+    return effectiveProtected(this.config(id));
+  }
+
+  // ------------------------------------------------------------------ templates
+
+  async listTemplates(): Promise<TemplateInfo[]> {
+    return listTemplates();
+  }
+
+  /**
+   * "Use template": add a template's files to a repository through a pull request. Nothing in the repo is changed
+   * except by the PR: the files go on a new branch (`ratchet/template-<id>`, with a suffix when it is taken), the PR
+   * description says what was added and how to run a baseline. Refuses when files of the template already exist on
+   * `baseRef` (`overwrite: true` replaces them) and when the git host cannot commit files.
+   */
+  async proposeTemplate(input: ProposeTemplateInput): Promise<ProposeTemplateResult> {
+    await this.resumed;
+    const bad = (m: string): never => {
+      throw new EngineError('invalid_input', m);
+    };
+    if (!input.repoUrl || typeof input.repoUrl !== 'string') bad('repoUrl is required');
+    if (!input.baseRef || typeof input.baseRef !== 'string') bad('baseRef is required');
+    const info = getTemplate(String(input.templateId ?? ''));
+    if (!info) bad(`unknown template ${JSON.stringify(input.templateId)}`);
+    if (info!.kind === 'demo') bad(`${info!.id} is a demo (${info!.example}); it runs in simulation and adds nothing to a repository`);
+    if (input.valueUsd !== undefined && !(Number.isFinite(input.valueUsd) && input.valueUsd > 0)) bad('valueUsd must be a positive number');
+    if (input.direction !== undefined && input.direction !== 'minimize' && input.direction !== 'maximize') bad('direction must be "minimize" or "maximize"');
+
+    const proposal = buildTemplateProposal(info!.id, { metric: input.metric, direction: input.direction, valueUsd: input.valueUsd });
+    const git = this.gitFor(input.repoUrl);
+    if (!git.commitFiles) throw new EngineError('unavailable', 'this git host cannot commit files, so it cannot open a template pull request');
+
+    if (!input.overwrite) {
+      const present = await this.pathsPresent(git, input.baseRef, proposal.files.map((f) => f.path));
+      if (present.length > 0) {
+        throw new EngineError(
+          'invalid_state',
+          `${present.join(', ')} already exist${present.length === 1 ? 's' : ''} on ${input.baseRef}; the template would replace ${present.length === 1 ? 'it' : 'them'} (pass overwrite to allow that)`,
+          { existing: present },
+        );
+      }
+    }
+
+    const commit = { baseRef: input.baseRef, message: proposal.commitMessage, files: proposal.files };
+    let branch = proposal.branch;
+    let sha: string;
+    try {
+      ({ sha } = await git.commitFiles({ ...commit, branch }));
+    } catch (err) {
+      // most likely the branch exists from an earlier proposal: take a fresh name once, then give up
+      branch = `${proposal.branch}-${this.clock.now().toString(36)}`;
+      try {
+        ({ sha } = await git.commitFiles({ ...commit, branch }));
+      } catch {
+        throw err;
+      }
+    }
+    const pr = await git.openPullRequest({ base: input.baseRef, head: branch, title: proposal.title, body: proposal.body, shas: [] });
+    return { prUrl: pr.url, branch, sha, templateId: info!.id, files: proposal.files.map((f) => f.path) };
+  }
+
+  /** Which of `paths` exist in the tree of `ref`. */
+  private async pathsPresent(git: GitHost, ref: string, paths: string[]): Promise<string[]> {
+    const scratchRoot = this.settings.scratchDir ?? tmpdir();
+    await mkdir(scratchRoot, { recursive: true });
+    const dir = await mkdtemp(join(scratchRoot, 'ratchet-engine-'));
+    try {
+      await git.checkout(ref, dir);
+      const present: string[] = [];
+      for (const p of paths) {
+        if (await stat(join(dir, p)).then(() => true, () => false)) present.push(p);
+      }
+      return present;
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 
   // ------------------------------------------------------------------ pull request
@@ -1272,7 +1410,7 @@ export class Engine implements EngineApi {
         this.reportError(err, `changedFiles ${c.sha}`);
         return false; // keep order: retry this commit (and the rest) next tick
       }
-      const violations = findProtectedViolations(files, config.protected);
+      const violations = findProtectedViolations(files, effectiveProtected(config).globs);
       const now = this.clock.now();
       // Sortable ids: the ledger orders by (submittedAt, id), and one poll can find several commits in the same millisecond.
       const candidateId = `${opt.id}-c${String(++seq).padStart(5, '0')}`;
@@ -1342,7 +1480,7 @@ export class Engine implements EngineApi {
         candidateId: cand.id,
         sha: cand.sha,
         phase,
-        repeats: config.bench.repeats,
+        repeats: this.repeatsFor(opt.id, config),
         ...(phase === 'confirm' && config.bench.confirm_trace ? { trace: config.bench.confirm_trace } : {}),
       },
       config,
@@ -1433,7 +1571,7 @@ export class Engine implements EngineApi {
     const confirmBest = this.kv.getNumber(K.confirmBest(opt.id));
     const outcome = evaluateRatchet({
       direction: opt.direction,
-      minGain: opt.minGain,
+      minGain: this.calibrationFor(opt.id, this.config(opt.id))?.minGain ?? opt.minGain,
       noiseFloor: baseline.noiseFloor,
       currentBest,
       candidate: bench.samples,

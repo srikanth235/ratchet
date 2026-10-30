@@ -1,4 +1,4 @@
-import type { CandidateVerdict, RunnerConfig } from '@ratchet/core';
+import { INSTALL_FILES, effectiveProtected, type CandidateVerdict, type RunnerConfig } from '@ratchet/core';
 
 export interface HistoryEntry {
   n: number;
@@ -47,7 +47,9 @@ export function buildContext(input: ContextInput): string {
   const lines: string[] = [];
   lines.push('# Ratchet context (generated; refreshed before every turn)', '');
   lines.push('## Objective');
-  lines.push(`- Metric: \`${o.metric}\` (${o.direction}). A candidate must beat the current best by more than ${(o.min_gain * 100).toFixed(1)}% and more than the benchmark noise floor.`);
+  const minGain = config.minGain ?? o.min_gain;
+  const gainText = minGain === undefined ? 'the gain calibrated from the baseline noise' : `${(minGain * 100).toFixed(1)}%`;
+  lines.push(`- Metric: \`${o.metric}\` (${o.direction}). A candidate must beat the current best by more than ${gainText} and more than the benchmark noise floor.`);
   lines.push(`- Baseline: ${fmt(config.baselineValue)}`);
   lines.push(`- Current ratchet best: ${fmt(input.bestValue)}${input.bestSha ? ` (commit ${input.bestSha})` : ''}; improvement so far ${improvementPct(config, config.baselineValue, input.bestValue)}`);
   lines.push('');
@@ -64,7 +66,8 @@ export function buildContext(input: ContextInput): string {
   }
   lines.push('');
   lines.push('## Rules');
-  lines.push(`- Protected paths (a candidate touching them is blocked): ${config.config.protected.length ? config.config.protected.map((p) => `\`${p}\``).join(', ') : 'none'}`);
+  const guarded = effectiveProtected(config.config).entries.filter((e) => e.source !== 'install').map((e) => `\`${e.glob}\``);
+  lines.push(`- Protected paths (a candidate touching them is blocked): ${guarded.join(', ')}, and lockfiles / install config (${INSTALL_FILES.map((f) => `\`${f}\``).join(', ')}) at any depth`);
   const guardrails = config.config.guardrails.map((g) => (g.kind === 'command' ? `\`${g.run}\` must pass` : `\`${g.metric}\` ${g.raw}`));
   lines.push(`- Guardrails checked on every candidate: ${guardrails.length ? guardrails.join('; ') : 'none'}`);
   if (config.config.evaluator.deps !== 'none') {

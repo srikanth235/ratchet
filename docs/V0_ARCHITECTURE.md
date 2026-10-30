@@ -26,7 +26,7 @@ ratchet keeps only verified wins. The core never looks at the domain.
 | Noise | run-to-run variance | seed / fold variance | run variance |
 | Value model | $ per ms (infra + conversion) | $ per WAPE point (inventory, stockouts) | $ per $ saved |
 
-A **pack** is evaluator templates + guardrails + holdout strategy + a default
+A **pack** (now simply a template *category*: `perf`, `forecasting`, `llm`; see docs/SIMPLIFIED_MODEL.md and docs/templates.md) is evaluator templates + guardrails + holdout strategy + a default
 value model + an agent brief, for one domain. Go to market one pack at a time;
 the platform is the core underneath. Headline result: **$ value per year
 created per $ spent** (`estimateValue`, `returnOnSpend` in core), labelled
@@ -109,44 +109,113 @@ from running the baseline N times before any agent starts.
 
 ## 4. Repository contract: `ratchet.yaml`
 
+Where this section and docs/SIMPLIFIED_MODEL.md disagree, SIMPLIFIED_MODEL.md wins. The simplified form is the whole file
+a repo needs; every older, more explicit config stays valid.
+
 ```yaml
 version: 0
-pack: perf                        # informational: which domain pack this follows
 objective:
-  name: search-api p95 latency
   metric: http_req_duration.p95   # key in the evaluator's JSON output
   direction: minimize
-  min_gain: 0.03                  # 3%
-  value:                          # business case
-    usd_per_unit: 1200            # $ per ms of p95 improvement
-    period: year
-    basis: estimated              # → measured once confirmed in production
-    unit: ms
-evaluator:                        # the trusted evaluation (legacy alias: bench)
-  kind: benchmark                 # benchmark | backtest | eval | simulation
-  ref: ratchet/bench              # protected ref holding the trusted evaluator
-  run: k6 run bench/k6/search.js
-  repeats: 5                      # also used for the baseline noise floor
-  hardware: c7i.2xlarge           # pinned, dedicated host
-  deps: auto                      # auto | pnpm | npm | none: how dependencies reach the offline bench
-  holdout: s3://sealed/search-trace.jsonl   # sealed; agents never see it
-guardrails:
-  - run: pytest -q
-  - run: openapi-diff --base main
-  - error_rate: "< 0.001"
-  - peak_rss: "< 1.2x"
-protected:                        # changes here block a candidate
-  - bench/**
-  - ratchet.yaml
-  - tests/contract/**
+evaluator:
+  template: http-latency          # an evaluator template: fills run / kind / machine / default guardrails
+environment:                      # all optional
+  image: .devcontainer/Dockerfile # toolchain for setup, guardrails and the evaluator
+  machine: c7i.2xlarge            # bench hardware (default: the template's)
+  region: us-east-1               # default: the app's
+  network: [registry.npmjs.org]   # extra egress for agents / the dependency job
 agent:
   instructions: RATCHET.md        # brief injected into every session
   allowed_instance_types: [c7i.2xlarge, c7i.xlarge, m7i.large]
 ```
 
+and the same thing spelled out, with every optional knob set:
+
+```yaml
+version: 0
+pack: perf                        # informational: the template category (perf, forecasting, llm)
+objective:
+  name: search-api p95 latency
+  metric: http_req_duration.p95   # key in the evaluator's JSON output
+  direction: minimize
+  min_gain: 0.03                  # OPTIONAL. 3%; absent: calibrated from the baseline noise
+  value:                          # business case (optional, can be set late)
+    usd_per_unit: 1200            # $ per ms of p95 improvement
+    period: year
+    basis: estimated              # → measured once confirmed in production
+    unit: ms
+evaluator:                        # the trusted evaluation (legacy alias: bench)
+  template: http-latency          # OPTIONAL. Either a template or a `run:` is required; `run:` wins when both are given
+  kind: benchmark                 # benchmark | backtest | eval | simulation (default: the template's, else benchmark)
+  ref: ratchet/bench              # protected ref holding the trusted evaluator (default ratchet/bench)
+  run: k6 run bench/k6/search.js
+  repeats: 5                      # OPTIONAL. Runs per candidate, also the baseline's; absent: calibrated
+  noise_factor: 2                 # OPTIONAL. The k of the noise floor k x stddev(baseline) (default 2)
+  hardware: c7i.2xlarge           # default: environment.machine, else the template's, else c7i.large
+  deps: auto                      # auto | pnpm | npm | none: how dependencies reach the offline bench
+  holdout: s3://sealed/search-trace.jsonl   # sealed; agents never see it
+environment:                      # OPTIONAL, every key too
+  image: .devcontainer/Dockerfile # repo-relative Dockerfile / devcontainer.json (protected)
+  machine: c7i.2xlarge            # instance type
+  region: us-east-1               # AWS region
+  network: [registry.npmjs.org]   # host names; "*.example.com" wildcards allowed, no scheme / port / bare "*"
+infra: ops/sandbox                # OPTIONAL, advanced: a custom OpenTofu module (see below)
+guardrails:                       # absent: the template's defaults (none for a bare `run:`)
+  - run: pytest -q
+  - run: openapi-diff --base main
+  - error_rate: "< 0.001"
+  - peak_rss: "< 1.2x"
+protected:                        # OPTIONAL: only ADDS to the automatic set below
+  - tests/contract/**
+agent:
+  instructions: RATCHET.md        # brief injected into every session (required)
+  allowed_instance_types: [c7i.2xlarge, c7i.xlarge, m7i.large]   # required
+```
+
 The evaluator comes from `evaluator.ref`, never from the candidate's tree, so an
 agent cannot change how it is scored. A forecasting config looks the same with
 `kind: backtest`, `metric: wape` and `holdout:` pointing at the latest unseen period.
+
+**Evaluator templates** (`evaluator.template`). A template is a `ratchet.yaml` fragment, the evaluator's real files and a
+`RATCHET.md` brief (docs/templates.md). `evaluator.template: http-latency` resolves, when the config is parsed, to the
+template's command (`node bench/http-latency.mjs`), `kind`, machine and default guardrails; anything set explicitly wins.
+Unknown ids, and the "Try a demo" entries, are config errors. `ratchet init --template <id>` or the app's "Use template"
+puts the files into a repo through a pull request.
+
+**Auto-calibrated statistics.** `evaluator.repeats`, `objective.min_gain` and `evaluator.noise_factor` are optional. The
+baseline runs `repeats` times (5 when absent); from its coefficient of variation (CV = stddev / mean) the engine derives
+
+- the resolution to detect `g = max(2 x CV, 1%)`;
+- runs per candidate `n = ceil(18 CV² / g²)`, clamped to 3..15 (3 standard errors on the difference of two n-run medians);
+- the win threshold `min_gain = g` rounded up to a readable step, and never below what the chosen `n` can resolve
+  (`3 sqrt(2) CV / sqrt(n)`), so a capped `n` raises the threshold instead of pretending.
+
+Any value set in ratchet.yaml is respected and the other is derived around it. With fewer than 3 baseline runs or a zero
+mean noise cannot be measured and the old 3% default applies. The result is stored in `engine_kv` (`opt:<id>:calibration`),
+announced as a `notice` event and returned by `EngineApi.calibration(id)` with a one-line explanation such as
+"this metric is noisy (±9%); wins must beat 9%; each candidate is measured 5 times". The rule of §3 is unchanged: the
+required gain is `max(noise_floor, min_gain × |best|)` with the calibrated `min_gain` and `noise_floor = k × stddev(baseline)`.
+
+**Automatic protected paths.** A candidate that changes a protected path is blocked, and the bench takes protected files
+from the evaluator ref. The set is computed (`effectiveProtected` in core; `EngineApi.protectedPaths(id)` returns it with the
+reason for each entry) from:
+
+| Source | Paths |
+|---|---|
+| the config | `ratchet.yaml` (the config path in use) |
+| the evaluator | the template's files; every `bench/` or `eval/` directory that `evaluator.run` references (`dist/bench/x.js` also protects `bench/**`) |
+| the environment | `environment.image` (and `.devcontainer/**` when it lives there), the `infra` module |
+| install config | `pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `bun.lock`, `bun.lockb`, `.npmrc`, `.yarnrc`, `.yarnrc.yml`, `pnpm-workspace.yaml`, `.pnpmfile.cjs`, at any depth |
+| the user | `protected:`, which only adds |
+
+The bench overlays the config, evaluator, environment and user-listed files from the evaluator ref (lockfiles are pinned
+through `evaluator.deps`) and still refuses to run when the evaluator ref holds none of the evaluator's files or of the
+user's globs.
+
+**`infra:`** (advanced, off by default) points at a custom OpenTofu module for the sandbox. It is read **only from the
+protected ref** and validated against the sandbox contract (§7, `infra/contract.md`); a candidate's copy is never used, and the
+path is protected so an agent cannot edit it. Parsing only checks that it is a repo-relative path; reading it from the
+protected ref and checking the contract is the engine's and the sandbox provider's job.
 
 **`evaluator.deps`** (optional, default `auto`) says how the candidate's
 dependencies reach a bench that has no network. `auto` detects the package manager
@@ -163,6 +232,11 @@ and setup then installs from it with the package manager offline. Because of tha
 no network") before anything runs, and the lockfile counts as protected without being
 listed under `protected`. The local simulation applies the same rule. Details and
 real-environment checks: `docs/real-env/bench.md` ("Dependencies on an offline bench").
+
+**Template pull requests.** `EngineApi.proposeTemplate({ repoUrl, baseRef, templateId })` commits the template's files on a
+new branch (`ratchet/template-<id>`) through `GitHost.commitFiles` and opens a PR (`openPullRequest` with no shas) whose
+description lists what was added, what to fill in, and how to run a baseline (`ratchet validate`, `ratchet baseline`). It
+refuses when the template's files already exist on `baseRef` unless `overwrite` is given.
 
 ## 5. Agents: local by default, cloud optional
 

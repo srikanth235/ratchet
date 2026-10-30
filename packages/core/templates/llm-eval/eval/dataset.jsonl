@@ -1,0 +1,20 @@
+{"input":"I love this product, it is great","expected":"positive"}
+{"input":"Terrible support, I want a refund","expected":"negative"}
+{"input":"It arrived on Tuesday","expected":"neutral"}
+{"input":"Fast shipping and excellent quality","expected":"positive"}
+{"input":"The app is slow and broken after the update","expected":"negative"}
+{"input":"I would recommend it to a friend","expected":"positive"}
+{"input":"Not sure yet, still testing it","expected":"neutral"}
+{"input":"Bad packaging but the item itself is fine","expected":"neutral"}
+{"input":"Happy with the purchase","expected":"positive"}
+{"input":"Very disappointed, it does not work as advertised","expected":"negative"}
+{"input":"The manual has 40 pages","expected":"neutral"}
+{"input":"Works well, nothing to complain about","expected":"positive"}
+{"input":"Does the job","expected":"positive"}
+{"input":"Never again","expected":"negative"}
+{"input":"It is a blue box","expected":"neutral"}
+{"input":"Excellent value, great battery, fast charging","expected":"positive"}
+{"input":"The screen is broken and support is slow to answer","expected":"negative"}
+{"input":"Ok","expected":"neutral"}
+{"input":"Best purchase this year","expected":"positive"}
+{"input":"Waste of money","expected":"negative"}

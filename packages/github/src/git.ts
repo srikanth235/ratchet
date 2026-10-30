@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { CandidateCommit, FileDiff, GitHost } from '@ratchet/core';
+import type { CandidateCommit, CommitFilesInput, FileDiff, GitHost } from '@ratchet/core';
 
 export interface GitRunOptions {
   cwd?: string;
@@ -189,6 +189,52 @@ export abstract class BaseGitHost implements GitHost {
     await this.sync();
     if (input.shas && input.shas.length > 0) await this.writeSquash(input);
     return this.createPullRequest(input);
+  }
+
+  /**
+   * Port method: branch `input.branch` off `input.baseRef` with one commit that writes `input.files` over the base tree.
+   * Built with plumbing (a scratch index, `hash-object`, `write-tree`, `commit-tree`), so no working tree is needed and
+   * nothing but the new ref is touched. Refuses an existing branch (`publish` is not forced) and unsafe paths.
+   */
+  async commitFiles(input: CommitFilesInput): Promise<{ sha: string }> {
+    if (input.files.length === 0) throw new Error('commitFiles: no files');
+    const seen = new Set<string>();
+    for (const f of input.files) {
+      const parts = f.path.split('/');
+      const unsafe =
+        !f.path ||
+        f.path.includes('\\') ||
+        f.path.includes('\0') ||
+        parts.some((x) => x === '' || x === '.' || x === '..' || x.toLowerCase() === '.git');
+      if (unsafe) throw new Error(`commitFiles: unsafe path ${JSON.stringify(f.path)}`);
+      if (seen.has(f.path)) throw new Error(`commitFiles: duplicate path ${f.path}`);
+      seen.add(f.path);
+    }
+    await this.sync();
+    const base = await this.resolve(input.baseRef);
+    const scratch = mkdtempSync(join(tmpdir(), 'ratchet-commit-'));
+    try {
+      const env = { GIT_INDEX_FILE: join(scratch, 'index') };
+      await this.git(['read-tree', base], { env });
+      for (const f of input.files) {
+        const blob = (await this.git(['hash-object', '-w', '--stdin'], { env, input: f.content })).trim();
+        await this.git(['update-index', '--add', '--cacheinfo', `${f.executable ? '100755' : '100644'},${blob},${f.path}`], { env });
+      }
+      const tree = (await this.git(['write-tree'], { env })).trim();
+      const id = this.identity;
+      const commitEnv = {
+        GIT_AUTHOR_NAME: id.name,
+        GIT_AUTHOR_EMAIL: id.email,
+        GIT_COMMITTER_NAME: id.name,
+        GIT_COMMITTER_EMAIL: id.email,
+      };
+      const message = `${input.message.replace(/\s+$/, '')}\n`;
+      const sha = (await this.git(['commit-tree', tree, '-p', base, '-F', '-'], { env: commitEnv, input: message })).trim();
+      await this.publish(input.branch, sha, { force: false });
+      return { sha };
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
   }
 
   /** Create `input.head` as a single commit holding the final verified tree, parented at the merge-base with `base`. */

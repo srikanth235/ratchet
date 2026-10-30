@@ -99,7 +99,7 @@ change that edits `bench/**` is blocked; a noise-level change is rejected.
 - `examples/demo-forecast`: a sales-forecasting pipeline with a rolling-origin
   backtest evaluator (`kind: backtest`, `metric: wape`), the most recent weeks
   as the sealed holdout, and leakage / look-ahead guardrails.
-- Pack template: `ratchet init --pack forecasting` writes `ratchet.yaml`,
+- Pack template: `ratchet init --template forecast-backtest` (alias `--pack forecasting`) writes `ratchet.yaml`,
   `RATCHET.md` and evaluator scaffolding.
 - Scripted agent with real model improvements (features, model choice,
   reconciliation) plus deliberate leakage attempts that must be blocked.

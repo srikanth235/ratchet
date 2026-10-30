@@ -35,19 +35,32 @@ export function buildProgram(io: Io, setExit: (code: number) => void, deps: Cost
   program
     .command('init')
     .description(
-      'scaffold ratchet.yaml, RATCHET.md and an evaluator stub for a domain pack.\n' +
-        'Refuses to overwrite existing files unless --force is given.',
+      'add an evaluator template to this repo: ratchet.yaml, RATCHET.md and the evaluator\'s files.\n' +
+        'Refuses to overwrite existing files unless --force is given. See --list-templates.',
     )
-    .option('--pack <pack>', 'domain pack: perf | forecasting (see --list-packs)')
-    .option('--metric <path>', "objective metric, a dotted path into the evaluator JSON (default: the pack's)")
-    .option('--direction <dir>', "minimize | maximize (default: the pack's)")
+    .option('--template <id>', 'template id: http-latency | cli-cold-start | test-suite-time | build-size | memory | forecast-backtest | llm-eval')
+    .option('--pack <id>', 'legacy alias of --template (perf = cli-cold-start, forecasting = forecast-backtest)')
+    .option('--metric <path>', "objective metric, a dotted path into the evaluator JSON (default: the template's)")
+    .option('--direction <dir>', "minimize | maximize (default: the template's)")
     .option('--value-usd <usd>', 'estimated USD per unit of improvement per year', parseNumber)
     .option('--dir <dir>', 'directory to write into', '.')
     .option('--force', 'overwrite existing files')
     .option('--dry-run', 'print what would be written, write nothing')
-    .option('--list-packs', 'list the available packs and exit')
+    .option('--list-templates', 'list the templates and the demos, then exit')
+    .option('--list-packs', 'legacy alias of --list-templates')
     .action(
-      (o: { pack?: string; metric?: string; direction?: string; valueUsd?: number; dir?: string; force?: boolean; dryRun?: boolean; listPacks?: boolean }) => {
+      (o: {
+        template?: string;
+        pack?: string;
+        metric?: string;
+        direction?: string;
+        valueUsd?: number;
+        dir?: string;
+        force?: boolean;
+        dryRun?: boolean;
+        listTemplates?: boolean;
+        listPacks?: boolean;
+      }) => {
         setExit(runInit(o, io));
       },
     );
@@ -60,7 +73,7 @@ export function buildProgram(io: Io, setExit: (code: number) => void, deps: Cost
         'objective.metric is looked up in it by dotted path (e.g. http_req_duration.p95).',
     )
     .argument('[path]', 'path to ratchet.yaml', 'ratchet.yaml')
-    .option('-n, --repeats <n>', 'number of runs (default: bench.repeats)', parsePositiveInt)
+    .option('-n, --repeats <n>', 'number of runs (default: evaluator.repeats, else 5)', parsePositiveInt)
     .option('--json', 'machine-readable JSON output')
     .option('--k <k>', 'noise floor = max(k x stddev, min-absolute); default 2', parseNumber)
     .option('--min-absolute <x>', 'absolute lower bound for the noise floor; default 0', parseNumber)

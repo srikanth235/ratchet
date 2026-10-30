@@ -72,6 +72,8 @@ export const K = {
   stopAt: (opt: string) => `opt:${opt}:stop_at`,
   confirmBest: (opt: string) => `opt:${opt}:confirm_best`,
   baseSha: (opt: string) => `opt:${opt}:base_sha`,
+  /** JSON `Calibration` derived from the baseline (repeats, win threshold, plain-words explanation). */
+  calibration: (opt: string) => `opt:${opt}:calibration`,
   pr: (opt: string) => `opt:${opt}:pr_url`,
   teardown: (opt: string) => `opt:${opt}:teardown_report`,
   reconcile: (opt: string) => `opt:${opt}:cost_reconcile`,

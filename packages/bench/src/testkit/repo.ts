@@ -181,8 +181,7 @@ bench:
   repeats: ${o.repeats ?? 3}
   hardware: c7i.2xlarge
 ${o.deps ? `  deps: ${o.deps}\n` : ''}${o.confirmTrace ? `  confirm_trace: ${o.confirmTrace}\n` : ''}guardrails:${guardrails.length ? '\n' + guardrails.map((g) => '  ' + g).join('\n') : ' []'}
-protected:
-${globs.map((g) => `  - "${g}"`).join('\n')}
+protected:${globs.length ? '\n' + globs.map((g) => `  - "${g}"`).join('\n') : ' []'}
 agent:
   instructions: RATCHET.md
   allowed_instance_types: [c7i.2xlarge]

@@ -9,6 +9,7 @@ import type {
   GitHost,
   RatchetConfig,
 } from '@ratchet/core';
+import { effectiveProtected } from '@ratchet/core';
 import { dependencyChangeGuardrail, hashNamedFiles, lockfileChanges, pinnedDepsFiles, resolveDepsStrategy, rootEntries } from './deps.js';
 import { BenchAbortedError, BenchError } from './errors.js';
 import { runProcess } from './exec.js';
@@ -157,15 +158,18 @@ class LocalExecutor implements PipelineExecutor {
         }
       }
     }
+    // Evaluator, config, environment and the user's list (lockfiles are pinned through the dependency strategy above).
+    const eff = effectiveProtected(this.config);
+    const protectedGlobs = eff.evaluatorGlobs;
     const res = await applyOverlay({
       codeDir: this.codeDir,
       benchDir: this.benchDir,
-      globs: [...this.config.protected, ...pinned],
+      globs: [...protectedGlobs, ...pinned],
       prune: this.o.pruneExtraProtected ?? true,
     });
-    if (!res.copied.some((p) => isProtected(p, this.config.protected))) {
+    if (!res.copied.some((p) => isProtected(p, eff.required))) {
       throw new BenchError(
-        `bench.ref ${this.config.bench.ref} contains no files matching the protected globs [${this.config.protected.join(', ')}]; ` +
+        `bench.ref ${this.config.bench.ref} contains no files matching the protected globs [${eff.required.join(', ')}]; ` +
           'refusing to benchmark with an unprotected bench',
       );
     }

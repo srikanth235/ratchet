@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
-import { extractMetric, formatConfigError, loadConfig, noiseFloor, summarize } from '@ratchet/core';
+import { CALIBRATION, calibrate, extractMetric, formatConfigError, loadConfig, noiseFloor, summarize } from '@ratchet/core';
 import type { Io } from '../io.js';
 import { DEFAULT_CONFIG_PATH } from './validate.js';
 
@@ -94,7 +94,7 @@ export async function runBaseline(
     return 1;
   }
   const config = res.config;
-  const repeats = opts.repeats ?? config.bench.repeats;
+  const repeats = opts.repeats ?? config.bench.repeats ?? CALIBRATION.baselineRepeats;
   if (!Number.isInteger(repeats) || repeats < 1) {
     io.err(`--repeats must be a positive integer (got ${repeats})\n`);
     return 1;
@@ -134,7 +134,7 @@ export async function runBaseline(
     progress(`  run ${i}/${repeats}: ${metric} = ${fmt(m.value)}\n`);
   }
 
-  const k = opts.k ?? 2;
+  const k = opts.k ?? config.bench.noise_factor ?? 2;
   const minAbsolute = opts.minAbsolute ?? 0;
   let floor: number;
   try {
@@ -144,7 +144,9 @@ export async function runBaseline(
     return 1;
   }
   const summary = summarize(samples);
-  const relativeGain = config.objective.min_gain * Math.abs(summary.median);
+  const calibration = calibrate({ samples, repeats: config.bench.repeats, minGain: config.objective.min_gain, noiseFactor: k });
+  const minGain = calibration.minGain;
+  const relativeGain = minGain * Math.abs(summary.median);
   const requiredGain = Math.max(floor, relativeGain);
 
   if (json) {
@@ -159,8 +161,9 @@ export async function runBaseline(
           summary,
           noiseFloor: floor,
           noiseFloorFormula: { k, minAbsolute },
-          minGain: config.objective.min_gain,
+          minGain,
           requiredGain,
+          calibration,
         },
         null,
         2,
@@ -178,7 +181,8 @@ export async function runBaseline(
     `  cv          ${Number.isFinite(summary.cv) ? (summary.cv * 100).toFixed(2) + '%' : 'inf'}`,
     `  min / max   ${fmt(summary.min)} / ${fmt(summary.max)}`,
     `  noise floor ${fmt(floor)}  (max(${k} x stddev, ${minAbsolute}))`,
-    `  required gain ${fmt(requiredGain)}  (max(noise floor, min_gain ${config.objective.min_gain} x median = ${fmt(relativeGain)}))`,
+    `  required gain ${fmt(requiredGain)}  (max(noise floor, min_gain ${minGain} x median = ${fmt(relativeGain)}))`,
+    `  calibration ${calibration.explanation}`,
   ];
   if (repeats < 3) lines.push('  warning: fewer than 3 runs; the noise floor is unreliable');
   io.out(lines.join('\n') + '\n');

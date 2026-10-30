@@ -1,0 +1,4 @@
+{
+  "note": "The visible workload input. Replace it with what your workload reads; the command gets its path as $WORKLOAD.",
+  "items": 1000
+}

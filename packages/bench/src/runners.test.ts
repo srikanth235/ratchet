@@ -360,9 +360,17 @@ for (const [name, factory] of [
       expect(out.guardrails[0]!.detail).toContain('bench/bench.mjs');
     });
 
+    it('protects the evaluator and ratchet.yaml with no protected: list at all (derived from evaluator.run)', async () => {
+      const h = factory(fx, { setup: 'echo "console.log(JSON.stringify({http_req_duration:{p95:1}}))" > bench/bench.mjs' });
+      const out = await h.runner.run(job(fx, fx.base, { repeats: 1 }), config({ guardrails: ['- run: "true"'], protectedGlobs: [] }), null);
+      expect(out.runs).toEqual([]);
+      expect(out.guardrails[0]).toMatchObject({ name: 'protected files intact', passed: false });
+      expect(out.guardrails[0]!.detail).toContain('bench/bench.mjs');
+    });
+
     it('fails with a BenchError when bench.ref has no protected files', async () => {
       const h = factory(fx);
-      await expect(h.runner.run(job(fx, fx.base), config({ protectedGlobs: ['nothing/**'] }), null)).rejects.toThrow(/contains no files matching/);
+      await expect(h.runner.run(job(fx, fx.base), config({ protectedGlobs: ['nothing/**'], run: 'sh ./score.sh' }), null)).rejects.toThrow(/contains no files matching/);
     });
 
     it('fails with a BenchError when the candidate cannot be checked out', async () => {

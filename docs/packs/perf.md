@@ -1,5 +1,9 @@
 # Pack: perf (code performance)
 
+> **Packs are template categories now** (docs/SIMPLIFIED_MODEL.md, docs/templates.md). `perf` groups the evaluator templates
+> `http-latency`, `cli-cold-start`, `test-suite-time`, `build-size` and `memory`, and the demos `demo-search` and `demo-cli`.
+> `pack: perf` in a ratchet.yaml is informational. `ratchet init --pack perf` still works and means `--template cli-cold-start`.
+
 The first pack, shipped as `examples/demo-search`. It makes a service faster (or cheaper) and keeps a change only
 when a trusted benchmark, on pinned hardware, confirms it on a workload the agents never saw.
 
@@ -119,21 +123,31 @@ The run-to-run spread of the verdicts is real: how many of the smaller fixes cle
 was doing. An overfit that is merely neutral on the holdout is decided by noise (`failed_confirm` needs the confirm run to
 beat the best's own confirm score, strictly), which is why the scripted overfit also pays a visible miss cost.
 
-## Scaffolding a repo: `ratchet init --pack perf`
+## Scaffolding a repo: `ratchet init --template <id>`
 
 ```sh
-ratchet init --pack perf                       # ratchet.yaml, RATCHET.md, bench/run.mjs in the cwd
-ratchet init --pack perf --metric startup.p95 --direction minimize --value-usd 400 --dir ./my-service
-ratchet init --pack perf --dry-run             # list the files and print ratchet.yaml, write nothing
-ratchet init --list-packs
+ratchet init --list-templates                              # the templates and the demos, with what each measures
+ratchet init --template http-latency                       # ratchet.yaml, RATCHET.md, bench/http-latency.mjs + config
+ratchet init --template cli-cold-start --metric cold_start_ms.p95 --value-usd 400 --dir ./my-cli
+ratchet init --template memory --dry-run                   # list the files and print ratchet.yaml, write nothing
+ratchet init --pack perf                                   # legacy alias: the cli-cold-start template
 ```
 
-Writes a `ratchet.yaml` for this pack (`kind: benchmark`, `bench/**`, `ratchet.yaml` and `package.json` protected, an
-`error_rate` guardrail, a `value:` block marked `estimated`), a `RATCHET.md` brief and `bench/run.mjs`: a stub that
-times `BENCH_COMMAND` (`BENCH_RUNS` times, default 20) and prints `{ "latency_ms": { p50, p95, mean, min, max }, "error_rate" }`.
-Replace the stub with the real benchmark (k6, hyperfine `--export-json`, ...) and fill in the `TODO`s: the test guardrail
-command, the sealed `holdout`, the brief. `--metric` is a dotted path into the evaluator's JSON (the stub fills a custom
-path with the p95 as a placeholder), `--value-usd` is USD per unit of improvement per year. Existing files are never
-overwritten without `--force`. The generated `ratchet.yaml` is checked with the same parser as `ratchet validate` before
-anything is written, and the next steps are `ratchet validate` and `ratchet baseline`. The templates live in
-`packages/cli/src/commands/init-templates.ts`.
+The perf templates, each a `ratchet.yaml` fragment plus real, dependency-free evaluator scripts (`bench/*.mjs`, with a JSON
+config next to them that you edit) and a `RATCHET.md` brief:
+
+| Template | Measures | Default metric | Holdout (`RATCHET_TRACE`) | Machine |
+|---|---|---|---|---|
+| `http-latency` | open-loop load test: p50/p95/p99, error rate | `http_req_duration.p95` | hidden request mix | c7i.2xlarge |
+| `cli-cold-start` | wall time of invocations (hyperfine when installed) | `cold_start_ms.p50` | hidden invocations | c7i.large |
+| `test-suite-time` | duration of the test command | `test_suite_ms` | none | c7i.2xlarge |
+| `build-size` | build seconds, bundle KB (raw and gzip) | `bundle_kb` | none | c7i.xlarge |
+| `memory` | peak RSS of the workload's process tree | `peak_rss_mb` | hidden workload | c7i.xlarge |
+
+The generated `ratchet.yaml` says `evaluator: { template: <id> }`: Ratchet fills in the command, the kind and the default
+guardrails, protects the template's files automatically (plus `ratchet.yaml`, lockfiles and install config), and calibrates
+`repeats` and `min_gain` from the baseline's noise. Fill in the `TODO`s: the evaluator's config, the test guardrail
+command, the sealed `holdout`, the brief. `--metric` is a dotted path into the evaluator's JSON, `--value-usd` is USD per
+unit of improvement per year. Existing files are never overwritten without `--force`. The generated `ratchet.yaml` is
+checked with the same parser as `ratchet validate` before anything is written; the next steps are `ratchet validate` and
+`ratchet baseline`. The files live in `packages/core/templates/<id>/` (embedded by `packages/core/scripts/gen-templates.mjs`).

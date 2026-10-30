@@ -39,7 +39,8 @@ describe('buildContext', () => {
     expect(text).toContain('| 2 | 11111111 | verified | 12.5 | - |');
   });
   it('lists rules: protected paths and guardrails', () => {
-    expect(text).toContain('`bench/**`, `ratchet.yaml`');
+    expect(text).toContain('`ratchet.yaml`, `bench/**`');
+    expect(text).toContain('lockfiles / install config'); // the automatic protected set, not only `protected:`
     expect(text).toContain('`pnpm test` must pass; `error_rate` < 0.001');
   });
   it('tells the agent that dependencies are fixed (a lockfile change is blocked), unless the evaluator declares none', () => {
