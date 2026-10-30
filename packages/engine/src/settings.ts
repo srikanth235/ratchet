@@ -33,6 +33,8 @@ export interface EngineSettings {
     runnerGraceMs?: number; // runner lifetime = time limit + grace (default 30 min)
   };
   reportBuilder?: ReportBuilder;
+  /** How long after an optimization ends billing data is assumed incomplete before `reconcileCosts` writes corrections (default 24 h, Cost Explorer's lag). */
+  costLagMs?: number;
   /** Called for non-fatal errors the engine swallowed to keep ticking. */
   onError?: (err: unknown, context: string) => void;
   /** Id source for optimizations (default `opt-<8 hex>`). Must produce [a-z0-9-] ids. */
@@ -62,6 +64,7 @@ export interface ResolvedSettings {
   fallbackHourlyUsd: number;
   reaper: { maxExperimentLifetimeMs: number; maxBenchLifetimeMs: number; runnerGraceMs: number };
   reportBuilder: ReportBuilder | undefined;
+  costLagMs: number;
   onError: (err: unknown, context: string) => void;
   newId: (() => string) | undefined;
 }
@@ -88,6 +91,7 @@ export function resolveSettings(s: EngineSettings = {}): ResolvedSettings {
       runnerGraceMs: s.reaper?.runnerGraceMs ?? 30 * 60_000,
     },
     reportBuilder: s.reportBuilder,
+    costLagMs: s.costLagMs ?? 24 * HOUR,
     onError: s.onError ?? (() => undefined),
     newId: s.newId,
   };

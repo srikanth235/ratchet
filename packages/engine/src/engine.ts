@@ -6,6 +6,7 @@ import {
   AGENT_KINDS,
   AGENT_STATUSES,
   evaluateRatchet,
+  reconcileSpend,
   findProtectedViolations,
   formatConfigError,
   guardrailName,
@@ -20,6 +21,7 @@ import {
   type BenchOutcome,
   type CandidateWithResults,
   type Clock,
+  type CostReconcileReport,
   type EngineApi,
   type EngineCreateOptimizationInput,
   type EngineEvent,
@@ -62,6 +64,8 @@ export interface TeardownReport {
   terminatedInstanceIds: string[];
   orphans: Array<{ id: string; role: string; state: string }>;
   errors: string[];
+  /** Best-effort cost reconcile at teardown: `pending` is normal (Cost Explorer lags up to 24 h); re-run `reconcileCosts` later. */
+  costReconcile?: { status: CostReconcileReport['status']; reason?: string; writtenUsd: number } | { status: 'error'; reason: string };
 }
 
 export interface ResumeReport {
@@ -169,6 +173,11 @@ export class Engine implements EngineApi {
 
   teardownReport(optimizationId: string): TeardownReport | undefined {
     return this.kv.getJson<TeardownReport>(K.teardown(optimizationId));
+  }
+
+  /** The report of the latest `reconcileCosts` run for the optimization. */
+  costReconcileReport(optimizationId: string): CostReconcileReport | undefined {
+    return this.kv.getJson<CostReconcileReport>(K.reconcile(optimizationId));
   }
 
   // ------------------------------------------------------------------ createOptimization
@@ -652,6 +661,34 @@ export class Engine implements EngineApi {
     return res;
   }
 
+  // ------------------------------------------------------------------ cost reconcile
+
+  /**
+   * Compare the ledger's estimated spend with Cost Explorer (by cost-allocation tag) and append
+   * correction rows (`estimated=false`, `source='cost-explorer'`, may be negative). Idempotent.
+   * Writes nothing and returns `pending` while billing data is incomplete (optimization still
+   * running, within the billing lag of its end, data flagged as estimated, or no data yet).
+   */
+  async reconcileCosts(id: string): Promise<CostReconcileReport> {
+    assertValidId('optimization id', id);
+    await this.resumed;
+    this.requireOpt(id);
+    const reconciler = this.ports.costs;
+    if (!reconciler) throw new EngineError('unavailable', 'no cost reconciler is configured (billing data is not available in this runtime)');
+    const report = await reconcileSpend(this.ledger, reconciler, id, { now: this.clock.now(), lagMs: this.settings.costLagMs });
+    this.kv.setJson(K.reconcile(id), report);
+    if (report.status === 'reconciled') {
+      this.emit({ type: 'spend', optimizationId: id, totalUsd: this.ledger.totalSpend(id) });
+      this.emit({
+        type: 'notice',
+        optimizationId: id,
+        level: 'info',
+        text: `spend reconciled with Cost Explorer: ${report.writtenUsd >= 0 ? '+' : '-'}$${Math.abs(report.writtenUsd).toFixed(4)}`,
+      });
+    }
+    return report;
+  }
+
   // ------------------------------------------------------------------ teardown
 
   async teardown(id: string): Promise<void> {
@@ -704,6 +741,17 @@ export class Engine implements EngineApi {
       const left = (await compute.listTagged(id)).filter((i) => i.state !== 'terminated');
       report.orphans = left.map((i) => ({ id: i.id, role: i.role, state: i.state }));
     });
+
+    // Best effort and never a teardown failure: Cost Explorer lags up to 24 h, so `pending` is the usual answer here.
+    if (this.ports.costs) {
+      try {
+        const r = await this.reconcileCosts(id);
+        report.costReconcile = { status: r.status, ...(r.reason ? { reason: r.reason } : {}), writtenUsd: r.writtenUsd };
+      } catch (err) {
+        report.costReconcile = { status: 'error', reason: (err as Error).message };
+        this.reportError(err, 'teardown reconcileCosts');
+      }
+    }
 
     this.kv.setJson(K.teardown(id), report);
     await this.ports.artifacts.put(`engine/${id}/teardown.json`, JSON.stringify(report, null, 2)).catch((e) => this.reportError(e, 'artifacts.put teardown'));

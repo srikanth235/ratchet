@@ -11,7 +11,7 @@
 import { join } from 'node:path';
 import type { Clock, Ledger } from '@ratchet/core';
 import { Engine, type EngineSettings } from '@ratchet/engine';
-import { AwsCloudCompute, AwsPriceBook, S3ArtifactStore, StaticPriceBook, TofuSandboxProvider, awsComputeConfigFromOutputs, type AwsSandboxOutputs } from '@ratchet/aws';
+import { AwsCloudCompute, AwsCostReconciler, AwsPriceBook, S3ArtifactStore, StaticPriceBook, TofuSandboxProvider, awsComputeConfigFromOutputs, type AwsSandboxOutputs } from '@ratchet/aws';
 import { GitHubGitHost } from '@ratchet/github';
 import { RemoteBenchRunner } from '@ratchet/bench';
 import { SsmRunnerControl } from '@ratchet/agents';
@@ -82,7 +82,7 @@ export function createLiveRuntime(opts: LiveOptions): LiveRuntime {
     ledger: opts.ledger,
     mode: 'live',
     clock,
-    ports: { sandbox, compute, prices, artifacts, git, runners, bench },
+    ports: { sandbox, compute, prices, artifacts, git, runners, bench, costs: new AwsCostReconciler() },
     settings: {
       ...(opts.secrets ? { secrets: opts.secrets } : {}),
       runnerImageRef: opts.runnerImageRef,
