@@ -16,7 +16,7 @@ that prints a number.
 | In scope | Out of scope (later) |
 |---|---|
 | Desktop app (Electron + React, macOS first) as mission control | Hosted controller / web dashboard |
-| Agents: **Claude Code** cloud sessions, **Codex** cloud tasks | Grok, OpenCode, self-hosted runners |
+| Agents: **Claude Code** and **Codex**, run headless on Ratchet **agent runners** (EC2 in the sandbox) | Vendor cloud sessions (Claude Code on the web, Codex cloud) as an extra adapter; Grok, OpenCode |
 | Cloud: **AWS** only | Azure, GCP, cross-cloud placement |
 | GitHub repos with a reproducible benchmark (k6, criterion, pytest-benchmark, hyperfine, custom command) | Repos without a benchmark; ML / forecasting objectives |
 | One optimization = one benchmark metric, one budget, one time limit | Multi-metric objectives, cross-agent collaboration |
@@ -27,23 +27,25 @@ that prints a number.
 ```
 ┌─────────────────── Ratchet desktop (Electron) ──────────────┐
 │ Optimization engine · Ratchet · Budget guard · Ledger · UI  │
-│ AgentAdapters (Claude Code, Codex) · GitHub watcher         │
+│ Runner control · GitHub watcher                             │
 │ AWS controller (cost meter, reaper, bench runner)           │
-└───────┬───────────────────────┬─────────────────────┬───────┘
-        │ launch / steer        │ watch branches      │ AWS APIs (admin profile)
-        ▼                       ▼                     ▼
- Agent sessions (vendor)     GitHub              AWS sandbox account
- ├─ Claude Code session ──▶ ratchet/<opt>/claude  ├─ agent boundary: tagged EC2, artifacts
- └─ Codex cloud task    ──▶ ratchet/<opt>/codex   ├─ trusted bench runner (eval-only role)
-        │                        │ re-bench        └─ S3 sealed traces (deny agents)
-        └── aws cli, scoped creds ──▶ agent boundary
+└───────┬──────────────────────────────┬──────────────────────┘
+        │ AWS APIs + SSM (admin)       │ watch branches
+        ▼                              ▼
+ AWS sandbox account                 GitHub
+ ├─ agent runner: claude -p ───push──▶ ratchet/<opt>/claude
+ ├─ agent runner: codex exec ──push──▶ ratchet/<opt>/codex
+ │    └─ experiments: tagged EC2, S3 artifacts (agent boundary)
+ ├─ trusted bench runner (eval-only role) ◀── re-bench candidates
+ └─ S3 sealed traces (deny agents)
+        ▲ model APIs (Anthropic, OpenAI) via runner egress
 ```
 
 Principles:
 
-1. **The Mac is mission control, not the runtime.** Agents run in vendor cloud
-   sessions; experiments and benchmarks run on AWS. Work continues if the lid
-   closes.
+1. **The Mac is mission control, not the runtime.** Agents run headless on
+   agent runners in the sandbox, each driven by a small `ratchet runner` loop;
+   experiments and benchmarks run on AWS too. Work continues if the lid closes.
 2. **GitHub is the bus.** Agent = branch, candidate = commit, winner = PR.
 3. **Agents never touch the trusted path.** Only benchmarks the app launches,
    with credentials no agent holds, move the ratchet.
@@ -57,7 +59,8 @@ Principles:
 | **Optimization** | Repo, benchmark, metric, agents, USD budget, time limit, stop rules |
 | **Benchmark** | Command from `ratchet.yaml` that emits metrics (e.g. k6 `http_req_duration.p95`) |
 | **Metric** | Name, direction (lower / higher is better), minimum gain, noise floor |
-| **Agent** | One Claude Code or Codex session working on its own branch `ratchet/<opt>/<agent>` |
+| **Agent** | One Claude Code or Codex instance, run headless on its own agent runner, working on its own branch `ratchet/<opt>/<agent>` |
+| **Agent runner** | EC2 instance in the sandbox that hosts one agent plus the `ratchet runner` loop |
 | **Candidate** | A commit an agent submits, with cost attributed |
 | **Guardrails** | Hard pass/fail checks: tests, API contract, error rate, peak memory |
 | **Bench runner** | Trusted re-benchmark of every candidate on pinned hardware |
@@ -110,40 +113,68 @@ agent:
 The bench code comes from `bench.ref`, never from the candidate's tree, so an
 agent cannot change how it is scored.
 
-## 5. Agent adapters
+## 5. Agents: headless on agent runners
+
+Both agents have documented headless modes, so v0 runs them on EC2 machines
+Ratchet controls instead of depending on vendor-hosted cloud sessions.
+
+| | Claude Code | Codex |
+|---|---|---|
+| Headless entry point | `claude -p --output-format stream-json` (or Claude Agent SDK) | `codex exec --json` (or Codex SDK) |
+| Continue a session | resume by session id | resume the previous exec session |
+| Auth | Anthropic API key (subscription only where terms allow) | OpenAI API key or ChatGPT sign-in, per terms |
+
+### Agent runner
+
+One EC2 instance per agent, launched by the app into the sandbox:
+
+1. Boots a Ratchet runner image (Node, git, agent CLIs, profilers, AWS CLI).
+2. Clones the repo, checks out `ratchet/<opt>/<agent>`.
+3. Runs `ratchet runner` (from `packages/core`), which drives the loop
+   locally: build the prompt from `RATCHET.md` + `.ratchet/context.md`, invoke
+   the agent headless, stream its JSON events to S3, wait for the verdict on
+   each candidate, resume the agent with the result.
+4. The app tails the event stream (S3 / SSM) for the Live agents screen and
+   can send messages, pause or stop via SSM.
+
+Because the loop runs on the runner, agents keep iterating when the Mac is
+asleep; the app only observes and enforces limits.
 
 ```ts
-interface AgentAdapter {
+interface AgentAdapter {                          // runs inside `ratchet runner`
   kind: "claude-code" | "codex";
-  preflight(): Promise<Preflight>;               // signed in, environment ready
+  preflight(): Promise<Preflight>;                // CLI present, auth valid
   start(spec: AgentSpec): Promise<SessionHandle>;
-  send(session: SessionHandle, message: string): Promise<void>;
-  events(session: SessionHandle): AsyncIterable<AgentEvent>;
+  resume(session: SessionHandle, message: string): Promise<void>;
+  events(session: SessionHandle): AsyncIterable<AgentEvent>;   // parsed stream-json
   stop(session: SessionHandle): Promise<void>;
 }
 ```
 
-- **Claude Code:** start and steer cloud sessions; the session environment
-  holds the agent's AWS credentials and a network policy allowing AWS + GitHub.
-- **Codex:** start cloud tasks in a Codex environment with the same
-  credentials and an internet allowlist for AWS and GitHub.
+### Secrets on the runner
 
-The app uses each vendor's CLI with the user's own login.
+- Model API keys and a repo-scoped GitHub token (fine-grained token or GitHub
+  App installation token) are written by the app to SSM Parameter Store
+  (SecureString), readable only by that runner's role. Never in OpenTofu state.
+- AWS access comes from the runner's **instance profile** (§7), so credentials
+  rotate automatically.
 
-> **To verify before building:** the supported commands / APIs for creating,
-> messaging and streaming Claude Code cloud sessions and Codex cloud tasks from a
-> third-party app; how each injects secrets; session duration and concurrency
-> limits; terms for programmatic use.
+### Later: vendor cloud sessions
+
+Claude Code on the web and Codex cloud tasks can be added as another adapter
+if their programmatic APIs and terms support it. Same `AgentAdapter`
+interface; the runner is skipped.
 
 ## 6. The improvement loop
 
-- **Self-loop (always):** each session gets `RATCHET.md` plus a generated
-  `.ratchet/context.md` (metric, current best, past candidates, remaining
-  budget, rules). The agent iterates: profile → hypothesize → change → run
-  experiments on AWS → commit → submit.
-- **App-steered (when the app is open):** after each result, the app messages
-  the agent with the verdict and the current best. Agents rebase onto the
-  ratchet best (shared baseline, independent exploration).
+- **Runner-driven (always):** `ratchet runner` gives the agent `RATCHET.md`
+  plus a generated `.ratchet/context.md` (metric, current best, past
+  candidates, remaining budget, rules). The agent iterates: profile →
+  hypothesize → change → run experiments → commit → submit. After each verdict
+  the runner resumes the agent with the result and the current best, and
+  rebases onto the ratchet best (shared baseline, independent exploration).
+- **User-steered (optional):** from the Live agents screen the user can send a
+  message, pause or stop; the app relays it to the runner via SSM.
 
 **Submitting:** the agent pushes a commit with a `Ratchet-Candidate: true`
 trailer. The watcher checks `protected` paths and queues the candidate for the
@@ -191,8 +222,8 @@ only v0 implementation.
 | Layer | Lifetime | Mechanism |
 |---|---|---|
 | Sandbox (buckets, boundary, runner role, network) | Long-lived | **OpenTofu** |
-| Per-agent credentials, kill switch | Minutes–hours | Cloud SDK from the app (`CredentialMinter`) |
-| Experiment instances | Seconds–hours | Agents via cloud CLI, inside the boundary |
+| Agent runners, per-agent role, secrets, kill switch | Minutes–hours | Cloud SDK from the app (`RunnerLauncher`, `CredentialMinter`) |
+| Experiment instances | Seconds–hours | Agents via AWS CLI from the runner, inside the boundary |
 | Cost meter, reaper | Continuous | Cloud SDK from the app, filtered by tag |
 
 **Operation:** the app bundles a pinned `tofu` binary; setup shows the
@@ -203,34 +234,36 @@ later).
 
 ### AWS sandbox module (v0)
 
-Into a **dedicated sandbox account**, `infra/aws` creates 7 resources:
+Into a **dedicated sandbox account**, `infra/aws` creates 8 resources:
 
 | Resource | Purpose |
 |---|---|
-| `aws_s3_bucket.artifacts` | Agent build outputs, one prefix per agent |
+| `aws_s3_bucket.artifacts` | Agent event streams and build outputs, one prefix per agent |
 | `aws_s3_bucket.sealed` | Hidden traffic traces, bench runner only |
 | `aws_s3_bucket_policy.sealed_deny_agents` | Explicit deny for every agent identity |
-| `aws_iam_policy.agent_boundary` | Tagged EC2 only, allow-listed instance types |
+| `aws_iam_policy.agent_boundary` | Permission boundary for every agent role |
 | `aws_iam_role.bench_runner` | Trusted re-bench with separate credentials |
 | `aws_iam_instance_profile.bench_runner` | Attached to bench instances |
-| `aws_security_group.ratchet` | Egress only; load generator ↔ target inside VPC |
+| `aws_security_group.agent_runner` | Egress to model APIs, GitHub, AWS endpoints only |
+| `aws_security_group.bench` | Load generator ↔ target inside VPC, no inbound from agents |
+
+Per-agent roles, runner instances and SSM secrets are created by the app per
+optimization (below), not by OpenTofu.
 
 ### Agent credentials (per agent)
 
-- An optimization-scoped IAM user per agent, constrained by the boundary:
+- An optimization-scoped **IAM role per agent**, attached to its runner as an
+  instance profile and capped by `agent_boundary`:
   - EC2 `RunInstances` only with tag `ratchet:opt=<id>`, allow-listed types,
     max instances (default 4) and max lifetime (default 2 h),
     `InstanceInitiatedShutdownBehavior=terminate`
-  - S3 only under `artifacts/<opt>/<agent>/`
+  - S3 only under `artifacts/<opt>/<agent>/`; SSM read only on its own secrets
   - Explicit deny on the sealed bucket, IAM, billing, everything else
-- Injected into the vendor session environment at start.
-- **Kill switch:** attach deny-all (immediate), then delete the key.
-- Deleted when the optimization ends.
-
-*Why not STS?* Assumed-role credentials expire in 1–12 h (1 h when chaining
-from SSO) and can't be refreshed inside a running vendor session without
-putting secrets in the transcript. Revisit with a credential-vending endpoint
-once a hosted controller exists.
+- Credentials come from instance metadata and rotate automatically; nothing
+  long-lived is handed to the agent.
+- **Kill switch:** attach deny-all to the role (immediate), stop the agent via
+  SSM, terminate the runner.
+- Role, profile and secrets are deleted when the optimization ends.
 
 ### Trusted bench runner
 
@@ -246,12 +279,15 @@ once a hosted controller exists.
 ### Cost metering and reaper
 
 - **Live estimate:** tagged resources × on-demand/spot price, every minute,
-  attributed to agent experiments vs. bench runner vs. storage/egress.
+  attributed to agent runners, agent experiments, bench runner and
+  storage/egress. Model token usage is read from the agents' JSON event stream
+  and shown alongside.
 - **Reconcile:** Cost Explorer by tag after the fact (~24 h lag).
 - **Guard:** warn at 80% of budget; at 100%, kill switch plus reaper.
 - **Reaper:** terminates tagged resources past max lifetime, belonging to a
-  stopped agent, or left after the optimization ends. Backstop later:
-  EventBridge + Lambda in the sandbox account for when the Mac is offline.
+  stopped agent, or left after the optimization ends. Agent runners also
+  enforce the time limit and budget stop locally. Backstop later: EventBridge
+  + Lambda in the sandbox account for when the Mac is offline.
 
 ## 8. Tech stack
 
@@ -263,7 +299,7 @@ the shell can be swapped (Tauri, GPUI) without touching the engine.
 ```
 packages/
   core/      TypeScript (Node): engine, ratchet rule, ledger, agents, AWS, sandbox
-  cli/       `ratchet` CLI over core              ← free / open-source local runs
+  cli/       `ratchet` CLI over core              ← free / open-source; `ratchet runner` on agent runners
   desktop/   Electron main + React renderer       ← the six screens
   ui/        design-system tokens + components (Midnight Brass)
 infra/       OpenTofu modules + sandbox contract
@@ -278,7 +314,8 @@ infra/       OpenTofu modules + sandbox contract
 | Secrets | OS keychain via Electron `safeStorage` / keytar |
 | Cloud | AWS SDK for JavaScript v3; bundled, pinned `tofu` binary |
 | Git / GitHub | `git` CLI + Octokit |
-| Agents | vendor CLIs / SDKs (Claude Code, Codex) as subprocesses or libraries |
+| Agents | `claude -p` / `codex exec` headless (or their SDKs) on agent runners; runner image built with Packer or EC2 Image Builder |
+| Runner control | AWS SSM (start / message / stop), event stream to S3 |
 | Long-running work | in-process job queue in core, swappable for a durable queue when hosted |
 | Packaging | electron-builder; macOS Developer ID + notarization, auto-update; Linux/Windows later at little cost |
 
@@ -295,10 +332,10 @@ renderer, a narrow preload API; AWS keys and tokens never reach the renderer.
 ```
 packages/core/src/
   optimization/ engine, ratchet, stop-rules
-  agents/       adapter, claude-code, codex
+  agents/       adapter, claude-code, codex, runner-loop
   github/       branch-watcher, pr-builder
   sandbox/      provider, tofu-runner, aws-provider
-  aws/          credential-minter, cost-meter, reaper, bench-runner
+  aws/          runner-launcher, credential-minter, cost-meter, reaper, bench-runner
   ledger/       schema, store
 packages/desktop/src/renderer/screens/
   Optimizations, NewOptimization, Environment, LiveAgents, BenchmarkHistory, Result
@@ -345,21 +382,21 @@ Dark, precise, "instrument panel" look. Implement as tokens in `packages/ui`.
 
 1. **M0, skeleton:** pnpm monorepo (core, cli, desktop, ui), Electron shell, design tokens, `ratchet.yaml` parser,
    ledger, GitHub watcher.
-2. **M1, AWS sandbox:** contract, OpenTofu AWS module, `tofu` runner,
+2. **M1, AWS sandbox:** contract, OpenTofu AWS module, `tofu` runner, agent runner image + launcher,
    credential minter, cost meter, reaper.
 3. **M2, trusted bench:** bench runner, guardrails, noise-floor baseline,
    hidden-trace confirm, ratchet rule.
-4. **M3, first agent:** Claude Code adapter end to end on a demo service.
+4. **M3, first agent:** Claude Code headless on an agent runner, `ratchet runner` loop, end to end on a demo service.
 5. **M4, second agent:** Codex adapter; parallel agents; shared ratchet.
 6. **M5, demo:** a sample HTTP service (k6 p95) plus one CLI cold-start
    benchmark (hyperfine), with cost per verified win reported.
 
 ## 11. Open questions
 
-1. Do vendor sessions allow reliable programmatic create/steer/stream for a
-   third-party app? (Blocks M3/M4.)
-2. Is a per-agent IAM user acceptable, or is a credential-vending endpoint
-   needed from day one?
+1. Terms: can a user's Claude or ChatGPT **subscription** drive the agents on
+   a Ratchet runner, or is it API keys only? (Check before M3.)
+2. Runner image: one shared image with every toolchain, or built per repo
+   from a `ratchet.yaml` setup step?
 3. Agents on EC2 only, or also ECS / Lambda for serverless targets?
-4. Agent token usage: shown as quota only, or counted against the budget?
+4. Model token spend: counted against the budget, or shown separately?
 5. How are hidden traces produced: captured from production, or generated?
