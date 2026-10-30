@@ -12,3 +12,4 @@ packages/desktop/out-before/
 packages/e2e/artifacts/
 .ratchet-sim-*/
 .ratchet-app-sim/
+.claude/worktrees/

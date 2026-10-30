@@ -145,12 +145,25 @@ export interface CandidateCommit {
   committedAt: number;
 }
 
+/** One file of a diff between two commits (renames are reported as a delete plus an add). */
+export interface FileDiff {
+  path: string;
+  additions: number;
+  deletions: number;
+  /** True for binary files: no line counts, no patch. */
+  binary: boolean;
+  /** This file's unified diff (`@@` hunks only, no `diff --git` / index headers); empty for binary files. */
+  patch: string;
+}
+
 export interface GitHost {
   /** Create `branch` at `fromRef` in the remote. */
   createBranch(fromRef: string, branch: string): Promise<void>;
   /** Commits on `branch` carrying the `Ratchet-Candidate: true` trailer, oldest first, after `sinceSha`. */
   listCandidates(branch: string, sinceSha?: string): Promise<CandidateCommit[]>;
   changedFiles(baseRef: string, sha: string): Promise<string[]>;
+  /** Per-file diff of `sha` against its merge base with `baseRef` (what a PR from `sha` into `baseRef` would show). */
+  diff(baseRef: string, sha: string): Promise<FileDiff[]>;
   /** Materialize `sha` (code) into `dir`; used by the bench runner. */
   checkout(sha: string, dir: string): Promise<void>;
   /** Squash the verified `shas` (ratchet order; last one's tree wins) onto `base` as branch `head` and open a PR. */

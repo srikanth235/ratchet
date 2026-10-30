@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import type { CandidateCommit, GitHost } from '@ratchet/core';
+import type { CandidateCommit, FileDiff, GitHost } from '@ratchet/core';
 
 export interface GitRunOptions {
   cwd?: string;
@@ -154,6 +154,22 @@ export abstract class BaseGitHost implements GitHost {
     return out.split('\0').filter(Boolean);
   }
 
+  async diff(baseRef: string, sha: string): Promise<FileDiff[]> {
+    await this.sync();
+    const base = await this.resolve(baseRef);
+    const head = await this.resolve(sha);
+    let from = base;
+    try {
+      from = (await this.git(['merge-base', base, head])).trim() || base;
+    } catch {
+      // unrelated histories: compare the trees directly
+    }
+    const opts = ['--no-color', '--no-ext-diff', '--no-renames'];
+    const numstat = await this.git(['diff', ...opts, '--numstat', '-z', from, head]);
+    const patch = await this.git(['diff', ...opts, '-U3', from, head]);
+    return parseGitDiff(numstat, patch);
+  }
+
   /** Materialize the tree of `sha` into `dir` (no `.git`, no side effects on the repo). */
   async checkout(sha: string, dir: string): Promise<void> {
     await this.sync();
@@ -198,4 +214,25 @@ export abstract class BaseGitHost implements GitHost {
     const commit = (await this.git(['commit-tree', tree, '-p', parent, '-F', '-'], { env, input: message })).trim();
     await this.publish(input.head, commit, { force: true });
   }
+}
+
+/**
+ * Combine `git diff --numstat -z` (paths and counts, robust to odd file names) with the unified `git diff` of the
+ * same range (hunks). Both list files in the same order, so sections are matched by position.
+ */
+export function parseGitDiff(numstat: string, patch: string): FileDiff[] {
+  const fields = numstat.split('\0');
+  const stats: { path: string; additions: number; deletions: number; binary: boolean }[] = [];
+  for (const f of fields) {
+    const m = /^(-|\d+)\t(-|\d+)\t([\s\S]+)$/.exec(f.replace(/^\n/, ''));
+    if (!m) continue;
+    const binary = m[1] === '-' && m[2] === '-';
+    stats.push({ path: m[3]!, additions: binary ? 0 : Number(m[1]), deletions: binary ? 0 : Number(m[2]), binary });
+  }
+  const sections = patch.split(/^diff --git .*$/m).slice(1);
+  return stats.map((s, i) => {
+    const body = sections[i] ?? '';
+    const at = body.search(/^@@/m);
+    return { ...s, patch: s.binary || at < 0 ? '' : body.slice(at).replace(/\n$/, '') };
+  });
 }
