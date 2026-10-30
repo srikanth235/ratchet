@@ -95,10 +95,17 @@ function TextField({ id, label, hint, value, error, placeholder, mono = true, on
 
 /** The live-mode form: AWS, GitHub, images and OpenTofu. Nothing secret is in it; secrets have their own rows. */
 function LiveForm({ s, onSave }: { s: SettingsVM; onSave(input: Partial<LiveSettings>): Promise<void> }) {
-  const saved = useMemo(() => pickLive(s.live), [s.live]);
+  // Reset the draft when the saved values change (after a save), during render rather than in an effect: a mount
+  // effect could land after the first keystroke and wipe it, and a refetch of equal values must not reset anything.
+  const savedKey = JSON.stringify(pickLive(s.live));
+  const saved = useMemo(() => JSON.parse(savedKey) as LiveSettings, [savedKey]);
   const [draft, setDraft] = useState<LiveSettings>(saved);
+  const [draftOf, setDraftOf] = useState(savedKey);
+  if (draftOf !== savedKey) {
+    setDraftOf(savedKey);
+    setDraft(saved);
+  }
   const [busy, setBusy] = useState(false);
-  useEffect(() => setDraft(saved), [saved]);
 
   const errors = Object.fromEntries(LIVE_KEYS.map((k) => [k, validateLiveSetting(k, draft[k])])) as Record<LiveSettingKey, string | null>;
   const invalid = LIVE_KEYS.some((k) => errors[k]);
