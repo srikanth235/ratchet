@@ -302,3 +302,28 @@ export interface EngineApi {
   teardown(id: OptimizationId): Promise<void>;
   subscribe(listener: (e: EngineEvent) => void): () => void;
 }
+
+// ---------------------------------------------------------------- runner loop (`ratchet runner`)
+
+/** The inbox the runner loop reads engine messages from (SSM/S3 in live mode, in-memory in simulation). */
+export interface RunnerInbox {
+  /** Resolves with the next message, or null when `signal` aborts. */
+  next(signal?: AbortSignal): Promise<RunnerMessage | null>;
+}
+
+/**
+ * What `runRunnerLoop` (in @ratchet/agents) needs. The loop owns one agent on one branch:
+ * prompt → agent turn → commit with `Ratchet-Candidate: true` trailer → push → wait for verdict
+ * → rebase onto the ratchet best when it moved → resume the agent with the verdict → repeat,
+ * until stop / deadline / budget.
+ */
+export interface RunnerLoopOptions {
+  config: RunnerConfig;
+  adapter: AgentAdapter;
+  /** A git clone of `config.repoUrl` checked out on `config.branch`, with push access. */
+  workdir: string;
+  inbox: RunnerInbox;
+  emit(event: AgentEvent): void;
+  clock: Clock;
+  signal?: AbortSignal;
+}
