@@ -16,6 +16,7 @@ import type {
   CandidateCommit,
   Clock,
   CloudCompute,
+  FileDiff,
   GitHost,
   GuardrailResult,
   InstanceInfo,
@@ -98,6 +99,10 @@ export class FakeGit implements GitHost {
       if (c) return c.files;
     }
     throw new Error(`unknown sha ${sha}`);
+  }
+
+  async diff(baseRef: string, sha: string): Promise<FileDiff[]> {
+    return (await this.changedFiles(baseRef, sha)).map((path) => ({ path, additions: 1, deletions: 0, binary: false, patch: '@@ -0,0 +1 @@\n+changed' }));
   }
 
   async checkout(_sha: string, dir: string): Promise<void> {

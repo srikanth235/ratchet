@@ -124,6 +124,35 @@ describe('GitHubGitHost', () => {
     }
   });
 
+  it('diff: syncs the mirror, diffs against the merge base and never puts the token in argv (mocked git)', async () => {
+    const calls: Call[] = [];
+    const H = 'a'.repeat(40);
+    const B = 'b'.repeat(40);
+    const M = 'c'.repeat(40);
+    const runner: GitRunner = async (args, opts = {}) => {
+      calls.push({ args: [...args], env: { ...opts.env } });
+      const cmd = args.slice(2); // drop --git-dir <dir>
+      if (cmd[0] === 'rev-parse') return { stdout: `${cmd.at(-1)!.includes('main') ? B : H}\n` };
+      if (cmd[0] === 'merge-base') return { stdout: `${M}\n` };
+      if (cmd[0] === 'diff' && cmd.includes('--numstat')) return { stdout: '3\t1\tsrc/search.ts\0-\t-\tlogo.png\0' };
+      if (cmd[0] === 'diff') {
+        return { stdout: 'diff --git a/src/search.ts b/src/search.ts\nindex 1..2 100644\n--- a/src/search.ts\n+++ b/src/search.ts\n@@ -1,2 +1,4 @@\n-a\n+b\n+c\n+d\n x\ndiff --git a/logo.png b/logo.png\nBinary files a/logo.png and b/logo.png differ\n' };
+      }
+      return { stdout: '' };
+    };
+    const host = new GitHubGitHost({ repo: 'acme/search', token: TOKEN, cacheDir: join(mkdtempSync(join(scratch, 'cache-')), 'mirror.git'), runner, octokit: fakeOctokit().client });
+    const files = await host.diff('main', H);
+    expect(files).toEqual([
+      { path: 'src/search.ts', additions: 3, deletions: 1, binary: false, patch: '@@ -1,2 +1,4 @@\n-a\n+b\n+c\n+d\n x' },
+      { path: 'logo.png', additions: 0, deletions: 0, binary: true, patch: '' },
+    ]);
+    const fetch = calls.find((c) => c.args.includes('fetch'))!;
+    expect(fetch.env.GIT_CONFIG_VALUE_0).toBe(`AUTHORIZATION: basic ${TOKEN_B64}`);
+    const diffs = calls.filter((c) => c.args.includes('diff'));
+    expect(diffs.map((c) => c.args.slice(-2))).toEqual([[M, H], [M, H]]);
+    for (const c of calls) expect(c.args.join(' ')).not.toContain(TOKEN);
+  });
+
   it('scrubs the token from git errors', async () => {
     // default runner against an unreachable host
     const host = new GitHubGitHost({ repo: 'acme/search', token: TOKEN, cacheDir: join(scratch, 'dead.git'), host: 'localhost.invalid' });

@@ -131,6 +131,28 @@ describe('LocalGitHost', () => {
     expect(git(remote.remoteDir, 'rev-parse', 'ratchet/o1/result2^{tree}')).toBe(git(remote.remoteDir, 'rev-parse', `${shas.c2}^{tree}`));
   });
 
+  it('diff: per-file counts and hunks of a candidate against its merge base with main', async () => {
+    // main moved on in the previous test (later.txt): that change must not show up in the candidate's diff
+    const files = await host.diff('main', shas.c2!);
+    expect(files.map((f) => f.path)).toEqual(['notes.txt', 'src/a.txt', 'src/m.txt', 'src/n.txt']);
+    const a = files.find((f) => f.path === 'src/a.txt')!;
+    expect(a).toMatchObject({ additions: 1, deletions: 0, binary: false });
+    expect(a.patch).toMatch(/^@@ -0,0 \+1 @@/);
+    expect(a.patch).toContain('+two');
+    expect(files.every((f) => !f.patch.includes('diff --git'))).toBe(true);
+  });
+
+  it('diff: binary files have no counts or patch; an unchanged tree has no files', async () => {
+    writeFileSync(join(remote.workDir, 'blob.bin'), Buffer.from([0, 1, 2, 0, 255]));
+    git(remote.workDir, 'add', '-A');
+    git(remote.workDir, 'commit', '-q', '-m', 'binary');
+    git(remote.workDir, 'push', '-q', 'origin', 'ratchet/o1/claude');
+    const sha = git(remote.workDir, 'rev-parse', 'HEAD');
+    const bin = (await host.diff('main', sha)).find((f) => f.path === 'blob.bin')!;
+    expect(bin).toEqual({ path: 'blob.bin', additions: 0, deletions: 0, binary: true, patch: '' });
+    expect(await host.diff('main', 'main')).toEqual([]);
+  });
+
   it('remoteUrl is a file:// url', () => {
     expect(host.remoteUrl()).toMatch(/^file:\/\/.*remote\.git$/);
   });
