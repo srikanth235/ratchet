@@ -96,22 +96,51 @@ export class ScriptedAgent implements AgentAdapter {
     onEvent({ at: this.clock.now(), ...e });
   }
 
+  /**
+   * Plays the next attempt. An attempt whose every patch is already in the tree (another agent's win arrived
+   * through a rebase) is not replayed: only its `git` housekeeping runs, and the agent moves straight on to
+   * its next idea within the same turn, as a real agent reading the new tree would.
+   */
   private async playNext(session: AgentSession, spec: AgentSpec, onEvent: (e: AgentEvent) => void, signal?: AbortSignal): Promise<void> {
-    const index = this.cursor++;
-    const attempt = this.script.attempts[index];
-    if (!attempt) {
-      this.emit(onEvent, { type: 'message', text: 'I have run out of ideas worth trying; leaving the tree as it is.' });
-      return;
-    }
-    this.options.onPlay?.(attempt, index);
-    for (const step of attempt.steps) {
-      if (signal?.aborted) {
-        this.emit(onEvent, { type: 'status', text: 'scripted turn aborted' });
-        throw new AgentAbortedError(session);
+    for (;;) {
+      const attempt = this.script.attempts[this.cursor++];
+      if (!attempt) {
+        this.emit(onEvent, { type: 'message', text: 'I have run out of ideas worth trying; leaving the tree as it is.' });
+        return;
       }
-      await this.playStep(step, spec, onEvent, signal);
+      this.options.onPlay?.(attempt, this.cursor - 1);
+      // leading git steps (e.g. dropping a rejected attempt) always run, before redundancy is judged
+      const lead = attempt.steps.findIndex((st) => st.type !== 'git');
+      const housekeeping = lead < 0 ? attempt.steps : attempt.steps.slice(0, lead);
+      const rest = attempt.steps.slice(housekeeping.length);
+      const play = async (steps: ScriptStep[]) => {
+        for (const step of steps) {
+          if (signal?.aborted) {
+            this.emit(onEvent, { type: 'status', text: 'scripted turn aborted' });
+            throw new AgentAbortedError(session);
+          }
+          await this.playStep(step, spec, onEvent, signal);
+        }
+      };
+      await play(housekeeping);
+      const redundant = await this.isRedundant(rest, spec.workdir);
+      if (redundant) this.emit(onEvent, { type: 'message', text: `"${attempt.name}" is already in the tree (it came in with the ratchet best); moving on to my next idea.` });
+      else await play(rest);
+      if (signal?.aborted) throw new AgentAbortedError(session);
+      if (!redundant) return;
     }
-    if (signal?.aborted) throw new AgentAbortedError(session);
+  }
+
+  private async skipApplies(skip: StepCondition, workdir: string): Promise<boolean> {
+    const text = await readFile(this.inside(workdir, skip.file), 'utf8').catch(() => '');
+    return text.includes(skip.contains) === (skip.skipWhen === 'present');
+  }
+
+  private async isRedundant(steps: ScriptStep[], workdir: string): Promise<boolean> {
+    const patches = steps.filter((s): s is Extract<ScriptStep, { type: 'patch' }> => s.type === 'patch');
+    if (patches.length === 0 || steps.some((s) => s.type === 'edit' || s.type === 'write' || s.type === 'delete')) return false;
+    for (const p of patches) if (!p.skip || !(await this.skipApplies(p.skip, workdir))) return false;
+    return true;
   }
 
   private inside(workdir: string, path: string): string {
@@ -173,12 +202,9 @@ export class ScriptedAgent implements AgentAdapter {
         return;
       }
       case 'patch': {
-        if (step.skip) {
-          const text = await readFile(this.inside(spec.workdir, step.skip.file), 'utf8').catch(() => '');
-          if (text.includes(step.skip.contains) === (step.skip.skipWhen === 'present')) {
-            this.emit(onEvent, { type: 'message', text: `${step.name ?? 'patch'} is already in the tree; skipping it.` });
-            return;
-          }
+        if (step.skip && (await this.skipApplies(step.skip, spec.workdir))) {
+          this.emit(onEvent, { type: 'message', text: `${step.name ?? 'patch'} is already in the tree; skipping it.` });
+          return;
         }
         const dir = await mkdtemp(join(tmpdir(), 'ratchet-patch-'));
         try {

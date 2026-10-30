@@ -2,16 +2,12 @@ diff --git a/src/search.ts b/src/search.ts
 index 808cad4..283645a 100644
 --- a/src/search.ts
 +++ b/src/search.ts
-@@ -1,5 +1,5 @@
+@@ -1,3 +1,3 @@
  import type { Catalog, Product } from "./data.js";
 -import { evaluateFilter, parseFilter } from "./filter.js";
 +import { evaluateFilter, parseFilter, type FilterNode } from "./filter.js";
  
- export interface SearchParams {
-   q?: string;
-@@ -22,6 +22,57 @@ export interface SearchResult {
- const NAME_WEIGHT = 3;
- const TAG_WEIGHT = 1;
+@@ -24,2 +24,53 @@ const TAG_WEIGHT = 1;
  
 +interface SecondaryIndex {
 +  category: Map<string, number[]>;
@@ -65,11 +61,7 @@ index 808cad4..283645a 100644
 +}
 +
  /** Terms are lowercase alphanumeric words; a term matches any word that starts with it. */
- export function tokenizeQuery(q: string): string[] {
-   return q.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-@@ -147,7 +198,11 @@ export function search(catalog: Catalog, params: SearchParams): SearchResult {
-     top.offer({ position, score });
-   };
+@@ -149,3 +200,7 @@ export function search(catalog: Catalog, params: SearchParams): SearchResult {
    if (scored) for (const [position, score] of scored) consider(position, score);
 -  else for (let position = 0; position < catalog.products.length; position++) consider(position, 0);
 +  else {
@@ -78,5 +70,3 @@ index 808cad4..283645a 100644
 +    else for (let position = 0; position < catalog.products.length; position++) consider(position, 0);
 +  }
  
-   return {
-     total,

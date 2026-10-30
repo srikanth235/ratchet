@@ -157,7 +157,6 @@ export async function runnerMain(options: RunnerMainOptions): Promise<number> {
       ...(env['RATCHET_BEST_REF'] ? { bestRef: env['RATCHET_BEST_REF'] } : {}),
       ...(env['RATCHET_MODEL'] ? { model: env['RATCHET_MODEL'] } : {}),
       ...(env['RATCHET_MAX_IDLE_TURNS'] ? { maxIdleTurns: Number(env['RATCHET_MAX_IDLE_TURNS']) } : {}),
-      agentEnv: {},
     });
   } finally {
     await sink.close();

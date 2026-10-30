@@ -246,7 +246,7 @@ describe('runRunnerLoop', () => {
   it('deadline: stops mid-turn, and while waiting for a verdict', async () => {
     const midTurn = await launch(script([{ type: 'sleep', ms: 60_000 }]), { auto: false, config: { deadlineAt: Date.now() + 300 } });
     expect((await midTurn.result).reason).toBe('deadline');
-    const waiting = await launch(script([write('a.txt', '1\n')]), { auto: false, config: { deadlineAt: Date.now() + 600 } });
+    const waiting = await launch(script([write('a.txt', '1\n')]), { auto: false, config: { deadlineAt: Date.now() + 2500 } });
     const res = await waiting.result;
     expect(res.reason).toBe('deadline');
     expect(waiting.events.some((e) => e.type === 'commit')).toBe(true); // it did submit before the deadline

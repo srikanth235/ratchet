@@ -205,7 +205,7 @@ export class AwsCliArtifactStore implements ArtifactStore {
 
   async get(key: string): Promise<string | null> {
     const r = await this.aws(['s3', 'cp', `s3://${this.bucket}/${key}`, '-', '--only-show-errors']);
-    if (r.code === 0) return r.out.replace(/\n$/, '') + (r.out.endsWith('\n') ? '\n' : '');
+    if (r.code === 0) return r.out; // line-oriented: blank lines are not preserved (fine for JSON / JSONL)
     if (/NoSuchKey|Not Found|404/.test(r.err)) return null;
     throw new Error(`aws s3 cp failed for ${key}: ${r.err}`);
   }

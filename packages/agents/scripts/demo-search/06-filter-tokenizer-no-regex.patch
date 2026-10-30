@@ -2,9 +2,7 @@ diff --git a/src/filter.ts b/src/filter.ts
 index 1dc27b9..9c35334 100644
 --- a/src/filter.ts
 +++ b/src/filter.ts
-@@ -30,30 +30,34 @@ type Token =
- 
- const FIELDS = ["category", "brand", "tag", "instock", "price", "rating"];
+@@ -32,13 +32,17 @@ const FIELDS = ["category", "brand", "tag", "instock", "price", "rating"];
  
 +const CONDITION = new RegExp("^(" + FIELDS.join("|") + "):(.+)$", "i");
 +const WHITESPACE = /\s/;
@@ -27,7 +25,7 @@ index 1dc27b9..9c35334 100644
 -      tokens = [...tokens, { kind: ch === "(" ? "lparen" : "rparen", pos }];
 +      tokens.push({ kind: ch === "(" ? "lparen" : "rparen", pos });
        pos++;
-     } else if (isWordChar(ch)) {
+@@ -46,12 +50,12 @@ function tokenize(input: string): Token[] {
        const start = pos;
 -      let word = "";
 -      while (pos < input.length && isWordChar(input.charAt(pos))) word += input.charAt(pos++);
@@ -45,15 +43,9 @@ index 1dc27b9..9c35334 100644
 -      tokens = [...tokens, { kind: "cond", field: (cond[1] as string).toLowerCase(), value: cond[2] as string, pos: start }];
 +      tokens.push({ kind: "cond", field: (cond[1] as string).toLowerCase(), value: cond[2] as string, pos: start });
      } else {
-       throw new FilterSyntaxError(`unexpected input at position ${pos}: "${input.slice(pos, pos + 12)}"`, pos);
-     }
-@@ -109,8 +113,7 @@ export function parseFilter(input: string): FilterNode {
- function parseOnce(input: string): FilterNode {
-   const tokens = tokenize(input);
+@@ -111,4 +115,3 @@ function parseOnce(input: string): FilterNode {
    let pos = 0;
 -  // every peek re-slices the remaining tokens
 -  const peek = (): Token | undefined => tokens.slice(pos)[0];
 +  const peek = (): Token | undefined => tokens[pos];
    const endPos = input.length;
- 
-   const parseOr = (): FilterNode => {

@@ -2,9 +2,7 @@ diff --git a/src/search.ts b/src/search.ts
 index bd2463d..ca1884a 100644
 --- a/src/search.ts
 +++ b/src/search.ts
-@@ -45,9 +45,14 @@ function toHit(p: Product, score: number): SearchHit {
-   };
- }
+@@ -47,5 +47,10 @@ function toHit(p: Product, score: number): SearchHit {
  
 +interface Match {
 +  p: Product;
@@ -17,11 +15,7 @@ index bd2463d..ca1884a 100644
 +function byRelevance(a: Match, b: Match): number {
 +  return b.score - a.score || b.p.rating - a.p.rating || a.p.name.localeCompare(b.p.name) || a.p.id - b.p.id;
  }
- 
- export function search(catalog: Catalog, params: SearchParams): SearchResult {
-@@ -70,22 +75,20 @@ export function search(catalog: Catalog, params: SearchParams): SearchResult {
-     }
-   }
+@@ -72,6 +77,6 @@ export function search(catalog: Catalog, params: SearchParams): SearchResult {
  
 -  let matches: SearchHit[] = [];
 +  const matches: Match[] = [];
@@ -30,18 +24,13 @@ index bd2463d..ca1884a 100644
 -    if (!filter || evaluateFilter(filter, p)) matches.push(toHit(p, score));
 +    if (!filter || evaluateFilter(filter, p)) matches.push({ p, score });
    };
-   if (scored) for (const [position, score] of scored) consider(position, score);
-   else for (let position = 0; position < catalog.products.length; position++) consider(position, 0);
+@@ -80,4 +85,2 @@ export function search(catalog: Catalog, params: SearchParams): SearchResult {
  
 -  // defensive copy so callers can never mutate shared state
 -  matches = JSON.parse(JSON.stringify(matches)) as SearchHit[];
    matches.sort(byRelevance);
- 
-   return {
-     total: matches.length,
-     limit: params.limit,
+@@ -88,3 +91,3 @@ export function search(catalog: Catalog, params: SearchParams): SearchResult {
      offset: params.offset,
 -    results: matches.slice(params.offset, params.offset + params.limit),
 +    results: matches.slice(params.offset, params.offset + params.limit).map((m) => toHit(m.p, m.score)),
    };
- }

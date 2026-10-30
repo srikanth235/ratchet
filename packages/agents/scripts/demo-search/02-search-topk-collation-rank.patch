@@ -2,14 +2,12 @@ diff --git a/src/search.ts b/src/search.ts
 index ca1884a..808cad4 100644
 --- a/src/search.ts
 +++ b/src/search.ts
-@@ -46,13 +46,69 @@ function toHit(p: Product, score: number): SearchHit {
- }
- 
+@@ -48,3 +48,3 @@ function toHit(p: Product, score: number): SearchHit {
  interface Match {
 -  p: Product;
 +  position: number;
    score: number;
- }
+@@ -52,5 +52,61 @@ interface Match {
  
 -/** Order: score desc, rating desc, name A-Z, id asc. */
 -function byRelevance(a: Match, b: Match): number {
@@ -74,11 +72,7 @@ index ca1884a..808cad4 100644
 +    }
 +  }
  }
- 
- export function search(catalog: Catalog, params: SearchParams): SearchResult {
-@@ -75,20 +131,28 @@ export function search(catalog: Catalog, params: SearchParams): SearchResult {
-     }
-   }
+@@ -77,6 +133,16 @@ export function search(catalog: Catalog, params: SearchParams): SearchResult {
  
 -  const matches: Match[] = [];
 +  const ranks = nameRanks(catalog);
@@ -97,8 +91,7 @@ index ca1884a..808cad4 100644
 +    total++;
 +    top.offer({ position, score });
    };
-   if (scored) for (const [position, score] of scored) consider(position, score);
-   else for (let position = 0; position < catalog.products.length; position++) consider(position, 0);
+@@ -85,9 +151,7 @@ export function search(catalog: Catalog, params: SearchParams): SearchResult {
  
 -  matches.sort(byRelevance);
 -
@@ -110,4 +103,3 @@ index ca1884a..808cad4 100644
 -    results: matches.slice(params.offset, params.offset + params.limit).map((m) => toHit(m.p, m.score)),
 +    results: top.sorted().slice(params.offset).map((m) => toHit(catalog.products[m.position] as Product, m.score)),
    };
- }
