@@ -9,9 +9,9 @@
  * - Agents: SsmRunnerControl (headless Claude Code / Codex on agent runners)
  */
 import { join } from 'node:path';
-import type { Clock, Ledger, SandboxOutputs } from '@ratchet/core';
+import type { Clock, Ledger } from '@ratchet/core';
 import { Engine, type EngineSettings } from '@ratchet/engine';
-import { AwsCloudCompute, AwsPriceBook, S3ArtifactStore, StaticPriceBook, TofuSandboxProvider } from '@ratchet/aws';
+import { AwsCloudCompute, AwsPriceBook, S3ArtifactStore, StaticPriceBook, TofuSandboxProvider, awsComputeConfigFromOutputs, type AwsSandboxOutputs } from '@ratchet/aws';
 import { GitHubGitHost } from '@ratchet/github';
 import { RemoteBenchRunner } from '@ratchet/bench';
 import { SsmRunnerControl } from '@ratchet/agents';
@@ -20,8 +20,8 @@ import { systemClock } from './clock.js';
 export interface LiveOptions {
   ledger: Ledger;
   region: string;
-  /** Outputs of the applied sandbox (from TofuSandboxProvider.outputs). */
-  sandbox: SandboxOutputs;
+  /** Outputs of the applied sandbox (from TofuSandboxProvider.outputs): bench subnet, split bench/confirm profiles, proxy. */
+  sandbox: AwsSandboxOutputs;
   sandboxId: string;
   /** `owner/name` of the repository to optimize. */
   githubRepo: string;
@@ -50,20 +50,8 @@ export interface LiveRuntime {
 
 export function createLiveRuntime(opts: LiveOptions): LiveRuntime {
   const clock = opts.clock ?? systemClock;
-  const compute = new AwsCloudCompute(
-    {
-      sandboxId: opts.sandboxId,
-      region: opts.region,
-      agentBoundaryArn: opts.sandbox.agentBoundaryRef,
-      agentRolePath: opts.sandbox.agentRolePath,
-      subnetId: opts.sandbox.network.subnetId,
-      agentRunnerSecurityGroupId: opts.sandbox.network.agentRunnerSecurityGroupId,
-      benchSecurityGroupId: opts.sandbox.network.benchSecurityGroupId,
-      benchInstanceProfile: opts.sandbox.evalIdentityRef,
-      artifactsBucket: opts.sandbox.artifactsBucket,
-    },
-    { clock },
-  );
+  // Derived from outputs so the private bench subnet, the confirm-only profile and the egress proxy are never dropped.
+  const compute = new AwsCloudCompute({ ...awsComputeConfigFromOutputs(opts.sandbox, opts.sandboxId), region: opts.region }, { clock });
   const sandbox = new TofuSandboxProvider({
     tofuBinary: opts.tofuBinary,
     moduleDir: opts.moduleDir,
@@ -75,7 +63,15 @@ export function createLiveRuntime(opts: LiveOptions): LiveRuntime {
   const artifacts = new S3ArtifactStore({ bucket: opts.sandbox.artifactsBucket, region: opts.region });
   const git = new GitHubGitHost({ repo: opts.githubRepo, token: opts.githubToken, cacheDir: join(opts.stateRoot, 'git-cache') });
   const prices = new AwsPriceBook({ region: opts.region, clock, fallback: new StaticPriceBook() });
-  const bench = new RemoteBenchRunner({ compute, git, clock, imageRef: opts.benchImageRef, artifacts });
+  const bench = new RemoteBenchRunner({
+    compute,
+    git,
+    clock,
+    imageRef: opts.benchImageRef,
+    artifacts,
+    // Bench instances have no internet: inputs are staged as tarballs under bench-inputs/ in the artifacts bucket.
+    stagingBucket: opts.sandbox.artifactsBucket,
+  });
   const runners = new SsmRunnerControl({
     compute,
     store: artifacts,

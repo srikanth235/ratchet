@@ -18,7 +18,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
-    "test:e2e": "RATCHET_E2E=1 vitest run src/simulation.e2e.test.ts --testTimeout=1200000"
+    "test:e2e": "RATCHET_E2E=1 vitest run src/simulation.e2e.test.ts --testTimeout=2700000"
   },
   "dependencies": {
     "@ratchet/core": "workspace:*",

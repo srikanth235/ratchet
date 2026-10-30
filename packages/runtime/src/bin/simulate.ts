@@ -10,6 +10,7 @@ import { mkdtempSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { openLedger } from '@ratchet/core';
 import { loadDemoSearchScript } from '@ratchet/agents';
+import type { EngineSettings } from '@ratchet/engine';
 import { createSimulationRuntime } from '../simulation.js';
 
 const arg = (name: string, def: number) => {
@@ -17,7 +18,7 @@ const arg = (name: string, def: number) => {
   return i > 0 ? Number(process.argv[i + 1]) : def;
 };
 
-export async function simulate(o: { repoRoot: string; attempts?: number; durationSec?: number; repeats?: number; minutes?: number; log?: (s: string) => void }) {
+export async function simulate(o: { repoRoot: string; attempts?: number; durationSec?: number; repeats?: number; minutes?: number; settings?: EngineSettings; log?: (s: string) => void }) {
   const log = o.log ?? ((s: string) => console.log(s));
   const workRoot = mkdtempSync(join(o.repoRoot, '.ratchet-sim-'));
   const ledger = openLedger(join(workRoot, 'ratchet.db'));
@@ -32,6 +33,7 @@ export async function simulate(o: { repoRoot: string; attempts?: number; duratio
     benchDurationSec: o.durationSec ?? 3,
     repeats: o.repeats ?? 2,
     scripts: { 'claude-code': trim('cc'), codex: trim('cx') },
+    ...(o.settings ? { settings: o.settings } : {}),
   });
   const unsub = rt.engine.subscribe((e) => {
     if (e.type === 'agent-event') {

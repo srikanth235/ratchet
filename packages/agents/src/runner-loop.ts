@@ -406,7 +406,7 @@ export async function runRunnerLoop(opts: RunnerLoopDeps): Promise<RunnerLoopRes
     reason ??= 'failed';
   } finally {
     const r = result();
-    status(`runner finished: ${r.reason}`, { reason: r.reason, turns: r.turns, candidates: r.candidates, spendUsd: r.spendUsd });
+    status(`runner finished: ${r.reason}`, { state: r.reason === 'failed' || r.reason === 'agent-unavailable' ? 'failed' : r.reason === 'stopped' || r.reason === 'aborted' ? 'stopped' : 'done', reason: r.reason, turns: r.turns, candidates: r.candidates, spendUsd: r.spendUsd });
     mailbox.close();
     ctl.abort();
   }
