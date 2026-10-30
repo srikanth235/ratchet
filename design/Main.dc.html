@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ratchet — Optimizations (Midnight Brass)</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;family=Instrument+Serif:ital@0;1&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#070B12}
+a{color:#EBCB8E}a:hover{color:#F6DDAE}
+.serif{font-family:'Instrument Serif',Georgia,'Times New Roman',serif;font-weight:400;letter-spacing:-0.01em}
+.mono{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+.eyebrow{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:#8592A6;font-weight:600}
+.card{background:#111827;border:1px solid rgba(148,163,190,.13);border-radius:14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 18px 40px -24px rgba(0,0,0,.8)}
+.nav{display:flex;align-items:center;gap:11px;height:34px;padding:0 10px;border-radius:8px;color:#A7B1C2;text-decoration:none;font-size:13px}
+.nav:hover{background:rgba(148,163,190,.07);color:#ECEFF4}
+.dots{background-image:radial-gradient(rgba(148,163,190,.13) 1px,transparent 1px);background-size:14px 14px}
+</style>
+</helmet>
+<div style="font-family: 'Instrument Sans', -apple-system, 'Helvetica Neue', sans-serif; color: #ECEFF4; background: #070B12; min-height: 1120px; padding: 28px; box-sizing: border-box; font-size: 13px">
+<div style="max-width: 1384px; margin: 0 auto; display: flex; flex-wrap: wrap; background: #0B1019; border: 1px solid rgba(148,163,190,.14); border-radius: 16px; overflow: hidden; box-shadow: 0 40px 90px -40px rgba(0,0,0,.9)">
+
+<nav aria-label="Main" style="flex: 1 1 236px; background: #0E1420; border-right: 1px solid rgba(148,163,190,.10); padding: 16px 14px 18px; box-sizing: border-box; display: flex; flex-direction: column; gap: 22px">
+<div aria-hidden="true" style="display: flex; gap: 8px; padding: 2px 4px"><span style="width: 12px; height: 12px; border-radius: 6px; background: #FF5F57"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #FEBC2E"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #28C840"></span></div>
+<div style="display: flex; align-items: center; gap: 11px; padding: 0 4px">
+<span style="width: 34px; height: 34px; border-radius: 9px; background: #151D2B; border: 1px solid rgba(217,178,111,.35); display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#D9B26F" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M2 13.5 L6 5 V13.5 L10 5 V13.5 L14 5 V13.5"></path></svg></span>
+<span class="serif" style="font-size: 24px; line-height: 1">Ratchet</span>
+<span class="mono" style="margin-left: auto; font-size: 10px; color: #8592A6; border: 1px solid rgba(148,163,190,.2); border-radius: 5px; padding: 2px 5px">v0</span>
+</div>
+<button type="button" style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(148,163,190,.14); background: #111827; color: #ECEFF4; font: inherit; text-align: left">
+<span style="width: 26px; height: 26px; border-radius: 7px; background: rgba(217,178,111,.16); color: #EBCB8E; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px">A</span>
+<span style="display: flex; flex-direction: column; gap: 1px; line-height: 1.2"><span style="font-weight: 600">acme</span><span style="font-size: 11.5px; color: #8592A6">platform-eng</span></span>
+<svg style="margin-left: auto" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#8592A6" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"></path></svg>
+</button>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div class="eyebrow" style="padding: 0 10px 8px">Workspace</div>
+<a href="Main.dc.html" class="nav" style="background: rgba(217,178,111,.10); color: #F4E3C0; font-weight: 500"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#D9B26F" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2.5 11.5a5.5 5.5 0 1 1 11 0"></path><path d="M8 11.5l2.8-3.6"></path><circle cx="8" cy="11.5" r="0.9" fill="#D9B26F"></circle></svg>Optimizations<span class="mono" style="margin-left: auto; font-size: 11px; color: #D9B26F">4</span></a>
+<a href="Benchmarks.dc.html" class="nav"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 13.5V9M6.3 13.5V5M9.7 13.5V7.5M13 13.5V3"></path></svg>Benchmarks</a>
+<a href="Live.dc.html" class="nav"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="2"></rect><path d="M5 6.5l2 1.5-2 1.5M8.5 10H11"></path></svg>Agents</a>
+<a href="Environment.dc.html" class="nav"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12.5h7a3 3 0 0 0 .3-6A4 4 0 0 0 4.2 7.6 2.5 2.5 0 0 0 4.5 12.5z"></path></svg>Environments</a>
+<a href="#" class="nav"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2h8v12l-2-1-2 1-2-1-2 1z"></path><path d="M6 5.5h4M6 8.5h4"></path></svg>Spend</a>
+<a href="#" class="nav"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2.5 5h11M2.5 11h11"></path><circle cx="6" cy="5" r="1.8" fill="#0E1420"></circle><circle cx="10.5" cy="11" r="1.8" fill="#0E1420"></circle></svg>Settings</a>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div class="eyebrow" style="padding: 0 10px">Live now</div>
+<a href="Live.dc.html" style="display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px; background: #111827; border: 1px solid rgba(217,178,111,.22); color: #ECEFF4; text-decoration: none">
+<span style="display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 7px; height: 7px; border-radius: 4px; background: #D9B26F; box-shadow: 0 0 0 4px rgba(217,178,111,.16)"></span><span style="font-weight: 500">search-api p95</span><span class="mono" style="margin-left: auto; color: #7BD8B0; font-size: 11.5px">−28%</span></span>
+<span style="height: 3px; border-radius: 2px; background: rgba(148,163,190,.16)"><span style="display: block; width: 40%; height: 3px; border-radius: 2px; background: #D9B26F"></span></span>
+<span class="mono" style="font-size: 11px; color: #8592A6">3h 10m · $142 of $300</span>
+</a>
+</div>
+<div style="margin-top: auto; display: flex; flex-direction: column; gap: 12px">
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; font-size: 11.5px; color: #A7B1C2">
+<span style="display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 7px; background: rgba(148,163,190,.06)"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 3px; background: #7BD8B0"></span>GitHub</span>
+<span style="display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 7px; background: rgba(148,163,190,.06)"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 3px; background: #7BD8B0"></span>AWS</span>
+<span style="display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 7px; background: rgba(148,163,190,.06)"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 3px; background: #7BD8B0"></span>Claude Code</span>
+<span style="display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 7px; background: rgba(148,163,190,.06)"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 3px; background: #7BD8B0"></span>Codex</span>
+</div>
+<div style="display: flex; align-items: center; gap: 10px; padding: 10px 4px 0; border-top: 1px solid rgba(148,163,190,.10)">
+<span style="width: 30px; height: 30px; border-radius: 15px; background: linear-gradient(135deg, #D9B26F, #8C6A33); color: #1A1408; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 11px">SK</span>
+<span style="display: flex; flex-direction: column; line-height: 1.25"><span style="font-weight: 500">Srikanth</span><span style="font-size: 11.5px; color: #8592A6">Owner</span></span>
+</div>
+</div>
+</nav>
+
+<main style="flex: 999 1 640px; min-width: 0; padding: 30px 34px 36px; box-sizing: border-box; display: flex; flex-direction: column; gap: 22px">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<span class="eyebrow">acme · platform-eng</span>
+<h1 class="serif" style="margin: 0; font-size: 46px; line-height: 1">Optimizations</h1>
+<p style="margin: 4px 0 0; color: #A7B1C2; font-size: 14px">Agents propose changes. The benchmark decides. <span class="serif" style="font-style: italic; font-size: 16px; color: #EBCB8E">Only verified wins ratchet forward.</span></p>
+</div>
+<div style="margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<div style="display: flex; padding: 3px; border-radius: 9px; background: #111827; border: 1px solid rgba(148,163,190,.13)">
+<button type="button" style="height: 30px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; color: #A7B1C2; font: inherit; font-size: 12px">7d</button>
+<button type="button" style="height: 30px; padding: 0 12px; border: 0; border-radius: 6px; background: #1C2636; color: #ECEFF4; font: inherit; font-size: 12px; font-weight: 500">30d</button>
+<button type="button" style="height: 30px; padding: 0 12px; border: 0; border-radius: 6px; background: transparent; color: #A7B1C2; font: inherit; font-size: 12px">90d</button>
+</div>
+<a href="NewOptimization.dc.html" style="display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 10px; background: linear-gradient(180deg, #E6C487, #C99C55); color: #1A1408; text-decoration: none; font-weight: 600; box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 6px 18px -6px rgba(217,178,111,.5)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg>New optimization</a>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); gap: 14px">
+<sc-for list="{{kpis}}" as="k" hint-placeholder-count="4">
+<div class="card" style="padding: 18px 18px 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; align-items: center; justify-content: space-between; gap: 8px"><span class="eyebrow">{{k.label}}</span><span class="mono" style="font-size: 11px; padding: 2px 7px; border-radius: 6px; background: rgba(123,216,176,.12); color: #7BD8B0">{{k.delta}}</span></div>
+<div style="display: flex; align-items: flex-end; justify-content: space-between; gap: 12px">
+<span style="display: flex; align-items: baseline; gap: 6px"><span class="serif" style="font-size: 44px; line-height: 0.95">{{k.value}}</span><span style="color: #8592A6; font-size: 12px">{{k.unit}}</span></span>
+<svg width="112" height="34" viewBox="0 0 120 34" aria-hidden="true" style="flex: none"><path d="{{k.area}}" fill="rgba(217,178,111,.12)"></path><path d="{{k.line}}" fill="none" stroke="#D9B26F" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"></path></svg>
+</div>
+<span style="color: #8592A6; font-size: 12px">{{k.foot}}</span>
+</div>
+</sc-for>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: stretch">
+<section class="card" style="flex: 999 1 560px; min-width: 0; padding: 22px 22px 18px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<span style="display: inline-flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; font-weight: 600; color: #EBCB8E"><span aria-hidden="true" style="width: 7px; height: 7px; border-radius: 4px; background: #D9B26F; box-shadow: 0 0 0 4px rgba(217,178,111,.16)"></span>Live · 3h 10m of 8h</span>
+<h2 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em">search-api · p95 latency</h2>
+<span class="mono" style="font-size: 12px; color: #8592A6">acme/search-service · k6 · 500 rps · c7i.2xlarge</span>
+</div>
+<div style="margin-left: auto; display: flex; align-items: center; gap: 12px">
+<span style="display: flex">
+<span style="width: 28px; height: 28px; border-radius: 14px; background: #2A2547; color: #CFC2FF; border: 2px solid #111827; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600">CC</span>
+<span style="width: 28px; height: 28px; border-radius: 14px; background: #1A3042; color: #A9DBFA; border: 2px solid #111827; margin-left: -8px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600">CX</span>
+</span>
+<a href="Live.dc.html" style="display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid rgba(148,163,190,.2); color: #ECEFF4; text-decoration: none; font-size: 12px">Open<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3l5 5-5 5"></path></svg></a>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 28px">
+<div style="display: flex; align-items: baseline; gap: 8px"><span class="serif" style="font-size: 76px; line-height: 0.85; color: #F4E3C0">131</span><span style="font-size: 18px; color: #A7B1C2">ms</span></div>
+<div style="display: flex; flex-direction: column; gap: 4px; padding-bottom: 6px">
+<span class="mono" style="color: #7BD8B0; font-size: 14px">−28.0% vs baseline</span>
+<span style="color: #8592A6">baseline 182 ms · noise ±2.1 ms · 3 locks</span>
+</div>
+<div style="margin-left: auto; display: flex; gap: 18px; padding-bottom: 6px; font-size: 12px; color: #A7B1C2; flex-wrap: wrap">
+<span style="display: flex; align-items: center; gap: 6px"><span aria-hidden="true" style="width: 16px; height: 2px; background: #D9B26F"></span>Best verified</span>
+<span style="display: flex; align-items: center; gap: 6px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 4px; background: #B8A6FF"></span>Claude Code</span>
+<span style="display: flex; align-items: center; gap: 6px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 4px; background: #7CC4F2"></span>Codex</span>
+</div>
+</div>
+<div class="dots" style="border-radius: 10px; border: 1px solid rgba(148,163,190,.08); padding: 10px 6px 4px; overflow-x: auto">
+<svg viewBox="0 0 760 240" style="width: 100%; min-width: 520px; height: auto; display: block" role="img" aria-label="Best verified p95 stepping down from 182 ms to 131 ms in three locks over three hours">
+<defs><linearGradient id="brassFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#D9B26F" stop-opacity="0.30"></stop><stop offset="1" stop-color="#D9B26F" stop-opacity="0"></stop></linearGradient></defs>
+<line x1="0" y1="60" x2="760" y2="60" stroke="rgba(148,163,190,.10)"></line>
+<line x1="0" y1="110" x2="760" y2="110" stroke="rgba(148,163,190,.10)"></line>
+<line x1="0" y1="160" x2="760" y2="160" stroke="rgba(148,163,190,.10)"></line>
+<line x1="0" y1="210" x2="760" y2="210" stroke="rgba(148,163,190,.18)"></line>
+<text x="756" y="56" font-size="10" fill="#8592A6" text-anchor="end" font-family="JetBrains Mono, monospace">180</text>
+<text x="756" y="106" font-size="10" fill="#8592A6" text-anchor="end" font-family="JetBrains Mono, monospace">160</text>
+<text x="756" y="156" font-size="10" fill="#8592A6" text-anchor="end" font-family="JetBrains Mono, monospace">140</text>
+<text x="756" y="206" font-size="10" fill="#8592A6" text-anchor="end" font-family="JetBrains Mono, monospace">120 ms</text>
+<path d="M0,55 H114 V100 H200 V142.5 H276 V182.5 H301 V210 H0 Z" fill="url(#brassFill)"></path>
+<path d="M0,55 H114 V100 H200 V142.5 H276 V182.5 H301" fill="none" stroke="#D9B26F" stroke-width="2.4" stroke-linejoin="round"></path>
+<line x1="301" y1="182.5" x2="720" y2="182.5" stroke="#D9B26F" stroke-width="1.2" stroke-dasharray="2 6" opacity="0.6"></line>
+<line x1="301" y1="18" x2="301" y2="210" stroke="#ECEFF4" stroke-width="1" stroke-dasharray="3 4" opacity="0.35"></line>
+<text x="307" y="28" font-size="10" fill="#A7B1C2" font-family="JetBrains Mono, monospace">now</text>
+<circle cx="38" cy="65" r="3.5" fill="#B8A6FF" opacity="0.55"></circle>
+<circle cx="74" cy="35" r="3.5" fill="#7CC4F2" opacity="0.55"></circle>
+<circle cx="102" cy="85" r="3.5" fill="#B8A6FF" opacity="0.55"></circle>
+<circle cx="160" cy="115" r="3.5" fill="#7CC4F2" opacity="0.55"></circle>
+<circle cx="186" cy="95" r="3.5" fill="#B8A6FF" opacity="0.55"></circle>
+<circle cx="246" cy="130" r="3.5" fill="#B8A6FF" opacity="0.55"></circle>
+<circle cx="262" cy="162" r="4.5" fill="none" stroke="#A7B1C2" stroke-width="1.4" stroke-dasharray="2 2"></circle>
+<circle cx="292" cy="150" r="3.5" fill="#7CC4F2" opacity="0.55"></circle>
+<circle cx="114" cy="100" r="9" fill="rgba(217,178,111,.18)"></circle><circle cx="114" cy="100" r="5" fill="#B8A6FF" stroke="#0B1019" stroke-width="2"></circle>
+<circle cx="200" cy="142.5" r="9" fill="rgba(217,178,111,.18)"></circle><circle cx="200" cy="142.5" r="5" fill="#7CC4F2" stroke="#0B1019" stroke-width="2"></circle>
+<circle cx="276" cy="182.5" r="9" fill="rgba(217,178,111,.18)"></circle><circle cx="276" cy="182.5" r="5" fill="#B8A6FF" stroke="#0B1019" stroke-width="2"></circle>
+<text x="122" y="94" font-size="10.5" fill="#EBCB8E" font-family="Instrument Sans, sans-serif">164 · batched lookups</text>
+<text x="208" y="136" font-size="10.5" fill="#EBCB8E" font-family="Instrument Sans, sans-serif">147 · index prefetch</text>
+<text x="160" y="200" font-size="10.5" fill="#EBCB8E" font-family="Instrument Sans, sans-serif">131 · LRU parse cache</text>
+<text x="0" y="232" font-size="10" fill="#8592A6" font-family="JetBrains Mono, monospace">0h</text>
+<text x="190" y="232" font-size="10" fill="#8592A6" text-anchor="middle" font-family="JetBrains Mono, monospace">2h</text>
+<text x="380" y="232" font-size="10" fill="#8592A6" text-anchor="middle" font-family="JetBrains Mono, monospace">4h</text>
+<text x="570" y="232" font-size="10" fill="#8592A6" text-anchor="middle" font-family="JetBrains Mono, monospace">6h</text>
+<text x="756" y="232" font-size="10" fill="#8592A6" text-anchor="end" font-family="JetBrains Mono, monospace">8h</text>
+</svg>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(130px, 100%), 1fr)); gap: 1px; background: rgba(148,163,190,.10); border-radius: 10px; overflow: hidden">
+<div style="background: #111827; padding: 12px 14px"><div class="eyebrow">AWS spend</div><div class="mono" style="margin-top: 6px; font-size: 15px">$142 <span style="color: #8592A6">/ 300</span></div><div style="margin-top: 8px; height: 3px; border-radius: 2px; background: rgba(148,163,190,.16)"><div style="width: 47%; height: 3px; border-radius: 2px; background: #D9B26F"></div></div></div>
+<div style="background: #111827; padding: 12px 14px"><div class="eyebrow">Evals</div><div class="mono" style="margin-top: 6px; font-size: 15px">23</div><div style="margin-top: 6px; color: #8592A6; font-size: 11.5px">≈ 7.3 / hour</div></div>
+<div style="background: #111827; padding: 12px 14px"><div class="eyebrow">Verified</div><div class="mono" style="margin-top: 6px; font-size: 15px; color: #7BD8B0">3</div><div style="margin-top: 6px; color: #8592A6; font-size: 11.5px">1 failed confirm</div></div>
+<div style="background: #111827; padding: 12px 14px"><div class="eyebrow">Blocked</div><div class="mono" style="margin-top: 6px; font-size: 15px; color: #F08A93">4</div><div style="margin-top: 6px; color: #8592A6; font-size: 11.5px">by guardrails</div></div>
+</div>
+</section>
+
+<section class="card" style="flex: 1 1 320px; min-width: 0; padding: 20px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; align-items: center; justify-content: space-between"><h2 class="serif" style="margin: 0; font-size: 26px">Activity</h2><a href="#" style="font-size: 12px; text-decoration: none">View all</a></div>
+<div style="display: flex; flex-direction: column">
+<sc-for list="{{events}}" as="e" hint-placeholder-count="6">
+<div style="display: flex; gap: 12px; padding: 12px 0; border-top: 1px solid rgba(148,163,190,.08)">
+<span aria-hidden="true" style="flex: none; width: 28px; height: 28px; border-radius: 14px; background: {{e.bg}}; color: {{e.fg}}; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600">{{e.glyph}}</span>
+<div style="display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1">
+<div style="display: flex; gap: 8px; align-items: baseline"><span style="font-weight: 500">{{e.title}}</span><span class="mono" style="margin-left: auto; font-size: 11px; color: #8592A6">{{e.time}}</span></div>
+<span style="color: #A7B1C2; font-size: 12.5px; line-height: 1.4">{{e.text}}</span>
+</div>
+</div>
+</sc-for>
+</div>
+</section>
+</div>
+
+<section class="card" style="padding: 6px 0 4px; overflow: hidden">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 20px 12px">
+<h2 class="serif" style="margin: 0; font-size: 26px">All optimizations</h2>
+<div style="margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px">
+<button type="button" style="height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid rgba(217,178,111,.4); background: rgba(217,178,111,.10); color: #F4E3C0; font: inherit; font-size: 12px">All · 4</button>
+<button type="button" style="height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid rgba(148,163,190,.18); background: transparent; color: #A7B1C2; font: inherit; font-size: 12px">Running</button>
+<button type="button" style="height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid rgba(148,163,190,.18); background: transparent; color: #A7B1C2; font: inherit; font-size: 12px">Shipped</button>
+<button type="button" style="height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid rgba(148,163,190,.18); background: transparent; color: #A7B1C2; font: inherit; font-size: 12px">Drafts</button>
+</div>
+</div>
+<div style="overflow-x: auto">
+<table style="width: 100%; min-width: 900px; border-collapse: collapse">
+<thead>
+<tr style="text-align: left">
+<th class="eyebrow" style="padding: 10px 20px; border-top: 1px solid rgba(148,163,190,.10)">Optimization</th>
+<th class="eyebrow" style="padding: 10px 12px; border-top: 1px solid rgba(148,163,190,.10)">Trend</th>
+<th class="eyebrow" style="padding: 10px 12px; border-top: 1px solid rgba(148,163,190,.10); text-align: right">Baseline → best</th>
+<th class="eyebrow" style="padding: 10px 12px; border-top: 1px solid rgba(148,163,190,.10)">Gain</th>
+<th class="eyebrow" style="padding: 10px 12px; border-top: 1px solid rgba(148,163,190,.10)">Agents</th>
+<th class="eyebrow" style="padding: 10px 12px; border-top: 1px solid rgba(148,163,190,.10); text-align: right">Spend</th>
+<th class="eyebrow" style="padding: 10px 20px; border-top: 1px solid rgba(148,163,190,.10)">Status</th>
+</tr>
+</thead>
+<tbody>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="4">
+<tr style="border-top: 1px solid rgba(148,163,190,.08)">
+<td style="padding: 14px 20px"><div style="display: flex; align-items: center; gap: 12px"><span aria-hidden="true" style="width: 34px; height: 34px; border-radius: 9px; background: #172033; border: 1px solid rgba(148,163,190,.12); display: flex; align-items: center; justify-content: center; color: #D9B26F" class="mono">{{r.icon}}</span><span style="display: flex; flex-direction: column; gap: 3px"><span style="font-weight: 500; font-size: 13.5px">{{r.name}}</span><span class="mono" style="font-size: 11.5px; color: #8592A6">{{r.repo}} · {{r.bench}}</span></span></div></td>
+<td style="padding: 14px 12px"><svg width="96" height="28" viewBox="0 0 96 28" aria-hidden="true"><path d="{{r.spark}}" fill="none" stroke="{{r.sparkColor}}" stroke-width="1.6" stroke-linejoin="round"></path></svg></td>
+<td class="mono" style="padding: 14px 12px; text-align: right; white-space: nowrap"><span style="color: #8592A6">{{r.base}}</span>  →  <span style="color: #ECEFF4">{{r.best}}</span></td>
+<td style="padding: 14px 12px"><span class="mono" style="display: inline-flex; padding: 3px 8px; border-radius: 6px; background: {{r.gainBg}}; color: {{r.gainFg}}; font-size: 12px">{{r.gain}}</span></td>
+<td style="padding: 14px 12px"><span style="display: flex"><sc-for list="{{r.agents}}" as="a" hint-placeholder-count="2"><span style="width: 24px; height: 24px; border-radius: 12px; background: {{a.bg}}; color: {{a.fg}}; border: 2px solid #111827; margin-right: -6px; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 600">{{a.m}}</span></sc-for></span></td>
+<td class="mono" style="padding: 14px 12px; text-align: right; color: #A7B1C2">{{r.spend}}</td>
+<td style="padding: 14px 20px"><span style="display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 12px; background: {{r.sBg}}; color: {{r.sFg}}; font-size: 12px; font-weight: 500; white-space: nowrap"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 3px; background: {{r.sFg}}"></span>{{r.status}}</span></td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+</section>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1120}}'>
+class Component extends DCLogic {
+renderVals() {
+const area = (l) => l + ' L120,34 L0,34 Z';
+const kp = [
+{ label: 'Verified wins', value: '7', unit: 'last 30d', delta: '+3', line: 'M0,28 L20,24 L40,25 L60,18 L80,16 L100,10 L120,6', foot: 'across 4 optimizations' },
+{ label: 'Median gain', value: '29', unit: '% faster', delta: '+6 pts', line: 'M0,24 L20,22 L40,16 L60,18 L80,12 L100,10 L120,7', foot: 'on verified, confirmed runs' },
+{ label: 'AWS spend', value: '$1,284', unit: 'MTD', delta: '26%', line: 'M0,30 L20,27 L40,25 L60,20 L80,17 L100,12 L120,9', foot: 'of $5,000 monthly cap' },
+{ label: 'Cost per win', value: '$183', unit: 'avg', delta: '−12%', line: 'M0,8 L20,10 L40,9 L60,15 L80,17 L100,21 L120,23', foot: 'compute + bench, no tokens' }
+];
+const ev = [
+{ glyph: '✓', bg: 'rgba(123,216,176,.14)', fg: '#7BD8B0', title: 'Verified win · Claude Code', time: '14:05', text: '4e1b7a0 · LRU parse cache → p95 131 ms (−7.2 ms), confirmed on hidden trace' },
+{ glyph: '×', bg: 'rgba(240,138,147,.14)', fg: '#F08A93', title: 'Blocked · Codex', time: '13:52', text: '5ad09e3 · peak memory 1.6× baseline exceeds 1.2× guardrail' },
+{ glyph: '–', bg: 'rgba(148,163,190,.12)', fg: '#A7B1C2', title: 'Rejected · Codex', time: '13:40', text: 'orjson swap · 149 ms, within noise of best' },
+{ glyph: '?', bg: 'rgba(148,163,190,.12)', fg: '#A7B1C2', title: 'Failed confirm · Claude Code', time: '13:12', text: 'pool pre-warm · 139 ms on bench, 146 ms on hidden trace' },
+{ glyph: '✓', bg: 'rgba(123,216,176,.14)', fg: '#7BD8B0', title: 'Verified win · Codex', time: '12:31', text: '91cc0b4 · index prefetch → 147 ms' },
+{ glyph: '◆', bg: 'rgba(217,178,111,.14)', fg: '#EBCB8E', title: 'Baseline locked', time: '11:00', text: '5 runs on c7i.2xlarge · 182 ms ± 2.1' }
+];
+const CC = { m: 'CC', bg: '#2A2547', fg: '#CFC2FF' };
+const CX = { m: 'CX', bg: '#1A3042', fg: '#A9DBFA' };
+const st = {
+Running: ['rgba(217,178,111,.14)', '#EBCB8E'],
+'PR open': ['rgba(123,216,176,.12)', '#7BD8B0'],
+Merged: ['rgba(148,163,190,.12)', '#C3CBD8'],
+Draft: ['transparent', '#A7B1C2']
+};
+const rows = [
+{ icon: 'p95', name: 'search-api p95 latency', repo: 'acme/search-service', bench: 'k6', spark: 'M0,4 H22 V10 H40 V16 H62 V22 H96', sparkColor: '#D9B26F', base: '182 ms', best: '131 ms', gain: '−28%', agents: [CC, CX], spend: '$142', status: 'Running' },
+{ icon: 'ops', name: 'Ingest throughput', repo: 'acme/ingest', bench: 'criterion', spark: 'M0,24 H18 V18 H44 V12 H70 V6 H96', sparkColor: '#7BD8B0', base: '41.2k/s', best: '58.9k/s', gain: '+43%', agents: [CX], spend: '$96', status: 'PR open' },
+{ icon: 'ttf', name: 'Edge worker cold start', repo: 'acme/edge-worker', bench: 'hyperfine', spark: 'M0,5 H30 V13 H58 V20 H96', sparkColor: '#7BD8B0', base: '2.41 s', best: '1.62 s', gain: '−33%', agents: [CC], spend: '$58', status: 'Merged' },
+{ icon: 'p99', name: 'Web render p99', repo: 'acme/web', bench: 'lighthouse-ci', spark: 'M0,14 H96', sparkColor: '#5C6779', base: '940 ms', best: '—', gain: '—', agents: [CC, CX], spend: '$0', status: 'Draft' }
+];
+return {
+kpis: kp.map((k) => ({ ...k, area: area(k.line) })),
+events: ev,
+rows: rows.map((r) => ({ ...r, gainBg: r.gain === '—' ? 'rgba(148,163,190,.08)' : 'rgba(123,216,176,.12)', gainFg: r.gain === '—' ? '#8592A6' : '#7BD8B0', sBg: st[r.status][0], sFg: st[r.status][1] }))
+};
+}
+}
+</script>
+</body>
+</html>
