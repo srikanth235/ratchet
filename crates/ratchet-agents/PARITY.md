@@ -1,7 +1,7 @@
 # ratchet-agents parity with packages/agents
 
 Every TypeScript test in `packages/agents/test` is mapped to the Rust test that replaces it (or marked **dropped** with the reason).
-The TS suite has 158 test definitions (163 with `it.each` expanded); the Rust crate has 188 tests (20 unit tests in `src/`, the rest in
+The TS suite has 158 test definitions (163 with `it.each` expanded); the Rust crate has 188 tests (17 unit tests in `src/`, the rest in
 `tests/`). Rust test names are the TS names in snake case. File names: `tests/<ts-file-with-underscores>.rs`.
 
 Legend: **ported** = same assertions; **ported (changed)** = same intent, assertion adapted (reason given); **dropped** = not ported.

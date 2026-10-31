@@ -5,7 +5,7 @@ replaces it. All Rust tests live in `tests/suite/` (one module per TS test file,
 binary links the whole AWS SDK) plus a few unit tests next to the code (`src/util.rs`, `src/civil.rs`).
 
 Counts: **208** vitest cases (160 `it(...)` plus 6 `it.each` blocks that expand to 48 cases) -> **199** Rust tests
-(192 in `tests/suite`, 7 unit tests in `src/`). The `it.each` blocks become one Rust test that loops over the same cases
+(193 in `tests/suite`, 6 unit tests in `src/`). The `it.each` blocks become one Rust test that loops over the same cases
 (a failure names the case), which is why the Rust count is lower even though every TS case is covered, and
 dozens of extra tests are new (marked "new" below). No TS test is dropped.
 
@@ -38,7 +38,7 @@ trait, returns `PortResult`, takes core's `OptimizationId` / `AgentId`, and uses
   verbatim and a refused teardown as `PortError::TeardownBlocked`. `AwsCloudCompute` keeps its typed id-as-`&str` methods privately
   (`*_impl`) behind the port. Tests that matched on `Error::Tofu` / `Error::ContractViolation` of a provider call now match the message
   (`PortError::Failed`); `Reaper::reap` and `CostMeter::{snapshot, collect}` take `Option<&OptimizationId>`.
-- New tests: `error::tests` (2), `is_usable_as_the_core_cloud_compute_port_object`, `is_usable_as_the_core_sandbox_provider_port_object_and_its_outputs_are_the_core_type`.
+- New tests: `error::tests` (2), `fs_store_behaves_like_s3_for_put_get_list_by_prefix_under_the_runner_layout` (moved from ratchet-agents with the store), `is_usable_as_the_core_cloud_compute_port_object`, `is_usable_as_the_core_sandbox_provider_port_object_and_its_outputs_are_the_core_type`.
 
 ## artifacts.test.ts -> tests/suite/artifacts.rs
 
