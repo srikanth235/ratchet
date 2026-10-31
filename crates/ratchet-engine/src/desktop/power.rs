@@ -60,40 +60,47 @@ impl PowerSaveBlocker for NoPowerBlocker {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Arc, Mutex};
 
     use super::*;
 
-    #[derive(Default)]
-    struct Counting {
-        started: AtomicU64,
-        stopped: AtomicU64,
+    struct Recording {
+        calls: Arc<Mutex<Vec<String>>>,
+        next: AtomicU64,
     }
 
-    impl PowerSaveBlocker for Arc<Counting> {
+    impl PowerSaveBlocker for Recording {
         fn start(&self) -> u64 {
-            self.started.fetch_add(1, Ordering::SeqCst) + 1
+            self.calls.lock().unwrap().push("start".into());
+            self.next.fetch_add(1, Ordering::SeqCst)
         }
-        fn stop(&self, _id: u64) {
-            self.stopped.fetch_add(1, Ordering::SeqCst);
+        fn stop(&self, id: u64) {
+            self.calls.lock().unwrap().push(format!("stop:{id}"));
         }
     }
 
+    /// machine.test.ts › powerSaveBlocker hook › starts prevent-app-suspension on run-active and stops it when the last
+    /// run ends
     #[test]
-    fn starts_once_stops_once() {
-        let c = Arc::new(Counting::default());
-        let hook = PowerSaveHook::new(c.clone());
+    fn starts_on_run_active_and_stops_when_the_last_run_ends() {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let hook = PowerSaveHook::new(Recording {
+            calls: calls.clone(),
+            next: AtomicU64::new(7),
+        });
+        let seen = || calls.lock().unwrap().clone();
+        assert!(seen().is_empty());
         hook.on_run_active(true);
-        hook.on_run_active(true);
+        hook.on_run_active(true); // idempotent: no second blocker
+        assert_eq!(seen(), ["start"]);
         assert!(hook.held());
-        assert_eq!(c.started.load(Ordering::SeqCst), 1);
         hook.on_run_active(false);
         hook.on_run_active(false);
+        assert_eq!(seen(), ["start", "stop:7"]);
         assert!(!hook.held());
-        assert_eq!(c.stopped.load(Ordering::SeqCst), 1);
         hook.on_run_active(true);
-        hook.release();
-        assert_eq!(c.stopped.load(Ordering::SeqCst), 2);
+        hook.release(); // on quit
+        assert_eq!(seen().last().map(String::as_str), Some("stop:8"));
     }
 }
