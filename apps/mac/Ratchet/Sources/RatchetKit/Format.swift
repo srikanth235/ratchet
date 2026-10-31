@@ -142,8 +142,8 @@ public enum ChartTicks {
         let step = steps.first { span / $0 < Double(maxCount) } ?? (steps.last ?? 86_400)
         var ticks: [Double] = []
         var t = 0.0
-        // Keep the last 6% of the plot free of labels.
-        while t <= span * 0.94 {
+        // Keep the last 20% of the plot free of labels: a wide label such as "1 h 30 m" is centred on its tick and is cut off near the edge.
+        while t <= span * 0.8 {
             ticks.append(t)
             t += step
         }

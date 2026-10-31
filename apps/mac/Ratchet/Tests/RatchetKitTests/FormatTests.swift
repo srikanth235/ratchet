@@ -115,7 +115,7 @@ struct FormatTests {
         #expect(ChartTicks.elapsed(span: 1200) == [0, 300, 600, 900])
         let long = ChartTicks.elapsed(span: 86_400)
         #expect(long.count <= 5)
-        #expect(long.allSatisfy { $0 <= 86_400 * 0.94 })
+        #expect(long.allSatisfy { $0 <= 86_400 * 0.8 })
         #expect(ChartTicks.elapsed(span: 0) == [0])
     }
 
