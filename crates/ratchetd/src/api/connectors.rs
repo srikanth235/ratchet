@@ -1,15 +1,16 @@
-//! Connectors (PROVISIONAL): saved GitHub / AWS / agent accounts, and the per-repo selection.
+//! Connectors: the accounts an optimization can use, several of each kind, stored once and picked per run; and the
+//! choice remembered per repo.
 //!
-//! Shapes come from `design/v02/2-connectors.png`, `3-new-connections.png` and `docs/SIMPLIFIED_MODEL.md`. The
-//! TypeScript feature is still in flight on another branch, so every type here may change before it lands; the
-//! routes are tagged `connectors (provisional)` in the OpenAPI document. Secrets (tokens, API keys) are written
-//! once and live in the keychain; they never come back in a response.
+//! The shapes are `packages/desktop/src/shared/connectors.ts`, one to one. Secrets (GitHub tokens, API keys) are
+//! written once and live in the keychain; they are never part of any response.
 
-use ratchet_core::enums::{AgentKind, AgentsWhere};
-use serde::{Deserialize, Serialize};
+use ratchet_core::enums::AgentsWhere;
+use serde::{Deserialize, Deserializer, Serialize};
 use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+use super::settings::GithubFlowVm;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ConnectorKind {
     Github,
@@ -17,196 +18,297 @@ pub enum ConnectorKind {
     Agent,
 }
 
-/// `connected` / `signed-in` / `valid` all read as green in the UI; the text says which.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+/// The two agent CLIs Ratchet drives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+pub enum ConnectorAgent {
+    #[serde(rename = "claude-code")]
+    ClaudeCode,
+    #[serde(rename = "codex")]
+    Codex,
+}
+
+/// - `connected`: a GitHub account / AWS profile / agent login that works
+/// - `expired`: it worked once and needs signing in again (GitHub token revoked, `aws sso login` needed)
+/// - `signed-out`: nothing to use (an agent CLI that is not signed in or not installed, a GitHub account without a token)
+/// - `valid`: an API key the provider accepted
+/// - `invalid`: an API key (or static AWS keys) the provider rejected
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum ConnectorStatus {
     Connected,
-    /// SSO session or token ran out; "Sign in" refreshes it.
     Expired,
     SignedOut,
+    Valid,
     Invalid,
-    /// Not tested yet.
-    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum GithubConnectorSource {
+    Device,
+    Token,
+    Env,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "kebab-case")]
-pub enum GithubAccountKind {
-    Personal,
-    Organization,
-    App,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct GithubConnectorInfo {
-    pub login: String,
-    pub account_kind: GithubAccountKind,
-    #[schema(required = true)]
-    pub repo_count: Option<u32>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "kebab-case")]
-pub enum AwsConnectorAuth {
-    Sso,
-    /// A named profile in `~/.aws`.
-    Profile,
-    /// The one-click CloudFormation role.
-    Role,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AwsConnectorInfo {
-    pub auth: AwsConnectorAuth,
-    /// Profile or SSO session name; `null` for a role.
-    #[schema(required = true)]
-    pub profile: Option<String>,
-    pub region: String,
-    #[schema(required = true)]
-    pub account_id: Option<String>,
-    /// Monthly spend cap in USD, when the user set one.
-    #[schema(required = true)]
-    pub cap_usd_per_month: Option<f64>,
-    /// What is left of the cap this month ("$412 left this month").
-    #[schema(required = true)]
-    pub remaining_usd_this_month: Option<f64>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "kebab-case")]
-pub enum AgentCredential {
-    /// The CLI's own sign-in on this Mac.
+pub enum AgentConnectorSource {
     Login,
-    /// An API key held in the keychain.
     ApiKey,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentConnectorInfo {
-    pub agent: AgentKind,
-    pub credential: AgentCredential,
-    /// CLI version for a login connector.
-    #[schema(required = true)]
-    pub version: Option<String>,
-    /// Last characters of an API key (`····4f2a`).
-    #[schema(required = true)]
-    pub key_hint: Option<String>,
-    /// Where this connector can run agents: a login runs on this Mac, a key also in the cloud.
-    pub runs_in: Vec<AgentsWhere>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AwsAuthStyle {
+    Sso,
+    Role,
+    Keys,
+    Process,
+    Other,
 }
 
-/// One saved connector. Exactly one of `github` / `aws` / `agent` is set, matching `kind`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ConnectorVm {
-    pub id: String,
-    pub kind: ConnectorKind,
-    /// "acme-prod", "Claude Code · your login".
-    pub name: String,
-    /// The grey line: "Personal · 42 repos", "SSO · us-east-1 · cap $500 / month".
-    pub detail: String,
-    pub status: ConnectorStatus,
-    /// "Connected", "Expired", "Signed out".
-    pub status_text: String,
-    /// The default of its kind: preselected for new optimizations.
-    pub is_default: bool,
-    /// Cost line on the New optimization step ("Free while this Mac is awake", "Billed to the key").
-    #[schema(required = true)]
-    pub cost_note: Option<String>,
-    #[schema(required = true)]
-    pub github: Option<GithubConnectorInfo>,
-    #[schema(required = true)]
-    pub aws: Option<AwsConnectorInfo>,
-    #[schema(required = true)]
-    pub agent: Option<AgentConnectorInfo>,
-}
-
-/// `POST /v1/connectors`: what the "Add connector" sheet sends.
+/// One saved connector. `kind` says which of the three it is; the first fields are common.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "kind", rename_all = "lowercase")]
-pub enum CreateConnectorInput {
-    /// Starts the device flow (or stores a pasted token) and saves the account.
+pub enum ConnectorVm {
+    #[serde(rename_all = "camelCase")]
     Github {
-        name: Option<String>,
-        /// A pasted personal access token (Advanced). Without it the device flow starts.
-        token: Option<String>,
+        id: String,
+        /// What the user sees and can rename ("srikanth235").
+        name: String,
+        /// One muted line under the name. Backticks mark a command to show in monospace.
+        detail: String,
+        status: ConnectorStatus,
+        /// The default of its kind (one per kind).
+        is_default: bool,
+        /// The account's login, `null` until it is known.
+        #[schema(required = true)]
+        login: Option<String>,
+        source: GithubConnectorSource,
     },
     #[serde(rename_all = "camelCase")]
     Aws {
+        id: String,
         name: String,
-        auth: AwsConnectorAuth,
-        profile: Option<String>,
-        region: Option<String>,
-        cap_usd_per_month: Option<f64>,
+        detail: String,
+        status: ConnectorStatus,
+        is_default: bool,
+        /// Profile name in `~/.aws/config` (names only; credentials stay where AWS keeps them).
+        profile: String,
+        region: String,
+        auth: AwsAuthStyle,
+        /// Optional monthly spend cap in USD.
+        #[schema(required = true)]
+        monthly_cap_usd: Option<f64>,
     },
     #[serde(rename_all = "camelCase")]
     Agent {
+        id: String,
         name: String,
-        agent: AgentKind,
-        credential: AgentCredential,
-        /// The API key, for `credential: api-key`.
-        api_key: Option<String>,
-        runs_in: Option<Vec<AgentsWhere>>,
+        detail: String,
+        status: ConnectorStatus,
+        /// For agents: the one used when a run does not choose.
+        is_default: bool,
+        agent: ConnectorAgent,
+        source: AgentConnectorSource,
+        /// `login` runs on this Mac only; `api-key` can run here or on cloud runners.
+        runs_on: Vec<AgentsWhere>,
+        /// Detected CLI version (login) or `null`.
+        #[schema(required = true)]
+        version: Option<String>,
+        /// Last characters of a stored key, e.g. `····4f2a`. Never the key.
+        #[schema(required = true)]
+        key_hint: Option<String>,
     },
 }
 
-/// `PATCH /v1/connectors/{id}`: rename, change the cap, make default.
+impl ConnectorVm {
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Github { id, .. } | Self::Aws { id, .. } | Self::Agent { id, .. } => id,
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Github { name, .. } | Self::Aws { name, .. } | Self::Agent { name, .. } => name,
+        }
+    }
+
+    pub fn kind(&self) -> ConnectorKind {
+        match self {
+            Self::Github { .. } => ConnectorKind::Github,
+            Self::Aws { .. } => ConnectorKind::Aws,
+            Self::Agent { .. } => ConnectorKind::Agent,
+        }
+    }
+
+    pub fn status(&self) -> ConnectorStatus {
+        match self {
+            Self::Github { status, .. }
+            | Self::Aws { status, .. }
+            | Self::Agent { status, .. } => *status,
+        }
+    }
+
+    pub fn is_default(&self) -> bool {
+        match self {
+            Self::Github { is_default, .. }
+            | Self::Aws { is_default, .. }
+            | Self::Agent { is_default, .. } => *is_default,
+        }
+    }
+
+    pub fn detail(&self) -> &str {
+        match self {
+            Self::Github { detail, .. }
+            | Self::Aws { detail, .. }
+            | Self::Agent { detail, .. } => detail,
+        }
+    }
+}
+
+/// Everything the Connectors screen shows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorsVm {
+    pub connectors: Vec<ConnectorVm>,
+    /// The GitHub device flow in progress (or just ended), for the code to show.
+    #[schema(required = true)]
+    pub github_flow: Option<GithubFlowVm>,
+    /// False when the keychain is unavailable: tokens and keys cannot be stored (the environment is still honoured).
+    pub encryption_available: bool,
+    /// True when a real OAuth client id is configured for "Sign in with GitHub".
+    pub client_id_configured: bool,
+}
+
+// ---- inputs -------------------------------------------------------------------------------------------------
+
+/// `POST /v1/connectors/github`: a pasted personal access token or app installation token, checked against GitHub
+/// before it is kept.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AddGithubConnectorInput {
+    pub token: String,
+    pub name: Option<String>,
+}
+
+/// `POST /v1/connectors/github/sign-in`: start the device flow for a new account, or sign `connectorId` in again.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct StartGithubSignInInput {
+    /// Re-sign-in: store the new token on this connector (default: a new one, or the one with the same login).
+    pub connector_id: Option<String>,
+}
+
+/// `POST /v1/connectors/aws`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AddAwsConnectorInput {
+    /// A profile from `~/.aws/config` or `~/.aws/credentials`.
+    pub profile: String,
+    /// Default `us-east-1`.
+    pub region: Option<String>,
+    /// USD per month; omit or `null` for no cap.
+    pub monthly_cap_usd: Option<f64>,
+    pub name: Option<String>,
+}
+
+/// `POST /v1/connectors/agents`: adopt a detected CLI login (one that was removed earlier) or store an API key.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "source", rename_all = "kebab-case")]
+pub enum AddAgentConnectorInput {
+    Login { agent: ConnectorAgent },
+    #[serde(rename_all = "camelCase")]
+    ApiKey {
+        agent: ConnectorAgent,
+        api_key: String,
+        name: Option<String>,
+    },
+}
+
+/// `PATCH /v1/connectors/{id}`: rename; AWS: region and monthly cap.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateConnectorInput {
     pub name: Option<String>,
-    pub is_default: Option<bool>,
-    pub cap_usd_per_month: Option<f64>,
+    /// AWS only.
     pub region: Option<String>,
-    /// Replace the stored API key.
-    pub api_key: Option<String>,
+    /// AWS only; `null` removes the cap, absent leaves it alone.
+    #[serde(default, deserialize_with = "double_option")]
+    #[schema(value_type = Option<f64>)]
+    pub monthly_cap_usd: Option<Option<f64>>,
 }
 
-/// One agent choice on the New optimization step: a connector and where it runs.
+/// `null` is `Some(None)`, absent is `None`.
+fn double_option<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(d).map(Some)
+}
+
+/// Result of "Test connection" on one connector.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorTestVm {
+    pub ok: bool,
+    /// One line; never contains a key or token.
+    pub detail: String,
+    /// The connector with its fresh status (`null` if it no longer exists).
+    #[schema(required = true)]
+    pub connector: Option<ConnectorVm>,
+}
+
+// ---- per-repo remembered selection --------------------------------------------------------------------------
+
+/// One agent choice: a connector and where it runs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSelection {
     pub connector_id: String,
-    pub runs_in: AgentsWhere,
+    #[serde(rename = "where")]
+    pub where_: AgentsWhere,
 }
 
-/// The connectors a run uses (step 2 of New optimization).
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+/// What one repo's runs use: one GitHub account, one AWS profile, and one connector per agent with where it runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ConnectorSelectionInput {
-    pub github_connector_id: Option<String>,
-    pub aws_connector_id: Option<String>,
+pub struct RepoConnections {
+    pub github: String,
+    pub aws: String,
     pub agents: Vec<AgentSelection>,
 }
 
-/// `GET /v1/connector-selections?repo=`: the remembered choice for a repo, or the defaults.
+/// What a run would use right now: the saved choice where there is one, else the defaults. `null` = nothing
+/// connected of that kind.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ConnectorSelectionVm {
+pub struct EffectiveConnections {
+    #[schema(required = true)]
+    pub github: Option<String>,
+    #[schema(required = true)]
+    pub aws: Option<String>,
+    pub agents: Vec<AgentSelection>,
+}
+
+/// `GET /v1/connector-selections?repo=`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoConnectionsVm {
+    /// `owner/name`, lower-cased: the key the selection is remembered under.
     pub repo: String,
-    pub selection: ConnectorSelectionInput,
-    /// True when the user chose it before for this repo ("Remembered for this repo"); false = the defaults.
-    pub remembered: bool,
+    /// What was saved for this repo last time (only entries that still exist); `null` if nothing usable was saved.
+    #[schema(required = true)]
+    pub saved: Option<RepoConnections>,
+    pub effective: EffectiveConnections,
 }
 
 /// `PUT /v1/connector-selections`: remember the choice for a repo.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct SaveConnectorSelectionInput {
+pub struct SaveRepoConnectionsInput {
     pub repo: String,
-    pub selection: ConnectorSelectionInput,
-}
-
-/// Result of "Test" / "Sign in" on a connector.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ConnectorTestVm {
-    pub connector: ConnectorVm,
-    pub ok: bool,
-    /// One line; never contains a key or token.
-    pub detail: String,
+    pub selection: RepoConnections,
 }

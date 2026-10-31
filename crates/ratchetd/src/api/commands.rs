@@ -4,7 +4,7 @@ use ratchet_core::enums::{AgentKind, AgentsWhere};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use super::connectors::ConnectorSelectionInput;
+use super::connectors::RepoConnections;
 use super::vm::KpiRange;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -44,8 +44,10 @@ pub struct CreateOptimizationInput {
     pub budget_usd: f64,
     pub time_limit_seconds: u64,
     pub plateau_evals: u32,
-    /// Provisional (connectors): which saved connectors this run uses.
-    pub connectors: Option<ConnectorSelectionInput>,
+    /// The connectors this run uses (GitHub account, AWS profile, each agent and where it runs). Remembered for the
+    /// repo. Without it the repo's remembered choice is used, else the defaults. When given, `agents` and
+    /// `agentsWhere` follow it.
+    pub connections: Option<RepoConnections>,
     /// Provisional (environment drafts): the approved draft whose environment this run uses.
     pub environment_draft_id: Option<String>,
 }
@@ -89,6 +91,8 @@ pub struct PreflightInput {
     pub agents: Vec<AgentKind>,
     pub agents_where: AgentsWhere,
     pub source: PreflightSource,
+    /// `owner/name`: check the connectors remembered for this repo instead of the defaults.
+    pub repo: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -155,4 +159,6 @@ pub struct AgentEventsQuery {
 pub struct ReposQuery {
     /// Substring of `owner/name`.
     pub query: Option<String>,
+    /// List with this GitHub connector (default: the default one).
+    pub connector_id: Option<String>,
 }

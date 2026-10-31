@@ -6,7 +6,7 @@
 //! snapshots. The first message on every connection is `hello`.
 //!
 //! It is the union of `EngineEventVM` of the Electron app, plus `hello`, `resync` and the provisional
-//! `environment-draft`, `connector` and `github`.
+//! `environment-draft` (provisional), `connector` and `github`.
 
 use ratchet_core::enums::{CandidateVerdict, OptimizationStatus};
 use ratchet_core::ports::{NoticeLevel, SandboxPhase};
@@ -92,7 +92,7 @@ pub enum ApiEvent {
         draft_id: String,
         status: EnvironmentDraftStatus,
     },
-    /// Provisional: a connector changed status (signed in, expired, removed).
+    /// A connector changed (the device flow finished, a probe changed its status, it was removed).
     #[serde(rename_all = "camelCase")]
     Connector {
         connector_id: String,

@@ -122,11 +122,11 @@ fn frame(id: Option<u64>, e: &ApiEvent) -> Event {
         .unwrap_or_else(|_| Event::default().event("error").data("unserializable event"))
 }
 
-/// Overview: spent, value locked in, return, the value staircase, what needs you, the table. PROVISIONAL.
+/// Overview: spent, value locked in, return, the value staircase, what needs you, the table.
 #[utoipa::path(
     get,
     path = "/v1/overview",
-    tag = "overview (provisional)",
+    tag = "overview",
     operation_id = "getOverview",
     params(OverviewQuery),
     responses((status = 200, body = OverviewVm))

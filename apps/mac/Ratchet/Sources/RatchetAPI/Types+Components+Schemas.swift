@@ -28,7 +28,7 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/ActivityVm`.
         public struct ActivityVm: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/ActivityVm/agent`.
-            public var agent: Components.Schemas.AgentKind?
+            public var agent: Components.Schemas.AgentKind
             /// Relative time ("12m ago").
             ///
             /// - Remark: Generated from `#/components/schemas/ActivityVm/at`.
@@ -54,7 +54,7 @@ extension Components {
             ///   - text:
             ///   - tone:
             public init(
-                agent: Components.Schemas.AgentKind? = nil,
+                agent: Components.Schemas.AgentKind,
                 at: Swift.String,
                 atMs: Swift.Int64,
                 id: Swift.String,
@@ -525,7 +525,7 @@ extension Components {
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case4/agentId`.
                 public var agentId: Swift.String
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case4/event`.
-                public var event: Components.Schemas.AgentEventVm?
+                public var event: Components.Schemas.AgentEventVm
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case4/optimizationId`.
                 public var optimizationId: Swift.String
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case4/type`.
@@ -543,7 +543,7 @@ extension Components {
                 ///   - _type:
                 public init(
                     agentId: Swift.String,
-                    event: Components.Schemas.AgentEventVm? = nil,
+                    event: Components.Schemas.AgentEventVm,
                     optimizationId: Swift.String,
                     _type: Components.Schemas.ApiEvent.Case4Payload._TypePayload
                 ) {
@@ -865,7 +865,7 @@ extension Components {
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case12/connectorId`.
                 public var connectorId: Swift.String
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case12/status`.
-                public var status: Components.Schemas.ConnectorStatus?
+                public var status: Components.Schemas.ConnectorStatus
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case12/type`.
                 @frozen public enum _TypePayload: String, Codable, Hashable, Sendable, CaseIterable {
                     case connector = "connector"
@@ -880,7 +880,7 @@ extension Components {
                 ///   - _type:
                 public init(
                     connectorId: Swift.String,
-                    status: Components.Schemas.ConnectorStatus? = nil,
+                    status: Components.Schemas.ConnectorStatus,
                     _type: Components.Schemas.ApiEvent.Case12Payload._TypePayload
                 ) {
                     self.connectorId = connectorId
@@ -1109,7 +1109,7 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/BenchPipelineVm`.
         public struct BenchPipelineVm: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/BenchPipelineVm/candidate`.
-            public var candidate: Components.Schemas.PipelineCandidate?
+            public var candidate: Components.Schemas.PipelineCandidate
             /// - Remark: Generated from `#/components/schemas/BenchPipelineVm/queued`.
             public var queued: Swift.Int64
             /// - Remark: Generated from `#/components/schemas/BenchPipelineVm/stages`.
@@ -1121,7 +1121,7 @@ extension Components {
             ///   - queued:
             ///   - stages:
             public init(
-                candidate: Components.Schemas.PipelineCandidate? = nil,
+                candidate: Components.Schemas.PipelineCandidate,
                 queued: Swift.Int64,
                 stages: [Components.Schemas.PipelineStage]
             ) {
@@ -1403,7 +1403,7 @@ extension Components {
             /// - Remark: Generated from `#/components/schemas/ConfigSummary/protectedGlobs`.
             public var protectedGlobs: [Swift.String]
             /// - Remark: Generated from `#/components/schemas/ConfigSummary/value`.
-            public var value: Components.Schemas.ValueSummary?
+            public var value: Components.Schemas.ValueSummary
             /// Creates a new `ConfigSummary`.
             ///
             /// - Parameters:
@@ -1431,7 +1431,7 @@ extension Components {
                 pack: Swift.String? = nil,
                 protectedEntries: [Components.Schemas.ProtectedEntryVm],
                 protectedGlobs: [Swift.String],
-                value: Components.Schemas.ValueSummary? = nil
+                value: Components.Schemas.ValueSummary
             ) {
                 self.direction = direction
                 self.environment = environment
@@ -1579,9 +1579,9 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/ConnectorVm`.
         public struct ConnectorVm: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/ConnectorVm/agent`.
-            public var agent: Components.Schemas.AgentConnectorInfo?
+            public var agent: Components.Schemas.AgentConnectorInfo
             /// - Remark: Generated from `#/components/schemas/ConnectorVm/aws`.
-            public var aws: Components.Schemas.AwsConnectorInfo?
+            public var aws: Components.Schemas.AwsConnectorInfo
             /// Cost line on the New optimization step ("Free while this Mac is awake", "Billed to the key").
             ///
             /// - Remark: Generated from `#/components/schemas/ConnectorVm/costNote`.
@@ -1591,7 +1591,7 @@ extension Components {
             /// - Remark: Generated from `#/components/schemas/ConnectorVm/detail`.
             public var detail: Swift.String
             /// - Remark: Generated from `#/components/schemas/ConnectorVm/github`.
-            public var github: Components.Schemas.GithubConnectorInfo?
+            public var github: Components.Schemas.GithubConnectorInfo
             /// - Remark: Generated from `#/components/schemas/ConnectorVm/id`.
             public var id: Swift.String
             /// The default of its kind: preselected for new optimizations.
@@ -1625,11 +1625,11 @@ extension Components {
             ///   - status:
             ///   - statusText: "Connected", "Expired", "Signed out".
             public init(
-                agent: Components.Schemas.AgentConnectorInfo? = nil,
-                aws: Components.Schemas.AwsConnectorInfo? = nil,
+                agent: Components.Schemas.AgentConnectorInfo,
+                aws: Components.Schemas.AwsConnectorInfo,
                 costNote: Swift.String? = nil,
                 detail: Swift.String,
-                github: Components.Schemas.GithubConnectorInfo? = nil,
+                github: Components.Schemas.GithubConnectorInfo,
                 id: Swift.String,
                 isDefault: Swift.Bool,
                 kind: Components.Schemas.ConnectorKind,
@@ -2657,7 +2657,7 @@ extension Components {
             /// - Remark: Generated from `#/components/schemas/EnvironmentsVm/idleMinutes`.
             public var idleMinutes: Swift.Int32
             /// - Remark: Generated from `#/components/schemas/EnvironmentsVm/lastReceipt`.
-            public var lastReceipt: Components.Schemas.TeardownReceiptVm?
+            public var lastReceipt: Components.Schemas.TeardownReceiptVm
             /// Creates a new `EnvironmentsVm`.
             ///
             /// - Parameters:
@@ -2667,7 +2667,7 @@ extension Components {
             public init(
                 environments: [Components.Schemas.EnvironmentVm],
                 idleMinutes: Swift.Int32,
-                lastReceipt: Components.Schemas.TeardownReceiptVm? = nil
+                lastReceipt: Components.Schemas.TeardownReceiptVm
             ) {
                 self.environments = environments
                 self.idleMinutes = idleMinutes
@@ -2833,7 +2833,7 @@ extension Components {
         /// - Remark: Generated from `#/components/schemas/Kpi`.
         public struct Kpi: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/Kpi/change`.
-            public var change: Components.Schemas.KpiChange?
+            public var change: Components.Schemas.KpiChange
             /// - Remark: Generated from `#/components/schemas/Kpi/foot`.
             public var foot: Swift.String
             /// - Remark: Generated from `#/components/schemas/Kpi/id`.
@@ -2857,7 +2857,7 @@ extension Components {
             ///   - unit:
             ///   - value:
             public init(
-                change: Components.Schemas.KpiChange? = nil,
+                change: Components.Schemas.KpiChange,
                 foot: Swift.String,
                 id: Swift.String,
                 label: Swift.String,
@@ -3145,7 +3145,7 @@ extension Components {
             /// - Remark: Generated from `#/components/schemas/OptimizationDetail/prUrl`.
             public var prUrl: Swift.String?
             /// - Remark: Generated from `#/components/schemas/OptimizationDetail/receipt`.
-            public var receipt: Components.Schemas.TeardownReceiptVm?
+            public var receipt: Components.Schemas.TeardownReceiptVm
             /// `null` when the evaluator reports no spans or there is no verified win yet.
             ///
             /// - Remark: Generated from `#/components/schemas/OptimizationDetail/spans`.
@@ -3193,7 +3193,7 @@ extension Components {
                 noiseFloor: Swift.Double? = nil,
                 pipeline: Components.Schemas.BenchPipelineVm,
                 prUrl: Swift.String? = nil,
-                receipt: Components.Schemas.TeardownReceiptVm? = nil,
+                receipt: Components.Schemas.TeardownReceiptVm,
                 spans: [Components.Schemas.SpanRow]? = nil,
                 startedAt: Swift.Int64? = nil,
                 summary: Components.Schemas.OptimizationVm,
@@ -3298,7 +3298,7 @@ extension Components {
             /// - Remark: Generated from `#/components/schemas/OptimizationVm/updated`.
             public var updated: Swift.String
             /// - Remark: Generated from `#/components/schemas/OptimizationVm/value`.
-            public var value: Components.Schemas.ValueVm?
+            public var value: Components.Schemas.ValueVm
             /// - Remark: Generated from `#/components/schemas/OptimizationVm/verifiedWins`.
             public var verifiedWins: Swift.Int64
             /// Creates a new `OptimizationVm`.
@@ -3343,7 +3343,7 @@ extension Components {
                 status: Components.Schemas.UiStatus,
                 unit: Swift.String,
                 updated: Swift.String,
-                value: Components.Schemas.ValueVm? = nil,
+                value: Components.Schemas.ValueVm,
                 verifiedWins: Swift.Int64
             ) {
                 self.agents = agents
@@ -3401,7 +3401,7 @@ extension Components {
             /// - Remark: Generated from `#/components/schemas/OptimizationsSnapshot/featuredId`.
             public var featuredId: Swift.String?
             /// - Remark: Generated from `#/components/schemas/OptimizationsSnapshot/featuredSeries`.
-            public var featuredSeries: Components.Schemas.RatchetSeries?
+            public var featuredSeries: Components.Schemas.RatchetSeries
             /// - Remark: Generated from `#/components/schemas/OptimizationsSnapshot/kpis`.
             public var kpis: [Components.Schemas.Kpi]
             /// - Remark: Generated from `#/components/schemas/OptimizationsSnapshot/optimizations`.
@@ -3422,7 +3422,7 @@ extension Components {
                 activity: [Components.Schemas.ActivityVm],
                 engine: Components.Schemas.EngineInfo,
                 featuredId: Swift.String? = nil,
-                featuredSeries: Components.Schemas.RatchetSeries? = nil,
+                featuredSeries: Components.Schemas.RatchetSeries,
                 kpis: [Components.Schemas.Kpi],
                 optimizations: [Components.Schemas.OptimizationVm],
                 range: Components.Schemas.KpiRange
@@ -3893,7 +3893,7 @@ extension Components {
             /// - Remark: Generated from `#/components/schemas/RepoInspectVm/baseRef`.
             public var baseRef: Swift.String
             /// - Remark: Generated from `#/components/schemas/RepoInspectVm/config`.
-            public var config: Components.Schemas.ConfigSummary?
+            public var config: Components.Schemas.ConfigSummary
             /// The ratchet.yaml text, read-only; `null` when the repo has none.
             ///
             /// - Remark: Generated from `#/components/schemas/RepoInspectVm/configYaml`.
@@ -3927,7 +3927,7 @@ extension Components {
             ///   - templates: Offered when there is no ratchet.yaml: "Add via pull request".
             public init(
                 baseRef: Swift.String,
-                config: Components.Schemas.ConfigSummary? = nil,
+                config: Components.Schemas.ConfigSummary,
                 configYaml: Swift.String? = nil,
                 errors: [Components.Schemas.ConfigError],
                 problem: Swift.String? = nil,
@@ -4874,7 +4874,7 @@ extension Components {
             /// - Remark: Generated from `#/components/schemas/WinningChangeVm/deletions`.
             public var deletions: Swift.Int64
             /// - Remark: Generated from `#/components/schemas/WinningChangeVm/excerpt`.
-            public var excerpt: Components.Schemas.DiffExcerpt?
+            public var excerpt: Components.Schemas.DiffExcerpt
             /// - Remark: Generated from `#/components/schemas/WinningChangeVm/files`.
             public var files: [Components.Schemas.DiffFileVm]
             /// Short sha of the best verified commit; `null` before the first win.
@@ -4901,7 +4901,7 @@ extension Components {
                 baseRef: Swift.String,
                 commits: Swift.Int64,
                 deletions: Swift.Int64,
-                excerpt: Components.Schemas.DiffExcerpt? = nil,
+                excerpt: Components.Schemas.DiffExcerpt,
                 files: [Components.Schemas.DiffFileVm],
                 sha: Swift.String? = nil,
                 unavailable: Swift.String? = nil

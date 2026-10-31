@@ -5,7 +5,7 @@
 //! data; `ratchet-engine` will implement it for real. Reads that only need the ledger can reuse
 //! [`crate::views::LedgerViews`].
 //!
-//! The *provisional* groups (connectors, overview, environment drafts) have default bodies that say the engine does
+//! The *provisional* group (environment drafts) has default bodies that say the engine does
 //! not support them yet, so an engine can ship without them.
 
 use async_trait::async_trait;
@@ -191,8 +191,17 @@ pub trait AppService: Send + Sync + 'static {
     /// Start the device flow: returns the code to show; the daemon polls and stores the token.
     async fn github_sign_in(&self) -> ServiceResult<GithubStatusVm>;
     async fn github_sign_out(&self) -> ServiceResult<GithubStatusVm>;
-    async fn list_repos(&self, query: Option<String>) -> ServiceResult<Vec<RepoVm>>;
-    async fn inspect_repo(&self, source: RepoSource) -> ServiceResult<RepoInspectVm>;
+    /// `connector_id`: list with this GitHub connector (default: the default one).
+    async fn list_repos(
+        &self,
+        query: Option<String>,
+        connector_id: Option<String>,
+    ) -> ServiceResult<Vec<RepoVm>>;
+    async fn inspect_repo(
+        &self,
+        source: RepoSource,
+        connector_id: Option<String>,
+    ) -> ServiceResult<RepoInspectVm>;
 
     // ---- AWS, agent CLIs ---------------------------------------------------------------------------------
     async fn aws_profiles(&self) -> ServiceResult<AwsProfilesVm>;
@@ -220,44 +229,49 @@ pub trait AppService: Send + Sync + 'static {
     /// "End sandbox now". Refused (409) while a run is active.
     async fn end_environment(&self, sandbox_id: &str) -> ServiceResult<EnvironmentsVm>;
 
-    // ---- overview (provisional) --------------------------------------------------------------------------
-    async fn overview(&self, _range: OverviewRange) -> ServiceResult<OverviewVm> {
-        unsupported("overview")
-    }
+    // ---- overview ----------------------------------------------------------------------------------------
+    /// Spent, value locked in, return, the staircase, what needs the user and the table, over `range`.
+    async fn overview(&self, range: OverviewRange) -> ServiceResult<OverviewVm>;
 
-    // ---- connectors (provisional) ------------------------------------------------------------------------
-    async fn list_connectors(&self) -> ServiceResult<Vec<ConnectorVm>> {
-        unsupported("connectors")
-    }
-    async fn create_connector(&self, _input: CreateConnectorInput) -> ServiceResult<ConnectorVm> {
-        unsupported("connectors")
-    }
-    async fn get_connector(&self, _id: &str) -> ServiceResult<ConnectorVm> {
-        unsupported("connectors")
-    }
+    // ---- connectors --------------------------------------------------------------------------------------
+    /// Every saved connector (detected CLI logins included), the device flow in progress and the keychain state.
+    async fn list_connectors(&self) -> ServiceResult<ConnectorsVm>;
+    /// Check every connector with its provider (and probe the machine for agent CLIs again), then list.
+    async fn refresh_connectors(&self) -> ServiceResult<ConnectorsVm>;
+    /// A pasted token, checked against GitHub before it is kept.
+    async fn add_github_connector(
+        &self,
+        input: AddGithubConnectorInput,
+    ) -> ServiceResult<ConnectorsVm>;
+    /// Start the device flow for a new account, or `connector_id` to sign it in again. `github_flow` carries the code.
+    async fn start_github_connector_sign_in(
+        &self,
+        input: StartGithubSignInInput,
+    ) -> ServiceResult<ConnectorsVm>;
+    async fn cancel_github_connector_sign_in(&self) -> ServiceResult<ConnectorsVm>;
+    async fn add_aws_connector(&self, input: AddAwsConnectorInput) -> ServiceResult<ConnectorsVm>;
+    /// A detected CLI login (one that was removed) or a pasted API key.
+    async fn add_agent_connector(
+        &self,
+        input: AddAgentConnectorInput,
+    ) -> ServiceResult<ConnectorsVm>;
+    /// Rename; AWS: region and monthly cap.
     async fn update_connector(
         &self,
-        _id: &str,
-        _input: UpdateConnectorInput,
-    ) -> ServiceResult<ConnectorVm> {
-        unsupported("connectors")
-    }
-    async fn delete_connector(&self, _id: &str) -> ServiceResult<()> {
-        unsupported("connectors")
-    }
-    /// "Test" / "Sign in": probe the account and refresh its status.
-    async fn test_connector(&self, _id: &str) -> ServiceResult<ConnectorTestVm> {
-        unsupported("connectors")
-    }
-    async fn connector_selection(&self, _repo: &str) -> ServiceResult<ConnectorSelectionVm> {
-        unsupported("connectors")
-    }
-    async fn save_connector_selection(
+        id: &str,
+        input: UpdateConnectorInput,
+    ) -> ServiceResult<ConnectorsVm>;
+    async fn remove_connector(&self, id: &str) -> ServiceResult<ConnectorsVm>;
+    async fn set_default_connector(&self, id: &str) -> ServiceResult<ConnectorsVm>;
+    /// "Test connection": probe the account and remember its status.
+    async fn test_connector(&self, id: &str) -> ServiceResult<ConnectorTestVm>;
+    /// The choice remembered for a repo, and what a run on it would use now (saved choice, else the defaults).
+    async fn repo_connections(&self, repo: &str) -> ServiceResult<RepoConnectionsVm>;
+    async fn save_repo_connections(
         &self,
-        _input: SaveConnectorSelectionInput,
-    ) -> ServiceResult<ConnectorSelectionVm> {
-        unsupported("connectors")
-    }
+        repo: &str,
+        selection: RepoConnections,
+    ) -> ServiceResult<RepoConnectionsVm>;
 
     // ---- environment drafts (provisional) ----------------------------------------------------------------
     async fn create_environment_draft(

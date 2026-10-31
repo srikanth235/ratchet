@@ -33,6 +33,8 @@ pub enum RepoSource {
 #[serde(rename_all = "camelCase")]
 pub struct InspectRepoInput {
     pub source: RepoSource,
+    /// Read the repo with this GitHub connector (default: the default one).
+    pub connector_id: Option<String>,
 }
 
 /// What step 1 learned about the chosen repo (read from the default branch, never typed).

@@ -60,7 +60,7 @@ async fn list_repos(
     State(s): State<AppState>,
     ApiQuery(q): ApiQuery<ReposQuery>,
 ) -> ApiResult<Json<Vec<RepoVm>>> {
-    Ok(Json(s.service.list_repos(q.query).await?))
+    Ok(Json(s.service.list_repos(q.query, q.connector_id).await?))
 }
 
 /// What step 1 of New optimization learns about a repo (a GitHub repo or a local folder): its ratchet.yaml, a
@@ -77,7 +77,7 @@ async fn inspect_repo(
     State(s): State<AppState>,
     ApiJson(input): ApiJson<InspectRepoInput>,
 ) -> ApiResult<Json<RepoInspectVm>> {
-    Ok(Json(s.service.inspect_repo(input.source).await?))
+    Ok(Json(s.service.inspect_repo(input.source, input.connector_id).await?))
 }
 
 /// The AWS profiles found on this Mac (names only).
