@@ -9,3 +9,5 @@ export { defaultReport } from './report.js';
 export { KvStore } from './kv.js';
 export { CostMeter } from './cost.js';
 export { reap } from './reaper.js';
+export * from './environment/index.js';
+export { readEnvironment } from './environment-files.js';

@@ -21,13 +21,14 @@
  */
 import { join } from 'node:path';
 import type { Clock, Ledger } from '@ratchet/core';
-import { Engine, EngineError, type EngineSettings } from '@ratchet/engine';
+import { AgentEnvironmentDrafter, Engine, EngineError, type EngineSettings } from '@ratchet/engine';
 import {
   AwsCloudCompute,
   AwsCostReconciler,
   AwsPriceBook,
   S3ArtifactStore,
   StaticPriceBook,
+  TofuEnvironmentChecker,
   TofuSandboxProvider,
   awsComputeConfigFromOutputs,
   regionForOptimization,
@@ -42,13 +43,14 @@ import {
   createLocalAgentControl,
   detectHarnesses,
   gitAuthEnv,
+  localAdapterFor,
   resolveLoginPath,
   type DetectOptions,
   type HarnessInfo,
   type LocalAgentControlOptions,
   type LocalRunnerControl,
 } from '@ratchet/agents';
-import type { AgentsWhere } from '@ratchet/core';
+import type { AgentsWhere, EnvironmentDrafter } from '@ratchet/core';
 import { systemClock } from './clock.js';
 
 export interface LiveOptions {
@@ -72,8 +74,14 @@ export interface LiveOptions {
   benchImageRef?: string | undefined;
   /** The app version the published AMIs are matched against (`ratchet:image_version`). */
   appVersion?: string | undefined;
-  /** The sandbox module is a custom one (`infra:` in ratchet.yaml): validate its outputs against infra/contract.md after apply. */
+  /**
+   * Validate the module's outputs against infra/contract.md after every apply even for the module that ships with the app. Not
+   * needed for `infra:` in ratchet.yaml or a drafted environment: the engine reads those from the protected ref and hands them to
+   * the sandbox provider, which validates them by itself (a custom module always, a drafted one against the base module's allow-list).
+   */
   infraOverride?: boolean | undefined;
+  /** Directory of the base module drafted environments are built on (`infra/modules/sandbox`); default: next to `moduleDir`. */
+  baseModuleDir?: string | undefined;
   /**
    * Candidate setup run on the bench before the guardrails, e.g. `pnpm install --frozen-lockfile && pnpm build`. The bench has no
    * network: when this is set, dependencies come from a snapshot of the lockfile at `evaluator.ref` that a separate instance with
@@ -115,6 +123,11 @@ export type LocalAgentsConfig = Pick<LocalAgentControlOptions, 'harnesses' | 'lo
 export interface LiveRuntime {
   engine: Engine;
   sandbox: TofuSandboxProvider;
+  /**
+   * Drafts, revises and approves the environment of an optimization (docs/SIMPLIFIED_MODEL.md, "Dynamic environments"). Null when
+   * there is no local agent to draft with or no GitHub repository to commit to; the engine's `draftEnvironment` then reports `unavailable`.
+   */
+  environment: EnvironmentDrafter | null;
   /** The GitHub remote, or null while git is not configured. */
   repoUrl: string | null;
   /** What still blocks running an optimization (empty = fully wired). The sandbox ports work regardless. */
@@ -241,6 +254,9 @@ export function createLiveRuntime(opts: LiveOptions): LiveRuntime {
     env: { ...(opts.awsProfile ? { AWS_PROFILE: opts.awsProfile } : {}), ...opts.awsEnv },
     ...(opts.tofuRunner ? { runner: opts.tofuRunner } : {}),
     ...(opts.infraOverride ? { validateContract: true } : {}),
+    ...(opts.baseModuleDir ? { baseModuleDir: opts.baseModuleDir } : {}),
+    // The machines of a drafted environment launch from the same bench image the evaluator uses.
+    ...(opts.benchImageRef ? { machineImageId: opts.benchImageRef } : opts.appVersion ? { imageVersion: opts.appVersion } : {}),
     // Teardown guard: runtime agent roles must be gone before `tofu destroy`. No outputs = nothing was ever launched.
     listRuntimeAgentRoles: async () => {
       const ports = awsNow();
@@ -260,11 +276,33 @@ export function createLiveRuntime(opts: LiveOptions): LiveRuntime {
       })
     : null;
 
+  // The setup agent that drafts environments: the user's own Claude Code / Codex on this machine, plus `tofu plan` in their account.
+  const environment: EnvironmentDrafter | null =
+    opts.localAgents && haveGit
+      ? new AgentEnvironmentDrafter({
+          git,
+          adapterFor: (kind) => localAdapterFor({ ...opts.localAgents!, clock }, kind === 'mock' ? 'claude-code' : kind),
+          clock,
+          prices,
+          defaultRegion: opts.region,
+          scratchDir: join(opts.stateRoot, 'scratch'),
+          checker: new TofuEnvironmentChecker({
+            tofuBinary: opts.tofuBinary,
+            moduleDir: opts.moduleDir,
+            ...(opts.baseModuleDir ? { baseModuleDir: opts.baseModuleDir } : {}),
+            workRoot: join(opts.stateRoot, 'scratch'),
+            ...(opts.tofuRunner ? { runner: opts.tofuRunner } : {}),
+            env: { ...(opts.awsProfile ? { AWS_PROFILE: opts.awsProfile } : {}), ...opts.awsEnv },
+            ...(opts.benchImageRef ? { machineImageId: opts.benchImageRef } : opts.appVersion ? { imageVersion: opts.appVersion } : {}),
+          }),
+        })
+      : null;
+
   const engine = new Engine({
     ledger: opts.ledger,
     mode: 'live',
     clock,
-    ports: { sandbox, compute, prices, artifacts, git, runners, bench, ...(localRunners ? { localRunners } : {}), costs: new AwsCostReconciler() },
+    ports: { sandbox, compute, prices, artifacts, git, runners, bench, ...(localRunners ? { localRunners } : {}), ...(environment ? { environment } : {}), costs: new AwsCostReconciler() },
     settings: {
       ...(opts.secrets ? { secrets: opts.secrets } : {}),
       ...(opts.runnerImageRef ? { runnerImageRef: opts.runnerImageRef } : {}),
@@ -278,6 +316,7 @@ export function createLiveRuntime(opts: LiveOptions): LiveRuntime {
   return {
     engine,
     sandbox,
+    environment,
     repoUrl: haveGit ? (git as GitHubGitHost).remoteUrl() : null,
     missing,
     agentsWhere,

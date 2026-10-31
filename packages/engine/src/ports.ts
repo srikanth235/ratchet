@@ -3,6 +3,7 @@ import type {
   BenchRunner,
   CloudCompute,
   CostReconciler,
+  EnvironmentDrafter,
   GitHost,
   PriceBook,
   RunnerControl,
@@ -25,4 +26,10 @@ export interface EnginePorts {
   bench: BenchRunner;
   /** Billing truth for the cost estimate (Cost Explorer). Optional: without it `reconcileCosts` reports it is unavailable. */
   costs?: CostReconciler;
+  /**
+   * Drafts, revises and approves environments (docs/SIMPLIFIED_MODEL.md, "Dynamic environments"). Optional: without it the
+   * engine's `draftEnvironment` & co. report `unavailable`. Applying an approved environment needs none of this: the engine
+   * reads it from the protected ref at run start.
+   */
+  environment?: EnvironmentDrafter;
 }

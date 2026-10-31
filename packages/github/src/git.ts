@@ -84,7 +84,7 @@ export abstract class BaseGitHost implements GitHost {
   /** Bring `gitDir` up to date with the remote before reading. */
   protected async sync(): Promise<void> {}
   /** Make `ref` (a local SHA) visible as `refs/heads/<branch>` on the remote. */
-  protected abstract publish(branch: string, sha: string, opts: { force: boolean }): Promise<void>;
+  protected abstract publish(branch: string, sha: string, opts: { force: boolean; expected?: string }): Promise<void>;
   protected abstract createPullRequest(input: PullRequestInput): Promise<{ url: string }>;
 
   protected async git(args: string[], extra: GitRunOptions = {}): Promise<string> {
@@ -212,6 +212,13 @@ export abstract class BaseGitHost implements GitHost {
     }
     await this.sync();
     const base = await this.resolve(input.baseRef);
+    if (input.update) {
+      // Straight onto an existing branch (a protected ref): only on top of the tip the caller based the files on.
+      const tip = await this.resolve(input.branch).catch(() => {
+        throw new Error(`commitFiles: branch ${input.branch} does not exist`);
+      });
+      if (tip !== base) throw new Error(`commitFiles: ${input.branch} is not at ${input.baseRef}; refusing to move it`);
+    }
     const scratch = mkdtempSync(join(tmpdir(), 'ratchet-commit-'));
     try {
       const env = { GIT_INDEX_FILE: join(scratch, 'index') };
@@ -230,7 +237,7 @@ export abstract class BaseGitHost implements GitHost {
       };
       const message = `${input.message.replace(/\s+$/, '')}\n`;
       const sha = (await this.git(['commit-tree', tree, '-p', base, '-F', '-'], { env: commitEnv, input: message })).trim();
-      await this.publish(input.branch, sha, { force: false });
+      await this.publish(input.branch, sha, input.update ? { force: false, expected: base } : { force: false });
       return { sha };
     } finally {
       rmSync(scratch, { recursive: true, force: true });

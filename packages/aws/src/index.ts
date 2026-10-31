@@ -14,3 +14,5 @@ export * from './identity.js';
 export * from './images.js';
 export * from './region.js';
 export * from './sandbox/override.js';
+export * from './sandbox/environment.js';
+export * from './sandbox/environment-check.js';

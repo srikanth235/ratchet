@@ -170,6 +170,19 @@ const repoPath = (what: string) =>
     .refine((p) => !p.includes('\\'), `${what} must use forward slashes`)
     .refine((p) => !p.split('/').includes('..'), `${what} must stay inside the repository (no "..")`);
 
+/**
+ * How much infrastructure an optimization's environment needs (docs/SIMPLIFIED_MODEL.md, "Dynamic environments"):
+ *  - `none`: pure code / tests; the evaluator's container is all there is;
+ *  - `single`: one machine on pinned hardware (a CLI, a build, one service);
+ *  - `full`: a stack (app + databases + seeded data + a separate load generator), written as OpenTofu under
+ *    `DEFAULT_ENVIRONMENT_INFRA_DIR` on top of the base module Ratchet ships.
+ */
+export const ENVIRONMENT_SCOPES = ['none', 'single', 'full'] as const;
+export type EnvironmentScope = (typeof ENVIRONMENT_SCOPES)[number];
+
+/** Where a drafted (setup-agent written, user approved) environment lives in the repo. Protected once `environment.scope` is set. */
+export const DEFAULT_ENVIRONMENT_INFRA_DIR = 'infra/ratchet';
+
 /** An egress host: `registry.npmjs.org` or `*.example.com`. No scheme, path or port; a bare `*` is not allowed. */
 const HOST_RE = /^(?:\*\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/;
 
@@ -180,8 +193,11 @@ const HOST_RE = /^(?:\*\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[
  *  - `machine`: bench instance type (default: the template's, else c7i.large).
  *  - `region`: AWS region (default us-east-1, chosen by the app).
  *  - `network`: extra egress hosts for agents / the dependency job.
+ *  - `scope`: how much infrastructure the task needs, decided by the setup agent and approved by the user (`ENVIRONMENT_SCOPES`).
+ *    `full` (and `single` with .tf files) means a drafted module under `infra/ratchet/` that the engine applies as the sandbox.
  */
 const environmentSchema = z.strictObject({
+  scope: z.enum(ENVIRONMENT_SCOPES, { error: `environment.scope must be one of ${ENVIRONMENT_SCOPES.join(', ')}` }).optional(),
   image: repoPath('environment.image').optional(),
   machine: z
     .string({ error: 'environment.machine must be an instance type such as c7i.2xlarge' })

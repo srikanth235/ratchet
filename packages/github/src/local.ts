@@ -31,10 +31,10 @@ export class LocalGitHost extends BaseGitHost {
     return this.remoteDir;
   }
 
-  protected async publish(branch: string, sha: string, opts: { force: boolean }): Promise<void> {
+  protected async publish(branch: string, sha: string, opts: { force: boolean; expected?: string }): Promise<void> {
     const ref = `refs/heads/${branch}`;
-    // old value of all zeros = "must not exist yet"
-    const args = opts.force ? ['update-ref', ref, sha] : ['update-ref', ref, sha, '0'.repeat(40)];
+    // old value of all zeros = "must not exist yet"; `expected` = "must still be at this commit"
+    const args = opts.force ? ['update-ref', ref, sha] : ['update-ref', ref, sha, opts.expected ?? '0'.repeat(40)];
     await this.git(args);
   }
 

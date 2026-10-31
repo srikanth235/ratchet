@@ -55,6 +55,11 @@ export function localAdapterFactory(opts: LocalAdapterOptions): (config: RunnerC
   };
 }
 
+/** The adapter of one agent kind (the user's own login), for callers that need an agent outside a runner loop, such as the environment setup agent. */
+export function localAdapterFor(opts: LocalAdapterOptions, kind: HarnessKind): AgentAdapter {
+  return localAdapterFactory(opts)({ kind } as RunnerConfig);
+}
+
 export interface LocalAgentControlOptions extends LocalAdapterOptions {
   /** `<rootDir>/<optimizationId>/{clone,<agentId>}`. */
   rootDir: string;
