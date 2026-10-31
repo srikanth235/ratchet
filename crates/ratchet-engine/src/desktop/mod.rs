@@ -5,6 +5,7 @@
 pub mod harnesses;
 pub mod live_config;
 pub mod power;
+pub mod product;
 pub mod secrets;
 
 pub use harnesses::{Detected, HarnessCache, HarnessProbe, RealHarnessProbe};
@@ -13,6 +14,11 @@ pub use live_config::{
     setting_for_secret_env,
 };
 pub use power::{NoPowerBlocker, PowerSaveBlocker, PowerSaveHook};
+pub use product::{
+    ImageLookupFailure, ImageQuery, ImageResolver, LiveAppConfig, LiveFactory, LiveHandle,
+    LiveSettingsSource, LiveSnapshot, ProductEngine, ProductOptions, RuntimeEngine, SimFactory,
+    SimHandle, demo_project,
+};
 #[cfg(target_os = "macos")]
 pub use secrets::KeychainSecretStore;
 pub use secrets::{

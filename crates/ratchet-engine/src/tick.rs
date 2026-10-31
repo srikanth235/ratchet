@@ -123,22 +123,27 @@ impl Engine {
             None => CancellationToken::new(),
         };
         let (done_tx, done_rx) = watch::channel(false);
-        {
+        let existing = {
             let mut g = lock(&self.run_loop);
-            if let Some(existing) = g.as_ref() {
-                let mut rx = existing.done.clone();
-                drop(g);
-                while !*rx.borrow() {
-                    if rx.changed().await.is_err() {
-                        break;
-                    }
+            match g.as_ref() {
+                Some(existing) => Some(existing.done.clone()),
+                None => {
+                    *g = Some(RunLoop {
+                        cancel: token.clone(),
+                        done: done_rx,
+                    });
+                    None
                 }
-                return;
             }
-            *g = Some(RunLoop {
-                cancel: token.clone(),
-                done: done_rx,
-            });
+        };
+        if let Some(mut rx) = existing {
+            // another run() is active: wait for it
+            while !*rx.borrow() {
+                if rx.changed().await.is_err() {
+                    break;
+                }
+            }
+            return;
         }
         while !token.is_cancelled() {
             if let Err(e) = self.tick().await {

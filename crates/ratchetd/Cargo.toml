@@ -8,7 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-default = ["server"]
+default = ["server", "engine"]
 # The daemon itself (axum, the service trait, the simulation). Without it the crate is only the API types, which is
 # all a client such as the `ratchet` CLI needs.
 server = [
@@ -25,6 +25,14 @@ server = [
     "dep:libc",
 ]
 
+# `RealService`: the AppService of the real engine (`ratchet-engine`) and `ratchetd serve --mode real`.
+engine = [
+    "server",
+    "dep:ratchet-engine",
+    "dep:ratchet-github",
+    "dep:ratchet-agents",
+]
+
 [lib]
 name = "ratchetd"
 
@@ -35,6 +43,9 @@ required-features = ["server"]
 
 [dependencies]
 ratchet-core = { path = "../ratchet-core", features = ["utoipa"] }
+ratchet-agents = { path = "../ratchet-agents", optional = true }
+ratchet-engine = { path = "../ratchet-engine", optional = true }
+ratchet-github = { path = "../ratchet-github", optional = true }
 ratchet-ledger = { path = "../ratchet-ledger", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
