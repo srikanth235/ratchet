@@ -46,7 +46,7 @@ async fn not_found() -> Response {
 
 /// Bind the unix socket: private parent directory, a stale socket file removed (but not a live daemon's), mode 0600.
 pub async fn bind(path: &Path) -> io::Result<UnixListener> {
-    use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     if let Some(dir) = path.parent() {
         create_private_dir(dir)?;
     }
@@ -62,13 +62,27 @@ pub async fn bind(path: &Path) -> io::Result<UnixListener> {
         }
         std::fs::remove_file(path)?;
     }
-    // No window in which the socket is more open than 0600, even in a directory we did not create.
-    // SAFETY: umask only changes this process's file creation mask.
-    let old = unsafe { libc::umask(0o177) };
-    let bound = UnixListener::bind(path);
-    unsafe { libc::umask(old) };
-    let listener = bound?;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    // No window in which the socket is more open than 0600, even in a directory we did not create: bind inside a
+    // private staging directory (mkdir 0700 only ever narrows under any umask) and rename into place. Changing the
+    // process-wide umask for the bind would race with every other thread that creates a file meanwhile.
+    static STAGE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let parent = path.parent().unwrap_or_else(|| Path::new(""));
+    let stage = parent.join(format!(
+        ".bind-{}-{}",
+        std::process::id(),
+        STAGE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_dir_all(&stage);
+    std::fs::DirBuilder::new().mode(0o700).create(&stage)?;
+    let staged = stage.join("s");
+    let result = (|| -> io::Result<UnixListener> {
+        let listener = UnixListener::bind(&staged)?;
+        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o600))?;
+        std::fs::rename(&staged, path)?;
+        Ok(listener)
+    })();
+    let _ = std::fs::remove_dir_all(&stage);
+    let listener = result?;
     Ok(listener)
 }
 

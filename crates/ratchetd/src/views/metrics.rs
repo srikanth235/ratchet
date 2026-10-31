@@ -17,7 +17,7 @@ pub const SPAN_PREFIX: &str = "span.";
 
 /// `BenchStats` as the flat record the view models carry (`value` plus the extras).
 pub fn stats_map(s: &BenchStats) -> BTreeMap<String, f64> {
-    let mut m = s.extra.clone();
+    let mut m: BTreeMap<String, f64> = s.extra.iter().map(|(k, v)| (k.clone(), *v)).collect();
     m.insert("value".into(), s.value);
     m
 }

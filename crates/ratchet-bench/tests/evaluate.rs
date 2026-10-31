@@ -221,7 +221,7 @@ fn bench_stats_has_the_headline_value_summary_and_per_metric_medians() {
     ] {
         assert_eq!(s.get(k), Some(v), "{k}");
     }
-    let flat: BTreeMap<String, f64> = s.extra.clone();
+    let flat: BTreeMap<String, f64> = s.extra.iter().map(|(k, v)| (k.clone(), *v)).collect();
     let m = metrics_from_stats(&flat);
     assert_eq!(
         m,
