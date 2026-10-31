@@ -372,42 +372,48 @@ impl EnvironmentDrafter for MockEnvironmentDrafter {
             .unwrap_or_default();
         self.delay().await;
         let m = message.to_lowercase();
-        let mut scope = current.scope;
-        let reason: String;
-        if SMALLER.is_match(&m) {
-            scope = if current.scope == EnvironmentScope::Full {
+        let (scope, reason) = if SMALLER.is_match(&m) {
+            let scope = if current.scope == EnvironmentScope::Full {
                 EnvironmentScope::Single
             } else {
                 EnvironmentScope::None
             };
-            reason = if scope == current.scope {
+            let reason = if scope == current.scope {
                 format!("Already as small as it gets ({scope}).")
             } else {
                 format!("Smaller setup: scope {scope}. {}", sample_reason(scope))
             };
+            (scope, reason)
         } else if BIGGER.is_match(&m) && !m.contains("rds") {
-            scope = if current.scope == EnvironmentScope::None {
+            let scope = if current.scope == EnvironmentScope::None {
                 EnvironmentScope::Single
             } else {
                 EnvironmentScope::Full
             };
-            reason = if scope == current.scope {
+            let reason = if scope == current.scope {
                 format!("Already the full stack ({scope}).")
             } else {
                 format!("Larger setup: scope {scope}. {}", sample_reason(scope))
             };
+            (scope, reason)
         } else if RDS_WORD.is_match(&m) {
-            reason = format!(
-                "{} I kept Postgres in a container: a managed database (RDS) needs subnets in two zones, and the isolated sandbox has one private subnet with no route out.",
-                sample_reason(scope)
-            );
+            (
+                current.scope,
+                format!(
+                    "{} I kept Postgres in a container: a managed database (RDS) needs subnets in two zones, and the isolated sandbox has one private subnet with no route out.",
+                    sample_reason(current.scope)
+                ),
+            )
         } else {
-            reason = format!(
-                "{} Noted: \"{}\". I kept the setup as it is because it already covers that.",
-                current.reason,
-                message.trim()
-            );
-        }
+            (
+                current.scope,
+                format!(
+                    "{} Noted: \"{}\". I kept the setup as it is because it already covers that.",
+                    current.reason,
+                    message.trim()
+                ),
+            )
+        };
         let draft = self.make(
             draft_id,
             scope,
