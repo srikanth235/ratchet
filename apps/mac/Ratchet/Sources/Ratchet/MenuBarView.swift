@@ -27,7 +27,7 @@ struct MenuBarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.md) {
             HStack(spacing: Space.sm) {
-                RatchetMarkView(height: 14)
+                RatchetMarkView(height: 16)
                 Text("Ratchet").kitType(.brand).foregroundStyle(Ink.text)
                 Spacer()
                 if store.needsYouCount > 0 {
