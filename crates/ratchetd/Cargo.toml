@@ -39,7 +39,7 @@ name = "ratchetd"
 [[bin]]
 name = "ratchetd"
 path = "src/main.rs"
-required-features = ["server"]
+required-features = ["server", "engine"]
 
 [dependencies]
 ratchet-core = { path = "../ratchet-core", features = ["utoipa"] }

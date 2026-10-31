@@ -222,8 +222,9 @@ impl SecretStore for KeychainSecretStore {
     }
 }
 
-/// The store the daemon uses by default: the Keychain on macOS, otherwise `fallback_file` (mode 0600).
-pub fn default_secret_store(fallback_file: PathBuf) -> std::sync::Arc<dyn SecretStore> {
+/// The store the daemon uses by default: the Keychain on macOS. Elsewhere there is no secure store, so secrets are refused
+/// unless `fallback_file` (mode 0600, plaintext) is given explicitly.
+pub fn default_secret_store(fallback_file: Option<PathBuf>) -> std::sync::Arc<dyn SecretStore> {
     #[cfg(target_os = "macos")]
     {
         let _ = fallback_file;
@@ -231,7 +232,10 @@ pub fn default_secret_store(fallback_file: PathBuf) -> std::sync::Arc<dyn Secret
     }
     #[cfg(not(target_os = "macos"))]
     {
-        std::sync::Arc::new(FileSecretStore::new(fallback_file))
+        match fallback_file {
+            Some(f) => std::sync::Arc::new(FileSecretStore::new(f)),
+            None => std::sync::Arc::new(MemorySecretStore::unavailable()),
+        }
     }
 }
 

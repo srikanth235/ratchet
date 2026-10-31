@@ -12,9 +12,17 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use ratchet_engine::desktop::{
+    DefaultPathsInput, NoPowerBlocker, PowerSaveHook, default_live_paths, default_secret_store,
+};
+use ratchet_engine::runtime::{ConnectionTesterDeps, create_connection_tester};
+use ratchet_github::{GithubApiOptions, HttpGithubApi};
+use ratchetd::api::ApiEvent;
 use ratchetd::launchagent::{self, LaunchAgentSpec, Launchctl, NoLaunchctl, SystemLaunchctl};
+use ratchetd::real::{RealService, RealServiceOptions, SettingsStore};
 use ratchetd::server::{Daemon, DaemonConfig, shutdown_signal};
+use ratchetd::service::AppService;
 use ratchetd::sim::{SimOptions, SimService};
 use ratchetd::{openapi, paths};
 
@@ -40,8 +48,32 @@ enum Command {
     },
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+enum Mode {
+    /// The scripted simulation with seeded demo data (design work, tests).
+    Sim,
+    /// The real engine. Demos still run simulated, one runtime per demo project.
+    #[default]
+    Real,
+}
+
 #[derive(Args, Clone, Default)]
 struct ServeArgs {
+    /// `real` (default) or `sim`.
+    #[arg(long, value_enum, default_value_t = Mode::Real, env = "RATCHET_MODE")]
+    mode: Mode,
+    /// The settings file of the real engine (default: `<support dir>/settings.json`).
+    #[arg(long, env = "RATCHET_SETTINGS")]
+    settings: Option<PathBuf>,
+    /// Plaintext secrets file for machines without a keychain (mode 0600). Without it, secrets are refused there.
+    #[arg(long, env = "RATCHET_SECRETS_FILE")]
+    secrets_file: Option<PathBuf>,
+    /// The monorepo root the demos run from (`examples/`, `node_modules`).
+    #[arg(long, env = "RATCHET_REPO_ROOT")]
+    repo_root: Option<PathBuf>,
+    /// Bundled resources (`infra/aws`, `bin/tofu`) of a packaged app.
+    #[arg(long, env = "RATCHET_RESOURCES_PATH")]
+    resources_path: Option<PathBuf>,
     /// The unix socket (default: `<support dir>/ratchetd.sock`).
     #[arg(long, env = "RATCHET_SOCKET")]
     socket: Option<PathBuf>,
@@ -124,32 +156,101 @@ async fn main() -> Result<()> {
 }
 
 async fn serve(args: ServeArgs) -> Result<()> {
-    let socket = args.socket.unwrap_or_else(paths::socket_path);
+    let socket = args.socket.clone().unwrap_or_else(paths::socket_path);
     let ledger_path = match args.ledger.as_deref() {
         Some(":memory:") => None,
         Some(p) => Some(PathBuf::from(p)),
         None => Some(paths::ledger_path()),
     };
-    // TODO(engine): `ratchet-engine` replaces the simulation here once it implements `AppService`.
-    let service = SimService::new(SimOptions {
-        ledger_path,
-        seed_demo: !args.no_seed,
-        tick_ms: args.tick_ms,
-        ..SimOptions::default()
-    })
-    .await
-    .context("cannot start the simulation service")?;
-    let daemon = Daemon::start(Arc::new(service.clone()), DaemonConfig::new(&socket))
+    let (service, stop): (Arc<dyn AppService>, Stop) = match args.mode {
+        Mode::Sim => {
+            let service = SimService::new(SimOptions {
+                ledger_path,
+                seed_demo: !args.no_seed,
+                tick_ms: args.tick_ms,
+                ..SimOptions::default()
+            })
+            .await
+            .context("cannot start the simulation service")?;
+            let s = service.clone();
+            (
+                Arc::new(service),
+                Box::new(move || Box::pin(async move { s.shutdown() })),
+            )
+        }
+        Mode::Real => {
+            let service = real_service(&args, ledger_path).await?;
+            let s = service.clone();
+            (
+                Arc::new(service),
+                Box::new(move || Box::pin(async move { s.shutdown().await })),
+            )
+        }
+    };
+    let daemon = Daemon::start(service, DaemonConfig::new(&socket))
         .await
         .with_context(|| format!("cannot listen on {}", socket.display()))?;
     shutdown_signal().await;
     tracing::info!("shutting down");
-    service.shutdown();
+    stop().await;
     daemon
         .stop()
         .await
         .context("the server failed while stopping")?;
     Ok(())
+}
+
+type Stop =
+    Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send>;
+
+/// The real engine with the app's desktop logic: Keychain secrets, GitHub, the machine's AWS profiles and agent CLIs.
+async fn real_service(args: &ServeArgs, ledger_path: Option<PathBuf>) -> Result<RealService> {
+    let support = paths::support_dir();
+    let settings = Arc::new(SettingsStore::new(
+        Some(
+            args.settings
+                .clone()
+                .unwrap_or_else(|| support.join("settings.json")),
+        ),
+        default_secret_store(args.secrets_file.clone()),
+        std::env::vars().collect(),
+    ));
+    let repo_root = args
+        .repo_root
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let live_defaults = default_live_paths(&DefaultPathsInput {
+        is_packaged: args.resources_path.is_some(),
+        resources_path: args.resources_path.clone().unwrap_or_default(),
+        repo_root: repo_root.clone(),
+        exists: None,
+    });
+    let mut opts = RealServiceOptions::new(settings, support.join("sandboxes"));
+    opts.ledger_path = ledger_path;
+    opts.live_defaults = live_defaults;
+    opts.repo_root = repo_root;
+    opts.work_root = support.join("sim").join(std::process::id().to_string());
+    opts.app_version = Some(ratchetd::VERSION.to_owned());
+    opts.github = Some(Arc::new(HttpGithubApi::new(GithubApiOptions::from_env())));
+    opts.connection_probe = Some(Arc::new(create_connection_tester(
+        ConnectionTesterDeps::default(),
+    )));
+    let service = RealService::new(opts)
+        .await
+        .context("cannot start the real engine")?;
+    // Keep the machine awake while a run is active. The blocker is the host's to provide (the Mac app supplies an IOKit
+    // assertion); the daemon alone has none, so this is a hook point.
+    let hook = PowerSaveHook::new(NoPowerBlocker);
+    let mut events = service.subscribe();
+    tokio::spawn(async move {
+        while let Ok(e) = events.recv().await {
+            if let ApiEvent::RunActive { active, .. } = e {
+                hook.on_run_active(active);
+            }
+        }
+        hook.release();
+    });
+    Ok(service)
 }
 
 fn generate(a: &OpenapiArgs) -> Result<()> {

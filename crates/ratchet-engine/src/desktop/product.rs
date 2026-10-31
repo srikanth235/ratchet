@@ -31,8 +31,7 @@ use ratchet_github::{GitHubGitHost, GitHubGitHostOptions, friendly_missing, slug
 use ratchet_ledger::Ledger;
 use ratchet_sandbox::images::{ImageOverride, RatchetImageKind};
 use ratchet_sandbox::{
-    Ec2ImageLookup, ResolveImageArgs, ResolvedImages, region_for_optimization,
-    resolve_image_refs,
+    Ec2ImageLookup, ResolveImageArgs, ResolvedImages, region_for_optimization, resolve_image_refs,
 };
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
