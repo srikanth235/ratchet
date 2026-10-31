@@ -63,6 +63,8 @@ public enum RatchetEvent: Sendable, Equatable {
     case connectorsChanged([Connector])
     case sandboxChanged(SandboxStatus)
     case receiptIssued(TeardownReceipt)
+    /// The daemon could not replay what was missed (it restarted, or the gap is too old): reload everything shown.
+    case resync
 }
 
 public enum RatchetClientError: Error, Sendable, Equatable, LocalizedError {

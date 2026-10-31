@@ -180,7 +180,15 @@ public final class AppStore {
             sandbox = status
         case .receiptIssued(let issued):
             receipt = issued
+        case .resync:
+            Task { await resync() }
         }
+    }
+
+    /// The event stream lost its place: reload the lists and every open detail.
+    private func resync() async {
+        await refresh()
+        for id in Array(details.keys) { await loadDetail(id: id) }
     }
 
     private func applyUpdate(_ new: Optimization) {

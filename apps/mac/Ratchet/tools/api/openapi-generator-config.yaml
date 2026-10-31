@@ -1,0 +1,40 @@
+# swift-openapi-generator configuration for Sources/RatchetAPI (see tools/generate-api.sh).
+generate:
+  - types
+  - client
+accessModifier: public
+namingStrategy: idiomatic
+# Only what the Mac app calls: the generated code stays reviewable, and the app does not compile routes it never uses
+# (settings, secrets, reports, template proposals, ...). Add an operationId here to start using one.
+filter:
+  operations:
+    - getStatus
+    - getOverview
+    - listOptimizations
+    - getOptimization
+    - listCandidates
+    - getRatchetHistory
+    - getWinningChange
+    - createOptimization
+    - startOptimization
+    - stopOptimization
+    - messageAgent
+    - pauseAgent
+    - resumeAgent
+    - listTemplates
+    - listRepos
+    - inspectRepo
+    - listConnectors
+    - createConnector
+    - updateConnector
+    - deleteConnector
+    - testConnector
+    - getConnectorSelection
+    - saveConnectorSelection
+    - createEnvironmentDraft
+    - getEnvironmentDraft
+    - reviseEnvironmentDraft
+    - approveEnvironmentDraft
+    - listEnvironments
+    - endEnvironment
+    - streamEvents
