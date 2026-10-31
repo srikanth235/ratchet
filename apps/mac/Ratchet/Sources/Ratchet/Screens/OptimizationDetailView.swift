@@ -85,7 +85,6 @@ struct OptimizationDetailView: View {
         guard let report = await store.report(id) else { return }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = report.fileName
-        panel.allowedContentTypes = [.plainText]
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
