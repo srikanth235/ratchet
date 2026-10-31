@@ -35,7 +35,7 @@ import { assertSafeRef, BENCH_USER, HOLDOUT_USER, sq, SENTINEL } from './shell.j
  *   seccomp                            n/a                                  Docker's default profile (checked in `docker info`)
  */
 
-/** Setuid-root launcher the harness uses INSIDE the container to start candidate processes (infra/images/scripts/ratchet-candidate-ctr.c). */
+/** Setuid-root launcher the harness uses INSIDE the container to start candidate processes (the Rust `ratchet-candidate-launcher` of crates/ratchet-bench, installed by infra/images/scripts/35-candidate-launcher.sh). */
 export const CANDIDATE_HELPER = '/usr/local/libexec/ratchet/ratchet-candidate-ctr';
 /** Where the container sees it, and the root-owned file that says who may call it and who it becomes. */
 export const HELPER_IN_CONTAINER = '/ratchet/candidate';

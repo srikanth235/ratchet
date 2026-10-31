@@ -5,7 +5,7 @@ Packer definitions for the two machine images that live mode launches. Nothing e
 | Image | Launched by | Passed to live mode as | Contains |
 |---|---|---|---|
 | **runner** | `AwsCloudCompute.launchRunner` | `runnerImageRef` | Node 22, pnpm, git, AWS CLI v2, SSM agent, `claude` and `codex` (pinned), perf/strace/sysstat, hyperfine, k6, gcc/make/python3, the `ratchet-runner` bin from this repository |
-| **bench** | `AwsCloudCompute.launchBenchInstance` | `benchImageRef` (override only; normally found by tag) | **Generic**: the Docker engine, git, AWS CLI v2, SSM agent, iptables, zstd, the unprivileged `ratchet-bench` and `ratchet-holdout` users and the setuid `ratchet-candidate-ctr` launcher (the dependency-snapshot / container-image job boots this image too, as `purpose: 'deps'`; its `ratchet-deps` user is created by that instance's user data). The toolchain is the repo's container (`environment.image`), built once and loaded offline. **No language toolchain, no compiler, no agent CLIs, no model keys, no runner bin** |
+| **bench** | `AwsCloudCompute.launchBenchInstance` | `benchImageRef` (override only; normally found by tag) | **Generic**: the Docker engine, git, AWS CLI v2, SSM agent, iptables, zstd, the unprivileged `ratchet-bench` and `ratchet-holdout` users and the setuid `ratchet-candidate-ctr` launcher (the Rust binary `ratchet-candidate-launcher`, prebuilt by CI; the dependency-snapshot / container-image job boots this image too, as `purpose: 'deps'`; its `ratchet-deps` user is created by that instance's user data). The toolchain is the repo's container (`environment.image`), built once and loaded offline. **No language toolchain, no compiler, no agent CLIs, no model keys, no runner bin** |
 
 Both are Amazon Linux 2023 (`x86_64` by default, `arm64` with `-var arch=arm64`; build the architecture of the instance types you launch).
 
@@ -14,7 +14,8 @@ infra/images/
   common.pkr.hcl      plugin pin, variables, shared locals (tags, builder type)
   runner.pkr.hcl      source + build for the runner image (script list = `runner_scripts`)
   bench.pkr.hcl       source + build for the bench image (script list = `bench_scripts`)
-  build.sh            packs the runner tarballs (runner only), runs packer, prints the AMI ids
+  build.sh            packs the runner tarballs (runner only), checks the launcher binary (bench only), runs packer, prints the AMI ids
+  launcher/           (git-ignored) the CI artifact ratchet-candidate-launcher-<arch> + .sha256, where build.sh looks for it
   pack-runner.sh      builds + `pnpm pack`s @ratchet/core and @ratchet/agents into dist/ with SHA256SUMS
   scripts/
     versions.sh         pinned versions + checksums (node, pnpm, aws cli, k6, hyperfine)
@@ -25,9 +26,8 @@ infra/images/
     20-aws-cli.sh       AWS CLI v2 zip (sha256)                                               (both)
     25-docker.sh        Docker engine (dnf), daemon.json, enabled; nobody in group docker     (bench)
     30-bench-tools.sh   k6 + hyperfine (sha256)                                               (runner; bench only with host_toolchain)
-    35-candidate-launcher.sh  compiles ratchet-candidate-ctr.c statically, installs it setuid root
-                        in a 0700 directory, removes the compiler                             (bench)
-    ratchet-candidate-ctr.c  the launcher the evaluator harness uses inside the repo container (bench)
+    35-candidate-launcher.sh  checks the prebuilt static launcher (sha256, native static ELF) and installs it
+                        setuid root (4755) in a 0700 directory; nothing is compiled                (bench)
     40-runner-tools.sh  perf, strace, sysstat, gcc, make, python3                             (runner)
     50-agent-clis.sh    claude + codex, pinned + sha512 checked                               (runner)
     60-ratchet-runner.sh  installs the packed tarballs, adds the `ratchet-runner` launcher    (runner)
@@ -38,13 +38,36 @@ infra/images/
 
 ## Build images
 
-Prerequisites: Packer >= 1.10 (validated with 1.16.2), AWS credentials for the **sandbox account** (AMIs are
+Prerequisites: Packer >= 1.10 (CI validates with 1.14.2), AWS credentials for the **sandbox account** (AMIs are
 regional and, encrypted by default, only launchable from the account that built them), and for the runner
 image `pnpm` + Node 22 on the machine running the build.
 
+The **bench image needs the prebuilt launcher** of its architecture. CI (`.github/workflows/images.yml`, job `launcher`) builds
+`crates/ratchet-bench` bin `ratchet-candidate-launcher` as a static executable (`RUSTFLAGS='-C target-feature=+crt-static'`, glibc
+static-pie, `x86_64-unknown-linux-gnu` on `ubuntu-24.04`, `aarch64-unknown-linux-gnu` on the native `ubuntu-24.04-arm` runner),
+installs it once into a scratch prefix with the image script as a check, and uploads the artifacts `ratchet-candidate-launcher-x86_64`
+and `ratchet-candidate-launcher-arm64`, each with the binary and its `.sha256` (`sha256sum` format; also in the job summary). `<arch>`
+is the Packer `arch` value, so the file names line up with `-var arch=...`:
+
 ```sh
+mkdir -p infra/images/launcher
+gh run download <run-id> -n ratchet-candidate-launcher-x86_64 -D infra/images/launcher     # and/or ...-arm64
 export AWS_PROFILE=ratchet-sandbox AWS_REGION=us-east-1
-infra/images/build.sh both            # or: runner | bench
+infra/images/build.sh both            # or: runner | bench   (bench for arm64: ... bench -var arch=arm64)
+```
+
+`build.sh` checks the binary against the `.sha256` before it launches a builder and passes `-var launcher_binary=... -var
+launcher_sha256=...`; `RATCHET_LAUNCHER_BINARY=/path/to/binary` (and `RATCHET_LAUNCHER_SHA256=<hex>` without a `.sha256` file next
+to it) override the location. Packer uploads the binary next to the scripts and `35-candidate-launcher.sh` checks the **uploaded
+copy** against the digest on the builder, then requires a native 64-bit ELF executable without a program interpreter (static),
+that names `/ratchet/launcher.conf`, and installs it as `/usr/local/libexec/ratchet/ratchet-candidate-ctr` (`root:root`, 4755) in a
+`root:root` 0700 directory - the path, owner and mode the C launcher had. `90-verify-bench.sh` repeats the stat and static checks
+and runs the launcher once (no `launcher.conf` on the host: exit 77). Use a binary built from the commit you are imaging
+(`source_commit`); the digest is the only link between them. The runner image needs no launcher.
+
+```sh
+# the same by hand
+
 # ...
 # runnerImageRef: ami-0123456789abcdef0
 # benchImageRef: ami-0fedcba9876543210
@@ -56,16 +79,18 @@ Equivalent by hand:
 infra/images/pack-runner.sh                                   # runner only: writes infra/images/dist/
 packer init infra/images
 packer build -only='runner.*' -var image_version=20261030-1a2b3c4 -var source_commit=1a2b3c4 infra/images
-packer build -only='bench.*'  -var image_version=20261030-1a2b3c4 infra/images
+packer build -only='bench.*'  -var image_version=20261030-1a2b3c4 \
+  -var launcher_binary=infra/images/launcher/ratchet-candidate-launcher-x86_64 \
+  -var launcher_sha256=$(cut -d' ' -f1 infra/images/launcher/ratchet-candidate-launcher-x86_64.sha256) infra/images
 ```
 
 Useful variables (all in `common.pkr.hcl`): `region`, `arch`, `instance_type`, `source_ami`, `dnf_args`,
-`vpc_id`/`subnet_id`, `encrypt_boot`/`kms_key_id`, `ami_users`, `runner_volume_gb`, `bench_volume_gb`, `extra_tags`,
+`launcher_binary`/`launcher_sha256` (bench), `vpc_id`/`subnet_id`, `encrypt_boot`/`kms_key_id`, `ami_users`, `runner_volume_gb`, `bench_volume_gb`, `extra_tags`,
 and `host_toolchain` (bench only, default `false`: also install node, pnpm, k6 and hyperfine for repos without `environment.image`;
 the result is named `ratchet-bench-host-...` and tagged `ratchet:image=bench-host`, so the tag lookup never selects it; pass its id as
 `benchImageRef`).
 
-- The **builder needs outbound internet** (dnf, npm, nodejs.org, GitHub releases, awscli.amazonaws.com). Build in
+- The **builder needs outbound internet** (dnf, npm, nodejs.org, GitHub releases, awscli.amazonaws.com); the launcher is uploaded from the controller, not downloaded. Build in
   the default VPC or a public subnet; the sandbox's bench subnet has no route out and the agent subnet may be behind
   the egress proxy, so neither works. Nothing is downloaded at run time: a runner behind the proxy needs only the
   model APIs and GitHub, not the package hosts.
@@ -113,7 +138,7 @@ data needs; it does not repeat what the user data does.
 |---|---|---|
 | Bench users `ratchet-bench`, `ratchet-holdout` | create them with the same flags (`useradd --system --no-create-home --shell /usr/sbin/nologin`); user data's `id -u \|\| useradd` is then a no-op | creates them only if missing |
 | Docker engine | installs and enables it (`25-docker.sh`), writes `daemon.json` (no tcp socket, no seccomp or `no-new-privileges` override), puts nobody in group `docker`, ships no layers | bench: `systemctl start docker` when present. Image/deps job: also rejects metadata for forwarded container traffic (`DOCKER-USER`, `FORWARD`) and gives the daemon the egress-proxy settings |
-| Container launcher | `35-candidate-launcher.sh` installs `/usr/local/libexec/ratchet/ratchet-candidate-ctr` (4755 root, 0700 directory, static, no compiler left) | nothing: the bench step script bind-mounts it read-only into the harness container together with a root-owned `launcher.conf` |
+| Container launcher | `35-candidate-launcher.sh` installs the prebuilt, sha256-checked Rust launcher as `/usr/local/libexec/ratchet/ratchet-candidate-ctr` (4755 root, 0700 directory, static, no compiler ever installed) | nothing: the bench step script bind-mounts it read-only into the harness container together with a root-owned `launcher.conf` |
 | IMDS block for that user | installs `iptables-nft` (iptables and ip6tables; the user data aborts under `set -e` without them) and, at build time only, proves the kernel accepts the same owner rule, then deletes it. **No rule is baked in, no `iptables-services`** | inserts `iptables -I OUTPUT 1 -m owner --uid-owner ratchet-bench -d 169.254.169.254 -j REJECT` and the IPv6 twin on every boot; the bench runner refuses a job without it |
 | Metadata options | AMI default `imds_support = v2.0` | `RunInstances`: IMDSv2 required, hop limit 1 |
 | `/etc/ratchet/runner.env` (secret refs, ids, proxy) | nothing; the build fails if it exists | writes it |
@@ -129,7 +154,7 @@ One detail worth knowing:
 
 ## Reproducibility
 
-- Tools: exact versions and SHA-256 / SHA-512 values in `scripts/versions*.sh`; a mismatch fails the build. For the
+- Tools: exact versions and SHA-256 / SHA-512 values in `scripts/versions*.sh`; a mismatch fails the build. The candidate launcher is pinned per build by `-var launcher_sha256` (the CI artifact's digest). For the
   npm CLIs only the top-level tarball is pinned; their platform binaries come from `optionalDependencies` at the same
   exact version and are verified by npm against the registry metadata.
 - AWS CLI and k6 / hyperfine / Node checksums are the ones published with the releases where available (Node:
@@ -157,9 +182,9 @@ pins together with a run of the adapter tests (`docs/real-env/agents.md`): the a
 ## Validating without AWS
 
 ```sh
-pnpm --filter @ratchet/infra-tests test                       # invariants of scripts and templates (images.test.ts)
+pnpm --filter @ratchet/infra-tests test                       # invariants of scripts and templates (images.test.ts, launcher-install.test.ts)
 shellcheck -x -P SCRIPTDIR -s bash infra/images/scripts/*.sh infra/images/*.sh
-packer init infra/images && packer validate -var image_version=test infra/images   # needs no AWS calls
+packer init infra/images && packer validate -var image_version=test infra/images   # needs no AWS calls (CI job `packer validate` runs it, plus `packer fmt -check`)
 packer validate -syntax-only infra/images                     # no plugin download
 ```
 
@@ -200,10 +225,11 @@ AWS-managed service. Not built or tested here:
            action: ExecuteBash
            inputs:
              commands:
+               - export RATCHET_LAUNCHER_BINARY=/tmp/ratchet-image/ratchet-candidate-launcher RATCHET_LAUNCHER_SHA256=<hex from the CI .sha256>
                - for s in 00-base 20-aws-cli 25-docker 35-candidate-launcher 70-bench-user 90-verify-bench 99-cleanup; do bash /tmp/ratchet-image/scripts/$s.sh; done
    ```
 
-   (For the runner add `RATCHET_RUNNER_DIST=/tmp/ratchet-image/dist` and the steps from `runner_scripts`; note the
+   (Bench: also upload the CI artifact `ratchet-candidate-launcher-<arch>` to the bucket under the name `ratchet-candidate-launcher`, as the `S3Download` destination above shows. For the runner add `RATCHET_RUNNER_DIST=/tmp/ratchet-image/dist` and the steps from `runner_scripts`; note the
    scripts expect `lib.sh` and `versions*.sh` next to them, which `scripts/` already provides.)
 3. Create an image recipe on the Amazon Linux 2023 parent image (x86_64 or arm64) with that component, a root volume of
    30 GB (runner) or 16 GB (bench), and a distribution configuration whose `amiTags` are the table above
@@ -220,7 +246,7 @@ test phases are extra; the `90-verify-*` scripts already fail the build on a bad
   variables, including `NODE_USE_ENV_PROXY=1` for Node's fetch, now reach the agent CLIs.
 - The bench image has no toolchain and no baked `node_modules`/pnpm store: both come from the repo's container and the dependency
   snapshot (`docs/real-env/bench.md`).
-- The Docker, launcher and container-probe parts are tested with shims and a locally compiled launcher only; the AL2023 `docker`
+- The Docker, launcher and container-probe parts are tested with shims and the launcher's own tests (`crates/ratchet-bench/tests/launcher.rs`) only; the install script is run against synthetic ELF files (`infra/tests/src/launcher-install.test.ts`) and, in CI, against the real binary in a scratch prefix; the AL2023 `docker`
   package contents (`docker-init`, the socket mode) are asserted by `90-verify-bench.sh` at build time.
 - Nothing here has run on AWS: the Packer templates are validated, the install steps were run in a scratch prefix, and
   the `dnf`/`useradd`/`iptables`/`systemctl` parts are untested.

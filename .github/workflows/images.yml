@@ -1,0 +1,120 @@
+name: Images
+# Inputs of the machine-image builds (infra/images, docs: infra/images/README.md): the static setuid candidate launcher
+# (crates/ratchet-bench, bin ratchet-candidate-launcher) per architecture, and a Packer validation of the templates.
+# The bench image installs the artifact `ratchet-candidate-launcher-<arch>` (binary + .sha256); nothing is compiled on the
+# image builder.
+on:
+  push:
+    paths:
+      - "Cargo.toml"
+      - "crates/**"
+      - "infra/images/**"
+      - ".github/workflows/images.yml"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "crates/**"
+      - "infra/images/**"
+      - ".github/workflows/images.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: images-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  launcher:
+    # `arch` is the Packer `arch` variable of the image (x86_64 | arm64): it names the artifact and the file.
+    name: launcher (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          # A native arm64 runner (free for public repositories): the binary is also executed, not just linked.
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    env:
+      NAME: ratchet-candidate-launcher-${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: launcher-${{ matrix.arch }}
+      # glibc, fully static (a static-pie executable): it runs unchanged inside any image of the architecture. The
+      # launcher uses no name service lookups, so static glibc has nothing to warn about. Symbols are stripped, as the
+      # C launcher's `gcc -s` did.
+      - name: Build
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+          CARGO_PROFILE_RELEASE_STRIP: symbols
+        run: |
+          cargo build --release -p ratchet-bench --bin ratchet-candidate-launcher --target "${{ matrix.target }}"
+          mkdir -p out
+          cp "target/${{ matrix.target }}/release/ratchet-candidate-launcher" "out/$NAME"
+      # The same checks the image build makes (infra/images/scripts/35-candidate-launcher.sh, lib.sh), on the real binary,
+      # then a real install as root into a scratch prefix: owner root, mode 4755 in a 0700 directory.
+      - name: Check, install and run it
+        run: |
+          set -euxo pipefail
+          file "out/$NAME"
+          (cd out && sha256sum "$NAME" > "$NAME.sha256" && cat "$NAME.sha256")
+          sha=$(cut -d' ' -f1 "out/$NAME.sha256")
+          prefix=$(mktemp -d)
+          sudo RATCHET_PREFIX="$prefix" RATCHET_LAUNCHER_BINARY="$PWD/out/$NAME" RATCHET_LAUNCHER_SHA256="$sha" \
+            bash infra/images/scripts/35-candidate-launcher.sh
+          # the 0700 root directory hides the file from this user: stat as root
+          test "$(sudo stat -c '%U:%G %a' "$prefix/libexec/ratchet/ratchet-candidate-ctr")" = "root:root 4755"
+          test "$(sudo stat -c '%U:%G %a' "$prefix/libexec/ratchet")" = "root:root 700"
+          # a wrong digest must stop the install
+          if sudo RATCHET_PREFIX="$(mktemp -d)" RATCHET_LAUNCHER_BINARY="$PWD/out/$NAME" RATCHET_LAUNCHER_SHA256="$(printf '0%.0s' {1..64})" \
+            bash infra/images/scripts/35-candidate-launcher.sh; then echo "a wrong sha256 was accepted"; exit 1; fi
+          # on the host there is no /ratchet/launcher.conf: the installed setuid binary refuses with 77
+          rc=0
+          sudo "$prefix/libexec/ratchet/ratchet-candidate-ctr" true || rc=$?
+          test "$rc" = 77
+          {
+            echo "### $NAME"
+            echo '```'
+            cat "out/$NAME.sha256"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ratchet-candidate-launcher-${{ matrix.arch }}
+          path: |
+            out/ratchet-candidate-launcher-${{ matrix.arch }}
+            out/ratchet-candidate-launcher-${{ matrix.arch }}.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  packer:
+    name: packer validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-packer@v3
+        with:
+          version: "1.14.2"
+      - name: Format
+        run: packer fmt -check -diff infra/images
+      - name: Validate (no AWS calls)
+        run: |
+          # runner.pkr.hcl uploads infra/images/dist/ (pack-runner.sh output); validate only needs it to exist
+          mkdir -p infra/images/dist
+          packer init infra/images
+          packer validate -var image_version=ci infra/images
+          packer validate -var image_version=ci -var arch=arm64 -var launcher_sha256="$(printf 'a%.0s' {1..64})" infra/images

@@ -37,9 +37,15 @@ Live mode launches two machine images that nothing else creates; build them once
 pinned tool or `packages/agents` changes. The Packer definitions and scripts are in `infra/images` (procedure,
 reproducibility, and the EC2 Image Builder alternative: `infra/images/README.md`).
 
+The bench image installs the setuid candidate launcher from a **prebuilt CI artifact** (nothing is compiled on the builder):
+the `Images` workflow (`.github/workflows/images.yml`, job `launcher`) uploads `ratchet-candidate-launcher-x86_64` and
+`ratchet-candidate-launcher-arm64`, each with a `.sha256`. Download the one of the image's architecture into
+`infra/images/launcher/` (git-ignored) first; `build.sh` verifies the digest, Packer uploads the binary and the builder verifies it again.
+
 ```sh
+gh run download <run-id-of-the-commit-you-build> -n ratchet-candidate-launcher-x86_64 -D infra/images/launcher   # arm64: -n ...-arm64 and build.sh bench -var arch=arm64
 export AWS_PROFILE=ratchet-sandbox AWS_REGION=us-east-1     # the sandbox account; the builder needs outbound internet
-infra/images/build.sh both          # packs the runner tarballs, runs packer for runner and bench
+infra/images/build.sh both          # packs the runner tarballs, checks the launcher, runs packer for runner and bench
 # runnerImageRef: ami-0123456789abcdef0
 # benchImageRef: ami-0fedcba9876543210
 ```
@@ -48,7 +54,7 @@ infra/images/build.sh both          # packs the runner tarballs, runs packer for
   hyperfine, k6 and the `ratchet-runner` bin from this checkout.
 - **Bench** (`ratchet:image=bench`): **generic** since the repo's container replaced per-repo toolchains: the Docker engine,
   git, AWS CLI v2, SSM agent, zstd, iptables, the unprivileged `ratchet-bench` and `ratchet-holdout` users and the setuid
-  `ratchet-candidate-ctr` launcher. No language toolchain, no agent CLIs, no model keys, no compiler. The repo's toolchain is
+  `ratchet-candidate-ctr` launcher (the prebuilt Rust binary from CI). No language toolchain, no agent CLIs, no model keys, no compiler. The repo's toolchain is
   its container (`environment.image`, `bench.md` "The repo's container"). `-var host_toolchain=true` builds the legacy variant with
   node, pnpm, k6 and hyperfine (tagged `ratchet:image=bench-host`, never found by the lookup) for repos without `environment.image`.
   The IMDS block for the users is added by the instance user data (`benchUserData`), not baked into the image.
