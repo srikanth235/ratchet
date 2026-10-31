@@ -46,7 +46,7 @@ use crate::ports::{EnginePorts, GitSource};
 use crate::settings::EngineSettings;
 
 /// The shipped demo projects the simulator can optimize.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum SimulationProject {
     #[default]
     Search,
