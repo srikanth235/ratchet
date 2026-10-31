@@ -265,3 +265,69 @@ the machine. Two agents interleave non-deterministically in the TS as well, henc
 - `simulate()` is a library function (`runtime::simulate`); the command line is the CLI's / `ratchetd`'s job. `SimulationOptions`
   has `tsc` and `bin_dir` overrides (the TS hard-codes `<repo>/node_modules/...`).
 - `AwsPriceBook::connect_with` was added to `ratchet-sandbox` (clock + fallback), because the SDK clients are not public there.
+
+## Desktop main-process logic (`packages/desktop/src/main`)
+
+The Electron main process is split three ways: the engine-side logic (secrets, live configuration, harness detection, the
+keep-awake hook, and the router that sends commands to the runtime of an optimization, `engine.ts`) lives here in
+`ratchet-engine::desktop`; everything that needs the API view models (settings store, AWS profile reader, `service.ts`) is
+`ratchetd::real` (a dependency cycle otherwise: `ratchetd` depends on this crate behind its `engine` feature). Rust paths below are
+`crates/ratchet-engine/…` unless they start with `ratchetd:`.
+
+| TS file | TS case | Rust test |
+|---|---|---|
+| `product-engine.test.ts` | slugOf (5 cases) | `tests/engine/desktop_product.rs::slug_of_cases` |
+| | builds one hybrid runtime per repo from Settings, the cached harnesses and the GitHub token | `desktop_product::real_runs::builds_one_hybrid_runtime_per_repo_from_settings_the_cached_harnesses_and_the_github_token` |
+| | routes commands to the runtime of the optimization, by the repo in the ledger | `real_runs::routes_commands_to_the_runtime_of_the_optimization_by_the_repo_in_the_ledger` |
+| | refuses without a GitHub sign-in, and says what is missing when the runtime is not ready | `real_runs::refuses_without_a_github_sign_in_and_says_what_is_missing_when_the_runtime_is_not_ready` |
+| | a repo that is not on GitHub is rejected by name | `real_runs::a_repo_that_is_not_on_github_is_rejected_by_name` |
+| | skips the image lookup without AWS credentials, and keeps an explicit AMI override | `real_runs::skips_the_image_lookup_without_aws_credentials_and_keeps_an_explicit_ami_override` |
+| | a failed image lookup becomes a "what is missing" line, not a crash | `real_runs::a_failed_image_lookup_becomes_a_what_is_missing_line_not_a_crash` |
+| | a missing cloud runner image only blocks Cloud (unattended) runs | `real_runs::a_missing_cloud_runner_image_only_blocks_cloud_runs_not_this_machine_runs` |
+| | proposeTemplate goes to the runtime of that repo, with the owner/name | `real_runs::propose_template_goes_to_the_runtime_of_that_repo_with_the_owner_name` |
+| | a changed setting rebuilds an idle runtime on next use, but never one that is running | `real_runs::a_changed_setting_rebuilds_an_idle_runtime_on_next_use_but_never_one_that_is_running` |
+| | watches an environment that outlived the last session even with no repo open | `real_runs::watches_an_environment_that_outlived_the_last_session_even_with_no_repo_open` |
+| | starts a demo in a simulation runtime with an automatic environment, created once per project | `demos::starts_a_demo_in_a_simulation_runtime_with_an_automatic_environment_created_once_per_project` |
+| | routes a demo optimization to its simulation runtime and diffs with its git | `demos::routes_a_demo_optimization_to_its_simulation_runtime_and_diffs_with_its_git` |
+| | works without any sign-in or AWS: a demo needs nothing | `demos::works_without_any_sign_in_or_aws_a_demo_needs_nothing` |
+| | merges run-active from every runtime … forwards the rest | `events::merges_run_active_from_every_runtime_and_forwards_the_rest` |
+| `machine.test.ts` | AWS profiles: lists profile and SSO session names with their kind, never a key | `ratchetd: real::aws_profiles::tests::lists_profile_and_sso_session_names_with_their_kind_never_a_key` |
+| | AWS profiles: handles missing files and empty ones | `ratchetd: real::aws_profiles::tests::handles_missing_files_and_empty_ones` |
+| | AWS profiles: reads AWS_CONFIG_FILE / AWS_SHARED_CREDENTIALS_FILE, else ~/.aws | `ratchetd: real::aws_profiles::tests::reads_the_env_overrides_else_the_aws_directory` |
+| | HarnessCache: probes once, caches, and probes again on refresh | `src/desktop/harnesses.rs::tests::probes_once_caches_and_probes_again_on_refresh` |
+| | HarnessCache: a failing probe is an empty result, not a crash | `src/desktop/harnesses.rs::tests::a_failing_probe_is_an_empty_result` |
+| | powerSaveBlocker hook: starts on run-active and stops when the last run ends | `src/desktop/power.rs::tests::starts_on_run_active_and_stops_when_the_last_run_ends` |
+| | githubSlug (it.each) · inspectLocalFolder (2) | ported with `ratchet-github` (`slug.rs`, `local_repo.rs`; see its PARITY.md) |
+| `settings.test.ts` | stores secrets encrypted, round-trips them in main, and persists across instances | `ratchetd: real::settings::tests::secrets_go_to_the_secret_store_never_the_settings_file_and_persist` |
+| | refuses to store secrets when the keychain is unavailable | `ratchetd: real::settings::tests::refuses_to_store_secrets_when_the_keychain_is_unavailable` |
+| | treats environment-provided credentials as configured | `ratchetd: real::settings::tests::environment_credentials_count_as_configured` |
+| | survives a corrupt settings file | `ratchetd: real::settings::tests::survives_a_corrupt_settings_file` |
+| | getSettings exposes only configured yes/no, and no response contains the secret value | `ratchetd: tests/api/real_service.rs::secrets_never_leave::no_response_event_or_error_carries_a_stored_key_or_token` |
+| `service.test.ts` | GitHub row (5) | `ratchetd: tests/api/real_service.rs::github_row::*` (5) |
+| | repo picker and ratchet.yaml (5) | `…::repo_picker::*` (4; "without a folder dialog, picking returns nothing" has no Rust counterpart: the folder dialog is the app's) |
+| | templates and the template pull request (3) | `…::templates::*` (3) |
+| | creating an optimization (2) | `…::creating::*` (2, plus `invalid_requests_name_the_fields`) |
+| | preflight: what is missing (4) | `…::preflight::*` (4) |
+| | AWS and agents rows (4) | `…::aws_and_agents::*` (4) |
+| | environments (read-only) and the teardown receipt (5) | `…::environments::*` (5; "an engine that cannot say" becomes "an empty ledger yields an empty view / ending an unknown environment is a 404": the Rust engine always supports the sandbox methods) |
+| | secrets never reach the renderer (2) | `…::secrets_never_leave::*` (2; the IPC channel list becomes "the OpenAPI document has no route that reveals a secret or applies infrastructure") |
+| (new) | provisional groups answer 501 | `…::provisional_groups::overview_connectors_and_environment_drafts_are_not_supported_yet` |
+
+Not ported on purpose: `ipc.test.ts` (no IPC: the contract tests of `ratchetd` cover every route), `github.test.ts` (the REST client and
+the device flow are `ratchet-github`), `dev-engine.test.ts` / `dev-git.test.ts` (the dev engine is `ratchetd`'s simulation, tested there),
+`mappers.test.ts` (the mappers are `ratchetd::views`, tested there).
+
+### Differences on purpose
+
+- **Secrets**: Electron's `safeStorage` (ciphertext in `settings.json`) became a `SecretStore` (`desktop::secrets`): the macOS Keychain
+  (`KeychainSecretStore`, `security-framework`, built on macOS only — it is not compiled on the Linux CI, so it is unverified there), a
+  `FileSecretStore` (0600, for tests and for machines that opt in with `--secrets-file`) and a `MemorySecretStore`. The settings file never
+  holds a secret; without a keychain `set_secret` is refused, as before.
+- **`PowerSaveHook`** takes a `PowerSaveBlocker` the host supplies (the Mac app's IOKit assertion); `ratchetd serve` wires the hook to
+  `run-active` with a no-op blocker, so the application has a hook point and nothing else changes.
+- **`ProductEngine`** reaches runtimes through `RuntimeEngine` (an `EngineApi` that can also `run`) and the `LiveFactory` / `SimFactory` /
+  `ImageResolver` seams instead of TS's `createRuntime` / `createSimulation` / `resolveImages` options; the recording fakes are in
+  `desktop::testing` (feature `testing`).
+- A missing cloud runner image is `LiveHandle::runner_problem` instead of a `WeakMap` keyed by the runtime object.
+- `RealService` creates the demo environment through the same router (`create_demo`), so `POST /v1/optimizations` with `demo` runs the
+  scripted agents on the simulation runtime exactly like `ratchetd serve --mode sim` does per optimization.

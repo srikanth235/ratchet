@@ -32,8 +32,11 @@ How identity is checked, beyond the ported cases:
   (alphabetical, percentiles sorted by number) where the TypeScript followed JSON insertion order.
 - **Provisional groups** (connectors, overview, environment drafts) have no TypeScript to port yet. Their shapes come
   from `design/v02.html` / `design/v02/*.png` and `docs/SIMPLIFIED_MODEL.md`; the tags say `(provisional)`.
-- **Secrets** are not stored by the simulation (only whether one is set). The real engine keeps them in the Keychain
-  behind `auth::TokenStore`-style traits; the per-boot token has a file implementation and a `TODO(keychain)`.
+- **Secrets** are not stored by the simulation (only whether one is set). `RealService` (`ratchetd serve --mode real`, the default)
+  keeps them in a `ratchet_engine::desktop::SecretStore`: the macOS Keychain, or with `--secrets-file` a 0600 file; without either
+  `PUT /v1/settings/secrets/{name}` answers 409. The per-boot API token keeps its file implementation.
+- **`RealService`** implements everything but the provisional groups (overview, connectors, environment drafts → 501 `unsupported`);
+  its tests are `tests/api/real_service.rs` (ports of `service.test.ts`), see `crates/ratchet-engine/PARITY.md`.
 
 ## Test mapping
 
