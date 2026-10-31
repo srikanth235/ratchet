@@ -11,59 +11,291 @@ import { installApi } from './test-utils';
 
 const nav = (label: string) => fireEvent.click(within(screen.getByRole('navigation', { name: 'Primary' })).getByRole('button', { name: new RegExp(`^${label}( \\d+| \\d+ live)?$`) }));
 
-describe('Optimizations (real ledger data)', () => {
-  it('shows KPIs, the live optimization, activity and the table', async () => {
-    installApi();
-    render(<App />);
-    expect(await screen.findByRole('heading', { name: 'search-api p95 latency', level: 2 })).toBeTruthy();
-    const kpis = within(screen.getByRole('region', { name: 'Key metrics' }));
-    expect(kpis.getByText('Verified wins')).toBeTruthy();
-    // default range 30d: 7 wins, +6 vs the 30 days before (one win, the edge worker run)
-    const wins = within(document.querySelector('[data-kpi="wins"]') as HTMLElement);
-    expect(wins.getByText('7')).toBeTruthy();
-    expect(wins.getByText('+6')).toBeTruthy();
-    expect(within(document.querySelector('[data-kpi="value"]') as HTMLElement).getByText('$61.2k')).toBeTruthy();
-    expect(screen.getByTestId('featured').textContent).toContain('≈ $61.2k / year');
-    expect(screen.getByRole('img', { name: /Ratchet chart, best down from 182 to 131/ })).toBeTruthy();
-    const table = within(screen.getByRole('table'));
-    expect(table.getByText('Ingest throughput')).toBeTruthy();
-    expect(table.getByText('Web render p99')).toBeTruthy();
-    expect(table.getByText('182 ms')).toBeTruthy();
-    expect(table.getAllByText('131 ms').length).toBeGreaterThan(0);
-    expect(screen.getByText(/Dev engine/)).toBeTruthy();
-  });
+const rowOf = (name: string) => within(screen.getByRole('button', { name }).closest('tr') as HTMLElement);
+const tableNames = () =>
+  within(screen.getByTestId('optimizations-table'))
+    .getAllByRole('row')
+    .slice(1)
+    .map((r) => (within(r).getAllByRole('cell')[0] as HTMLElement).firstChild!.textContent);
 
-  it('the range switch reloads the KPIs for that window; no chip without data in the window before', async () => {
+describe('Overview (real ledger data)', () => {
+  it('leads with what was spent, what the wins are worth and what that returns; one staircase, what needs you, the table', async () => {
     installApi();
     render(<App />);
-    const wins = () => document.querySelector('[data-kpi="wins"]') as HTMLElement;
-    await waitFor(() => expect(within(wins()).getByText('7')).toBeTruthy());
-    fireEvent.click(screen.getByRole('radio', { name: '90d' }));
-    await waitFor(() => expect(within(wins()).getByText('8')).toBeTruthy());
-    expect(within(wins()).getByText('last 90d')).toBeTruthy();
-    expect(document.querySelectorAll('.kpi__badge')).toHaveLength(0);
-    expect(screen.getByRole('radio', { name: '90d' }).getAttribute('aria-checked')).toBe('true');
-    fireEvent.click(screen.getByRole('radio', { name: '7d' }));
-    await waitFor(() => expect(within(wins()).getByText('last 7d')).toBeTruthy());
+    expect(await screen.findByRole('heading', { name: 'Overview', level: 1 })).toBeTruthy();
+    // 90 days is the default window: all three optimizations that ran
+    const spent = within(await screen.findByTestId('hero-spent'));
+    expect(spent.getByText('$143')).toBeTruthy();
+    expect(spent.getByText('of $280 budgeted across 3 optimizations')).toBeTruthy();
+    const value = within(screen.getByTestId('hero-value'));
+    expect(value.getByText('$70.7k')).toBeTruthy();
+    expect(value.getByText('from 8 verified wins (estimated)')).toBeTruthy();
+    const ret = within(screen.getByTestId('hero-return'));
+    expect(ret.getByText(/^\d+×$/).textContent).toBe('495×');
+    expect(ret.getByText(/paid back in under a day/)).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Value locked in per year, rose to $70.7k through 8 verified wins' })).toBeTruthy();
+
+    const needs = within(screen.getByTestId('needs-you'));
+    expect(needs.getByText('Open a pull request for 2 verified wins')).toBeTruthy();
+    expect(needs.getByText('Ingest throughput · +43%')).toBeTruthy();
+    expect(needs.getByText('Open a pull request for 1 verified win')).toBeTruthy();
+    expect(needs.getByText('Nothing else is waiting on you.')).toBeTruthy();
+
+    expect(tableNames()).toEqual(['search-api p95 latency', 'Ingest throughput', 'Edge worker cold start']);
+    const search = rowOf('search-api p95 latency');
+    expect(search.getByText('Running')).toBeTruthy();
+    expect(search.getByText(/^\dh \d+m left$/)).toBeTruthy();
+    expect(search.getByText('−28%')).toBeTruthy();
+    expect(search.getByText('182 → 131 ms')).toBeTruthy();
+    expect(search.getByText('$61.2k')).toBeTruthy();
+    expect(search.getByText('/ 120')).toBeTruthy(); // the budget only while it runs
+    const ingest = rowOf('Ingest throughput');
+    expect(ingest.getByText('Waiting on you')).toBeTruthy();
+    expect(ingest.getByText('+43%')).toBeTruthy();
+    expect(ingest.getByText('41.2 → 58.9 k/s')).toBeTruthy();
+    expect(ingest.getByText('$7.1k')).toBeTruthy();
+    expect(ingest.queryByText(/\/ 100/)).toBeNull();
+    // status is a dot and a word: no pills anywhere, and the draft is left to Optimizations
+    expect(document.querySelectorAll('main .rt-pill')).toHaveLength(0);
+    expect(screen.queryByText('Web render p99')).toBeNull();
     expect(document.body.textContent).not.toMatch(/NaN|undefined/);
   });
 
-  it('clicking a finished optimization opens its Result; New optimization opens the form', async () => {
+  it('the range switch reloads: 30 days leaves out the older optimization and its win', async () => {
     installApi();
     render(<App />);
+    expect(await screen.findByRole('button', { name: 'Edge worker cold start' })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: '90 days' }).getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByRole('radio', { name: '30 days' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Edge worker cold start' })).toBeNull());
+    const value = within(screen.getByTestId('hero-value'));
+    expect(value.getByText('$68.3k')).toBeTruthy();
+    expect(value.getByText('from 7 verified wins (estimated)')).toBeTruthy();
+    expect(screen.getByRole('radio', { name: '30 days' }).getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(screen.getByRole('radio', { name: 'All time' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edge worker cold start' })).toBeTruthy());
+    expect(document.body.textContent).not.toMatch(/NaN|undefined/);
+  });
+
+  it('hovering a dot of the staircase names the optimization that locked the win in', async () => {
+    installApi();
+    render(<App />);
+    const dots = await waitFor(() => {
+      const d = document.querySelectorAll('[data-win]');
+      expect(d.length).toBe(8);
+      return d;
+    });
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    fireEvent.mouseEnter(dots[0]!);
+    expect(screen.getByRole('tooltip').textContent).toBe('$2.4k / yr · Edge worker cold start');
+    fireEvent.mouseLeave(dots[0]!);
+    fireEvent.mouseEnter(dots[7]!);
+    expect(screen.getByRole('tooltip').textContent).toMatch(/^\$70\.7k \/ yr · search-api p95 latency$/);
+  });
+
+  it("a needs-you item opens that optimization's Result; rows open Agents (running) or Result; New optimization opens the form", async () => {
+    installApi();
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Review: Open a pull request for 2 verified wins' }));
+    expect(await screen.findByRole('heading', { name: 'Ingest throughput', level: 1 })).toBeTruthy();
+    expect(screen.getByRole('main').getAttribute('data-screen')).toBe('result');
+    nav('Overview');
+    fireEvent.click(await screen.findByRole('button', { name: 'search-api p95 latency' }));
+    await waitFor(() => expect(screen.getByRole('main').getAttribute('data-screen')).toBe('agents'));
+    nav('Overview');
+    fireEvent.click(await screen.findByRole('button', { name: 'New optimization' }));
+    expect(await screen.findByRole('heading', { name: 'New optimization' })).toBeTruthy();
+  });
+
+  it('without a value model it shows dashes and a quiet hint instead of numbers it cannot know', async () => {
+    const h = installApi();
+    window.ratchet.overview = async (r) => ({ ...(await h.service.overview(r)), value: null, returnOnSpend: null, wins: [] });
+    render(<App />);
+    const value = within(await screen.findByTestId('hero-value'));
+    expect(value.getByText('—')).toBeTruthy();
+    expect(value.getByTestId('set-a-value').textContent).toBe('Set a value to see what the wins are worth');
+    expect(within(screen.getByTestId('hero-return')).getByText('—')).toBeTruthy();
+    expect(screen.getByText(/Once an optimization has a value/)).toBeTruthy();
+    expect(screen.queryByTestId('value-stair')).toBeNull();
+    expect(within(screen.getByTestId('hero-spent')).getByText('$143')).toBeTruthy(); // spend still adds up
+    expect(document.body.textContent).not.toMatch(/NaN|undefined/);
+  });
+
+  it('with a value model but no win in the range it says so', async () => {
+    const h = installApi();
+    window.ratchet.overview = async (r) => ({ ...(await h.service.overview(r)), value: { usdPerYear: 0, wins: 0, basis: 'estimated' }, returnOnSpend: null, wins: [] });
+    render(<App />);
+    expect(await screen.findByText('no verified wins in this range')).toBeTruthy();
+    expect(screen.getByText('No verified wins in this range yet.')).toBeTruthy();
+    expect(within(screen.getByTestId('hero-return')).getByText('needs a verified win and some spend')).toBeTruthy();
+  });
+
+  it('with nothing to wait for it says so; with no optimizations it shows one calm empty state with New optimization', async () => {
+    const h = installApi();
+    window.ratchet.overview = async (r) => ({ ...(await h.service.overview(r)), needsYou: [] });
+    const { unmount } = render(<App />);
+    expect(await screen.findByText('Nothing is waiting on you.')).toBeTruthy();
+    unmount();
+    window.ratchet.overview = async (r) => ({ ...(await h.service.overview(r)), empty: true, rows: [], needsYou: [], wins: [], value: null, returnOnSpend: null });
+    render(<App />);
+    expect(await screen.findByText('No optimizations yet')).toBeTruthy();
+    expect(screen.queryByTestId('hero-spent')).toBeNull();
+    fireEvent.click(within(screen.getByTestId('no-optimizations')).getByRole('button', { name: 'New optimization' }));
+    expect(await screen.findByRole('heading', { name: 'New optimization' })).toBeTruthy();
+  });
+
+  it('a range with nothing in it keeps the numbers and says nothing ran', async () => {
+    const h = installApi();
+    window.ratchet.overview = async (r) => ({ ...(await h.service.overview(r)), rows: [], wins: [], spent: { usd: 0, budgetUsd: 0, optimizations: 0 }, value: { usdPerYear: 0, wins: 0, basis: 'estimated' }, returnOnSpend: null });
+    render(<App />);
+    expect(await screen.findByText('Nothing ran in this range.')).toBeTruthy();
+    expect(within(screen.getByTestId('hero-spent')).getByText('nothing spent in this range')).toBeTruthy();
+  });
+});
+
+describe('Optimizations (the calm list)', () => {
+  it('lists every optimization, drafts included, in the same table; All / Running / Done filter it', async () => {
+    installApi();
+    render(<App initialRoute="optimizations" />);
+    expect(await screen.findByRole('heading', { name: 'Optimizations', level: 1 })).toBeTruthy();
+    await waitFor(() => expect(tableNames()).toHaveLength(4));
+    expect(tableNames()).toEqual(['search-api p95 latency', 'Ingest throughput', 'Web render p99', 'Edge worker cold start']);
+    expect(screen.getByRole('radio', { name: 'All' }).getAttribute('aria-checked')).toBe('true');
+    expect(rowOf('Ingest throughput').getByText('Waiting on you')).toBeTruthy();
+    expect(screen.getByText('Web render p99').closest('tr')!.textContent).toMatch(/Draft/);
+    fireEvent.click(screen.getByRole('radio', { name: 'Running' }));
+    expect(tableNames()).toEqual(['search-api p95 latency']);
+    fireEvent.click(screen.getByRole('radio', { name: 'Done' }));
+    expect(tableNames()).toEqual(['Ingest throughput', 'Edge worker cold start']); // the draft is neither
+    // the old dashboard is gone: no KPI cards, no featured card, no activity feed
+    expect(document.querySelector('.kpi, [data-testid=featured], [data-testid=activity]')).toBeNull();
+    expect(document.querySelectorAll('main .rt-pill')).toHaveLength(0);
+  });
+
+  it('a finished optimization opens its Result, a running one Agents, and New optimization opens the form', async () => {
+    installApi();
+    render(<App initialRoute="optimizations" />);
     fireEvent.click(await screen.findByRole('button', { name: 'Ingest throughput' }));
     expect(await screen.findByRole('heading', { name: 'Ingest throughput', level: 1 })).toBeTruthy();
     expect((await screen.findAllByText('41.2 k/s')).length).toBeGreaterThan(0);
+    nav('Optimizations');
+    fireEvent.click(await screen.findByRole('button', { name: 'search-api p95 latency' }));
+    await waitFor(() => expect(screen.getByRole('main').getAttribute('data-screen')).toBe('agents'));
     nav('Optimizations');
     fireEvent.click(await screen.findByRole('button', { name: /New optimization/ }));
     expect(await screen.findByRole('heading', { name: 'New optimization' })).toBeTruthy();
   });
 
-  it('shows an empty state for a fresh ledger', async () => {
+  it('shows one calm empty state for a fresh ledger', async () => {
     const h = installApi();
-    window.ratchet.listOptimizations = async () => ({ ...(await h.service.listOptimizations()), optimizations: [], featuredId: null, featuredSeries: null, activity: [] }) as OptimizationsSnapshot;
-    render(<App />);
+    window.ratchet.overview = async (r) => ({ ...(await h.service.overview(r)), empty: true, rows: [] });
+    render(<App initialRoute="optimizations" />);
     expect(await screen.findByText('No optimizations yet')).toBeTruthy();
+    expect(screen.getByText('Create one to start a baseline run.')).toBeTruthy();
+    expect(screen.queryByRole('radio', { name: 'Running' })).toBeNull();
+    fireEvent.click(within(screen.getByTestId('no-optimizations')).getByRole('button', { name: 'New optimization' }));
+    expect(await screen.findByRole('heading', { name: 'New optimization' })).toBeTruthy();
+  });
+});
+
+describe('Sidebar and the sandbox line', () => {
+  const activity = (over: Partial<SandboxActivity> = {}): SandboxActivity => ({
+    sandboxId: 'ratchet-sandbox', status: 'applied', region: 'eu-west-2', auto: true, activeRuns: [], instancesRunning: 2, spendUsd: 1.2, idleSince: 5_000, destroyAt: new Date(2026, 9, 30, 15, 40, 0).getTime(), lastReceipt: null, ...over,
+  });
+
+  it('has the logo and four places: Overview, Optimizations, Benchmarks, Connectors (the settings route); nothing else', async () => {
+    installApi();
+    render(<App />);
+    const labels = within(screen.getByRole('navigation', { name: 'Primary' })).getAllByRole('button').map((b) => b.textContent);
+    expect(labels).toEqual(['Overview', 'Optimizations', 'Benchmarks', 'Connectors']);
+    expect(document.querySelector('.brand__name')!.textContent).toBe('Ratchet');
+    expect(document.querySelectorAll('.integration, .workspace, .user, .live-card')).toHaveLength(0);
+    expect(screen.getByRole('button', { name: 'Overview' }).getAttribute('aria-current')).toBe('page');
+    nav('Connectors');
+    expect(screen.getByRole('main').getAttribute('data-screen')).toBe('settings');
+    expect(screen.getByRole('button', { name: 'Connectors' }).getAttribute('aria-current')).toBe('page');
+    nav('Benchmarks');
+    expect(screen.getByRole('main').getAttribute('data-screen')).toBe('benchmarks');
+  });
+
+  it('screens of one optimization (Agents, Result) and New optimization stay under Optimizations', async () => {
+    installApi();
+    render(<App initialRoute="result" />);
+    await screen.findByRole('heading', { level: 1 });
+    expect(screen.getByRole('button', { name: 'Optimizations' }).getAttribute('aria-current')).toBe('page');
+    expect(screen.getByRole('button', { name: 'Overview' }).getAttribute('aria-current')).toBeNull();
+  });
+
+  it('says "No sandbox running" when there is none; the panel says nothing is billing', async () => {
+    installApi();
+    render(<App />);
+    const status = within(screen.getByTestId('sandbox-status'));
+    expect(await status.findByText('No sandbox running')).toBeTruthy();
+    fireEvent.click(status.getByRole('button', { name: /No sandbox running/ }));
+    expect(screen.getByTestId('no-environment').textContent).toMatch(/nothing is billing/);
+    expect(screen.queryByRole('button', { name: 'End now' })).toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByTestId('sandbox-panel')).toBeNull();
+  });
+
+  it('shows the running sandbox in one line: name, cost so far and when it goes off; End now waits for the runs to end', async () => {
+    const h = installApi({ engine: { sandboxActivity: async () => activity({ activeRuns: ['opt_demo_search'], destroyAt: null }) } });
+    h.ledger.recordSandbox({ id: 'ratchet-sandbox', provider: 'aws', region: 'eu-west-2', status: 'applied' });
+    render(<App />);
+    const line = await within(screen.getByTestId('sandbox-status')).findByRole('button', { name: /Sandbox on/ });
+    await waitFor(() => expect(line.textContent).toBe('Sandbox on · ratchet-sandbox$1.20 so far · off after the last run'));
+    fireEvent.click(line);
+    const env = within(screen.getByTestId('environment'));
+    expect(env.getByText('eu-west-2')).toBeTruthy();
+    expect(env.getByText('Runs active').nextSibling!.textContent).toBe('1');
+    expect((env.getByRole('button', { name: 'End now' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(env.getByText('Available once the active runs have ended.')).toBeTruthy();
+  });
+
+  it('an idle sandbox says when it goes off; End now asks for a confirmation, then the receipt it produced appears', async () => {
+    let alive = true;
+    const r = receipt({ trigger: 'manual' });
+    const h = installApi({
+      engine: {
+        sandboxActivity: async () => (alive ? activity() : activity({ status: 'destroyed', lastReceipt: r })),
+        endSandbox: async () => ((alive = false), h.ledger.setSandboxStatus('ratchet-sandbox', 'destroyed'), r),
+      },
+    });
+    h.ledger.recordSandbox({ id: 'ratchet-sandbox', provider: 'aws', region: 'eu-west-2', status: 'applied' });
+    const end = vi.spyOn(window.ratchet, 'endSandbox');
+    render(<App />);
+    const line = await within(screen.getByTestId('sandbox-status')).findByRole('button', { name: /Sandbox idle/ });
+    await waitFor(() => expect(line.textContent).toMatch(/^Sandbox idle · ratchet-sandbox\$1\.20 so far · off at 15:40$/));
+    fireEvent.click(line);
+    fireEvent.click(within(screen.getByTestId('environment')).getByRole('button', { name: 'End now' }));
+    expect(end).not.toHaveBeenCalled(); // behind a confirm
+    fireEvent.click(within(screen.getByRole('group', { name: 'Confirm end sandbox' })).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('group', { name: 'Confirm end sandbox' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'End now' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm end sandbox' }));
+    await waitFor(() => expect(end).toHaveBeenCalledWith('ratchet-sandbox'));
+    const rec = within(await screen.findByTestId('receipt'));
+    expect(rec.getByText('Nothing left running')).toBeTruthy();
+    expect(rec.getByText(/ended by you/)).toBeTruthy();
+    expect(screen.queryByTestId('environment')).toBeNull();
+    await waitFor(() => expect(within(screen.getByTestId('sandbox-status')).getByRole('button', { name: /No sandbox running/ })).toBeTruthy());
+  });
+
+  it('shows a refusal from the engine, and Details opens the full Environments screen', async () => {
+    const h = installApi({
+      engine: {
+        sandboxActivity: async () => activity(),
+        endSandbox: async () => { throw new Error('sandbox_in_use: a run is active'); },
+      },
+    });
+    h.ledger.recordSandbox({ id: 'ratchet-sandbox', provider: 'aws', region: 'eu-west-2', status: 'applied' });
+    render(<App />);
+    fireEvent.click(await within(screen.getByTestId('sandbox-status')).findByRole('button', { name: /Sandbox idle/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'End now' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm end sandbox' }));
+    expect((await screen.findByRole('alert')).textContent).toMatch(/sandbox_in_use/);
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    expect(screen.getByRole('main').getAttribute('data-screen')).toBe('sandbox');
   });
 });
 

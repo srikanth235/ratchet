@@ -49,6 +49,7 @@ import {
   validateConfigText,
   type MetaView,
 } from './mappers.js';
+import { buildOverview } from './overview.js';
 import type { SettingsStore } from './settings.js';
 
 const DEFAULT_REGION = 'us-east-1';
@@ -317,6 +318,9 @@ export function createService(deps: ServiceDeps): RatchetService {
         activity: buildActivity(ledger, t, 8),
         engine: engineInfo(),
       };
+    },
+    async overview(range) {
+      return buildOverview(ledger, meta, now(), range);
     },
     async getOptimization(id) {
       const d = buildDetail(ledger, id, meta, now());

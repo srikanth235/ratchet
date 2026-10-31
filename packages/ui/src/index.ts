@@ -13,6 +13,7 @@ export { Button, type ButtonProps, type ButtonVariant } from './components/Butto
 export { AgentAvatar, agentColor, agentLabel, agentSoft, type AgentAvatarProps, type AgentKind } from './components/AgentAvatar.js';
 export { Sparkline, sparklinePoints, type SparklineProps } from './components/Sparkline.js';
 export { StairChart, stairPath, type StairChartProps, type StairPoint, type StairStep } from './components/StairChart.js';
+export { ValueStair, usdShort, valueStairPath, type ValueStairProps, type ValueStep } from './components/ValueStair.js';
 export { BarSpark, barHeights, type Bar, type BarSparkProps } from './components/BarSpark.js';
 export { EvalBars, evalBarHeights, type EvalBarsProps } from './components/EvalBars.js';
 export { Histogram, type HistogramProps, type HistogramSeries } from './components/Histogram.js';

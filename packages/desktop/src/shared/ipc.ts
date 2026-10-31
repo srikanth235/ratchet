@@ -24,6 +24,7 @@ const liveField = (key: LiveSettingKey) =>
 /** Argument tuples per method, validated in the main process before anything is executed. */
 export const ARGS = {
   listOptimizations: z.tuple([z.object({ range: z.enum(['7d', '30d', '90d']).optional() }).strict().optional()]),
+  overview: z.tuple([z.enum(['30d', '90d', 'all']).optional()]),
   getOptimization: z.tuple([id]),
   ratchetHistory: z.tuple([id, z.string().min(1).max(300).optional()]),
   winningChange: z.tuple([id]),

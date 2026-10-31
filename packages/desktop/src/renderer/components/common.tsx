@@ -91,6 +91,17 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
   );
 }
 
+/** The one calm empty state of the Overview and the Optimizations list. */
+export function EmptyOptimizations({ onNew }: { onNew(): void }) {
+  return (
+    <div className="calm-empty" data-testid="no-optimizations">
+      <p className="calm-empty__title serif">No optimizations yet</p>
+      <p className="muted">Create one to start a baseline run.</p>
+      <button type="button" className="btn pri" onClick={onNew}>New optimization</button>
+    </div>
+  );
+}
+
 /** Dropdown for the per-optimization screens. */
 export function OptimizationPicker() {
   const { selectedId, select } = useNav();

@@ -31,12 +31,10 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
 
 /** The 16-grid sidebar glyphs from the design (stroke 1.5). Keys are the route ids. */
 const NAV: Record<string, ReactNode> = {
-  optimizations: <><path d="M2.5 11.5a5.5 5.5 0 1 1 11 0" /><path d="M8 11.5l2.8-3.6" /><circle cx="8" cy="11.5" r="0.9" fill="currentColor" /></>,
+  overview: <><path d="M2.5 11.5a5.5 5.5 0 1 1 11 0" /><path d="M8 11.5l2.8-3.6" /></>,
+  optimizations: <path d="M2 13.5 L5.5 6 V13.5 L9 6 V13.5 L12.5 6 V13.5" />,
   benchmarks: <path d="M3 13.5V9M6.3 13.5V5M9.7 13.5V7.5M13 13.5V3" />,
-  agents: <><rect x="2" y="3" width="12" height="10" rx="2" /><path d="M5 6.5l2 1.5-2 1.5M8.5 10H11" /></>,
-  sandbox: <path d="M4.5 12.5h7a3 3 0 0 0 .3-6A4 4 0 0 0 4.2 7.6 2.5 2.5 0 0 0 4.5 12.5z" />,
-  result: <><path d="M4 2h8v12l-2-1-2 1-2-1-2 1z" /><path d="M6 5.5h4M6 8.5h4" /></>,
-  settings: <><path d="M2.5 5h11M2.5 11h11" /><circle cx="6" cy="5" r="1.8" fill="var(--rt-color-sidebar)" /><circle cx="10.5" cy="11" r="1.8" fill="var(--rt-color-sidebar)" /></>,
+  settings: <path d="M6 10l4-4M5 7.5 3.5 9a2.5 2.5 0 0 0 3.5 3.5L8.5 11M11 8.5 12.5 7A2.5 2.5 0 0 0 9 3.5L7.5 5" />,
 };
 
 export function NavIcon({ id }: { id: string }) {
@@ -50,7 +48,7 @@ export function NavIcon({ id }: { id: string }) {
 
 export function RatchetMark() {
   return (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#D9B26F" strokeWidth="1.8" strokeLinejoin="round" aria-hidden="true">
+    <svg width="22" height="22" viewBox="0 0 18 18" fill="none" stroke="#D9B26F" strokeWidth="1.7" strokeLinejoin="round" aria-hidden="true">
       <path d="M2 13.5 L6 5 V13.5 L10 5 V13.5 L14 5 V13.5" />
     </svg>
   );

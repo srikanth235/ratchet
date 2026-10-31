@@ -5,6 +5,7 @@ import type { RatchetApi } from './types.js';
 /** IPC channel per `RatchetApi` method (everything except `onEvent`), plus the event push channel. */
 export const IPC = {
   listOptimizations: 'ratchet:listOptimizations',
+  overview: 'ratchet:overview',
   getOptimization: 'ratchet:getOptimization',
   ratchetHistory: 'ratchet:ratchetHistory',
   winningChange: 'ratchet:winningChange',

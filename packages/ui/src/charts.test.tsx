@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { BarSpark, barHeights, Histogram, histogramBins, linearScale, StairChart, stairPath, ticks, VerdictPill } from './index.js';
+import { BarSpark, barHeights, Histogram, histogramBins, linearScale, StairChart, stairPath, ticks, usdShort, ValueStair, valueStairPath, VerdictPill } from './index.js';
 
 describe('chart helpers', () => {
   it('linearScale maps domain to range', () => {
@@ -85,5 +85,42 @@ describe('BarSpark / Histogram / VerdictPill', () => {
 
   it('VerdictPill labels verdicts', () => {
     expect(renderToStaticMarkup(<VerdictPill verdict="failed_confirm" />)).toContain('Failed confirm');
+  });
+});
+
+describe('ValueStair', () => {
+  const day = 24 * 3600_000;
+  const from = Date.UTC(2026, 7, 2);
+  const to = from + 90 * day;
+  const steps = [
+    { at: from + 6 * day, value: 1200, label: 'CLI cold start' },
+    { at: from + 40 * day, value: 6000, label: 'Forecast accuracy' },
+    { at: from + 84 * day, value: 15400, label: 'Checkout p95' },
+  ];
+
+  it('usdShort is compact', () => {
+    expect([0, 850, 4800, 15400, 1_250_000].map((v) => usdShort(v))).toEqual(['$0', '$850', '$4.8k', '$15.4k', '$1.3M']);
+    expect(usdShort(5000, 0)).toBe('$5k');
+  });
+
+  it('valueStairPath starts at $0 on the left, steps at every win and runs to the right edge', () => {
+    const d = valueStairPath(steps, (at) => (at - from) / day, (v) => 100 - v / 200, 0, 90);
+    expect(d).toBe('M0.0 100.0 H6.0 V94.0 H40.0 V70.0 H84.0 V23.0 H90.0');
+  });
+
+  it('draws one brass path, one dot per win, right-hand dollar labels and date ticks', () => {
+    const html = renderToStaticMarkup(<ValueStair steps={steps} from={from} to={to} />);
+    expect(html).toContain('aria-label="Value locked in per year, rose to $15.4k through 3 verified wins"');
+    expect((html.match(/data-win=/g) ?? []).length).toBe(3);
+    expect(html).toContain('>$0<');
+    expect(html).toMatch(/>\$(5|10|15)k</);
+    expect(html).toContain('>Aug 2<');
+    expect(html).toContain('>Oct 31<');
+  });
+
+  it('with no wins it is a flat line at $0 and says so', () => {
+    const html = renderToStaticMarkup(<ValueStair steps={[]} from={from} to={to} />);
+    expect(html).toContain('no verified wins yet');
+    expect(html).not.toContain('data-win=');
   });
 });

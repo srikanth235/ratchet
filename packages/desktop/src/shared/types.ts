@@ -561,10 +561,15 @@ export interface PreflightInput {
   source: 'github' | 'local' | 'demo';
 }
 
+export * from './overview.js';
+import type { OverviewRange, OverviewVM } from './overview.js';
+
 /** The only surface the renderer gets from the main process (`window.ratchet`). */
 export interface RatchetApi {
   // reads
   listOptimizations(opts?: { range?: KpiRange }): Promise<OptimizationsSnapshot>;
+  /** The Overview: spend, value locked in, return, the value staircase, what needs the user, and the optimizations of the range (default 90d). */
+  overview(range?: OverviewRange): Promise<OverviewVM>;
   getOptimization(id: string): Promise<OptimizationDetail>;
   /** `metric`: one of the series' `options` keys; default the objective. */
   ratchetHistory(id: string, metric?: string): Promise<RatchetSeries>;
