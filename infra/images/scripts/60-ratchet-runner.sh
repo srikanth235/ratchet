@@ -31,6 +31,7 @@ make_world_readable "$app"
 # have the launch environment that the instance user data wrote to /etc/ratchet/runner.env
 # (RATCHET_SECRET_REFS, proxy settings). The launcher loads that file, but anything the caller
 # already exported (ids, artifacts bucket, region) wins.
+mkdir -p "$PREFIX/bin"
 cat > "$PREFIX/bin/ratchet-runner" <<'LAUNCHER'
 #!/bin/bash
 set -euo pipefail
