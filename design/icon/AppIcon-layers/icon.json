@@ -4,7 +4,7 @@
     {
       "layers" : [
         { "glass" : true, "image-name" : "front.svg", "name" : "newest chamber" },
-        { "glass" : true, "image-name" : "back.svg", "name" : "sealed chambers", "opacity" : 0.58 }
+        { "glass" : true, "image-name" : "back.svg", "name" : "sealed chambers", "opacity" : 0.60 }
       ],
       "shadow" : { "kind" : "neutral", "opacity" : 0.5 },
       "translucency" : { "enabled" : true, "value" : 0.4 }
