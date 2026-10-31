@@ -7,6 +7,8 @@ Rust test with the same assertions; this file maps one to the other. All tests r
 
 ## Engine (`packages/engine/src/*.test.ts`): 127 TS cases → 127 Rust tests
 
+(`packages/engine/src/environment/*.test.ts`, 41 more cases, are mapped in `crates/ratchet-env/PARITY.md`.)
+
 ### Deliberate differences (the assertion is kept in spirit, the mechanics differ)
 
 - **Typed inputs.** Cases that pass a value TypeScript's types would have rejected at compile time are asserted at the
@@ -315,7 +317,7 @@ keep-awake hook, and the router that sends commands to the runtime of an optimiz
 | | AWS and agents rows (4) | `…::aws_and_agents::*` (4) |
 | | environments (read-only) and the teardown receipt (5) | `…::environments::*` (5; "an engine that cannot say" becomes "an empty ledger yields an empty view / ending an unknown environment is a 404": the Rust engine always supports the sandbox methods) |
 | | secrets never reach the renderer (2) | `…::secrets_never_leave::*` (2; the IPC channel list becomes "the OpenAPI document has no route that reveals a secret or applies infrastructure") |
-| (new) | provisional groups answer 501 | `…::provisional_groups::overview_connectors_and_environment_drafts_are_not_supported_yet` |
+| (new) | environment drafts need the sign-in | `…::environment_drafts_group::environment_drafts_need_the_sign_in` |
 
 Not ported on purpose: `ipc.test.ts` (no IPC: the contract tests of `ratchetd` cover every route), `github.test.ts` (the REST client and
 the device flow are `ratchet-github`), `dev-engine.test.ts` / `dev-git.test.ts` (the dev engine is `ratchetd`'s simulation, tested there),

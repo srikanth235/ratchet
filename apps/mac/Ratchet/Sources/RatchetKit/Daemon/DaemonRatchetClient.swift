@@ -50,9 +50,11 @@ public struct DaemonLocation: Sendable, Equatable {
 /// fallback; a daemon that cannot answer is an error the app shows (and retries).
 public final class DaemonRatchetClient: RatchetClient {
     private let api: Client
+    private let transport: any ClientTransport
     private let state = DaemonClientState()
 
     public init(transport: any ClientTransport) {
+        self.transport = transport
         self.api = Client(
             serverURL: URL(string: "http://localhost") ?? URL(fileURLWithPath: "/"),
             transport: transport, middlewares: [APIErrorMiddleware()])
@@ -91,6 +93,35 @@ public final class DaemonRatchetClient: RatchetClient {
 
     // MARK: Run controls
 
+    // The generated client holds only the operations the app uses (tools/api/openapi-generator-config.yaml); these two
+    // routes are called through the same transport and error middleware without generated code, so the committed client
+    // stays what the generator produces. Adding them to the filter and regenerating (on a Mac) replaces this.
+    private struct PullRequestPayload: Decodable { var url: String }
+    private struct ReportPayload: Decodable {
+        var fileName: String
+        var markdown: String
+    }
+
+    private func escaped(_ segment: String) -> String {
+        segment.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? segment
+    }
+
+    /// One request without a body, through the error middleware; the response body on success.
+    private func rawCall(_ method: HTTPRequest.Method, _ path: String, operationID: String) async throws -> Data {
+        let base = URL(string: "http://localhost") ?? URL(fileURLWithPath: "/")
+        let request = HTTPRequest(method: method, scheme: nil, authority: nil, path: path)
+        let transport = self.transport
+        let (_, body) = try await APIErrorMiddleware().intercept(request, body: nil, baseURL: base, operationID: operationID) {
+            request, body, url in
+            try await transport.send(request, body: body, baseURL: url, operationID: operationID)
+        }
+        var bytes: [UInt8] = []
+        if let body {
+            for try await chunk in body { bytes.append(contentsOf: chunk) }
+        }
+        return Data(bytes)
+    }
+
     public func stopOptimization(id: String) async throws {
         try await calling {
             _ = try await api.stopOptimization(path: .init(id: id), body: .json(.init())).noContent
@@ -100,7 +131,8 @@ public final class DaemonRatchetClient: RatchetClient {
 
     public func openPullRequest(optimizationID: String) async throws -> URL {
         try await calling {
-            let pull = try await api.openPullRequest(path: .init(id: optimizationID)).created.body.json
+            let data = try await rawCall(.post, "/v1/optimizations/\(escaped(optimizationID))/pull-request", operationID: "openPullRequest")
+            let pull = try JSONDecoder().decode(PullRequestPayload.self, from: data)
             await state.forgetRows()
             guard let url = URL(string: pull.url) else {
                 throw RatchetClientError.unavailable("The pull request was opened, but its address is not readable: \(pull.url)")
@@ -111,7 +143,8 @@ public final class DaemonRatchetClient: RatchetClient {
 
     public func report(optimizationID: String) async throws -> OptimizationReport {
         try await calling {
-            let report = try await api.getReport(path: .init(id: optimizationID)).ok.body.json
+            let data = try await rawCall(.get, "/v1/optimizations/\(escaped(optimizationID))/report", operationID: "getReport")
+            let report = try JSONDecoder().decode(ReportPayload.self, from: data)
             return OptimizationReport(fileName: report.fileName, markdown: report.markdown)
         }
     }

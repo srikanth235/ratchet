@@ -70,7 +70,7 @@ Two systematic differences:
 
 ## `packages/github/src/report.test.ts` -> `tests/report.rs`
 
-The TS tests seeded a SQLite ledger. `ratchet-ledger` does not exist yet, so `build_result_report` takes a plain
+The TS tests seeded a SQLite ledger. `ratchet-ledger` holds the rows, so `build_result_report` takes a plain
 `ReportInput` (what the engine will read from the ledger) and the tests build the same data by hand. The expected Markdown
 and JSON are the TS snapshots, extracted byte for byte into `tests/fixtures/report.md` / `report.json`.
 
@@ -111,7 +111,7 @@ and JSON are the TS snapshots, extracted byte for byte into `tests/fixtures/repo
 
 ## `packages/e2e` (Electron + Playwright) -> not ported here
 
-The e2e specs drive the Electron app and are replaced by XCUITest flows in the Mac app. Only their GitHub fake
+The e2e specs drive the Electron app and are not replaced by UI tests yet (XCUITest flows were planned, see docs/CUTOVER.md); the engine path is covered by `ratchetd simulate` and the `demos` CI job. Only their GitHub fake
 (`harness/fakes.mjs: startFakeGithub`) is ported, as `testing::FakeGithubServer`; `FakeGithubServer::env()` yields the same
 `RATCHET_GITHUB_API_URL` / `RATCHET_GITHUB_WEB_URL` / `RATCHET_GITHUB_CLIENT_ID` variables and `sign_in_end_to_end_against_the_fake_server`
 walks the device flow against it (start, pending polls, approve, token stored).
@@ -130,7 +130,7 @@ walks the device flow against it (start, pending polls, approve, token stored).
 ## Gaps and known differences
 
 - **No ledger.** `buildResultReport(ledger, id)` / `buildSquashPlanFromLedger` became pure functions of `ReportInput`; the
-  `ratchet-engine` crate fills it from `ratchet-ledger`. `bench.run` is passed in (`OptimizationInfo::bench_run`) because
+  `ratchet-engine` builds its own report (`report.rs`) from `ratchet-ledger`; nothing outside this crate calls these two functions yet. `bench.run` is passed in (`OptimizationInfo::bench_run`) because
   config parsing lives in `ratchet-core`.
 - **`friendlyMissing` is ported but is engine text**; it may move to `ratchet-engine`.
 - **Number formatting** is `ratchet_core::numfmt` (exact V8 `toFixed` / `toPrecision` / `String(number)`, ties and exponent

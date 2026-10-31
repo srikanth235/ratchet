@@ -604,7 +604,13 @@ fn memory_reports_the_peak_resident_memory_of_the_workload_tree() {
             ("BENCH_COMMAND", cmd.to_owned()),
         ]
     };
-    let small = run_evaluator(d, "node bench/memory.mjs", &env("node -e \"0\""));
+    // (the command idles for 150 ms so that the sampler, which polls `ps` on a Mac, always catches it: `node -e 0` can be
+    // over before the first sample and then reads 0 MB)
+    let small = run_evaluator(
+        d,
+        "node bench/memory.mjs",
+        &env("node -e \"setTimeout(()=>{},150)\""),
+    );
     let big = run_evaluator(
         d,
         "node bench/memory.mjs",

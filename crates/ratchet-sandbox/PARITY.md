@@ -9,6 +9,10 @@ Counts: **208** vitest cases (160 `it(...)` plus 6 `it.each` blocks that expand 
 (a failure names the case), which is why the Rust count is lower even though every TS case is covered, and
 dozens of extra tests are new (marked "new" below). No TS test is dropped.
 
+`packages/aws/src/sandbox/environment.test.ts` (29 cases: materializing drafted and custom environments, the two-stage
+`TofuSandboxProvider`, the `infra:` module, the mock, `TofuEnvironmentChecker`) is not in the counts above: its 27 Rust tests are
+`tests/suite/sandbox_environment.rs`, mapped in `crates/ratchet-env/PARITY.md`.
+
 How the AWS SDK is faked: Rust SDK clients are built with `aws-smithy-mocks` rules (`mock_client!`), so the request
 conversion code runs for real and the tests assert on the SDK input types, like `aws-sdk-client-mock` did. A client given
 no rules panics on any call, which is how "no AWS call happens" is asserted. Real AWS is never called.

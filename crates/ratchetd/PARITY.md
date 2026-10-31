@@ -12,7 +12,7 @@ How identity is checked, beyond the ported cases:
 | **The contract file** | `tests/api/openapi.rs::the_committed_openapi_file_is_current`, `api/openapi.yaml` | The committed OpenAPI document is byte-identical to the one generated from the routes and types. Regenerate with `cargo run -p ratchetd -- openapi`. The Swift client is generated from this file. |
 | **Round trip of every route** | `tests/api/contract.rs::every_route_round_trips_its_types` | Every operation in the document is called on an in-process daemon over the real socket; the body parses into its Rust type and serializes back to the same JSON (no lost, renamed or extra field). A meta-check fails when a documented route has no case, or a case has no route. |
 | **camelCase on the wire** | `tests/api/openapi.rs::schema_property_names_are_camel_case` | utoipa ignores serde's `rename_all_fields`; a snake_case property in a schema means the Swift client would be generated wrong. |
-| **Every `RatchetApi` method has a route** | `tests/api/electron_api.rs::every_method_of_the_electron_api_has_a_route` | The table maps each of the 37 IPC channels (and the event channel) to an operation id (and is checked against `channels.ts` while it exists). |
+| **Every `RatchetApi` method has a route** | `tests/api/electron_api.rs::every_method_of_the_electron_api_has_a_route` | The table maps each of the 51 IPC channels (and the event channel) to an operation id (and is checked against `channels.ts` while it exists). |
 | **Snapshots** | `tests/api/snapshots/` (insta) | The route table, the schema names and the SSE event union. |
 
 ## Differences on purpose
@@ -37,7 +37,7 @@ How identity is checked, beyond the ported cases:
 - **Secrets** are not stored by the simulation (only whether one is set). `RealService` (`ratchetd serve --mode real`, the default)
   keeps them in a `ratchet_engine::desktop::SecretStore`: the macOS Keychain, or with `--secrets-file` a 0600 file; without either
   `PUT /v1/settings/secrets/{name}` answers 409. The per-boot API token keeps its file implementation.
-- **`RealService`** implements everything but environment drafts (→ 501 `unsupported`). Connectors live in the connector store
+- **`RealService`** implements every group, environment drafts included (the trait defaults still answer 501 `unsupported` for a service that cannot say). Connectors live in the connector store
   (`ratchet-connectors`) and the single-account calls of the first Settings (`setAwsProfile`, `setSecret`, `githubSignIn`, ...)
   work on top of them, as in `service.ts`; the first start migrates the old settings file's token, profile and keys into connectors.
   Its tests are `tests/api/real_service.rs` (ports of `service.test.ts`), see `crates/ratchet-engine/PARITY.md`.
@@ -80,7 +80,7 @@ integration binary `tests/api/main.rs` (module paths).
 | TS case | Rust test |
 |---|---|
 | GitHub row: signed out by default; the device flow shows a code, then signs in | `it::sim::timers_drive_a_run_without_ticks`, `it::contract::every_route_round_trips_its_types` (sign-out, sign-in), `it::sse::github_and_connector_events_are_published` |
-| GitHub row: a denied sign-in / a rejected pasted token / a token from the environment | deferred to the real engine (needs `ratchet-github`; the simulation always approves) |
+| GitHub row: a denied sign-in / a rejected pasted token / a token from the environment | ported: `tests/api/real_service.rs::github_row` |
 | GitHub row: a pasted token (Advanced) is checked first | `it::sim::settings_connections_and_preflight_tell_the_truth` (format check), `it::contract::failures_are_api_errors` |
 | GitHub row: Test connection for GitHub | `it::sim::settings_connections_and_preflight_tell_the_truth` |
 | repo picker: lists the account repositories (needs the sign-in) and searches them | `it::contract::every_route_round_trips_its_types`, `failures_are_api_errors` (409 `not_ready`) |
@@ -90,7 +90,7 @@ integration binary `tests/api/main.rs` (module paths).
 | repo picker: without a folder dialog, picking returns nothing | dropped (the app's `NSOpenPanel`) |
 | templates: lists the gallery | `it::contract::every_route_round_trips_its_types` |
 | templates: proposeTemplate opens the pull request | `it::sim::template_proposals_use_the_core_templates` |
-| templates: surfaces the engine refusing (files already exist) | deferred to the real engine (needs `GitHost::commit_files`) |
+| templates: surfaces the engine refusing (files already exist) | ported: `tests/api/real_service.rs::templates::surfaces_the_engine_refusing_files_already_exist` |
 | creating: a real run uses owner/name; what is missing stops it before anything is created | `it::sim::creating_validates_and_checks_readiness` |
 | creating: a demo goes to the simulation and needs no repository | `it::sim::creating_validates_and_checks_readiness`, `it::contract::every_route_round_trips_its_types` |
 | preflight: a demo needs nothing | `it::sim::settings_connections_and_preflight_tell_the_truth` |
@@ -131,8 +131,8 @@ integration binary `tests/api/main.rs` (module paths).
 |---|---|
 | stores secrets encrypted, round-trips them, persists across instances | the Keychain belongs to the real engine; `auth::tests::the_file_store_is_private_and_atomic` covers the token store |
 | refuses to store secrets when the keychain is unavailable | `SettingsVm.encryptionAvailable` is on the wire; the simulation always has one |
-| treats environment-provided credentials as configured | deferred to the real engine |
-| survives a corrupt settings file | deferred to the real engine (the simulation keeps no settings file) |
+| treats environment-provided credentials as configured | ported: `src/real/settings.rs` tests |
+| survives a corrupt settings file | ported: `src/real/settings.rs` tests |
 | getSettings exposes only configured yes/no | `it::sim::settings_connections_and_preflight_tell_the_truth` |
 
 ### `overview.test.ts` (12)
@@ -183,7 +183,7 @@ Spend events are summed in `ORDER BY at, id` (the TS sums in table order); the d
 | Auth | `it::auth::*` (401 on every route and on the event stream and the document, bearer parsing, 0600 socket and token file, private directory, per-boot token, a live socket is not taken over and a stale one is replaced, shutdown with a stream open removes both files, custom token store); `auth::tests`, `paths::tests` (unit) |
 | SSE | `it::sse::*` (hello first, ids count up without gaps, `Last-Event-ID` replays exactly the missed events, resync when the id is too old or from before a restart, resume from `GET /v1/status`); `hub::tests` (unit) |
 | OpenAPI | `it::openapi::*` (committed file current, yaml = json, snapshots, unique camelCase operation ids, every tag used, no dangling `$ref`, camelCase properties, enum wire values) |
-| Provisional groups | `it::sim::connectors_keep_their_invariants`, `overview_numbers_add_up`, `drafts_follow_their_life_cycle` |
+| Provisional groups | `it::sim::connectors_keep_their_invariants`, `drafts_follow_their_life_cycle`, `tests/api/overview.rs` |
 | Cost reconcile | `it::sim::cost_reconcile_is_pending_while_running_and_idempotent_afterwards` |
 | LaunchAgent | `launchagent::tests` (plist content, install/uninstall with a recording `Launchctl`; `launchctl` is never called) |
 | Timers | `it::sim::timers_drive_a_run_without_ticks` (baseline, turns, stop, device flow) |

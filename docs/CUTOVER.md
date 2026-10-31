@@ -232,9 +232,10 @@ now list only `examples/*` and `infra/tests`. `ratchetd simulate` needs `pnpm in
 
 | Run | Result |
 |---|---|
-| `ratchetd simulate --project search` | DEMO_SEARCH_RESULT |
-| `ratchetd simulate --project forecast` | DEMO_FORECAST_RESULT |
-| `ratchetd simulate --project cli` | DEMO_CLI_RESULT |
+| `ratchetd simulate --project search` | exit 0: 2 verified wins of 18 candidates, +56% (run while the machine was busy compiling) |
+| `ratchetd simulate --project forecast` | exit 0: 5 verified wins of 22 candidates, +45% |
+| `ratchetd simulate --project cli` | exit 0: 5 verified wins of 19 candidates, +59% (a first run on a busy machine ended with no win: the cold-start bench is timing based, which is why the TS e2e retried up to three times and the Rust one does too) |
+| `RATCHET_E2E=1 cargo test -p ratchet-engine --test engine runtime_simulation` | 5 passed in 19 min (search with both agents, forecast, cli: the verdict invariants of the TS `simulation.e2e` on all three demos) |
 
 ### Things that stay, and why
 
@@ -284,8 +285,17 @@ does not exist yet" and the XCUITest claim; `ratchet-sandbox` now lists `environ
    daemon's own simulation and needs neither. `demo_scripts.rs` locates the scripts through `CARGO_MANIFEST_DIR`.
 7. **XCUITest flows, Spotlight, Quick Look** (promised by the architecture page, not built).
 8. **Ship a pinned `tofu`** in `Contents/Resources/bin` (optional, picked up automatically).
-9. **Reject malformed globs elsewhere** (`validate_config` runs `parse_config`, so the API already does).
+9. **Dead code from the Electron host**: `ratchet-bench`'s `NodeRuntimeInfo::electron` (the shim that ran Electron as node) has no
+   caller any more.
+10. **Real-env procedures** (`docs/real-env/*.md`) still show TypeScript snippets; re-express them with `ratchetd` / `ratchet`.
 
 ## Final numbers
 
-FINAL_NUMBERS
+- `cargo test --workspace --no-fail-fast` on Linux: **1,698 passed, 0 failed, 0 ignored**. The baseline run before this change had
+  1,693 tests (1,692 passed and the load-related failure noted above); the five new ones are the four `ratchetd::host` tests and
+  the protected-glob config test. `cargo fmt --all --check` and `cargo clippy --workspace --all-targets -- -D warnings` are clean.
+- `pnpm install --frozen-lockfile && pnpm build && pnpm typecheck && pnpm test`: demo-search 67, demo-forecast 28, demo-cli 72,
+  infra/tests 248 (+1 skipped, needs root) passed.
+- The `ratchet-runner` musl build, `pack-runner.sh`, `60-ratchet-runner.sh` (scratch prefix) and the tampered-binary refusal were run
+  by hand on x86_64 Linux; the arm64 build is exercised only by `images.yml`.
+- CI for the head commit: see the links in the final report of the change.

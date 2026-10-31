@@ -103,21 +103,21 @@ Rust paths are relative to `crates/ratchet-bench/tests`. The tables are in sourc
 | snapshot key hpc7g.4xlarge is arm64 | `snapshot_key::arch_of_hpc7g_4xlarge` |
 | snapshot key a1.large is arm64 | `snapshot_key::arch_of_a1_large` |
 | manifest validation (the controller trusts its own hashes, not the bucket) accepts what the snapshot job writes | `manifest_validation::accepts_what_the_snapshot_job_writes` |
-| manifest validation (the controller trusts its own hashes, not the bucket) rejects not json | `manifest_validation::rejects_another_key` |
-| manifest validation (the controller trusts its own hashes, not the bucket) rejects another key | `manifest_validation::rejects_other_lockfile_hashes` |
-| manifest validation (the controller trusts its own hashes, not the bucket) rejects other lockfile hashes | `manifest_validation::rejects_an_extra_lockfile` |
-| manifest validation (the controller trusts its own hashes, not the bucket) rejects an extra lockfile | `manifest_validation::rejects_another_image` |
-| manifest validation (the controller trusts its own hashes, not the bucket) rejects another image | `manifest_validation::rejects_another_arch` |
-| manifest validation (the controller trusts its own hashes, not the bucket) rejects another arch | `manifest_validation::rejects_another_strategy_revision` |
-| manifest validation (the controller trusts its own hashes, not the bucket) rejects another strategy revision | `manifest_validation::rejects_an_archive_outside_its_prefix` |
-| manifest validation (the controller trusts its own hashes, not the bucket) rejects an archive outside its prefix | `manifest_validation::rejects_a_traversing_archive` |
-| manifest validation (the controller trusts its own hashes, not the bucket) rejects a traversing archive | `manifest_validation::rejects_an_archive_of_another_digest` |
-| manifest validation (the controller trusts its own hashes, not the bucket) rejects an archive of another digest | `manifest_validation::rejects_an_extension_that_does_not_match_the_compression` |
-| manifest validation (the controller trusts its own hashes, not the bucket) rejects an extension that does not match the compression | `manifest_validation::rejects_a_bad_digest` |
-| manifest validation (the controller trusts its own hashes, not the bucket) rejects a bad digest | `manifest_validation::rejects_a_shell_looking_node_version` |
-| manifest validation (the controller trusts its own hashes, not the bucket) rejects a shell-looking node version | `manifest_validation::rejects_an_unknown_compression` |
-| manifest validation (the controller trusts its own hashes, not the bucket) rejects an unknown compression | `manifest_validation::rejects_a_negative_size` |
-| manifest validation (the controller trusts its own hashes, not the bucket) rejects a negative size | `manifest_validation::rejects_text_that_is_not_json` |
+| manifest validation (the controller trusts its own hashes, not the bucket) rejects not json | `manifest_validation::rejects_text_that_is_not_json` |
+| manifest validation (the controller trusts its own hashes, not the bucket) rejects another key | `manifest_validation::rejects_another_key` |
+| manifest validation (the controller trusts its own hashes, not the bucket) rejects other lockfile hashes | `manifest_validation::rejects_other_lockfile_hashes` |
+| manifest validation (the controller trusts its own hashes, not the bucket) rejects an extra lockfile | `manifest_validation::rejects_an_extra_lockfile` |
+| manifest validation (the controller trusts its own hashes, not the bucket) rejects another image | `manifest_validation::rejects_another_image` |
+| manifest validation (the controller trusts its own hashes, not the bucket) rejects another arch | `manifest_validation::rejects_another_arch` |
+| manifest validation (the controller trusts its own hashes, not the bucket) rejects another strategy revision | `manifest_validation::rejects_another_strategy_revision` |
+| manifest validation (the controller trusts its own hashes, not the bucket) rejects an archive outside its prefix | `manifest_validation::rejects_an_archive_outside_its_prefix` |
+| manifest validation (the controller trusts its own hashes, not the bucket) rejects a traversing archive | `manifest_validation::rejects_a_traversing_archive` |
+| manifest validation (the controller trusts its own hashes, not the bucket) rejects an archive of another digest | `manifest_validation::rejects_an_archive_of_another_digest` |
+| manifest validation (the controller trusts its own hashes, not the bucket) rejects an extension that does not match the compression | `manifest_validation::rejects_an_extension_that_does_not_match_the_compression` |
+| manifest validation (the controller trusts its own hashes, not the bucket) rejects a bad digest | `manifest_validation::rejects_a_bad_digest` |
+| manifest validation (the controller trusts its own hashes, not the bucket) rejects a shell-looking node version | `manifest_validation::rejects_a_shell_looking_node_version` |
+| manifest validation (the controller trusts its own hashes, not the bucket) rejects an unknown compression | `manifest_validation::rejects_an_unknown_compression` |
+| manifest validation (the controller trusts its own hashes, not the bucket) rejects a negative size | `manifest_validation::rejects_a_negative_size` |
 | the dependency-snapshot job script only ever downloads the staged BASE tree: no candidate archive, no git, no other bucket prefix | `the_dependency_snapshot_job_script::only_ever_downloads_the_staged_base_tree` |
 | the dependency-snapshot job script refuses to be built for the candidate archive or anything but the deps-base basename | `the_dependency_snapshot_job_script::refuses_to_be_built_for_the_candidate_archive_or_another_basename` |
 | the dependency-snapshot job script verifies the digest before unpacking anything | `the_dependency_snapshot_job_script::verifies_the_digest_before_unpacking_anything` |
