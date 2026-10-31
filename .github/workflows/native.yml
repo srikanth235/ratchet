@@ -102,6 +102,13 @@ jobs:
       - name: Unit tests
         run: swift test --scratch-path "$HOME/Library/Developer/$APP_NAME/test-build" 2>&1 | tail -n 200
         shell: bash -o pipefail {0}
+      # Sources/RatchetAPI is generated from api/openapi.yaml and committed (tools/generate-api.sh). Advisory (a yellow
+      # step, never a red job): it builds swift-openapi-generator, so it only warns when the committed client is stale.
+      - name: API client is current
+        continue-on-error: true
+        run: |
+          tools/generate-api.sh
+          git diff --exit-code -- Sources/RatchetAPI
       # Step 3: the grid lint, and the self-test (new-mac-app / test-mac-app skills); run when the app ships them.
       - name: Grid lint
         run: |
