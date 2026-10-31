@@ -11,7 +11,7 @@ publish.workspace = true
 name = "ratchet_bench"
 
 # The setuid-root launcher the evaluator harness uses inside a bench container (port of
-# infra/images/scripts/ratchet-candidate-ctr.c). It shares nothing with the async runners but the crate.
+# the former infra/images/scripts/ratchet-candidate-ctr.c; the bench image installs this binary). It shares nothing with the async runners but the crate.
 [[bin]]
 name = "ratchet-candidate-launcher"
 path = "src/bin/ratchet-candidate-launcher.rs"

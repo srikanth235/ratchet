@@ -87,6 +87,32 @@ dnf_install() {
   dnf install -y --setopt=install_weak_deps=False ${RATCHET_DNF_ARGS:-} "$@"
 }
 
+# elf_field FILE OFFSET SIZE: the unsigned integer of SIZE bytes (1, 2, 4 or 8) at byte OFFSET. od reads in host byte
+# order; every host these scripts run on (x86_64, aarch64) is little endian, like the ELF files they check.
+elf_field() { od -An -v -tu"$3" -j "$2" -N "$3" "$1" | tr -d ' \n'; }
+
+# elf_is_native FILE: a 64-bit little-endian ELF executable or PIE for the machine we run on.
+elf_is_native() {
+  local want
+  case "$ARCH_UNAME" in x86_64) want=62 ;; aarch64) want=183 ;; *) return 1 ;; esac
+  [ "$(od -An -v -tx1 -N6 "$1" | tr -d ' \n')" = "7f454c460201" ] || return 1
+  case "$(elf_field "$1" 16 2)" in 2 | 3) ;; *) return 1 ;; esac # ET_EXEC | ET_DYN
+  [ "$(elf_field "$1" 18 2)" = "$want" ]
+}
+
+# elf_is_static FILE: no program interpreter (PT_INTERP). A static-pie executable (what Rust's crt-static produces for a
+# glibc target) makes glibc's `ldd` print "statically linked" and exit 0, so ldd's status cannot tell static from dynamic.
+elf_is_static() {
+  local phoff phentsize phnum i
+  phoff="$(elf_field "$1" 32 8)"
+  phentsize="$(elf_field "$1" 54 2)"
+  phnum="$(elf_field "$1" 56 2)"
+  { [ "${phnum:-0}" -gt 0 ] && [ "${phentsize:-0}" -ge 56 ]; } || return 1
+  for ((i = 0; i < phnum; i++)); do
+    [ "$(elf_field "$1" $((phoff + i * phentsize)) 4)" != 3 ] || return 1
+  done
+}
+
 # link_into_bin TARGET NAME: symlink in $PREFIX/bin
 link_into_bin() {
   mkdir -p "$PREFIX/bin"

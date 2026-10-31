@@ -2,7 +2,7 @@
 
 `packages/bench` (TypeScript) is the executable spec. This file maps every TS test case to the Rust test that ports it,
 lists what was dropped or changed on purpose, and says how behaviour identity is checked. The setuid launcher
-(`ratchet-candidate-ctr.c`) is ported as the `ratchet-candidate-launcher` binary of this crate; its notes are at the end.
+(formerly `ratchet-candidate-ctr.c`, deleted) is ported as the `ratchet-candidate-launcher` binary of this crate and is what the images install; its notes are at the end.
 
 ## How "behaviour-identical" is verified
 
@@ -31,7 +31,7 @@ the compression at run time and the restore follows the manifest.
 | `remote-image.test.ts` | 28 | 28 (`tests/remote_image.rs`) |
 | `runners.test.ts` | 79 | 78 (`tests/runners.rs`; one TS case was vacuous) |
 | `units.test.ts` | 28 | 28 (`tests/units.rs`) |
-| `infra/tests/src/candidate-launcher.test.ts` | 9 | 8 (7 in `tests/launcher.rs`, the header test in `src/launcher.rs`); the static-compile test is dropped, see below |
+| `infra/tests/src/candidate-launcher.test.ts` (deleted with the C file) | 9 | 8 (7 in `tests/launcher.rs`, the header test in `src/launcher.rs`); the static-compile test is dropped, see below |
 | **Total** | 312 | 310 ported + 2 dropped, plus the Rust-only tests below |
 
 Rust-only: `tests/golden.rs` (12), `tests/snapshots.rs` (6), `tests/properties.rs` (9), unit tests next to the code
@@ -439,7 +439,7 @@ directory that uid 65534 can traverse.
 ## The setuid candidate launcher
 
 `src/launcher.rs` (logic) + `src/bin/ratchet-candidate-launcher.rs` (entry point, configuration path compiled in) port
-`infra/images/scripts/ratchet-candidate-ctr.c`. Same protocol, same exit codes (70 internal, 77 not allowed, 78 refused
+the former `infra/images/scripts/ratchet-candidate-ctr.c`. Same protocol, same exit codes (70 internal, 77 not allowed, 78 refused
 argument, 126 / 127 not executable / not found), same messages (`ratchet-candidate: ...`):
 
 1. read `/ratchet/launcher.conf` with `O_NOFOLLOW`; it must be a regular file, owned by root, not group/other writable; one
@@ -465,11 +465,11 @@ Test seam: `tests/launcher.rs` runs the same `launcher::run` through a second bi
 `launcher-seam` feature (a dev-dependency feature of this crate's own tests), is never built by `cargo build`, and a setuid
 program must not take its configuration path from its caller, which is why the production binary does not.
 
-Build and install (the image build script is NOT changed, see below):
+Build and install (done by CI and the image build, see below):
 
 ```text
-RUSTFLAGS='-C target-feature=+crt-static' cargo build --release -p ratchet-bench --bin ratchet-candidate-launcher \
-    --target x86_64-unknown-linux-gnu        # or aarch64-unknown-linux-gnu
+RUSTFLAGS='-C target-feature=+crt-static' CARGO_PROFILE_RELEASE_STRIP=symbols cargo build --release -p ratchet-bench \
+    --bin ratchet-candidate-launcher --target x86_64-unknown-linux-gnu        # or aarch64-unknown-linux-gnu
 install -d -m 0700 -o root -g root /usr/local/libexec/ratchet
 install -m 4755 -o root -g root target/<triple>/release/ratchet-candidate-launcher \
     /usr/local/libexec/ratchet/ratchet-candidate-ctr
@@ -477,15 +477,27 @@ install -m 4755 -o root -g root target/<triple>/release/ratchet-candidate-launch
 
 The installed name and path (`CANDIDATE_HELPER`) are unchanged, so the generated scripts need no change.
 
-### Swapping the image build
+### The image build swap (done)
 
-`infra/images/scripts/35-candidate-launcher.sh` compiles `ratchet-candidate-ctr.c` with `gcc -static` on the image builder
-(`dnf install gcc glibc-static`, removed again afterwards) and installs it. Replacing that with the Rust binary is not a
-one-line change: the builder would need a Rust toolchain and crates.io access (or a prebuilt artifact from CI copied next to
-the scripts, as `lib.sh` does for nothing else today), and `infra/tests/src/candidate-launcher.test.ts` compiles the C file.
-So the C source, its build script and its TS test are left in place and still produce the shipped binary. To swap:
+All three steps of the swap are done:
 
-1. have CI build the binary with the command above for both architectures and publish it next to the image scripts (or add
-   a Rust toolchain step to the builder);
-2. in `35-candidate-launcher.sh` replace the `dnf`/`gcc` lines by `install -m 4755 -o root -g root <prebuilt> "$dest/ratchet-candidate-ctr"`;
-3. delete `ratchet-candidate-ctr.c` and `infra/tests/src/candidate-launcher.test.ts` (the Rust tests above replace them).
+1. `.github/workflows/images.yml` (job `launcher`) builds the binary with the command above for `x86_64-unknown-linux-gnu`
+   (`ubuntu-24.04`) and `aarch64-unknown-linux-gnu` (native `ubuntu-24.04-arm`), installs it with the image script into a
+   scratch prefix as a check (digest, 4755 root:root in a 0700 directory, exit 77 without a `launcher.conf`), records the
+   SHA-256 and uploads `ratchet-candidate-launcher-x86_64` / `-arm64` (binary + `.sha256`). glibc static-pie, not musl: it is the
+   libc the Rust tests run against, and the launcher does no name-service lookups.
+2. `infra/images/scripts/35-candidate-launcher.sh` no longer compiles anything and no longer installs gcc: Packer uploads the
+   binary (`launcher_binary`, default `infra/images/launcher/ratchet-candidate-launcher-<arch>`) and the script checks the
+   uploaded copy against `launcher_sha256`, requires a native static ELF that names `/ratchet/launcher.conf`, and installs it at the
+   same path, owner and mode as the C program (`/usr/local/libexec/ratchet/ratchet-candidate-ctr`, `root:root` 4755 in a 0700
+   directory). `launcher.conf` itself is still written by the bench step script, as before. `90-verify-bench.sh` checks static-ness
+   with the ELF program headers, not `ldd`: glibc's `ldd` exits 0 ("statically linked") for a static-pie executable, so the old
+   `ldd`-must-fail check would have failed every build.
+3. `ratchet-candidate-ctr.c` and `infra/tests/src/candidate-launcher.test.ts` are deleted. The latter's "compiles statically" test
+   is replaced by `infra/tests/src/launcher-install.test.ts` (the install script against synthetic ELF files: digest, architecture,
+   static, conf path, mode / owner as root) and the CI check on the real binary; its behavior tests live in `tests/launcher.rs`
+   (table above). The `ratchet-sandbox` constants never referred to the C program (`CANDIDATE_LAUNCHER_PATH` is the sudo-launched
+   shell wrapper), so nothing changed there.
+
+Not verified: a real image build (Packer against AWS), and the shipped binary running as setuid inside a bench container on an
+instance; CI executes it on a Linux runner only as root without a configuration.

@@ -1,5 +1,5 @@
 //! ratchet-candidate-launcher: the setuid-root launcher the evaluator harness uses INSIDE a bench container to start a
-//! candidate process as the unprivileged candidate user. Port of `infra/images/scripts/ratchet-candidate-ctr.c`; the binary is
+//! candidate process as the unprivileged candidate user. Port of the former C launcher `infra/images/scripts/ratchet-candidate-ctr.c` (deleted; the images install this binary); the binary is
 //! `src/bin/ratchet-candidate-launcher.rs` and this module is its logic, so that the decisions can be unit tested.
 //!
 //! ```text

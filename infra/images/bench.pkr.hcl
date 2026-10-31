@@ -1,7 +1,8 @@
 # Trusted bench image: what `AwsCloudCompute.launchBenchInstance` boots (LiveOptions.benchImageRef, or found by tag).
 #
 # GENERIC: the Docker engine, the SSM agent, the AWS CLI, zstd, git, iptables, the unprivileged `ratchet-bench` and
-# `ratchet-holdout` users and the setuid launcher the evaluator harness uses inside the repo's container. The repo's
+# `ratchet-holdout` users and the setuid launcher the evaluator harness uses inside the repo's container (the Rust binary
+# `ratchet-candidate-launcher`, built by CI and uploaded here: var.launcher_binary + var.launcher_sha256). The repo's
 # toolchain (node, python, k6, ...) is NOT here: it is the repo's container image (`environment.image`), built once by the
 # dependency/image job, saved to the artifacts bucket and loaded offline on bench instances (docs/real-env/bench.md).
 # Deliberately NOT here either: the `claude`/`codex` CLIs, any model key or token, the ratchet-runner bin, compilers.
@@ -26,7 +27,7 @@ locals {
   # Added by -var host_toolchain=true; `sort` puts them back in numeric order.
   bench_host_scripts  = ["10-node.sh", "30-bench-tools.sh"]
   bench_run_scripts   = sort(concat(local.bench_scripts, var.host_toolchain ? local.bench_host_scripts : []))
-  bench_support_files = ["lib.sh", "versions.sh", "ratchet-candidate-ctr.c"]
+  bench_support_files = ["lib.sh", "versions.sh"]
 
   bench_name = "ratchet-bench${var.host_toolchain ? "-host" : ""}-${var.image_version}-${var.arch}"
   bench_tags = merge(local.common_tags, {
@@ -102,9 +103,21 @@ build {
     destination = "${local.remote_dir}/"
   }
 
+  # The prebuilt launcher, next to the scripts (35-candidate-launcher.sh's default location). `generated` defers the
+  # existence check of the local file from `packer validate` to the build; the script checks its SHA-256 on the builder.
+  provisioner "file" {
+    source      = local.launcher_path
+    destination = "${local.remote_dir}/ratchet-candidate-launcher"
+    generated   = true
+  }
+
   provisioner "shell" {
-    execute_command  = "{{ .Vars }} sudo -n -E bash '{{ .Path }}'"
-    environment_vars = ["RATCHET_DNF_ARGS=${var.dnf_args}", "RATCHET_HOST_TOOLCHAIN=${var.host_toolchain ? 1 : 0}"]
-    inline           = [for s in local.bench_run_scripts : "bash ${local.remote_dir}/${s}"]
+    execute_command = "{{ .Vars }} sudo -n -E bash '{{ .Path }}'"
+    environment_vars = [
+      "RATCHET_DNF_ARGS=${var.dnf_args}",
+      "RATCHET_HOST_TOOLCHAIN=${var.host_toolchain ? 1 : 0}",
+      "RATCHET_LAUNCHER_SHA256=${var.launcher_sha256}",
+    ]
+    inline = [for s in local.bench_run_scripts : "bash ${local.remote_dir}/${s}"]
   }
 }

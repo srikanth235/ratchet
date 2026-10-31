@@ -117,6 +117,22 @@ variable "host_toolchain" {
   description = "Bench image only: also install node, pnpm, k6 and hyperfine on the host, for repos without environment.image (the legacy no-container path). The default image is generic: the toolchain is the repo's container. The result is tagged ratchet:image=bench-host and is never found by the tag lookup."
 }
 
+variable "launcher_binary" {
+  type        = string
+  default     = ""
+  description = "Bench image only: the prebuilt static ratchet-candidate-launcher for var.arch (CI artifact ratchet-candidate-launcher-<arch>, built by .github/workflows/images.yml). Empty: infra/images/launcher/ratchet-candidate-launcher-<arch>. Uploaded to the builder; no compiler is installed there."
+}
+
+variable "launcher_sha256" {
+  type        = string
+  default     = ""
+  description = "Bench image only: SHA-256 (64 hex digits) of launcher_binary, from the CI job's ratchet-candidate-launcher-<arch>.sha256. 35-candidate-launcher.sh checks the uploaded copy against it and fails the build on a mismatch; build.sh fills it in from the .sha256 file next to the binary."
+  validation {
+    condition     = var.launcher_sha256 == "" || can(regex("^[0-9a-fA-F]{64}$", var.launcher_sha256))
+    error_message = "The launcher_sha256 must be 64 hex digits (the SHA-256 of the launcher binary)."
+  }
+}
+
 variable "extra_tags" {
   type        = map(string)
   default     = {}
@@ -136,4 +152,7 @@ locals {
 
   # Where the provisioning scripts land on the builder (the file provisioners upload to here).
   remote_dir = "/tmp/ratchet-image"
+
+  # The prebuilt candidate launcher (bench image): the explicit path, else where `gh run download` / build.sh put it.
+  launcher_path = var.launcher_binary != "" ? var.launcher_binary : "${path.root}/launcher/ratchet-candidate-launcher-${var.arch}"
 }

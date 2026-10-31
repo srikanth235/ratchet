@@ -17,3 +17,6 @@ packages/e2e/artifacts/
 # Rust
 /target
 Cargo.lock
+
+# Prebuilt launcher binaries from CI (infra/images/README.md)
+/infra/images/launcher/

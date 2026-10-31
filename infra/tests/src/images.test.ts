@@ -277,24 +277,61 @@ describe("bench image", () => {
     expect(verify).toContain("docker-init");
     expect(stripComments(read("scripts", "99-cleanup.sh"))).toContain("rm -rf /var/lib/docker");
   });
-  it("installs the setuid launcher in a root-only directory from source, then removes the compiler", () => {
+  it("installs the prebuilt Rust launcher (sha256-checked, setuid root, root-only directory); nothing is compiled on the image", () => {
     const script = stripComments(read("scripts", "35-candidate-launcher.sh"));
-    expect(script).toContain("dnf_install gcc glibc-static");
-    expect(script).toMatch(/gcc -O2 -static -s -Wall -Wextra -Werror/);
+    expect(script).toContain('src="${RATCHET_LAUNCHER_BINARY:-$SCRIPT_DIR/ratchet-candidate-launcher}"');
+    expect(script).toContain('want="${RATCHET_LAUNCHER_SHA256:-}"');
+    expect(script).toContain('verify_sha256 "$bin" "$want"');
+    expect(script).toContain('elf_is_native "$bin"');
+    expect(script).toContain('elf_is_static "$bin"');
     expect(script).toContain('install -d -m 0700 -o root -g root "$dest"');
-    expect(script).toContain('install -m 4755 -o root -g root');
-    expect(script).toContain("dnf remove -y gcc glibc-static");
+    expect(script).toContain('install -m 4755 -o root -g root "$bin" "$dest/ratchet-candidate-ctr"');
+    expect(script).not.toMatch(/\bgcc\b|glibc-static|dnf|\bcargo\b|rustc/);
+    // the digest is checked on the copy that is installed, and before anything is installed
+    expect(script.indexOf("verify_sha256")).toBeGreaterThan(script.indexOf('cp -- "$src" "$bin"'));
+    expect(script.indexOf("verify_sha256")).toBeLessThan(script.indexOf("install -d"));
     // the path and name the bench scripts mount into the container
     const ts = readRepo("packages", "bench", "src", "image-scripts.ts");
     expect(/CANDIDATE_HELPER = '([^']+)'/.exec(ts)![1]).toBe("/usr/local/libexec/ratchet/ratchet-candidate-ctr");
     expect(script).toContain('dest="$PREFIX/libexec/ratchet"');
-    expect(script).toContain("ratchet-candidate-ctr");
+    // the C program and its compile step are gone
+    expect(existsSync(join(scriptsDir, "ratchet-candidate-ctr.c"))).toBe(false);
+    expect(benchSupport).not.toContain("ratchet-candidate-ctr.c");
     const verify = stripComments(read("scripts", "90-verify-bench.sh"));
     expect(verify).toContain("root:root 4755");
     expect(verify).toContain("root:root 700");
     expect(verify).toContain("must be statically linked");
+    expect(verify).toContain("elf_is_static");
+    expect(verify).not.toMatch(/\bldd\b.*\|\|/); // ldd exits 0 for a static-pie executable
+    expect(verify).toContain("must exit 77");
     expect(verify).toMatch(/for c in gcc cc make/);
-    expect(benchSupport).toContain("ratchet-candidate-ctr.c");
+  });
+  it("uploads the launcher and its SHA-256 to the bench builder only, from the CI artifact", () => {
+    // a file provisioner puts it next to the scripts, where 35-candidate-launcher.sh looks by default
+    expect(benchHcl).toMatch(/provisioner "file" \{\s*source\s*=\s*local\.launcher_path\s*destination\s*=\s*"\$\{local\.remote_dir\}\/ratchet-candidate-launcher"/);
+    expect(benchHcl).toContain("RATCHET_LAUNCHER_SHA256=${var.launcher_sha256}");
+    expect(common).toMatch(/variable "launcher_binary"[\s\S]*?default\s*=\s*""/);
+    expect(common).toMatch(/variable "launcher_sha256"[\s\S]*?\[0-9a-fA-F\]\{64\}/);
+    expect(common).toContain("launcher/ratchet-candidate-launcher-${var.arch}");
+    expect(stripComments(runnerHcl)).not.toMatch(/launcher/);
+    // build.sh checks the digest before a builder is launched and hands both variables to Packer
+    const build = read("build.sh");
+    expect(build).toContain("sha256 mismatch");
+    expect(build).toContain('-var "launcher_binary=$bin" -var "launcher_sha256=$got"');
+    expect(readRepo(".gitignore")).toContain("/infra/images/launcher/");
+  });
+  it("builds the launcher in CI as a static binary per architecture, records its SHA-256 and uploads it", () => {
+    const wf = readRepo(".github", "workflows", "images.yml");
+    expect(wf).toContain("RUSTFLAGS: -C target-feature=+crt-static");
+    expect(wf).toContain("--bin ratchet-candidate-launcher");
+    for (const t of ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "ubuntu-24.04-arm"]) expect(wf, t).toContain(t);
+    expect(wf).toContain("sha256sum");
+    expect(wf).toContain("actions/upload-artifact@v4");
+    expect(wf).toContain("name: ratchet-candidate-launcher-${{ matrix.arch }}");
+    // the artifact names are the ones launcher_path / build.sh look for (Packer arch names)
+    expect(wf).toMatch(/arch: x86_64/);
+    expect(wf).toMatch(/arch: arm64/);
+    expect(wf).toContain("infra/images/scripts/35-candidate-launcher.sh");
   });
   it("provides what remote-scripts.ts needs: setpriv, pkill, GNU grep -P, find -printf, iptables and ip6tables", () => {
     const remote = readRepo("packages", "bench", "src", "remote-scripts.ts");

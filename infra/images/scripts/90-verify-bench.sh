@@ -57,7 +57,13 @@ systemctl stop docker docker.socket 2>/dev/null || true
 log "candidate launcher (setuid root, static, root-only directory)"
 [ "$(stat -c '%U:%G %a' "$LAUNCHER")" = "root:root 4755" ] || die "$LAUNCHER must be root:root mode 4755"
 [ "$(stat -c '%U:%G %a' "$(dirname "$LAUNCHER")")" = "root:root 700" ] || die "$(dirname "$LAUNCHER") must be root:root mode 0700"
-if ldd "$LAUNCHER" >/dev/null 2>&1; then die "$LAUNCHER must be statically linked (it runs inside arbitrary images)"; fi
+# Not `ldd`: it exits 0 ("statically linked") for a static-pie executable, which is what the Rust launcher is.
+elf_is_native "$LAUNCHER" || die "$LAUNCHER is not an ELF executable for this machine"
+elf_is_static "$LAUNCHER" || die "$LAUNCHER must be statically linked (it runs inside arbitrary images)"
+# It runs here and refuses: root is not the caller named by a launcher.conf, and the host has none (exit 77).
+launcher_rc=0
+"$LAUNCHER" true >/dev/null 2>&1 || launcher_rc=$?
+[ "$launcher_rc" -eq 77 ] || die "$LAUNCHER without a launcher.conf must exit 77, got $launcher_rc"
 if as_bench "$LAUNCHER" true >/dev/null 2>&1; then die "$BU can execute the launcher on the host"; fi
 for c in gcc cc make; do
   if command -v "$c" >/dev/null; then die "$c must not be on the bench image"; fi
