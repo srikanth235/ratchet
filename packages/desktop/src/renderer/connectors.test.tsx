@@ -85,15 +85,15 @@ describe('Connectors screen', () => {
     const h = installApi({ awsProfiles: profiles, connectionTester: { aws, anthropic: vi.fn(), openai: vi.fn() } as never });
     h.connectors.addAws({ profile: 'acme-prod', region: 'eu-west-1' });
     render(<App initialRoute="settings" />);
-    const li = await waitFor(() => {
-      const r = row('acme-prod');
-      expect(r.getByText('Expired')).toBeTruthy();
-      return r;
+    // A late response of the mount-time connection probe can briefly show the row as Connected again, so click
+    // inside the retry loop: it only goes through once the Sign in button is really there.
+    await waitFor(() => {
+      expect(row('acme-prod').getByText('Expired')).toBeTruthy();
+      fireEvent.click(row('acme-prod').getByRole('button', { name: 'Sign in' }));
     });
-    fireEvent.click(li.getByRole('button', { name: 'Sign in' }));
-    expect(li.getByRole('status').textContent).toContain('aws sso login --profile acme-prod');
+    expect(row('acme-prod').getByRole('status').textContent).toContain('aws sso login --profile acme-prod');
     aws.mockResolvedValue({ ok: true, detail: 'signed in to account 123456789012' } as never);
-    fireEvent.click(li.getByRole('button', { name: 'Check again' }));
+    fireEvent.click(row('acme-prod').getByRole('button', { name: 'Check again' }));
     await waitFor(() => expect(row('acme-prod').getByText('Connected')).toBeTruthy());
   });
 
