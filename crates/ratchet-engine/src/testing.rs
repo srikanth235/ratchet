@@ -603,6 +603,8 @@ pub struct FakeCompute {
     pub stubborn: Mutex<HashSet<String>>,
     pub fail_revoke: Mutex<HashSet<String>>,
     pub fail_delete_secrets: AtomicBool,
+    /// Make `list_tagged` fail (the orphan check cannot run).
+    pub fail_list_tagged: Mutex<Option<PortError>>,
     /// The n-th `launch_runner` call (1-based) never returns (a process that died mid-launch).
     pub hang_launch_at: AtomicUsize,
     launches: AtomicUsize,
@@ -621,6 +623,7 @@ impl FakeCompute {
             stubborn: Mutex::new(HashSet::new()),
             fail_revoke: Mutex::new(HashSet::new()),
             fail_delete_secrets: AtomicBool::new(false),
+            fail_list_tagged: Mutex::new(None),
             hang_launch_at: AtomicUsize::new(0),
             launches: AtomicUsize::new(0),
             n: AtomicUsize::new(0),
@@ -808,6 +811,9 @@ impl CloudCompute for FakeCompute {
         &self,
         optimization_id: Option<&OptimizationId>,
     ) -> PortResult<Vec<InstanceInfo>> {
+        if let Some(e) = lock(&self.fail_list_tagged).clone() {
+            return Err(e);
+        }
         Ok(lock(&self.instances)
             .values()
             .filter(|i| optimization_id.is_none_or(|o| &i.optimization_id == o))
