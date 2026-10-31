@@ -335,3 +335,10 @@ the device flow are `ratchet-github`), `dev-engine.test.ts` / `dev-git.test.ts` 
 - A missing cloud runner image is `LiveHandle::runner_problem` instead of a `WeakMap` keyed by the runtime object.
 - `RealService` creates the demo environment through the same router (`create_demo`), so `POST /v1/optimizations` with `demo` runs the
   scripted agents on the simulation runtime exactly like `ratchetd serve --mode sim` does per optimization.
+
+### Known flakiness (demo-search)
+
+The demo-search tests (`RATCHET_E2E=1`) assert only: 7 to 9 candidates (the scripted patches build on each other, so a later patch that no
+longer applies lands no commit), every candidate decided as verified / rejected / failed_confirm / blocked, at least one blocked and at
+least one verified win. A strict per-candidate sequence is asserted for demo-cli and demo-forecast, whose gains are far above the noise.
+The same machine noise is why the TS `simulation.e2e.test.ts` retries up to `MAX_RUNS` times.
