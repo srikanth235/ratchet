@@ -1906,7 +1906,9 @@ public enum Operations {
             }
         }
     }
-    /// Ask an agent to draft the environment this goal needs (scope none, single or full, resources, checks, cost).
+    /// Ask the setup agent to draft the environment this goal needs (scope none, single or full, resources, checks, cost).
+    /// Answers at once with the draft in status `drafting`; the agent works in the background and `environment-draft`
+    /// events say when it is `ready` (or `failed`).
     ///
     /// - Remark: HTTP `POST /v1/environment-drafts`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/post(createEnvironmentDraft)`.
@@ -2042,6 +2044,108 @@ public enum Operations {
                     }
                 }
             }
+            public struct Conflict: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/environment-drafts/POST/responses/409/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/v1/environment-drafts/POST/responses/409/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.CreateEnvironmentDraft.Output.Conflict.Body
+                /// Creates a new `Conflict`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.CreateEnvironmentDraft.Output.Conflict.Body) {
+                    self.body = body
+                }
+            }
+            /// Something to set up first (sign in, an agent connector)
+            ///
+            /// - Remark: Generated from `#/paths//v1/environment-drafts/post(createEnvironmentDraft)/responses/409`.
+            ///
+            /// HTTP response code: `409 conflict`.
+            case conflict(Operations.CreateEnvironmentDraft.Output.Conflict)
+            /// The associated value of the enum case if `self` is `.conflict`.
+            ///
+            /// - Throws: An error if `self` is not `.conflict`.
+            /// - SeeAlso: `.conflict`.
+            public var conflict: Operations.CreateEnvironmentDraft.Output.Conflict {
+                get throws {
+                    switch self {
+                    case let .conflict(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "conflict",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct NotImplemented: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/environment-drafts/POST/responses/501/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/v1/environment-drafts/POST/responses/501/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.CreateEnvironmentDraft.Output.NotImplemented.Body
+                /// Creates a new `NotImplemented`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.CreateEnvironmentDraft.Output.NotImplemented.Body) {
+                    self.body = body
+                }
+            }
+            /// This engine has no setup agent
+            ///
+            /// - Remark: Generated from `#/paths//v1/environment-drafts/post(createEnvironmentDraft)/responses/501`.
+            ///
+            /// HTTP response code: `501 notImplemented`.
+            case notImplemented(Operations.CreateEnvironmentDraft.Output.NotImplemented)
+            /// The associated value of the enum case if `self` is `.notImplemented`.
+            ///
+            /// - Throws: An error if `self` is not `.notImplemented`.
+            /// - SeeAlso: `.notImplemented`.
+            public var notImplemented: Operations.CreateEnvironmentDraft.Output.NotImplemented {
+                get throws {
+                    switch self {
+                    case let .notImplemented(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "notImplemented",
+                            response: self
+                        )
+                    }
+                }
+            }
             /// Any other failure; `code` says which.
             ///
             /// - Remark: Generated from `#/paths//v1/environment-drafts/post(createEnvironmentDraft)/responses/default`.
@@ -2092,7 +2196,7 @@ public enum Operations {
             }
         }
     }
-    /// One environment draft.
+    /// One environment draft, with the content of its files ("View files").
     ///
     /// - Remark: HTTP `GET /v1/environment-drafts/{id}`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/{id}/get(getEnvironmentDraft)`.
@@ -2214,17 +2318,45 @@ public enum Operations {
                     }
                 }
             }
-            /// No such resource.
+            public struct NotFound: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/environment-drafts/{id}/GET/responses/404/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/v1/environment-drafts/{id}/GET/responses/404/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.GetEnvironmentDraft.Output.NotFound.Body
+                /// Creates a new `NotFound`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.GetEnvironmentDraft.Output.NotFound.Body) {
+                    self.body = body
+                }
+            }
+            /// OK
             ///
             /// - Remark: Generated from `#/paths//v1/environment-drafts/{id}/get(getEnvironmentDraft)/responses/404`.
             ///
             /// HTTP response code: `404 notFound`.
-            case notFound(Components.Responses.NotFound)
+            case notFound(Operations.GetEnvironmentDraft.Output.NotFound)
             /// The associated value of the enum case if `self` is `.notFound`.
             ///
             /// - Throws: An error if `self` is not `.notFound`.
             /// - SeeAlso: `.notFound`.
-            public var notFound: Components.Responses.NotFound {
+            public var notFound: Operations.GetEnvironmentDraft.Output.NotFound {
                 get throws {
                     switch self {
                     case let .notFound(response):
@@ -2287,7 +2419,9 @@ public enum Operations {
             }
         }
     }
-    /// Approve and lock the environment: agents change code only, never the environment. 409 unless every check passed.
+    /// Approve and lock the environment: the files are committed to the protected ref (`mode` `commit`) or proposed as a
+    /// pull request (`pr`, the default), and from then on agents change code only, never the environment. 409 unless
+    /// every check passed (and unless the base `ratchet.yaml` is still the one the draft was made from).
     ///
     /// - Remark: HTTP `POST /v1/environment-drafts/{id}/approval`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/{id}/approval/post(approveEnvironmentDraft)`.
@@ -2321,17 +2455,26 @@ public enum Operations {
                 }
             }
             public var headers: Operations.ApproveEnvironmentDraft.Input.Headers
+            /// - Remark: Generated from `#/paths/v1/environment-drafts/{id}/approval/POST/requestBody`.
+            @frozen public enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/environment-drafts/{id}/approval/POST/requestBody/content/application\/json`.
+                case json(Components.Schemas.ApproveEnvironmentDraftInput)
+            }
+            public var body: Operations.ApproveEnvironmentDraft.Input.Body
             /// Creates a new `Input`.
             ///
             /// - Parameters:
             ///   - path:
             ///   - headers:
+            ///   - body:
             public init(
                 path: Operations.ApproveEnvironmentDraft.Input.Path,
-                headers: Operations.ApproveEnvironmentDraft.Input.Headers = .init()
+                headers: Operations.ApproveEnvironmentDraft.Input.Headers = .init(),
+                body: Operations.ApproveEnvironmentDraft.Input.Body
             ) {
                 self.path = path
                 self.headers = headers
+                self.body = body
             }
         }
         @frozen public enum Output: Sendable, Hashable {
@@ -2381,6 +2524,29 @@ public enum Operations {
                     default:
                         try throwUnexpectedResponseStatus(
                             expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// The request is malformed or a field is invalid (see `fields`).
+            ///
+            /// - Remark: Generated from `#/paths//v1/environment-drafts/{id}/approval/post(approveEnvironmentDraft)/responses/400`.
+            ///
+            /// HTTP response code: `400 badRequest`.
+            case badRequest(Components.Responses.BadRequest)
+            /// The associated value of the enum case if `self` is `.badRequest`.
+            ///
+            /// - Throws: An error if `self` is not `.badRequest`.
+            /// - SeeAlso: `.badRequest`.
+            public var badRequest: Components.Responses.BadRequest {
+                get throws {
+                    switch self {
+                    case let .badRequest(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "badRequest",
                             response: self
                         )
                     }
@@ -2533,7 +2699,8 @@ public enum Operations {
             }
         }
     }
-    /// "Ask for a change" or "Use a smaller setup": the agent revises the draft. 409 once approved.
+    /// "Ask for a change" or "Use a smaller setup": the same agent session continues and the draft is re-validated and
+    /// re-costed. Answers with the draft in status `drafting`; 409 once approved or while it is being drafted.
     ///
     /// - Remark: HTTP `POST /v1/environment-drafts/{id}/revisions`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/{id}/revisions/post(reviseEnvironmentDraft)`.
@@ -2705,6 +2872,57 @@ public enum Operations {
                     default:
                         try throwUnexpectedResponseStatus(
                             expectedStatus: "notFound",
+                            response: self
+                        )
+                    }
+                }
+            }
+            public struct Conflict: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/environment-drafts/{id}/revisions/POST/responses/409/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/v1/environment-drafts/{id}/revisions/POST/responses/409/content/application\/json`.
+                    case json(Components.Schemas.ApiError)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ApiError {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.ReviseEnvironmentDraft.Output.Conflict.Body
+                /// Creates a new `Conflict`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.ReviseEnvironmentDraft.Output.Conflict.Body) {
+                    self.body = body
+                }
+            }
+            /// Approved or being drafted
+            ///
+            /// - Remark: Generated from `#/paths//v1/environment-drafts/{id}/revisions/post(reviseEnvironmentDraft)/responses/409`.
+            ///
+            /// HTTP response code: `409 conflict`.
+            case conflict(Operations.ReviseEnvironmentDraft.Output.Conflict)
+            /// The associated value of the enum case if `self` is `.conflict`.
+            ///
+            /// - Throws: An error if `self` is not `.conflict`.
+            /// - SeeAlso: `.conflict`.
+            public var conflict: Operations.ReviseEnvironmentDraft.Output.Conflict {
+                get throws {
+                    switch self {
+                    case let .conflict(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "conflict",
                             response: self
                         )
                     }

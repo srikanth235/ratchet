@@ -447,7 +447,7 @@ public final class DaemonRatchetClient: RatchetClient {
 
     public func createDraft(_ request: DraftRequest) async throws -> EnvironmentDraft {
         try await providing("drafts") {
-            let input = VM.CreateEnvironmentDraftInput(goal: request.goal, repo: request.repoID)
+            let input = VM.CreateEnvironmentDraftInput(agentConnector: .claudeCode, goal: request.goal, repo: request.repoID)
             let created = try await api.createEnvironmentDraft(body: .json(input)).created.body.json
             await state.markRealDraft(created.id)
             return try await settledDraft(created)
@@ -458,7 +458,7 @@ public final class DaemonRatchetClient: RatchetClient {
 
     public func reviseDraft(id: String, instruction: String) async throws -> EnvironmentDraft {
         try await providing("drafts") {
-            let revised = try await api.reviseEnvironmentDraft(path: .init(id: id), body: .json(.init(request: instruction))).ok.body.json
+            let revised = try await api.reviseEnvironmentDraft(path: .init(id: id), body: .json(.init(message: instruction))).ok.body.json
             return try await settledDraft(revised)
         } sample: {
             try await fallback.reviseDraft(id: id, instruction: instruction)
@@ -467,7 +467,7 @@ public final class DaemonRatchetClient: RatchetClient {
 
     public func approveDraft(id: String) async throws -> EnvironmentDraft {
         try await providing("drafts") {
-            DaemonMapping.draft(try await api.approveEnvironmentDraft(path: .init(id: id)).ok.body.json)
+            DaemonMapping.draft(try await api.approveEnvironmentDraft(path: .init(id: id), body: .json(.init())).ok.body.json)
         } sample: {
             try await fallback.approveDraft(id: id)
         }
@@ -478,14 +478,14 @@ public final class DaemonRatchetClient: RatchetClient {
     private func settledDraft(_ first: VM.EnvironmentDraftVm) async throws -> EnvironmentDraft {
         var draft = first
         var polls = 0
-        while draft.status == .drafting || draft.status == .revising {
+        while draft.status == .drafting {
             polls += 1
             guard polls <= 300 else { throw RatchetClientError.unavailable("Drafting the environment is taking too long.") }
             try await Task.sleep(for: .seconds(1))
             draft = try await api.getEnvironmentDraft(path: .init(id: draft.id)).ok.body.json
         }
         if draft.status == .failed {
-            throw RatchetClientError.unavailable(draft.rationale.isEmpty ? "The environment could not be drafted." : draft.rationale)
+            throw RatchetClientError.unavailable(draft.error ?? "The environment could not be drafted.")
         }
         return DaemonMapping.draft(draft)
     }

@@ -525,7 +525,7 @@ extension Components {
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case4/agentId`.
                 public var agentId: Swift.String
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case4/event`.
-                public var event: Components.Schemas.AgentEventVm?
+                public var event: Components.Schemas.AgentEventVm
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case4/optimizationId`.
                 public var optimizationId: Swift.String
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case4/type`.
@@ -543,7 +543,7 @@ extension Components {
                 ///   - _type:
                 public init(
                     agentId: Swift.String,
-                    event: Components.Schemas.AgentEventVm? = nil,
+                    event: Components.Schemas.AgentEventVm,
                     optimizationId: Swift.String,
                     _type: Components.Schemas.ApiEvent.Case4Payload._TypePayload
                 ) {
@@ -819,14 +819,23 @@ extension Components {
             ///
             /// - Remark: Generated from `#/components/schemas/ApiEvent/case10`.
             case case10(Components.Schemas.ApiEvent.Case10Payload)
-            /// Provisional: an environment draft changed status.
+            /// An environment draft changed status, or its agent reported progress (`phase` and `text`, the same strings as the
+            /// TypeScript `EnvironmentDraftProgress`).
             ///
             /// - Remark: Generated from `#/components/schemas/ApiEvent/case11`.
             public struct Case11Payload: Codable, Hashable, Sendable {
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case11/draftId`.
                 public var draftId: Swift.String
+                /// - Remark: Generated from `#/components/schemas/ApiEvent/case11/phase`.
+                public var phase: Components.Schemas.EnvironmentDraftPhase?
+                /// 0 while the first draft is being made.
+                ///
+                /// - Remark: Generated from `#/components/schemas/ApiEvent/case11/revision`.
+                public var revision: Swift.Int32
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case11/status`.
                 public var status: Components.Schemas.EnvironmentDraftStatus
+                /// - Remark: Generated from `#/components/schemas/ApiEvent/case11/text`.
+                public var text: Swift.String?
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case11/type`.
                 @frozen public enum _TypePayload: String, Codable, Hashable, Sendable, CaseIterable {
                     case environmentDraft = "environment-draft"
@@ -837,24 +846,37 @@ extension Components {
                 ///
                 /// - Parameters:
                 ///   - draftId:
+                ///   - phase:
+                ///   - revision: 0 while the first draft is being made.
                 ///   - status:
+                ///   - text:
                 ///   - _type:
                 public init(
                     draftId: Swift.String,
+                    phase: Components.Schemas.EnvironmentDraftPhase? = nil,
+                    revision: Swift.Int32,
                     status: Components.Schemas.EnvironmentDraftStatus,
+                    text: Swift.String? = nil,
                     _type: Components.Schemas.ApiEvent.Case11Payload._TypePayload
                 ) {
                     self.draftId = draftId
+                    self.phase = phase
+                    self.revision = revision
                     self.status = status
+                    self.text = text
                     self._type = _type
                 }
                 public enum CodingKeys: String, CodingKey {
                     case draftId
+                    case phase
+                    case revision
                     case status
+                    case text
                     case _type = "type"
                 }
             }
-            /// Provisional: an environment draft changed status.
+            /// An environment draft changed status, or its agent reported progress (`phase` and `text`, the same strings as the
+            /// TypeScript `EnvironmentDraftProgress`).
             ///
             /// - Remark: Generated from `#/components/schemas/ApiEvent/case11`.
             case case11(Components.Schemas.ApiEvent.Case11Payload)
@@ -865,7 +887,7 @@ extension Components {
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case12/connectorId`.
                 public var connectorId: Swift.String
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case12/status`.
-                public var status: Components.Schemas.ConnectorStatus?
+                public var status: Components.Schemas.ConnectorStatus
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case12/type`.
                 @frozen public enum _TypePayload: String, Codable, Hashable, Sendable, CaseIterable {
                     case connector = "connector"
@@ -880,7 +902,7 @@ extension Components {
                 ///   - _type:
                 public init(
                     connectorId: Swift.String,
-                    status: Components.Schemas.ConnectorStatus? = nil,
+                    status: Components.Schemas.ConnectorStatus,
                     _type: Components.Schemas.ApiEvent.Case12Payload._TypePayload
                 ) {
                     self.connectorId = connectorId
@@ -1045,6 +1067,23 @@ extension Components {
                 case let .case13(value):
                     try value.encode(to: encoder)
                 }
+            }
+        }
+        /// `POST /v1/environment-drafts/{id}/approval`. The body is optional.
+        ///
+        /// - Remark: Generated from `#/components/schemas/ApproveEnvironmentDraftInput`.
+        public struct ApproveEnvironmentDraftInput: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ApproveEnvironmentDraftInput/mode`.
+            public var mode: Components.Schemas.EnvironmentApprovalMode?
+            /// Creates a new `ApproveEnvironmentDraftInput`.
+            ///
+            /// - Parameters:
+            ///   - mode:
+            public init(mode: Components.Schemas.EnvironmentApprovalMode? = nil) {
+                self.mode = mode
+            }
+            public enum CodingKeys: String, CodingKey {
+                case mode
             }
         }
         /// - Remark: Generated from `#/components/schemas/AwsConnectorAuth`.
@@ -1279,12 +1318,6 @@ extension Components {
                 case verdict
                 case vsBaselinePct
             }
-        }
-        /// - Remark: Generated from `#/components/schemas/CheckState`.
-        @frozen public enum CheckState: String, Codable, Hashable, Sendable, CaseIterable {
-            case ok = "ok"
-            case warn = "warn"
-            case fail = "fail"
         }
         /// One row of "Baseline vs best" / "Before and after".
         ///
@@ -1857,43 +1890,77 @@ extension Components {
         ///
         /// - Remark: Generated from `#/components/schemas/CreateEnvironmentDraftInput`.
         public struct CreateEnvironmentDraftInput: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/CreateEnvironmentDraftInput/agent`.
-            public var agent: Components.Schemas.AgentKind?
+            /// The user's agent connector that does the drafting (their own login, run on this machine).
+            ///
+            /// - Remark: Generated from `#/components/schemas/CreateEnvironmentDraftInput/agentConnector`.
+            public var agentConnector: Components.Schemas.AgentKind
+            /// The AWS profile selected in Settings: `tofu plan` is checked against that account.
+            ///
+            /// - Remark: Generated from `#/components/schemas/CreateEnvironmentDraftInput/awsProfile`.
+            public var awsProfile: Swift.String?
+            /// The protected ref the files are committed to / the PR targets. Default `main`.
+            ///
             /// - Remark: Generated from `#/components/schemas/CreateEnvironmentDraftInput/baseRef`.
             public var baseRef: Swift.String?
+            /// Path of the config inside the repo (default `ratchet.yaml`).
+            ///
+            /// - Remark: Generated from `#/components/schemas/CreateEnvironmentDraftInput/configPath`.
+            public var configPath: Swift.String?
+            /// What the user wants optimized, in their words.
+            ///
             /// - Remark: Generated from `#/components/schemas/CreateEnvironmentDraftInput/goal`.
             public var goal: Swift.String
+            /// Region of the sandbox (default: `environment.region` of ratchet.yaml, else the default region).
+            ///
+            /// - Remark: Generated from `#/components/schemas/CreateEnvironmentDraftInput/region`.
+            public var region: Swift.String?
+            /// The repository: `owner/name` or its GitHub URL.
+            ///
             /// - Remark: Generated from `#/components/schemas/CreateEnvironmentDraftInput/repo`.
             public var repo: Swift.String
-            /// - Remark: Generated from `#/components/schemas/CreateEnvironmentDraftInput/scope`.
-            public var scope: Components.Schemas.EnvScope?
+            /// The run's time limit, for the cost estimate (default 2 h).
+            ///
+            /// - Remark: Generated from `#/components/schemas/CreateEnvironmentDraftInput/timeLimitSeconds`.
+            public var timeLimitSeconds: Swift.Double?
             /// Creates a new `CreateEnvironmentDraftInput`.
             ///
             /// - Parameters:
-            ///   - agent:
-            ///   - baseRef:
-            ///   - goal:
-            ///   - repo:
-            ///   - scope:
+            ///   - agentConnector: The user's agent connector that does the drafting (their own login, run on this machine).
+            ///   - awsProfile: The AWS profile selected in Settings: `tofu plan` is checked against that account.
+            ///   - baseRef: The protected ref the files are committed to / the PR targets. Default `main`.
+            ///   - configPath: Path of the config inside the repo (default `ratchet.yaml`).
+            ///   - goal: What the user wants optimized, in their words.
+            ///   - region: Region of the sandbox (default: `environment.region` of ratchet.yaml, else the default region).
+            ///   - repo: The repository: `owner/name` or its GitHub URL.
+            ///   - timeLimitSeconds: The run's time limit, for the cost estimate (default 2 h).
             public init(
-                agent: Components.Schemas.AgentKind? = nil,
+                agentConnector: Components.Schemas.AgentKind,
+                awsProfile: Swift.String? = nil,
                 baseRef: Swift.String? = nil,
+                configPath: Swift.String? = nil,
                 goal: Swift.String,
+                region: Swift.String? = nil,
                 repo: Swift.String,
-                scope: Components.Schemas.EnvScope? = nil
+                timeLimitSeconds: Swift.Double? = nil
             ) {
-                self.agent = agent
+                self.agentConnector = agentConnector
+                self.awsProfile = awsProfile
                 self.baseRef = baseRef
+                self.configPath = configPath
                 self.goal = goal
+                self.region = region
                 self.repo = repo
-                self.scope = scope
+                self.timeLimitSeconds = timeLimitSeconds
             }
             public enum CodingKeys: String, CodingKey {
-                case agent
+                case agentConnector
+                case awsProfile
                 case baseRef
+                case configPath
                 case goal
+                case region
                 case repo
-                case scope
+                case timeLimitSeconds
             }
         }
         /// `POST /v1/optimizations`.
@@ -2174,37 +2241,6 @@ extension Components {
             case minimize = "minimize"
             case maximize = "maximize"
         }
-        /// Who drafted it and what that cost ("Drafted by Claude Code from the repo and your goal, 2 min, $0.31").
-        ///
-        /// - Remark: Generated from `#/components/schemas/DraftProvenance`.
-        public struct DraftProvenance: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/DraftProvenance/agent`.
-            public var agent: Components.Schemas.AgentKind
-            /// - Remark: Generated from `#/components/schemas/DraftProvenance/costUsd`.
-            public var costUsd: Swift.Double
-            /// - Remark: Generated from `#/components/schemas/DraftProvenance/durationS`.
-            public var durationS: Swift.Int32
-            /// Creates a new `DraftProvenance`.
-            ///
-            /// - Parameters:
-            ///   - agent:
-            ///   - costUsd:
-            ///   - durationS:
-            public init(
-                agent: Components.Schemas.AgentKind,
-                costUsd: Swift.Double,
-                durationS: Swift.Int32
-            ) {
-                self.agent = agent
-                self.costUsd = costUsd
-                self.durationS = durationS
-            }
-            public enum CodingKeys: String, CodingKey {
-                case agent
-                case costUsd
-                case durationS
-            }
-        }
         /// Which engine answers.
         ///
         /// - Remark: Generated from `#/components/schemas/EngineInfo`.
@@ -2235,281 +2271,343 @@ extension Components {
             case sim = "sim"
             case real = "real"
         }
-        /// One of Ratchet's checks on a draft: isolated, results sealed, same hardware every time, full teardown.
+        /// - Remark: Generated from `#/components/schemas/EnvironmentApprovalMode`.
+        @frozen public enum EnvironmentApprovalMode: String, Codable, Hashable, Sendable, CaseIterable {
+            case commit = "commit"
+            case pr = "pr"
+        }
+        /// Where the approved files went.
         ///
-        /// - Remark: Generated from `#/components/schemas/EnvCheck`.
-        public struct EnvCheck: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/EnvCheck/detail`.
-            public var detail: Swift.String
-            /// - Remark: Generated from `#/components/schemas/EnvCheck/id`.
-            public var id: Swift.String
-            /// - Remark: Generated from `#/components/schemas/EnvCheck/label`.
-            public var label: Swift.String
-            /// - Remark: Generated from `#/components/schemas/EnvCheck/state`.
-            public var state: Components.Schemas.CheckState
-            /// Creates a new `EnvCheck`.
+        /// - Remark: Generated from `#/components/schemas/EnvironmentApprovalVm`.
+        public struct EnvironmentApprovalVm: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/EnvironmentApprovalVm/at`.
+            public var at: Swift.Int64
+            /// `pr` only.
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentApprovalVm/branch`.
+            public var branch: Swift.String?
+            /// Repo paths written.
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentApprovalVm/files`.
+            public var files: [Swift.String]
+            /// Always true: the environment is locked from here (for `pr`: once the PR is merged), a candidate that touches it
+            /// is blocked.
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentApprovalVm/locked`.
+            public var locked: Swift.Bool
+            /// - Remark: Generated from `#/components/schemas/EnvironmentApprovalVm/mode`.
+            public var mode: Components.Schemas.EnvironmentApprovalMode
+            /// `pr` only: "Open as PR".
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentApprovalVm/prUrl`.
+            public var prUrl: Swift.String?
+            /// The commit holding the files (on the base ref for `commit`, on `branch` for `pr`).
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentApprovalVm/sha`.
+            public var sha: Swift.String
+            /// Creates a new `EnvironmentApprovalVm`.
             ///
             /// - Parameters:
-            ///   - detail:
+            ///   - at:
+            ///   - branch: `pr` only.
+            ///   - files: Repo paths written.
+            ///   - locked: Always true: the environment is locked from here (for `pr`: once the PR is merged), a candidate that touches it
+            ///   - mode:
+            ///   - prUrl: `pr` only: "Open as PR".
+            ///   - sha: The commit holding the files (on the base ref for `commit`, on `branch` for `pr`).
+            public init(
+                at: Swift.Int64,
+                branch: Swift.String? = nil,
+                files: [Swift.String],
+                locked: Swift.Bool,
+                mode: Components.Schemas.EnvironmentApprovalMode,
+                prUrl: Swift.String? = nil,
+                sha: Swift.String
+            ) {
+                self.at = at
+                self.branch = branch
+                self.files = files
+                self.locked = locked
+                self.mode = mode
+                self.prUrl = prUrl
+                self.sha = sha
+            }
+            public enum CodingKeys: String, CodingKey {
+                case at
+                case branch
+                case files
+                case locked
+                case mode
+                case prUrl
+                case sha
+            }
+        }
+        /// One of Ratchet's checks on a draft: isolated, results sealed, same hardware every time, full teardown, ...
+        ///
+        /// - Remark: Generated from `#/components/schemas/EnvironmentCheckVm`.
+        public struct EnvironmentCheckVm: Codable, Hashable, Sendable {
+            /// Why it passed or failed, one line.
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentCheckVm/detail`.
+            public var detail: Swift.String
+            /// - Remark: Generated from `#/components/schemas/EnvironmentCheckVm/id`.
+            public var id: Swift.String
+            /// Plain words for the UI.
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentCheckVm/label`.
+            public var label: Swift.String
+            /// - Remark: Generated from `#/components/schemas/EnvironmentCheckVm/ok`.
+            public var ok: Swift.Bool
+            /// Creates a new `EnvironmentCheckVm`.
+            ///
+            /// - Parameters:
+            ///   - detail: Why it passed or failed, one line.
             ///   - id:
-            ///   - label:
-            ///   - state:
+            ///   - label: Plain words for the UI.
+            ///   - ok:
             public init(
                 detail: Swift.String,
                 id: Swift.String,
                 label: Swift.String,
-                state: Components.Schemas.CheckState
+                ok: Swift.Bool
             ) {
                 self.detail = detail
                 self.id = id
                 self.label = label
-                self.state = state
+                self.ok = ok
             }
             public enum CodingKeys: String, CodingKey {
                 case detail
                 case id
                 case label
-                case state
+                case ok
             }
         }
-        /// - Remark: Generated from `#/components/schemas/EnvCost`.
-        public struct EnvCost: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/EnvCost/estimatedRunUsd`.
-            public var estimatedRunUsd: Swift.Double
-            /// - Remark: Generated from `#/components/schemas/EnvCost/hourlyUsd`.
-            public var hourlyUsd: Swift.Double
-            /// "ready in ~6 min"
+        /// - Remark: Generated from `#/components/schemas/EnvironmentCostVm`.
+        public struct EnvironmentCostVm: Codable, Hashable, Sendable {
+            /// `usd_per_hour x (run hours + start-up)` for the run's time limit.
             ///
-            /// - Remark: Generated from `#/components/schemas/EnvCost/readyMinutes`.
-            public var readyMinutes: Swift.Int32
-            /// "about $1.18 for a 2 h run"
+            /// - Remark: Generated from `#/components/schemas/EnvironmentCostVm/estimateForRunUsd`.
+            public var estimateForRunUsd: Swift.Double
+            /// Minutes until the environment is ready to measure.
             ///
-            /// - Remark: Generated from `#/components/schemas/EnvCost/runHours`.
-            public var runHours: Swift.Double
-            /// Creates a new `EnvCost`.
+            /// - Remark: Generated from `#/components/schemas/EnvironmentCostVm/startupMinutes`.
+            public var startupMinutes: Swift.Int32
+            /// Sum of the resources' hourly prices (excludes the sandbox's fixed private-network cost, ~$0.04/h).
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentCostVm/usdPerHour`.
+            public var usdPerHour: Swift.Double
+            /// Creates a new `EnvironmentCostVm`.
             ///
             /// - Parameters:
-            ///   - estimatedRunUsd:
-            ///   - hourlyUsd:
-            ///   - readyMinutes: "ready in ~6 min"
-            ///   - runHours: "about $1.18 for a 2 h run"
+            ///   - estimateForRunUsd: `usd_per_hour x (run hours + start-up)` for the run's time limit.
+            ///   - startupMinutes: Minutes until the environment is ready to measure.
+            ///   - usdPerHour: Sum of the resources' hourly prices (excludes the sandbox's fixed private-network cost, ~$0.04/h).
             public init(
-                estimatedRunUsd: Swift.Double,
-                hourlyUsd: Swift.Double,
-                readyMinutes: Swift.Int32,
-                runHours: Swift.Double
+                estimateForRunUsd: Swift.Double,
+                startupMinutes: Swift.Int32,
+                usdPerHour: Swift.Double
             ) {
-                self.estimatedRunUsd = estimatedRunUsd
-                self.hourlyUsd = hourlyUsd
-                self.readyMinutes = readyMinutes
-                self.runHours = runHours
+                self.estimateForRunUsd = estimateForRunUsd
+                self.startupMinutes = startupMinutes
+                self.usdPerHour = usdPerHour
             }
             public enum CodingKeys: String, CodingKey {
-                case estimatedRunUsd
-                case hourlyUsd
-                case readyMinutes
-                case runHours
+                case estimateForRunUsd
+                case startupMinutes
+                case usdPerHour
             }
         }
-        /// One thing the environment creates (a row of "What gets created").
+        /// What a machine of the environment does (the `role` of the base module's `machines` map).
+        /// Which step an environment draft is in while its agent works.
         ///
-        /// - Remark: Generated from `#/components/schemas/EnvResource`.
-        public struct EnvResource: Codable, Hashable, Sendable {
-            /// "shop-api in the repo's container".
-            ///
-            /// - Remark: Generated from `#/components/schemas/EnvResource/description`.
-            public var description: Swift.String
-            /// - Remark: Generated from `#/components/schemas/EnvResource/hourlyUsd`.
-            public var hourlyUsd: Swift.Double
-            /// - Remark: Generated from `#/components/schemas/EnvResource/id`.
-            public var id: Swift.String
-            /// Instance type, "c7i.2xlarge".
-            ///
-            /// - Remark: Generated from `#/components/schemas/EnvResource/machine`.
-            public var machine: Swift.String
-            /// "API", "Postgres 16".
-            ///
-            /// - Remark: Generated from `#/components/schemas/EnvResource/name`.
-            public var name: Swift.String
-            /// Creates a new `EnvResource`.
-            ///
-            /// - Parameters:
-            ///   - description: "shop-api in the repo's container".
-            ///   - hourlyUsd:
-            ///   - id:
-            ///   - machine: Instance type, "c7i.2xlarge".
-            ///   - name: "API", "Postgres 16".
-            public init(
-                description: Swift.String,
-                hourlyUsd: Swift.Double,
-                id: Swift.String,
-                machine: Swift.String,
-                name: Swift.String
-            ) {
-                self.description = description
-                self.hourlyUsd = hourlyUsd
-                self.id = id
-                self.machine = machine
-                self.name = name
-            }
-            public enum CodingKeys: String, CodingKey {
-                case description
-                case hourlyUsd
-                case id
-                case machine
-                case name
-            }
-        }
-        /// How much environment the task needs. `none`: the evaluator runs on the host as is; `single`: one machine;
-        /// `full`: several services (API + database + cache + load generator).
-        ///
-        /// - Remark: Generated from `#/components/schemas/EnvScope`.
-        @frozen public enum EnvScope: String, Codable, Hashable, Sendable, CaseIterable {
-            case none = "none"
-            case single = "single"
-            case full = "full"
+        /// - Remark: Generated from `#/components/schemas/EnvironmentDraftPhase`.
+        @frozen public enum EnvironmentDraftPhase: String, Codable, Hashable, Sendable, CaseIterable {
+            case reading = "reading"
+            case drafting = "drafting"
+            case validating = "validating"
+            case done = "done"
+            case failed = "failed"
         }
         /// - Remark: Generated from `#/components/schemas/EnvironmentDraftStatus`.
         @frozen public enum EnvironmentDraftStatus: String, Codable, Hashable, Sendable, CaseIterable {
             case drafting = "drafting"
             case ready = "ready"
-            case revising = "revising"
-            case approved = "approved"
             case failed = "failed"
+            case approved = "approved"
         }
+        /// A draft and where it stands in the draft / revise / approve loop.
+        ///
         /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm`.
         public struct EnvironmentDraftVm: Codable, Hashable, Sendable {
-            /// Set once approved (the environment is locked from then on).
+            /// Set once approved.
             ///
-            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/approvedAt`.
-            public var approvedAt: Swift.Int64?
+            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/approval`.
+            public var approval: Components.Schemas.EnvironmentApprovalVm?
+            /// The AWS profile `tofu plan` is checked against.
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/awsProfile`.
+            public var awsProfile: Swift.String?
             /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/baseRef`.
             public var baseRef: Swift.String
-            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/checks`.
-            public var checks: [Components.Schemas.EnvCheck]
-            /// All checks passed ("Passed Ratchet's checks"): required to approve.
-            ///
-            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/checksPassed`.
-            public var checksPassed: Swift.Bool
-            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/cost`.
-            public var cost: Components.Schemas.EnvCost
             /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/createdAt`.
             public var createdAt: Swift.Int64
-            /// File paths only; read them with `GET /v1/environment-drafts/{id}/files`.
+            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/draft`.
+            public var draft: Components.Schemas.EnvironmentProposalVm?
+            /// Why drafting (or the last revision) failed.
             ///
-            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/filePaths`.
-            public var filePaths: [Swift.String]
+            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/error`.
+            public var error: Swift.String?
             /// The goal the user typed ("Make checkout p95 faster").
             ///
             /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/goal`.
             public var goal: Swift.String
             /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/id`.
             public var id: Swift.String
-            /// "Open as PR": the pull request that adds the environment files to the repo.
+            /// The user's change requests and the agent's replies.
             ///
-            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/prUrl`.
-            public var prUrl: Swift.String?
-            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/provenance`.
-            public var provenance: Components.Schemas.DraftProvenance
-            /// The note under it: why this much environment, and the "Use a smaller setup" hint.
-            ///
-            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/rationale`.
-            public var rationale: Swift.String
+            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/messages`.
+            public var messages: [Components.Schemas.EnvironmentMessageVm]
+            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/region`.
+            public var region: Swift.String
             /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/repo`.
             public var repo: Swift.String
-            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/resources`.
-            public var resources: [Components.Schemas.EnvResource]
-            /// Starts at 1, +1 per revision.
+            /// 1 for the first draft, +1 for every revision; 0 while the first draft is being made.
             ///
             /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/revision`.
             public var revision: Swift.Int32
-            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/scope`.
-            public var scope: Components.Schemas.EnvScope
             /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/status`.
             public var status: Components.Schemas.EnvironmentDraftStatus
-            /// The serif quote: "This task needs the full stack: the API, Postgres with seeded orders, ...".
-            ///
-            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/summary`.
-            public var summary: Swift.String
+            /// - Remark: Generated from `#/components/schemas/EnvironmentDraftVm/updatedAt`.
+            public var updatedAt: Swift.Int64
             /// Creates a new `EnvironmentDraftVm`.
             ///
             /// - Parameters:
-            ///   - approvedAt: Set once approved (the environment is locked from then on).
+            ///   - approval: Set once approved.
+            ///   - awsProfile: The AWS profile `tofu plan` is checked against.
             ///   - baseRef:
-            ///   - checks:
-            ///   - checksPassed: All checks passed ("Passed Ratchet's checks"): required to approve.
-            ///   - cost:
             ///   - createdAt:
-            ///   - filePaths: File paths only; read them with `GET /v1/environment-drafts/{id}/files`.
+            ///   - draft:
+            ///   - error: Why drafting (or the last revision) failed.
             ///   - goal: The goal the user typed ("Make checkout p95 faster").
             ///   - id:
-            ///   - prUrl: "Open as PR": the pull request that adds the environment files to the repo.
-            ///   - provenance:
-            ///   - rationale: The note under it: why this much environment, and the "Use a smaller setup" hint.
+            ///   - messages: The user's change requests and the agent's replies.
+            ///   - region:
             ///   - repo:
-            ///   - resources:
-            ///   - revision: Starts at 1, +1 per revision.
-            ///   - scope:
+            ///   - revision: 1 for the first draft, +1 for every revision; 0 while the first draft is being made.
             ///   - status:
-            ///   - summary: The serif quote: "This task needs the full stack: the API, Postgres with seeded orders, ...".
+            ///   - updatedAt:
             public init(
-                approvedAt: Swift.Int64? = nil,
+                approval: Components.Schemas.EnvironmentApprovalVm? = nil,
+                awsProfile: Swift.String? = nil,
                 baseRef: Swift.String,
-                checks: [Components.Schemas.EnvCheck],
-                checksPassed: Swift.Bool,
-                cost: Components.Schemas.EnvCost,
                 createdAt: Swift.Int64,
-                filePaths: [Swift.String],
+                draft: Components.Schemas.EnvironmentProposalVm? = nil,
+                error: Swift.String? = nil,
                 goal: Swift.String,
                 id: Swift.String,
-                prUrl: Swift.String? = nil,
-                provenance: Components.Schemas.DraftProvenance,
-                rationale: Swift.String,
+                messages: [Components.Schemas.EnvironmentMessageVm],
+                region: Swift.String,
                 repo: Swift.String,
-                resources: [Components.Schemas.EnvResource],
                 revision: Swift.Int32,
-                scope: Components.Schemas.EnvScope,
                 status: Components.Schemas.EnvironmentDraftStatus,
-                summary: Swift.String
+                updatedAt: Swift.Int64
             ) {
-                self.approvedAt = approvedAt
+                self.approval = approval
+                self.awsProfile = awsProfile
                 self.baseRef = baseRef
-                self.checks = checks
-                self.checksPassed = checksPassed
-                self.cost = cost
                 self.createdAt = createdAt
-                self.filePaths = filePaths
+                self.draft = draft
+                self.error = error
                 self.goal = goal
                 self.id = id
-                self.prUrl = prUrl
-                self.provenance = provenance
-                self.rationale = rationale
+                self.messages = messages
+                self.region = region
                 self.repo = repo
-                self.resources = resources
                 self.revision = revision
-                self.scope = scope
                 self.status = status
-                self.summary = summary
+                self.updatedAt = updatedAt
             }
             public enum CodingKeys: String, CodingKey {
-                case approvedAt
+                case approval
+                case awsProfile
                 case baseRef
-                case checks
-                case checksPassed
-                case cost
                 case createdAt
-                case filePaths
+                case draft
+                case error
                 case goal
                 case id
-                case prUrl
-                case provenance
-                case rationale
+                case messages
+                case region
                 case repo
-                case resources
                 case revision
-                case scope
                 case status
-                case summary
+                case updatedAt
+            }
+        }
+        /// A file of the draft: `ratchet.yaml`, or a file under `infra/ratchet/` (OpenTofu, Dockerfile, seed script).
+        ///
+        /// - Remark: Generated from `#/components/schemas/EnvironmentFileVm`.
+        public struct EnvironmentFileVm: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/EnvironmentFileVm/content`.
+            public var content: Swift.String
+            /// Repo-relative POSIX path.
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentFileVm/path`.
+            public var path: Swift.String
+            /// Creates a new `EnvironmentFileVm`.
+            ///
+            /// - Parameters:
+            ///   - content:
+            ///   - path: Repo-relative POSIX path.
+            public init(
+                content: Swift.String,
+                path: Swift.String
+            ) {
+                self.content = content
+                self.path = path
+            }
+            public enum CodingKeys: String, CodingKey {
+                case content
+                case path
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/EnvironmentMessageFrom`.
+        @frozen public enum EnvironmentMessageFrom: String, Codable, Hashable, Sendable, CaseIterable {
+            case user = "user"
+            case agent = "agent"
+        }
+        /// One turn of the revise loop.
+        ///
+        /// - Remark: Generated from `#/components/schemas/EnvironmentMessageVm`.
+        public struct EnvironmentMessageVm: Codable, Hashable, Sendable {
+            /// Epoch ms.
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentMessageVm/at`.
+            public var at: Swift.Int64
+            /// - Remark: Generated from `#/components/schemas/EnvironmentMessageVm/from`.
+            public var from: Components.Schemas.EnvironmentMessageFrom
+            /// - Remark: Generated from `#/components/schemas/EnvironmentMessageVm/text`.
+            public var text: Swift.String
+            /// Creates a new `EnvironmentMessageVm`.
+            ///
+            /// - Parameters:
+            ///   - at: Epoch ms.
+            ///   - from:
+            ///   - text:
+            public init(
+                at: Swift.Int64,
+                from: Components.Schemas.EnvironmentMessageFrom,
+                text: Swift.String
+            ) {
+                self.at = at
+                self.from = from
+                self.text = text
+            }
+            public enum CodingKeys: String, CodingKey {
+                case at
+                case from
+                case text
             }
         }
         /// Phase of an environment (sandbox) as seen from outside. `none`: the ledger has it, nothing reported a phase.
@@ -2523,6 +2621,152 @@ extension Components {
             case destroying = "destroying"
             case destroyed = "destroyed"
             case failed = "failed"
+        }
+        /// What the setup agent proposed, as "New optimization > Environment" shows it.
+        ///
+        /// - Remark: Generated from `#/components/schemas/EnvironmentProposalVm`.
+        public struct EnvironmentProposalVm: Codable, Hashable, Sendable {
+            /// Which connector drafted it.
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentProposalVm/agent`.
+            public var agent: Components.Schemas.AgentKind
+            /// - Remark: Generated from `#/components/schemas/EnvironmentProposalVm/checks`.
+            public var checks: [Components.Schemas.EnvironmentCheckVm]
+            /// - Remark: Generated from `#/components/schemas/EnvironmentProposalVm/cost`.
+            public var cost: Components.Schemas.EnvironmentCostVm
+            /// How long drafting took, seconds (all revisions).
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentProposalVm/durationS`.
+            public var durationS: Swift.Int64
+            /// What would be committed: `ratchet.yaml` plus the files under `infra/ratchet/`, with their content ("View files").
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentProposalVm/files`.
+            public var files: [Components.Schemas.EnvironmentFileVm]
+            /// Why this scope, in a sentence or two.
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentProposalVm/reason`.
+            public var reason: Swift.String
+            /// - Remark: Generated from `#/components/schemas/EnvironmentProposalVm/resources`.
+            public var resources: [Components.Schemas.EnvironmentResourceVm]
+            /// - Remark: Generated from `#/components/schemas/EnvironmentProposalVm/scope`.
+            public var scope: Components.Schemas.EnvironmentScope
+            /// What the setup agent cost in model tokens, USD (all revisions).
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentProposalVm/usdSpent`.
+            public var usdSpent: Swift.Double
+            /// Creates a new `EnvironmentProposalVm`.
+            ///
+            /// - Parameters:
+            ///   - agent: Which connector drafted it.
+            ///   - checks:
+            ///   - cost:
+            ///   - durationS: How long drafting took, seconds (all revisions).
+            ///   - files: What would be committed: `ratchet.yaml` plus the files under `infra/ratchet/`, with their content ("View files").
+            ///   - reason: Why this scope, in a sentence or two.
+            ///   - resources:
+            ///   - scope:
+            ///   - usdSpent: What the setup agent cost in model tokens, USD (all revisions).
+            public init(
+                agent: Components.Schemas.AgentKind,
+                checks: [Components.Schemas.EnvironmentCheckVm],
+                cost: Components.Schemas.EnvironmentCostVm,
+                durationS: Swift.Int64,
+                files: [Components.Schemas.EnvironmentFileVm],
+                reason: Swift.String,
+                resources: [Components.Schemas.EnvironmentResourceVm],
+                scope: Components.Schemas.EnvironmentScope,
+                usdSpent: Swift.Double
+            ) {
+                self.agent = agent
+                self.checks = checks
+                self.cost = cost
+                self.durationS = durationS
+                self.files = files
+                self.reason = reason
+                self.resources = resources
+                self.scope = scope
+                self.usdSpent = usdSpent
+            }
+            public enum CodingKeys: String, CodingKey {
+                case agent
+                case checks
+                case cost
+                case durationS
+                case files
+                case reason
+                case resources
+                case scope
+                case usdSpent
+            }
+        }
+        /// One row of "What gets created".
+        ///
+        /// - Remark: Generated from `#/components/schemas/EnvironmentResourceVm`.
+        public struct EnvironmentResourceVm: Codable, Hashable, Sendable {
+            /// One plain line: "shop-api in the repo's container".
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentResourceVm/detail`.
+            public var detail: Swift.String
+            /// Instance type, "c7i.2xlarge".
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentResourceVm/machine`.
+            public var machine: Swift.String
+            /// "API", "Postgres 16", "Load generator".
+            ///
+            /// - Remark: Generated from `#/components/schemas/EnvironmentResourceVm/name`.
+            public var name: Swift.String
+            /// - Remark: Generated from `#/components/schemas/EnvironmentResourceVm/role`.
+            public var role: Components.Schemas.EnvironmentRole
+            /// - Remark: Generated from `#/components/schemas/EnvironmentResourceVm/usdPerHour`.
+            public var usdPerHour: Swift.Double
+            /// Creates a new `EnvironmentResourceVm`.
+            ///
+            /// - Parameters:
+            ///   - detail: One plain line: "shop-api in the repo's container".
+            ///   - machine: Instance type, "c7i.2xlarge".
+            ///   - name: "API", "Postgres 16", "Load generator".
+            ///   - role:
+            ///   - usdPerHour:
+            public init(
+                detail: Swift.String,
+                machine: Swift.String,
+                name: Swift.String,
+                role: Components.Schemas.EnvironmentRole,
+                usdPerHour: Swift.Double
+            ) {
+                self.detail = detail
+                self.machine = machine
+                self.name = name
+                self.role = role
+                self.usdPerHour = usdPerHour
+            }
+            public enum CodingKeys: String, CodingKey {
+                case detail
+                case machine
+                case name
+                case role
+                case usdPerHour
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/EnvironmentRole`.
+        @frozen public enum EnvironmentRole: String, Codable, Hashable, Sendable, CaseIterable {
+            case app = "app"
+            case database = "database"
+            case cache = "cache"
+            case load = "load"
+            case evaluator = "evaluator"
+            case other = "other"
+        }
+        /// How much infrastructure an optimization's environment needs (`environment.scope`, docs/SIMPLIFIED_MODEL.md,
+        /// "Dynamic environments"). `none`: pure code / tests, the evaluator's container is all there is; `single`: one
+        /// machine on pinned hardware; `full`: a stack (app + databases + seeded data + a load generator) written as
+        /// OpenTofu under `infra/ratchet/` on top of the base module Ratchet ships.
+        ///
+        /// - Remark: Generated from `#/components/schemas/EnvironmentScope`.
+        @frozen public enum EnvironmentScope: String, Codable, Hashable, Sendable, CaseIterable {
+            case none = "none"
+            case single = "single"
+            case full = "full"
         }
         /// `environment:` of ratchet.yaml (all optional). `image` null = the evaluator runs on the host.
         ///
@@ -4126,27 +4370,19 @@ extension Components {
         ///
         /// - Remark: Generated from `#/components/schemas/ReviseEnvironmentDraftInput`.
         public struct ReviseEnvironmentDraftInput: Codable, Hashable, Sendable {
-            /// Plain words: "use RDS instead of a Postgres container".
+            /// Plain words: "use a smaller setup", "use RDS instead of a Postgres container".
             ///
-            /// - Remark: Generated from `#/components/schemas/ReviseEnvironmentDraftInput/request`.
-            public var request: Swift.String
-            /// - Remark: Generated from `#/components/schemas/ReviseEnvironmentDraftInput/scope`.
-            public var scope: Components.Schemas.EnvScope?
+            /// - Remark: Generated from `#/components/schemas/ReviseEnvironmentDraftInput/message`.
+            public var message: Swift.String
             /// Creates a new `ReviseEnvironmentDraftInput`.
             ///
             /// - Parameters:
-            ///   - request: Plain words: "use RDS instead of a Postgres container".
-            ///   - scope:
-            public init(
-                request: Swift.String,
-                scope: Components.Schemas.EnvScope? = nil
-            ) {
-                self.request = request
-                self.scope = scope
+            ///   - message: Plain words: "use a smaller setup", "use RDS instead of a Postgres container".
+            public init(message: Swift.String) {
+                self.message = message
             }
             public enum CodingKeys: String, CodingKey {
-                case request
-                case scope
+                case message
             }
         }
         /// The sandbox line at the bottom of the sidebar ("Sandbox on · acme-prod, $1.20 so far · off at 15:40").
