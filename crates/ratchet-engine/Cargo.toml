@@ -1,0 +1,47 @@
+[package]
+name = "ratchet-engine"
+version = "0.0.0"
+description = "Ratchet engine: the ratchet loop on tokio, the automatic sandbox lifecycle, and the simulation / live / hybrid runtimes (port of packages/engine and packages/runtime)."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "ratchet_engine"
+
+[features]
+default = []
+# Test doubles of every port (fakes with a shared call log) for the engine's own tests and for other crates' tests.
+testing = []
+
+[dependencies]
+async-trait = "0.1"
+futures = "0.3"
+indexmap = { version = "2", features = ["serde"] }
+rand = "0.9"
+ratchet-agents = { path = "../ratchet-agents" }
+ratchet-bench = { path = "../ratchet-bench" }
+ratchet-core = { path = "../ratchet-core" }
+ratchet-github = { path = "../ratchet-github" }
+ratchet-ledger = { path = "../ratchet-ledger" }
+ratchet-sandbox = { path = "../ratchet-sandbox" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+serde_norway = "0.9"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process", "io-util"] }
+tracing = "0.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+
+[dev-dependencies]
+ratchet-bench = { path = "../ratchet-bench", features = ["testkit"] }
+ratchet-engine = { path = ".", features = ["testing"] }
+ratchet-github = { path = "../ratchet-github", features = ["testing"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process", "io-util", "test-util"] }
+
+[lints.rust]
+unsafe_code = "forbid"

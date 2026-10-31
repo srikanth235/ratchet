@@ -20,5 +20,5 @@ pub use ratchet_core::rows::{gain_percent, is_improvement};
 pub use store::{
     AddAgentInput, AppendAgentEventInput, BoxFuture, CreateOptimizationInput, Ledger,
     LedgerOptions, RecordBaselineInput, RecordBenchResultInput, RecordSpendInput,
-    SubmitCandidateInput, ValueInput,
+    SubmitCandidateInput, Tx, ValueInput,
 };
