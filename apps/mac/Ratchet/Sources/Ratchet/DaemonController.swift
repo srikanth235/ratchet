@@ -118,7 +118,7 @@ final class DaemonController {
         run(.registrationChecked(registration(of: mode)))
     }
 
-    private func run(_ event: DaemonEvent) {
+    private func run(_ event: DaemonLifecycleEvent) {
         for command in lifecycle.handle(event) { execute(command) }
     }
 

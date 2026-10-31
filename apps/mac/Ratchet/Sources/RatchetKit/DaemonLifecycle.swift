@@ -35,7 +35,7 @@ public enum DaemonPhase: Sendable, Equatable {
     public var isRunning: Bool { self == .running }
 }
 
-public enum DaemonEvent: Sendable, Equatable {
+public enum DaemonLifecycleEvent: Sendable, Equatable {
     /// The app launched (or the controller was created) and read the registration.
     case launched(AgentRegistration)
     case registered(AgentRegistration)
@@ -78,7 +78,7 @@ public struct DaemonLifecycle: Sendable, Equatable {
         self.phase = phase
     }
 
-    public mutating func handle(_ event: DaemonEvent) -> [DaemonCommand] {
+    public mutating func handle(_ event: DaemonLifecycleEvent) -> [DaemonCommand] {
         switch event {
         case .launched(let registration):
             switch registration {
