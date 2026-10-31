@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="218 337 600 369">
+<title>Ratchet</title>
+<defs><linearGradient id="brass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8E4B8"/><stop offset=".6" stop-color="#E2BE7C"/><stop offset="1" stop-color="#BE8F49"/></linearGradient></defs>
+  <path d="M407.1 434.5L407.1 466.0A31.5 31.5 0 0 0 438.6 434.5Z" fill="#8E9BB2" fill-opacity="0.16"/>
+  <path d="M361.0 424.6L438.6 424.6A77.6 77.6 0 0 0 361.0 347.0Z" fill="#8E9BB2" fill-opacity="0.26"/>
+  <path d="M351.1 470.8L227.3 470.8A123.8 123.8 0 0 1 351.1 347.0Z" fill="#8E9BB2" fill-opacity="0.4"/>
+  <path d="M443.4 480.7L443.4 696.7A216.1 216.1 0 0 1 227.3 480.7Z" fill="#8E9BB2" fill-opacity="0.58"/>
+  <path d="M453.3 342.2L453.3 696.7A354.5 354.5 0 0 0 807.8 342.2Z" fill="url(#brass)"/>
+</svg>
