@@ -875,6 +875,8 @@ mod creating {
             .set_secret(SecretName::GithubToken, GH_TOKEN)
             .await
             .unwrap();
+        // the images are looked up (by the stub resolver) only when AWS is set up; a profile makes that true on any machine
+        s.service.set_aws_profile("default").await.unwrap();
         let mut i = common();
         i.repo_url = "https://github.com/acme/api.git".into();
         i.agents_where = Some(AgentsWhere::Cloud);
