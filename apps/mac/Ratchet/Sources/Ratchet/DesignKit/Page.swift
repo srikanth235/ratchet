@@ -43,7 +43,7 @@ struct PageHeader<Trailing: View>: View {
     var body: some View {
         HStack(alignment: .center, spacing: Space.lg) {
             VStack(alignment: .leading, spacing: Space.sm) {
-                Text(title).kitType(.pageTitle).foregroundStyle(Ink.text)
+                Text(title).kitType(.pageTitle).foregroundStyle(Ink.text).frame(height: Dim.titleLine)
                 if let subtitle {
                     Text(subtitle).kitType(.body).foregroundStyle(Ink.textFaint)
                 }

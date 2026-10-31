@@ -53,8 +53,24 @@ enum KitType {
     }
 }
 
+extension KitType {
+    /// The reference's line height for running text, or nil for roles that size themselves (serif, buttons, mono).
+    var minLine: CGFloat? {
+        switch self {
+        case .body, .bodyStrong: Dim.lineBody
+        case .meta, .caption, .captionStrong: Dim.lineMeta
+        default: nil
+        }
+    }
+}
+
 extension View {
+    @ViewBuilder
     func kitType(_ type: KitType) -> some View {
-        font(type.font).tracking(type.tracking)
+        if let line = type.minLine {
+            font(type.font).tracking(type.tracking).frame(minHeight: line)
+        } else {
+            font(type.font).tracking(type.tracking)
+        }
     }
 }

@@ -11,7 +11,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 200, ideal: Dim.sidebarWidth, max: 280)
+                .navigationSplitViewColumnWidth(Dim.sidebarWidth)
         } detail: {
             DetailRoot()
         }

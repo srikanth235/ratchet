@@ -13,7 +13,6 @@ struct SidebarView: View {
                 Text("Ratchet").kitType(.brand).foregroundStyle(Ink.text)
             }
             .padding(.horizontal, Space.md)
-            .padding(.top, Space.sm)
             .accessibilityElement(children: .combine)
 
             VStack(spacing: Space.xs / 2) {

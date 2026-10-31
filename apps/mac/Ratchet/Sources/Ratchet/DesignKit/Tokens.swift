@@ -97,6 +97,12 @@ enum Dim {
     /// The chart of a running optimization has the page to itself.
     static let chartHeightDetail: CGFloat = 248
     static let textLine: CGFloat = 18
+    /// Line heights of the reference (line-height 1.45): 13.5 px text 19.6, 12.5 px text 18. The bundled sans is set
+    /// tighter by default, so text roles get these as a minimum height.
+    /// The page title: font size 32, line-height 1.
+    static let titleLine: CGFloat = 32
+    static let lineBody: CGFloat = 20
+    static let lineMeta: CGFloat = 18
     static let markStroke: CGFloat = 1.5
 }
 
