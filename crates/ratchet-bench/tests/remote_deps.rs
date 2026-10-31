@@ -1,3 +1,4 @@
+#![cfg(target_os = "linux")] // the generated bench-host scripts run under GNU tools; see PARITY.md
 //! Port of `packages/bench/src/remote-deps.test.ts`.
 //!
 //! Dependency snapshots end to end with the REAL generated scripts run by local bash (the same approach as `runners.rs`):
