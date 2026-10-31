@@ -221,12 +221,20 @@ mod with_node_on_path_plain_node {
         );
     }
 
+    /// `true` lives in /bin on Linux and in /usr/bin on macOS.
+    fn true_binary() -> &'static str {
+        ["/bin/true", "/usr/bin/true"]
+            .into_iter()
+            .find(|p| Path::new(p).exists())
+            .expect("a `true` binary")
+    }
+
     #[test]
     fn prepends_dirname_when_a_different_node_would_win() {
         let r = rig();
         let other = r.root.path().join("other");
         fs::create_dir(&other).expect("mkdir");
-        symlink("/bin/true", other.join("node")).expect("symlink");
+        symlink(true_binary(), other.join("node")).expect("symlink");
         let both = format!(
             "{}:{}",
             other.display(),
@@ -234,7 +242,7 @@ mod with_node_on_path_plain_node {
         );
         assert_eq!(
             resolve_node_on_path(&both),
-            Some(fs::canonicalize("/bin/true").expect("real"))
+            Some(fs::canonicalize(true_binary()).expect("real"))
         );
         let out = with_node_on_path(
             &env(&[("PATH", &format!("{}:/usr/bin", other.display()))]),
