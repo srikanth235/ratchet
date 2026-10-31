@@ -182,3 +182,86 @@ Rust test with the same assertions; this file maps one to the other. All tests r
 | listTemplates and proposeTemplate / refuses when files of the template already exist, unless overwrite is given | `templates::refuses_when_files_of_the_template_already_exist_unless_overwrite_is_given` |
 | listTemplates and proposeTemplate / takes another branch name when the first is taken, and gives up with the original error when that fails too | `templates::takes_another_branch_name_when_the_first_is_taken_and_gives_up_with_the_original_error_when_that_fails_too` |
 | listTemplates and proposeTemplate / rejects demos, unknown templates, bad options and a host that cannot commit files | `templates::rejects_demos_unknown_templates_bad_options_and_a_host_that_cannot_commit_files` |
+
+## Runtime (`packages/runtime`)
+
+Source: `crates/ratchet-engine/src/runtime/` (`simulation.rs`, `live.rs`, `live_checks.rs`, `summary.rs`, `simulate.rs`, `clock.rs`).
+27 TS tests → 27 Rust tests (+ 4 demo sequence tests that have no TS counterpart). The e2e tests run only with `RATCHET_E2E=1`, like
+the TS (`describe.skipIf(!enabled)`).
+
+### `packages/runtime/src/bench-contract.test.ts` → `tests/engine/runtime_bench_contract.rs` (4 TS, 4 Rust)
+
+| TS `describe` / `it` | Rust test |
+|---|---|
+| bench instance contract between @ratchet/aws and @ratchet/bench / agree on the candidate user, the holdout user and the launcher path | `agree_on_the_candidate_user_the_holdout_user_and_the_launcher_path` |
+| … / the user-data of a confirm instance sets up every user and the launcher the scripts check for | `the_user_data_of_a_confirm_instance_sets_up_every_user_and_the_launcher_the_scripts_check_for` |
+| … / agree on the dependency-snapshot user, and the user-data of a deps instance sets it up and blocks metadata for it | `agree_on_the_dependency_snapshot_user_and_the_user_data_of_a_deps_instance_sets_it_up_and_blocks_metadata_for_it` |
+| … / agree on the prefixes the deps identity is scoped to in infra/aws (reads bench-inputs/*/deps-base.tgz, writes bench-deps/*) | `agree_on_the_prefixes_the_deps_identity_is_scoped_to_in_infra_aws` |
+
+### `packages/runtime/src/live-checks.test.ts` → `tests/engine/runtime_live_checks.rs` (5 TS, 5 Rust)
+
+| TS `describe` / `it` | Rust test |
+|---|---|
+| createConnectionTester / aws: reports the account, passes region and profile through, and reports credential errors | `aws_reports_the_account_passes_region_and_profile_through_and_reports_credential_errors` |
+| … / github: requires push rights and never leaks the token | `github_requires_push_rights_and_never_leaks_the_token` |
+| … / anthropic / openai: probe the models endpoint with the key in a header, and map statuses | `anthropic_openai_probe_the_models_endpoint_with_the_key_in_a_header_and_map_statuses` |
+| … / network errors are reported without the key | `network_errors_are_reported_without_the_key` |
+| … / tofu: finds the module and an OpenTofu binary | `tofu_finds_the_module_and_an_opentofu_binary` |
+
+### `packages/runtime/src/live.test.ts` → `tests/engine/runtime_live.rs` (12 TS, 12 Rust)
+
+| TS `describe` / `it` | Rust test |
+|---|---|
+| createLiveRuntime / before the first apply: sandbox plan/apply/destroy work, everything else says what is missing | `before_the_first_apply_sandbox_plan_apply_destroy_work_everything_else_says_what_is_missing` |
+| … / rebuilt from the ledger outputs and a full configuration, nothing is missing | `rebuilt_from_the_ledger_outputs_and_a_full_configuration_nothing_is_missing` |
+| … / reports only what is still missing | `reports_only_what_is_still_missing` |
+| createHybridRuntime / defaults to local agents and an invisible sandbox: no apply step, no runner AMI needed | `defaults_to_local_agents_and_an_invisible_sandbox_no_apply_step_no_runner_ami_needed` |
+| … / is ready once GitHub and the bench image are set | `is_ready_once_github_and_the_bench_image_are_set` |
+| … / without an applied sandbox a draft can be created: the sandbox is made at the first start, so only GitHub is missing | `without_an_applied_sandbox_a_draft_can_be_created_the_sandbox_is_made_at_the_first_start_so_only_github_is_missing` |
+| … / runs the detection probes when no harnesses are given, and says what is missing when none is usable | `runs_the_detection_probes_when_no_harnesses_are_given_and_says_what_is_missing_when_none_is_usable` |
+| … / a signed-out harness does not count as usable; a signed-in one does | `a_signed_out_harness_does_not_count_as_usable_a_signed_in_one_does` |
+| … / agentsWhere cloud keeps the SSM path: the runner AMI is required again | `agents_where_cloud_keeps_the_ssm_path_the_runner_ami_is_required_again` |
+| … / createLiveRuntime without localAgents is unchanged (cloud, no local control) and refuses agentsWhere local without them | `create_live_runtime_without_local_agents_is_unchanged_cloud_no_local_control_and_refuses_agents_where_local_without_them` |
+| images found by tag, region from the repo / resolveLiveImages fills both AMIs from the tags for the app version; an explicit ref wins | `resolve_live_images_fills_both_amis_from_the_tags_for_the_app_version_an_explicit_ref_wins` |
+| … / createLiveRuntimeFor uses environment.region of the repo, then the setting; the lookup is skipped before a sandbox exists | `create_live_runtime_for_uses_environment_region_of_the_repo_then_the_setting_the_lookup_is_skipped_before_a_sandbox_exists` |
+
+### `packages/runtime/src/summary.test.ts` → `tests/engine/runtime_summary.rs` (4 TS, 4 Rust)
+
+| TS `describe` / `it` | Rust test |
+|---|---|
+| buildSimulationSummary / captures project, baseline, best, gain, verdict counts, spend, value/ROI and the PR path | `captures_project_baseline_best_gain_verdict_counts_spend_value_roi_and_the_pr_path` |
+| … / handles a run with no win, no value model and no PR | `handles_a_run_with_no_win_no_value_model_and_no_pr` |
+| … / prToPath converts file URLs and passes other URLs through | `pr_to_path_converts_file_urls_and_passes_other_urls_through` |
+| writeSimulationSummary / writes pretty JSON, creating parent directories, and leaves no temp file behind | `write_simulation_summary_writes_pretty_json_creating_parent_directories_and_leaves_no_temp_file_behind` |
+
+### `packages/runtime/src/local-agents.int.test.ts` → `tests/engine/runtime_local_agents.rs` (1 TS, 1 Rust)
+
+| TS `describe` / `it` | Rust test |
+|---|---|
+| local agents through the real engine and an automatic sandbox / runs a Claude Code agent in a worktree, verifies its commit, then removes the worktree and (after the idle window) the sandbox | `runs_a_claude_code_agent_in_a_worktree_verifies_its_commit_then_removes_the_worktree_and_after_the_idle_window_the_sandbox` |
+
+### `packages/runtime/src/simulation.e2e.test.ts` → `tests/engine/runtime_simulation.rs` (1 TS, 1 Rust + 4 demo tests)
+
+| TS `describe` / `it` | Rust test |
+|---|---|
+| simulation e2e (RATCHET_E2E=1) / runs two agents x 2 attempts to a verified win, drains every candidate, opens a PR and leaves nothing running | `runs_two_agents_x_2_attempts_to_a_verified_win_drains_every_candidate_opens_a_pr_and_leaves_nothing_running` |
+| (none: the verdicts are documented in `crates/ratchet-agents/scripts/demo-*/README.md`) | `demo_search_claude_code_verdicts`, `demo_search_codex_verdicts`, `demo_cli_claude_code_verdicts`, `demo_forecast_claude_code_verdicts` |
+
+The demo tests run ONE agent through its whole script on the real `LocalBenchRunner` and assert the verdict of every candidate in
+submission order: the bad attempts exactly as the READMEs document them (`blocked` for the protected-path edit, the contract
+break and the look-ahead leakage; `rejected` for the noise-level no-op; `failed_confirm` for the overfit), the good ones
+`verified`, and the two demo-search patches the README calls noise-level (05, 06) as "verified or rejected" because that depends on
+the machine. Two agents interleave non-deterministically in the TS as well, hence one agent.
+
+### Differences on purpose
+
+- Construction is `async` (the AWS SDK loads its configuration asynchronously); `createLiveRuntime`'s JavaScript `Proxy`
+  (`unready` / `lateBound`) is a hand-written proxy per port trait (`CloudCompute`, `ArtifactStore`, `RunnerControl`,
+  `BenchRunner`, `GitHost`) that fails with `PortError::Failed("not_configured: …")`; `EngineError::from(PortError)` turns that into
+  the `not_configured` code with the TS message.
+- `LiveOptions::settings` / `SimulationOptions::settings` overlay field by field (`overlay_settings`); in the TS the spread replaces
+  the whole `sandbox` object.
+- `ConnectionTester` takes injectable `HttpProbe` / process runner / `check_aws` / `check_github` / `exists` instead of `fetch` etc.
+- `simulate()` is a library function (`runtime::simulate`); the command line is the CLI's / `ratchetd`'s job. `SimulationOptions`
+  has `tsc` and `bin_dir` overrides (the TS hard-codes `<repo>/node_modules/...`).
+- `AwsPriceBook::connect_with` was added to `ratchet-sandbox` (clock + fallback), because the SDK clients are not public there.

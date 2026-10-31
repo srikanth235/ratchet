@@ -7,6 +7,8 @@ pub mod live_config;
 pub mod power;
 pub mod product;
 pub mod secrets;
+#[cfg(feature = "testing")]
+pub mod testing;
 
 pub use harnesses::{Detected, HarnessCache, HarnessProbe, RealHarnessProbe};
 pub use live_config::{
