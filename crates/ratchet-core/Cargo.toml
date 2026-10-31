@@ -1,0 +1,32 @@
+[package]
+name = "ratchet-core"
+version = "0.0.0"
+description = "Ratchet domain crate: config, statistics, the ratchet rule, protected paths, value model, ports, templates"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+# Derive `utoipa::ToSchema` on the public data types (used by the OpenAPI contract crate).
+utoipa = ["dep:utoipa"]
+
+[dependencies]
+async-trait = "0.1"
+include_dir = "0.7"
+schemars = { version = "1", features = ["preserve_order"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+serde_norway = "0.9"
+thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
+tokio = { version = "1", default-features = false, features = ["sync", "time", "macros"] }
+tokio-util = { version = "0.7", default-features = false }
+utoipa = { version = "5", optional = true }
+
+[dev-dependencies]
+insta = { version = "1", features = ["json"] }
+proptest = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

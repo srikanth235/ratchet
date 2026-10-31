@@ -13,3 +13,7 @@ packages/e2e/artifacts/
 .ratchet-sim-*/
 .ratchet-app-sim/
 .claude/worktrees/
+
+# Rust
+/target
+Cargo.lock
