@@ -1,13 +1,11 @@
 //! The template files, embedded at compile time.
 //!
-//! The files stay where they are, in `packages/core/templates/<id>/**`, and are embedded with `include_dir!`
-//! (path relative to this crate). That replaces `scripts/gen-templates.mjs` / `files.generated.ts`: there is no
-//! generated file to keep in sync. When the TypeScript packages are deleted the directory moves into this crate
-//! (change the path below, nothing else).
+//! The files live in `templates/<id>/**` at the repository root and are embedded with `include_dir!`
+//! (path relative to this crate). There is no generated file to keep in sync.
 
 use include_dir::{Dir, DirEntry, include_dir};
 
-static TEMPLATES: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../../packages/core/templates");
+static TEMPLATES: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/../../templates");
 
 /// Template ids that have files, sorted.
 pub fn template_ids_with_files() -> Vec<String> {
@@ -24,8 +22,8 @@ pub fn template_ids_with_files() -> Vec<String> {
     ids
 }
 
-/// The files of template `id` as `(repo-relative POSIX path, content)`, in the order `gen-templates.mjs`
-/// produced them: entries sorted by name at each directory level, directories expanded in place.
+/// The files of template `id` as `(repo-relative POSIX path, content)`, in the order the original TypeScript
+/// generator produced them: entries sorted by name at each directory level, directories expanded in place.
 /// `RATCHET.md` still has its `{{placeholders}}`. Empty for an unknown id.
 pub fn template_files(id: &str) -> Vec<(String, &'static str)> {
     let Some(dir) = TEMPLATES.get_dir(id) else {

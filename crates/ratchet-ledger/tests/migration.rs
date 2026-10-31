@@ -1,5 +1,5 @@
 //! The Rust migration must create the same schema as the drizzle migration it was ported from
-//! (`packages/core/src/ledger/migrations/0000_init.sql`), the executable spec until the TypeScript is deleted.
+//! (`tests/fixtures/drizzle_0000_init.sql`, a frozen copy of the TypeScript package's migration).
 
 mod common;
 
@@ -27,8 +27,7 @@ async fn the_migration_creates_the_same_schema_as_the_drizzle_one() {
     let ours = schema(l.pool()).await;
 
     let drizzle = std::fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../packages/core/src/ledger/migrations/0000_init.sql"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drizzle_0000_init.sql"),
     )
     .unwrap();
     let pool = SqlitePoolOptions::new()

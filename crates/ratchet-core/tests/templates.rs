@@ -1,7 +1,7 @@
 //! Port of `packages/core/src/templates/templates.test.ts`.
 //!
 //! The per-template cases of `describe.each(TEMPLATE_IDS)` are loops inside one test each, so a failure names
-//! the template. The evaluator scripts are the unchanged `.mjs` files of `packages/core/templates`; their
+//! the template. The evaluator scripts are the unchanged `.mjs` files of `templates`; their
 //! tests run them with `node` and are skipped (with a note) when `node` is not installed.
 
 use std::collections::BTreeSet;
@@ -150,11 +150,11 @@ fn the_list_is_a_copy() {
     assert_ne!(fresh[0].objective.metric, "y");
 }
 
-// "the embedded files are in sync with packages/core/templates (run scripts/gen-templates.mjs)"
+// "the embedded files are in sync with templates "
 // The files are embedded with include_dir!; this checks the embedded copy against the files on disk.
 #[test]
 fn the_embedded_files_are_in_sync_with_the_template_directory() {
-    let dir = repo_root().join("packages/core/templates");
+    let dir = repo_root().join("templates");
     let mut on_disk = BTreeSet::new();
     fn walk(dir: &Path, base: &Path, out: &mut BTreeSet<(String, String)>) {
         for e in std::fs::read_dir(dir).unwrap() {

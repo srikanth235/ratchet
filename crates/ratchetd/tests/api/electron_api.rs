@@ -10,7 +10,7 @@ fn doc() -> Value {
     serde_json::to_value(ratchetd::openapi::openapi()).unwrap()
 }
 
-/// Every method of the preload API (`RatchetApi`, `packages/desktop/src/shared/types.ts`) and the operation that
+/// Every method of the preload API (`RatchetApi` of the retired Electron app) and the operation that
 /// replaces it. `None`: dropped on purpose (the native app does it itself).
 const RATCHET_API: &[(&str, Option<&str>)] = &[
     ("listOptimizations", Some("listOptimizations")),
@@ -91,31 +91,6 @@ fn every_method_of_the_electron_api_has_a_route() {
                 "RatchetApi.{method} has no operation {op}"
             );
         }
-    }
-    // the table is the whole of `channels.ts`, while the TypeScript still exists
-    let channels = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../packages/desktop/src/shared/channels.ts");
-    if let Ok(src) = std::fs::read_to_string(channels) {
-        let listed: BTreeSet<&str> = RATCHET_API.iter().map(|(m, _)| *m).collect();
-        let mut seen = 0;
-        for line in src.lines() {
-            if let Some((name, rest)) = line.trim().split_once(": 'ratchet:") {
-                if name == "event" {
-                    continue;
-                }
-                assert!(rest.starts_with(name), "{line}");
-                assert!(
-                    listed.contains(name),
-                    "channels.ts has {name}, which this table does not map"
-                );
-                seen += 1;
-            }
-        }
-        assert_eq!(
-            seen,
-            RATCHET_API.len() - 1,
-            "every IPC channel is in the table (onEvent is the event channel)"
-        );
     }
 }
 
