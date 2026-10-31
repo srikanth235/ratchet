@@ -1,0 +1,28 @@
+---
+source: crates/ratchet-sandbox/tests/suite/user_data.rs
+expression: "runner_user_data(&two_secrets(), 2.0, Some(&proxy())).unwrap()"
+---
+#!/bin/bash
+set -euo pipefail
+shutdown -h +120 >/dev/null 2>&1 || true
+install -d -m 700 /etc/ratchet
+umask 077
+cat > /etc/ratchet/runner.env <<'RATCHET_ENV_EOF'
+RATCHET_OPTIMIZATION_ID='opt1'
+RATCHET_AGENT_ID='a1'
+RATCHET_AGENT_KIND='claude-code'
+RATCHET_REPO_URL='https://github.com/o/r'\''; rm -rf / #.git'
+RATCHET_BRANCH='ratchet/opt1/a1'
+RATCHET_SECRET_REFS='ANTHROPIC_API_KEY=/ratchet/opt1/a1/ANTHROPIC_API_KEY,GITHUB_TOKEN=/ratchet/opt1/a1/GITHUB_TOKEN'
+HTTPS_PROXY='http://10.42.3.10:3128'
+https_proxy='http://10.42.3.10:3128'
+HTTP_PROXY='http://10.42.3.10:3128'
+http_proxy='http://10.42.3.10:3128'
+NO_PROXY='localhost,127.0.0.1,169.254.169.254,ssm.us-east-1.amazonaws.com,ssmmessages.us-east-1.amazonaws.com,ec2messages.us-east-1.amazonaws.com,logs.us-east-1.amazonaws.com,s3.us-east-1.amazonaws.com,.s3.us-east-1.amazonaws.com'
+no_proxy='localhost,127.0.0.1,169.254.169.254,ssm.us-east-1.amazonaws.com,ssmmessages.us-east-1.amazonaws.com,ec2messages.us-east-1.amazonaws.com,logs.us-east-1.amazonaws.com,s3.us-east-1.amazonaws.com,.s3.us-east-1.amazonaws.com'
+NODE_USE_ENV_PROXY='1'
+RATCHET_ENV_EOF
+set -a; . /etc/ratchet/runner.env; set +a
+grep -E '^(HTTPS?_PROXY|https?_proxy|NO_PROXY|no_proxy|NODE_USE_ENV_PROXY)=' /etc/ratchet/runner.env | sed 's/^/export /' > /etc/profile.d/ratchet-proxy.sh
+chmod 644 /etc/profile.d/ratchet-proxy.sh
+mkdir -p /run/ratchet && touch /run/ratchet/user-data.done

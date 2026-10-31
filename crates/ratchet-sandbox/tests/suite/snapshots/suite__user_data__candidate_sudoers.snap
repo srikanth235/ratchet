@@ -1,0 +1,6 @@
+---
+source: crates/ratchet-sandbox/tests/suite/user_data.rs
+expression: CANDIDATE_SUDOERS
+---
+Defaults:ratchet-holdout !requiretty, !use_pty, !lecture, env_keep += "RATCHET_CANDIDATE_DIR RATCHET_CANDIDATE_HOME RATCHET_CANDIDATE_TMP RATCHET_CANDIDATE_PATH"
+ratchet-holdout ALL=(ratchet-bench) NOPASSWD: /usr/local/sbin/ratchet-candidate-exec

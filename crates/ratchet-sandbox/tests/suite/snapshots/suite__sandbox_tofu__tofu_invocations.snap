@@ -1,0 +1,131 @@
+---
+source: crates/ratchet-sandbox/tests/suite/sandbox_tofu.rs
+expression: calls
+---
+[
+  {
+    "cmd": "/opt/tofu",
+    "cwd": "/repo/infra/aws",
+    "args": [
+      "init",
+      "-input=false",
+      "-no-color",
+      "-backend=false"
+    ],
+    "env": {
+      "AWS_PROFILE": "sandbox",
+      "CHECKPOINT_DISABLE": "1",
+      "TF_DATA_DIR": "<ROOT>/demo/.terraform-data",
+      "TF_INPUT": "0",
+      "TF_IN_AUTOMATION": "1"
+    }
+  },
+  {
+    "cmd": "/opt/tofu",
+    "cwd": "/repo/infra/aws",
+    "args": [
+      "plan",
+      "-input=false",
+      "-no-color",
+      "-detailed-exitcode",
+      "-out=<ROOT>/demo/plan.tfplan",
+      "-state=<ROOT>/demo/terraform.tfstate",
+      "-var-file=<ROOT>/demo/vars.tfvars.json"
+    ],
+    "env": {
+      "AWS_PROFILE": "sandbox",
+      "CHECKPOINT_DISABLE": "1",
+      "TF_DATA_DIR": "<ROOT>/demo/.terraform-data",
+      "TF_INPUT": "0",
+      "TF_IN_AUTOMATION": "1"
+    }
+  },
+  {
+    "cmd": "/opt/tofu",
+    "cwd": "/repo/infra/aws",
+    "args": [
+      "show",
+      "-json",
+      "-no-color",
+      "<ROOT>/demo/plan.tfplan"
+    ],
+    "env": {
+      "AWS_PROFILE": "sandbox",
+      "CHECKPOINT_DISABLE": "1",
+      "TF_DATA_DIR": "<ROOT>/demo/.terraform-data",
+      "TF_INPUT": "0",
+      "TF_IN_AUTOMATION": "1"
+    }
+  },
+  {
+    "cmd": "/opt/tofu",
+    "cwd": "/repo/infra/aws",
+    "args": [
+      "apply",
+      "-input=false",
+      "-no-color",
+      "-state=<ROOT>/demo/terraform.tfstate",
+      "<ROOT>/demo/plan.tfplan"
+    ],
+    "env": {
+      "AWS_PROFILE": "sandbox",
+      "CHECKPOINT_DISABLE": "1",
+      "TF_DATA_DIR": "<ROOT>/demo/.terraform-data",
+      "TF_INPUT": "0",
+      "TF_IN_AUTOMATION": "1"
+    }
+  },
+  {
+    "cmd": "/opt/tofu",
+    "cwd": "/repo/infra/aws",
+    "args": [
+      "output",
+      "-json",
+      "-no-color",
+      "-state=<ROOT>/demo/terraform.tfstate"
+    ],
+    "env": {
+      "AWS_PROFILE": "sandbox",
+      "CHECKPOINT_DISABLE": "1",
+      "TF_DATA_DIR": "<ROOT>/demo/.terraform-data",
+      "TF_INPUT": "0",
+      "TF_IN_AUTOMATION": "1"
+    }
+  },
+  {
+    "cmd": "/opt/tofu",
+    "cwd": "/repo/infra/aws",
+    "args": [
+      "init",
+      "-input=false",
+      "-no-color",
+      "-backend=false"
+    ],
+    "env": {
+      "AWS_PROFILE": "sandbox",
+      "CHECKPOINT_DISABLE": "1",
+      "TF_DATA_DIR": "<ROOT>/demo/.terraform-data",
+      "TF_INPUT": "0",
+      "TF_IN_AUTOMATION": "1"
+    }
+  },
+  {
+    "cmd": "/opt/tofu",
+    "cwd": "/repo/infra/aws",
+    "args": [
+      "destroy",
+      "-input=false",
+      "-no-color",
+      "-auto-approve",
+      "-state=<ROOT>/demo/terraform.tfstate",
+      "-var-file=<ROOT>/demo/vars.tfvars.json"
+    ],
+    "env": {
+      "AWS_PROFILE": "sandbox",
+      "CHECKPOINT_DISABLE": "1",
+      "TF_DATA_DIR": "<ROOT>/demo/.terraform-data",
+      "TF_INPUT": "0",
+      "TF_IN_AUTOMATION": "1"
+    }
+  }
+]

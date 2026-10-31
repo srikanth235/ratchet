@@ -1,0 +1,6 @@
+---
+source: crates/ratchet-sandbox/tests/suite/user_data.rs
+expression: CANDIDATE_LAUNCHER_SCRIPT
+---
+#!/bin/sh
+exec sudo -n -u ratchet-bench /usr/local/sbin/ratchet-candidate-exec "$@"
