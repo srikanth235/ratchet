@@ -1208,15 +1208,7 @@ mod graceful_stop_drains_every_candidate {
             })
         }));
         // Make the commit invisible to the normal running polls too, so only the drain can find it.
-        let running: Vec<_> = h
-            .git
-            .commits
-            .lock()
-            .unwrap()
-            .get_mut(CC)
-            .unwrap()
-            .drain(..)
-            .collect();
+        let running = std::mem::take(h.git.commits.lock().unwrap().get_mut(CC).unwrap());
         h.runners.emit(&b.agent(ClaudeCode), vec![done_event()]);
         h.runners.emit(&b.agent(Codex), vec![done_event()]);
         h.cycle(1).await;
