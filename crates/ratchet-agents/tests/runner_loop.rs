@@ -1,5 +1,11 @@
 mod common;
 
+use ratchet_core::enums::{AgentKind, CandidateVerdict};
+use ratchet_core::ports::mock::SystemClock;
+use ratchet_core::ports::{
+    AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
+    CancellationToken, EventSink, PortResult, Preflight, RunnerMessage,
+};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -9,18 +15,14 @@ use common::{
     AutoOptions, Decision, Sandbox, auto_verdicts, base_config, make_sandbox, rule, set_best, sh,
     until, write_file,
 };
-use ratchet_agents::domain::{
-    AgentAdapter, AgentError, AgentEvent, AgentEventType, AgentKind, AgentSession, AgentSpec,
-    AgentUsage, CandidateVerdict, EventCallback, Preflight, RunnerMessage,
-};
+
 use ratchet_agents::git::{GitCall, GitResult, GitRunner};
 use ratchet_agents::workdir::{PrepareWorkdirOptions, prepare_workdir};
 use ratchet_agents::{
     AgentScript, ExecGit, LoopTuning, MemoryInbox, RunnerLoopOptions, RunnerLoopResult,
-    RunnerStopReason, ScriptStep, ScriptedAgent, SystemClock, run_runner_loop,
+    RunnerStopReason, ScriptStep, ScriptedAgent, run_runner_loop,
 };
 use serde_json::{Value, json};
-use tokio_util::sync::CancellationToken;
 
 fn write(path: &str, content: &str) -> ScriptStep {
     ScriptStep::Write {
@@ -91,7 +93,7 @@ impl Run {
     fn commits(&self) -> Vec<AgentEvent> {
         self.events()
             .into_iter()
-            .filter(|e| e.kind == AgentEventType::Commit)
+            .filter(|e| e.event_type == AgentEventType::Commit)
             .collect()
     }
     fn received(&self) -> Vec<String> {
@@ -227,13 +229,13 @@ impl Launch {
 }
 
 fn types(events: &[AgentEvent]) -> Vec<AgentEventType> {
-    events.iter().map(|e| e.kind).collect()
+    events.iter().map(|e| e.event_type).collect()
 }
 
 fn verdicts_of(events: &[AgentEvent]) -> Vec<String> {
     events
         .iter()
-        .filter(|e| e.kind == AgentEventType::Verdict)
+        .filter(|e| e.event_type == AgentEventType::Verdict)
         .map(|e| e.data_str("verdict").unwrap().to_string())
         .collect()
 }
@@ -305,7 +307,7 @@ async fn prompt_turn_commit_with_trailer_push_verdict_resume_idle_stop() {
     );
     let last = events.last().unwrap();
     assert_eq!(
-        (last.kind, last.text.as_deref()),
+        (last.event_type, last.text.as_deref()),
         (AgentEventType::Status, Some("runner finished: idle"))
     );
 
@@ -337,15 +339,15 @@ impl AgentAdapter for PromptSpy {
     fn kind(&self) -> AgentKind {
         self.inner.kind()
     }
-    async fn preflight(&self) -> Preflight {
+    async fn preflight(&self) -> PortResult<Preflight> {
         self.inner.preflight().await
     }
     async fn start(
         &self,
         spec: &AgentSpec,
-        on_event: EventCallback<'_>,
-        cancel: &CancellationToken,
-    ) -> Result<AgentSession, AgentError> {
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<AgentSession> {
         self.prompts.lock().unwrap().push(spec.prompt.clone());
         self.inner.start(spec, on_event, cancel).await
     }
@@ -354,9 +356,9 @@ impl AgentAdapter for PromptSpy {
         session: &mut AgentSession,
         spec: &AgentSpec,
         message: &str,
-        on_event: EventCallback<'_>,
-        cancel: &CancellationToken,
-    ) -> Result<(), AgentError> {
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<()> {
         self.inner
             .resume(session, spec, message, on_event, cancel)
             .await
@@ -377,15 +379,15 @@ impl AgentAdapter for TokensOnly {
     fn kind(&self) -> AgentKind {
         self.0.kind()
     }
-    async fn preflight(&self) -> Preflight {
+    async fn preflight(&self) -> PortResult<Preflight> {
         self.0.preflight().await
     }
     async fn start(
         &self,
         spec: &AgentSpec,
-        on_event: EventCallback<'_>,
-        cancel: &CancellationToken,
-    ) -> Result<AgentSession, AgentError> {
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<AgentSession> {
         let strip = |mut e: AgentEvent| {
             if let Some(u) = e.usage.as_mut() {
                 *u = AgentUsage {
@@ -403,9 +405,9 @@ impl AgentAdapter for TokensOnly {
         session: &mut AgentSession,
         spec: &AgentSpec,
         message: &str,
-        on_event: EventCallback<'_>,
-        cancel: &CancellationToken,
-    ) -> Result<(), AgentError> {
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<()> {
         self.0
             .resume(session, spec, message, on_event, cancel)
             .await
@@ -612,7 +614,7 @@ async fn rebases_onto_the_ratchet_best_when_it_moved_preferring_the_best_on_conf
         "{first}"
     );
     assert!(run.has_event(|e| {
-        e.kind == AgentEventType::Status
+        e.event_type == AgentEventType::Status
             && e.text
                 .as_deref()
                 .unwrap_or("")
@@ -821,7 +823,7 @@ async fn retries_a_crashed_turn_telling_the_agent_and_gives_up_after_max_consecu
         flaky
             .events()
             .iter()
-            .filter(|e| e.kind == AgentEventType::Error
+            .filter(|e| e.event_type == AgentEventType::Error
                 && e.text
                     .as_deref()
                     .unwrap_or("")
@@ -850,7 +852,7 @@ async fn agent_preflight_failure_ends_the_run_as_agent_unavailable() {
     let error = run
         .events()
         .into_iter()
-        .find(|e| e.kind == AgentEventType::Error)
+        .find(|e| e.event_type == AgentEventType::Error)
         .unwrap();
     assert!(error.text.unwrap().contains("script has no attempts"));
 }
@@ -940,7 +942,7 @@ async fn gives_up_with_failed_when_push_never_succeeds() {
     let res = run.result().await;
     assert_eq!(res.reason, RunnerStopReason::Failed);
     assert!(run.has_event(|e| {
-        e.kind == AgentEventType::Error
+        e.event_type == AgentEventType::Error
             && e.text
                 .as_deref()
                 .unwrap_or("")

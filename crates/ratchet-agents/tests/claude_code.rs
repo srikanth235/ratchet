@@ -1,13 +1,15 @@
 mod common;
 
+use ratchet_core::enums::AgentKind;
+use ratchet_core::ports::{
+    AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
+    CancellationToken, PortError, PortResult,
+};
 use std::sync::Arc;
 use std::time::Duration;
 
-use common::{collect, env_of, fixture};
-use ratchet_agents::domain::{
-    AgentAdapter, AgentError, AgentEvent, AgentEventType, AgentKind, AgentSession, AgentSpec,
-    AgentUsage,
-};
+use common::{btree_env_of, collect, env_of, fixture};
+
 use ratchet_agents::process::KillSignal;
 use ratchet_agents::testing::{FakeProcessSpec, FakeSpawner};
 use ratchet_agents::{
@@ -15,7 +17,6 @@ use ratchet_agents::{
     CliAgentOptions, PromptVia,
 };
 use serde_json::json;
-use tokio_util::sync::CancellationToken;
 
 const SID: &str = "5f1c1b8e-2d7a-4a37-9c0e-7b6f3b1d0a11";
 
@@ -45,7 +46,7 @@ fn parse(name: &str, chunk_size: Option<usize>) -> (ClaudeStreamParser, Vec<Agen
 }
 
 fn kinds(events: &[AgentEvent]) -> Vec<AgentEventType> {
-    events.iter().map(|e| e.kind).collect()
+    events.iter().map(|e| e.event_type).collect()
 }
 
 #[test]
@@ -197,9 +198,9 @@ async fn start(
     adapter: &ClaudeCodeAdapter,
     spec: &AgentSpec,
     on_event: impl Fn(AgentEvent) + Send + Sync,
-) -> Result<AgentSession, AgentError> {
+) -> PortResult<AgentSession> {
     adapter
-        .start(spec, &on_event, &CancellationToken::new())
+        .start(spec, &on_event, Some(&CancellationToken::new()))
         .await
 }
 
@@ -213,7 +214,7 @@ async fn start_builds_the_command_line_pipes_the_prompt_on_stdin_and_returns_the
     let mut s = spec();
     s.model = Some("claude-opus-5-5".into());
     s.max_turns = Some(40);
-    s.env = Some(env_of(&[("FOO", "bar")]));
+    s.env = Some(btree_env_of(&[("FOO", "bar")]));
     let session = start(&adapter, &s, on_event).await.unwrap();
     assert_eq!(
         session,
@@ -250,7 +251,7 @@ async fn start_builds_the_command_line_pipes_the_prompt_on_stdin_and_returns_the
             .lock()
             .unwrap()
             .iter()
-            .any(|e| e.kind == AgentEventType::Usage)
+            .any(|e| e.event_type == AgentEventType::Usage)
     );
 }
 
@@ -315,7 +316,7 @@ async fn resume_passes_resume_id_sends_the_message_and_keeps_the_session_id() {
             &spec(),
             "verdict: verified",
             &on_event,
-            &CancellationToken::new(),
+            Some(&CancellationToken::new()),
         )
         .await
         .unwrap();
@@ -332,7 +333,7 @@ async fn resume_passes_resume_id_sends_the_message_and_keeps_the_session_id() {
         .lock()
         .unwrap()
         .iter()
-        .find(|e| e.kind == AgentEventType::Usage)
+        .find(|e| e.event_type == AgentEventType::Usage)
         .unwrap()
         .usage;
     assert_eq!(
@@ -361,7 +362,7 @@ async fn resume_follows_a_new_session_id_if_the_cli_forks_one() {
             &spec(),
             "go on",
             &|_| {},
-            &CancellationToken::new(),
+            Some(&CancellationToken::new()),
         )
         .await
         .unwrap();
@@ -386,12 +387,12 @@ async fn resume_of_an_unknown_session_turns_a_non_zero_exit_with_stderr_into_an_
             &spec(),
             "x",
             &on_event,
-            &CancellationToken::new(),
+            Some(&CancellationToken::new()),
         )
         .await
         .unwrap_err();
     match err {
-        AgentError::Failed {
+        PortError::AgentFailed {
             message, exit_code, ..
         } => {
             assert!(message.contains("No conversation found"), "{message}");
@@ -400,7 +401,7 @@ async fn resume_of_an_unknown_session_turns_a_non_zero_exit_with_stderr_into_an_
         other => panic!("{other:?}"),
     }
     assert_eq!(
-        events.lock().unwrap().last().unwrap().kind,
+        events.lock().unwrap().last().unwrap().event_type,
         AgentEventType::Error
     );
 }
@@ -419,7 +420,7 @@ async fn an_is_error_result_fails_the_turn_with_the_error_event_emitted_once() {
             .lock()
             .unwrap()
             .iter()
-            .filter(|e| e.kind == AgentEventType::Error)
+            .filter(|e| e.event_type == AgentEventType::Error)
             .count(),
         1
     );
@@ -476,25 +477,22 @@ async fn abort_signals_the_process_group_with_sigterm_and_fails_with_aborted() {
     let (events, collect_event) = collect();
     let trigger = cancel.clone();
     let on_event = move |e: AgentEvent| {
-        let is_status = e.kind == AgentEventType::Status;
+        let is_status = e.event_type == AgentEventType::Status;
         collect_event(e);
         if is_status {
             trigger.cancel(); // abort once the session has started
         }
     };
     let err = adapter
-        .start(&spec(), &on_event, &cancel)
+        .start(&spec(), &on_event, Some(&cancel))
         .await
         .unwrap_err();
-    match err {
-        AgentError::Aborted { session } => assert_eq!(session.map(|s| s.id), Some(SID.to_string())),
-        other => panic!("{other:?}"),
-    }
+    assert!(err.is_cancelled(), "{err:?}");
     assert_eq!(fake.call(0).signals[0], KillSignal::Term);
     let events = events.lock().unwrap();
     let last = events.last().unwrap();
     assert_eq!(
-        (last.kind, last.text.as_deref()),
+        (last.event_type, last.text.as_deref()),
         (AgentEventType::Status, Some("claude-code turn aborted"))
     );
 }
@@ -504,22 +502,25 @@ async fn an_already_aborted_signal_never_lets_the_turn_proceed() {
     let (fake, adapter) = adapter_for(FakeProcessSpec::hang(), &KEYED);
     let cancel = CancellationToken::new();
     cancel.cancel();
-    let err = adapter.start(&spec(), &|_| {}, &cancel).await.unwrap_err();
-    assert!(err.is_aborted());
+    let err = adapter
+        .start(&spec(), &|_| {}, Some(&cancel))
+        .await
+        .unwrap_err();
+    assert!(err.is_cancelled());
     assert!(fake.call(0).signals.contains(&KillSignal::Term));
 }
 
 #[tokio::test]
 async fn preflight_is_ok_with_the_binary_present_and_a_key() {
     let (_, adapter) = adapter_for(FakeProcessSpec::stdout("2.1.0 (Claude Code)\n"), &KEYED);
-    let r = adapter.preflight().await;
+    let r = adapter.preflight().await.unwrap();
     assert!(r.ok && r.problems.is_empty());
 }
 
 #[tokio::test]
 async fn preflight_reports_a_missing_key_and_a_missing_binary() {
     let (_, adapter) = adapter_for(FakeProcessSpec::spawn_error("ENOENT"), &[]);
-    let r = adapter.preflight().await;
+    let r = adapter.preflight().await.unwrap();
     assert!(!r.ok);
     assert_eq!(r.problems.len(), 2);
     assert!(r.problems[0].contains("cannot run 'claude'"));
@@ -538,5 +539,5 @@ async fn preflight_allows_a_subscription_login_explicitly() {
         allow_subscription_auth: true,
         ..ClaudeCodeOptions::default()
     });
-    assert!(adapter.preflight().await.ok);
+    assert!(adapter.preflight().await.unwrap().ok);
 }

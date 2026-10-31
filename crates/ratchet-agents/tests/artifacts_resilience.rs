@@ -2,16 +2,17 @@
 
 mod common;
 
+use ratchet_core::ports::{
+    AgentEvent, AgentEventType, ArtifactStore, CancellationToken, Clock, PortError, PortResult,
+    RunnerInbox, RunnerMessage,
+};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use common::MemoryStore;
-use ratchet_agents::domain::{
-    AgentEvent, AgentEventType, ArtifactStore, Clock, RunnerInbox, RunnerMessage, StoreError,
-};
+
 use ratchet_agents::{ArtifactEventSink, ArtifactInbox, EventSinkOptions, event_key, inbox_key};
-use tokio_util::sync::CancellationToken;
 
 /// Counts sleeps and aborts after 20 of them.
 struct CountingClock {
@@ -24,12 +25,13 @@ impl Clock for CountingClock {
     fn now(&self) -> i64 {
         0
     }
-    async fn sleep(&self, _duration: Duration, _cancel: &CancellationToken) {
+    async fn sleep(&self, _ms: u64, _cancel: Option<&CancellationToken>) -> PortResult<()> {
         let mut n = self.sleeps.lock().unwrap();
         *n += 1;
         if *n > 20 {
             self.cancel.cancel();
         }
+        Ok(())
     }
 }
 
@@ -61,18 +63,18 @@ fn take_failure(counter: &Mutex<u32>) -> bool {
 
 #[async_trait]
 impl ArtifactStore for Flaky {
-    async fn put(&self, key: &str, body: &[u8]) -> Result<(), StoreError> {
+    async fn put(&self, key: &str, body: &[u8]) -> PortResult<()> {
         self.inner.put(key, body).await
     }
-    async fn get(&self, key: &str) -> Result<Option<String>, StoreError> {
+    async fn get(&self, key: &str) -> PortResult<Option<String>> {
         if take_failure(&self.get_failures) {
-            return Err(StoreError("S3 503".into()));
+            return Err(PortError::failed("S3 503"));
         }
         self.inner.get(key).await
     }
-    async fn list(&self, prefix: &str) -> Result<Vec<String>, StoreError> {
+    async fn list(&self, prefix: &str) -> PortResult<Vec<String>> {
         if take_failure(&self.list_failures) {
-            return Err(StoreError("S3 503".into()));
+            return Err(PortError::failed("S3 503"));
         }
         self.inner.list(prefix).await
     }
@@ -93,7 +95,10 @@ async fn the_inbox_retries_after_a_store_error_instead_of_giving_up() {
     let inbox = ArtifactInbox::new(store, "p/")
         .with_clock(clock.clone())
         .with_poll_interval(Duration::from_millis(1));
-    assert_eq!(inbox.next(&cancel).await, Some(RunnerMessage::Stop));
+    assert_eq!(
+        inbox.next(Some(&cancel)).await.unwrap(),
+        Some(RunnerMessage::Stop)
+    );
     assert_eq!(*clock.sleeps.lock().unwrap(), 3); // one failed list and two failed gets, each retried after the poll interval
 }
 
@@ -106,10 +111,7 @@ async fn the_inbox_skips_a_malformed_message_and_delivers_the_next() {
         .await
         .unwrap();
     let inbox = ArtifactInbox::new(store, "p/").with_poll_interval(Duration::from_millis(1));
-    assert_eq!(
-        inbox.next(&CancellationToken::new()).await,
-        Some(RunnerMessage::Pause)
-    );
+    assert_eq!(inbox.next(None).await.unwrap(), Some(RunnerMessage::Pause));
 }
 
 #[tokio::test]

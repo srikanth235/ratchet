@@ -35,7 +35,7 @@ Added (no TS counterpart), `tests/artifacts_resilience.rs`: the inbox retries af
 | ...error_max_turns ends the turn normally | `error_max_turns_ends_the_turn_normally_so_the_runner_can_carry_on` |
 | ...a stream that ends without a result line is an error | `a_stream_that_ends_without_a_result_line_is_an_error_even_with_exit_zero` |
 | ...a missing binary is reported, not thrown raw | `a_missing_binary_is_reported_not_raised_raw` |
-| ...abort: signals the process group (SIGTERM) and rejects with AgentAbortedError | `abort_signals_the_process_group_with_sigterm_and_fails_with_aborted` (`AgentError::Aborted`) |
+| ...abort: signals the process group (SIGTERM) and rejects with AgentAbortedError | `abort_signals_the_process_group_with_sigterm_and_fails_with_aborted` (`PortError::Cancelled`; ported (changed): the error no longer carries the session id the aborted turn had started, nothing used it) |
 | ...an already-aborted signal never lets the turn proceed | `an_already_aborted_signal_never_lets_the_turn_proceed` |
 | ...preflight: ok with the binary present and a key | `preflight_is_ok_with_the_binary_present_and_a_key` |
 | ...preflight: reports a missing key and a missing binary | `preflight_reports_a_missing_key_and_a_missing_binary` |
@@ -53,7 +53,7 @@ Added (no TS counterpart), `tests/artifacts_resilience.rs`: the inbox retries af
 | CodexAdapter: start: `codex exec --json`, prompt on stdin via "-" | `start_runs_codex_exec_json_with_the_prompt_on_stdin_via_dash_and_returns_the_thread_id` |
 | ...resume: `codex exec resume <thread> --json ...` | `resume_runs_codex_exec_resume_thread_json` |
 | ...sandbox / prompt-as-argument / extra overrides | `sandbox_prompt_as_argument_and_extra_overrides_are_configurable` |
-| ...turn.failed becomes an AgentError | `turn_failed_becomes_an_error_carrying_the_vendor_message` |
+| ...turn.failed becomes an error (`PortError::AgentFailed`) | `turn_failed_becomes_an_error_carrying_the_vendor_message` |
 | ...non-zero exit without turn.completed carries stderr | `non_zero_exit_without_turn_completed_carries_stderr` |
 | ...abort kills the process group | `abort_kills_the_process_group_and_fails_with_aborted` |
 | ...preflight: key and binary | `preflight_checks_key_and_binary` |
@@ -74,8 +74,8 @@ Added (no TS counterpart), `tests/artifacts_resilience.rs`: the inbox retries af
 | prompts: resume message for verified / rejected / no-change | `resume_message_for_a_verified_rejected_and_no_change_turn` |
 
 Added: `numbers_are_formatted_like_the_ts_helpers` (`Number.prototype.toFixed` ties round away from zero, not to even).
-Protected paths: `effective_protected` in `domain.rs` is a port of `protected-set.ts` without the evaluator-template registry
-(`TODO(core)`); a template's own protect globs are missing from the agent's context listing until core lands (the engine still enforces them).
+Protected paths: the context lists `ratchet_core::protected_set::effective_protected`, which includes the evaluator template's own protect
+globs (a template's `data/**`, say), as the engine enforces them; test `wire::the_context_lists_the_protect_globs_of_the_evaluator_template`.
 
 ## controls.test.ts -> tests/controls.rs
 
@@ -91,7 +91,7 @@ Protected paths: `effective_protected` in `domain.rs` is a port of `protected-se
 | ...a restarted event sink continues the numbering | `a_restarted_event_sink_continues_the_numbering_and_a_failed_put_is_retried_on_the_next_flush` |
 | AwsCliArtifactStore: put/get/list | `aws_cli_store_put_get_list_through_s3_cp_and_s3api` |
 | ...list returns [] when the prefix is empty | `aws_cli_store_list_returns_empty_when_the_prefix_is_empty_aws_prints_null` |
-| FsArtifactStore | `fs_store_behaves_like_s3_for_put_get_list_by_prefix` |
+| FsArtifactStore | moved with the store to `ratchet-sandbox`: `tests/suite/artifacts.rs::fs_store_behaves_like_s3_for_put_get_list_by_prefix_under_the_runner_layout` |
 | LocalRunnerControl: separate clones, in-memory inbox, cursors | `local_control_runs_agents_in_separate_clones_with_an_in_memory_inbox_and_cursor_based_polling` |
 | ...stop ends a running agent promptly | `local_control_stop_ends_a_running_agent_promptly` |
 
@@ -187,7 +187,9 @@ The demo tests read `examples/demo-*` from the repository root, so they keep wor
 
 - `tests/snapshots.rs` (insta): `context.md`, the initial prompt, a resume message, the SSM launch script, the `RunnerConfig` wire shape, the Claude and Codex
   transcripts as `AgentEvent` JSON, the harness hints.
-- Unit tests in `src/`: `domain` (protected-set globs, wire shapes of `RunnerMessage` / `AgentEvent`), `clock`, `detect` (semver scan, version-directory
+- `tests/wire.rs`: the three unit tests of the former `domain.rs` (evaluator directories of a run command, wire shapes of `RunnerMessage` /
+  `AgentEvent`), now on the `ratchet-core` types, plus the template protect globs in the context.
+- Unit tests in `src/`: `clock`, `detect` (semver scan, version-directory
   order, secret-name matching), `inbox`, `scripted`, `process`.
 
 ## Behaviour differences (all deliberate, none observable in the TS tests)
@@ -195,8 +197,8 @@ The demo tests read `examples/demo-*` from the repository root, so they keep wor
 1. **Reader robustness.** A store error in `ArtifactInbox::next` is logged and retried after the poll interval (TS: the rejected promise ended the
    mailbox pump, so the runner never saw another message). `ArtifactEventSink` reads the last batch number lazily on the first flush and, if
    listing fails, keeps its events and retries instead of numbering from 0.
-2. **`FsArtifactStore.put`** writes a temp file and renames it, so a reader never sees a half-written object (`.tmp-*` files are hidden from `list`).
-   The empty-object retry in the readers stays, it protects the S3 case.
+2. **`FsArtifactStore`** is `ratchet_sandbox::FsArtifactStore` (this crate's copy is gone): `put` stages through a `.put-tmp` directory and renames, so a
+   reader never sees a half-written object (the staging directory is never listed). The empty-object retry in the readers stays, it protects the S3 case.
 3. **`LocalRunnerControl::start`** builds the adapter (which can fail with the detection hint) before it clones or adds a worktree; TS added the
    worktree first and left it behind when the adapter factory threw.
 4. **Numbers.** Timestamps are `i64` milliseconds, token counts `u64`; JSON floats print like Rust (`20.0`), every consumer parses them the same. The
@@ -208,9 +210,28 @@ The demo tests read `examples/demo-*` from the repository root, so they keep wor
 7. **`RATCHET_CLAUDE_PERMISSION_MODE`** is passed through for any value (`ClaudePermissionMode::Other`), like the TS cast.
 8. **Events** drop `null`/absent `data` entries (an `exitCode` of `null` on a signal exit is omitted; TS wrote `null`).
 9. **Spawn errors** read like node's (`spawn claude ENOENT`), built from the OS error.
+10. **Wire shape of the runner config.** `RunnerConfig.config` is core's `RatchetConfig`, which serializes without the `bench` alias object the TS config
+    carried next to `evaluator` (core's `RatchetConfig::bench()` is the evaluator) and with core's field order; `snapshots__runner_config_wire_shape` was
+    accepted accordingly. The runner still reads configs that carry `bench` (unknown fields are ignored) as long as they are complete.
 
-## Local stand-ins to unify when ratchet-core / ratchet-sandbox land
+## Unified with ratchet-core / ratchet-sandbox
 
-`src/domain.rs`, every item marked `TODO(core)` or `TODO(sandbox)`: ids, `AgentKind`, `CandidateVerdict`, `Clock`, `AgentEvent`/`AgentUsage`/`AgentSpec`/
-`AgentSession`/`AgentAdapter`, `RunnerMessage`/`RunnerConfig`/`RunnerHandle`/`RunnerControl`/`RunnerInbox`, a slice of `RatchetConfig` (objective, evaluator,
-guardrails, protected, environment, infra; unknown fields kept), the protected-set computation, `ArtifactStore`, and the `CloudCompute::run_command` slice of the SSM capability.
+`src/domain.rs` is gone. What it stood in for is now used from the other crates, and where the two disagreed core (or this crate) changed:
+
+- **Types and ports** from `ratchet_core`: `AgentKind`, `CandidateVerdict`, ids (`OptimizationId`, `AgentId`), `AgentEvent` / `AgentUsage` / `AgentSpec` /
+  `AgentSession` / `Preflight`, `AgentAdapter`, `RunnerMessage` / `RunnerConfig` / `RunnerHandle` / `PolledEvents`, `RunnerControl`, `RunnerInbox`,
+  `Clock`, `ArtifactStore`, `CloudCompute` (`run_command` is the only method the SSM control calls), `RatchetConfig` (the full typed config: a runner config
+  must now carry a complete `config`, which the engine always sent), `effective_protected`, `numfmt::to_fixed`.
+- **Errors** are `PortError`: `AgentError::Failed { message, exit_code, stderr }` is `PortError::AgentFailed { .. }` (new in core), `AgentError::Aborted` is
+  `PortError::Cancelled`, `ControlError` / `StoreError` are `PortError::Failed`.
+- **Callbacks.** `EventCallback` is core's `EventSink<'_>` (a synchronous callback, so events stay in order and the loop sees usage before the adapter goes
+  on); `AgentAdapter::resume` takes `&mut AgentSession` (a CLI can fork the session id), `cancel` is `Option<&CancellationToken>` (the one from `tokio_util`).
+- **Clock.** One trait: `sleep(ms, Option<&CancellationToken>)` returns `Err(Cancelled)` when the token fires. `SystemClock` is core's; `AcceleratedClock`
+  (simulation) and this crate's `ManualClock` (sleepers wake only on `advance`; core's jumps on `sleep`) stay here.
+- **`AgentSpec`** has `workdir: String` and `env: BTreeMap` (wire types), `LoopTuning::agent_env` follows.
+- **`RunnerMessage::Unknown`** (behaviour difference 5) moved into core.
+- **`RunnerLoopOptions`** (with `LoopTuning`) stays here: it is the TypeScript `RunnerLoopDeps`; the copy core had drafted is removed.
+- **`ratchet-sandbox`** is a dependency of the `ratchet-runner` binary only, for `FsArtifactStore` (`RATCHET_ARTIFACT_DIR`): the binary hands it to
+  `runner_main` through `RunnerMainOptions::store`, so the library, and every test that links it, does not link the AWS SDK (the SDK's debug info made each
+  test binary ~200 MB); only `tests/runner_main.rs` (which shares the directory with the real binary) does. `AwsCliArtifactStore` stays: the runner
+  shells out to the `aws` CLI on the instance instead of linking the SDK for S3.

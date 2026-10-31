@@ -1,6 +1,13 @@
 //! Shared helpers for the integration tests: git sandboxes, a fake engine that answers commits with verdicts, polling.
 #![allow(dead_code)]
 
+use ratchet_core::enums::CandidateVerdict;
+use ratchet_core::ids::{AgentId, OptimizationId};
+use ratchet_core::ports::{
+    AgentEvent, AgentEventType, AgentIdentity, ArtifactStore, BenchLaunchSpec, CloudCompute,
+    InstanceInfo, PortError, PortResult, RemoteCommand, RemoteCommandResult, RunnerConfig,
+    RunnerLaunchSpec, RunnerMessage, SecretRef,
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -8,10 +15,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use ratchet_agents::domain::{
-    AgentEvent, AgentEventType, ArtifactStore, CandidateVerdict, CloudCompute, ControlError,
-    RemoteCommand, RemoteCommandResult, RunnerConfig, RunnerMessage, StoreError,
-};
+
 use serde_json::json;
 
 pub const SEED_FILES: [(&str, &str); 3] = [
@@ -221,7 +225,7 @@ pub fn auto_verdicts(
 ) -> Arc<dyn Fn(&AgentEvent) + Send + Sync> {
     let state = Mutex::new((opts.start.unwrap_or(20.0), 0usize));
     Arc::new(move |e: &AgentEvent| {
-        if e.kind != AgentEventType::Commit {
+        if e.event_type != AgentEventType::Commit {
             return;
         }
         let sha = e.data_str("sha").unwrap_or_default().to_string();
@@ -312,17 +316,17 @@ pub struct MemoryStore {
 
 #[async_trait]
 impl ArtifactStore for MemoryStore {
-    async fn put(&self, key: &str, body: &[u8]) -> Result<(), StoreError> {
+    async fn put(&self, key: &str, body: &[u8]) -> PortResult<()> {
         self.objects
             .lock()
             .unwrap()
             .insert(key.to_string(), String::from_utf8_lossy(body).into_owned());
         Ok(())
     }
-    async fn get(&self, key: &str) -> Result<Option<String>, StoreError> {
+    async fn get(&self, key: &str) -> PortResult<Option<String>> {
         Ok(self.objects.lock().unwrap().get(key).cloned())
     }
-    async fn list(&self, prefix: &str) -> Result<Vec<String>, StoreError> {
+    async fn list(&self, prefix: &str) -> PortResult<Vec<String>> {
         Ok(self
             .objects
             .lock()
@@ -359,25 +363,71 @@ impl Default for FakeCompute {
     }
 }
 
+/// Only the SSM command channel works; the rest of the port is not used by the runner control.
 #[async_trait]
 impl CloudCompute for FakeCompute {
+    async fn create_agent_identity(
+        &self,
+        _: &OptimizationId,
+        _: &AgentId,
+    ) -> PortResult<AgentIdentity> {
+        Err(PortError::Unsupported("create_agent_identity"))
+    }
+    async fn revoke_agent_identity(&self, _: &AgentIdentity) -> PortResult<()> {
+        Err(PortError::Unsupported("revoke_agent_identity"))
+    }
+    async fn delete_agent_identity(&self, _: &AgentIdentity) -> PortResult<()> {
+        Err(PortError::Unsupported("delete_agent_identity"))
+    }
+    async fn put_secret(
+        &self,
+        _: &OptimizationId,
+        _: &AgentId,
+        _: &str,
+        _: &str,
+    ) -> PortResult<SecretRef> {
+        Err(PortError::Unsupported("put_secret"))
+    }
+    async fn delete_secrets(&self, _: &OptimizationId, _: &AgentId) -> PortResult<()> {
+        Err(PortError::Unsupported("delete_secrets"))
+    }
+    async fn launch_runner(&self, _: &RunnerLaunchSpec) -> PortResult<InstanceInfo> {
+        Err(PortError::Unsupported("launch_runner"))
+    }
+    async fn launch_bench_instance(&self, _: &BenchLaunchSpec) -> PortResult<InstanceInfo> {
+        Err(PortError::Unsupported("launch_bench_instance"))
+    }
+    async fn terminate(&self, _: &[String]) -> PortResult<()> {
+        Err(PortError::Unsupported("terminate"))
+    }
+    async fn list_tagged(&self, _: Option<&OptimizationId>) -> PortResult<Vec<InstanceInfo>> {
+        Err(PortError::Unsupported("list_tagged"))
+    }
     async fn run_command(
         &self,
         instance_id: &str,
-        command: RemoteCommand,
-    ) -> Result<RemoteCommandResult, ControlError> {
+        command: &RemoteCommand,
+    ) -> PortResult<RemoteCommandResult> {
         self.commands
             .lock()
             .unwrap()
-            .push((instance_id.to_string(), command));
+            .push((instance_id.to_string(), command.clone()));
         if *self.fail.lock().unwrap() {
-            return Err(ControlError::new("instance gone"));
+            return Err(PortError::failed("instance gone"));
         }
         Ok(self.next_result.lock().unwrap().clone())
     }
 }
 
 pub fn env_of(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
+}
+
+/// `AgentSpec::env` is ordered.
+pub fn btree_env_of(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
     pairs
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))

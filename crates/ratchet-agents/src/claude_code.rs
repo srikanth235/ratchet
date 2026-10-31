@@ -4,14 +4,14 @@ use std::collections::BTreeSet;
 
 use async_trait::async_trait;
 use serde_json::{Map, Value, json};
-use tokio_util::sync::CancellationToken;
 
 use crate::cli_agent::{CliAgent, CliAgentOptions, as_record, num, str_of, truncate};
-use crate::domain::{
-    AgentAdapter, AgentError, AgentEvent, AgentEventType, AgentKind, AgentSession, AgentSpec,
-    AgentUsage, EventCallback, Preflight,
-};
 use crate::process::LineSplitter;
+use ratchet_core::enums::AgentKind;
+use ratchet_core::ports::{
+    AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
+    CancellationToken, EventSink, PortError, PortResult, Preflight,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClaudeResult {
@@ -407,10 +407,10 @@ impl ClaudeCodeAdapter {
         args: Vec<String>,
         spec: &AgentSpec,
         prompt: &str,
-        on_event: EventCallback<'_>,
+        on_event: &EventSink<'_>,
         cancel: &CancellationToken,
         is_start: bool,
-    ) -> Result<(), AgentError> {
+    ) -> PortResult<()> {
         let clock = self.cli.clock.clone();
         let mut parser = ClaudeStreamParser::new(move || clock.now());
         let via_arg = self.options.prompt_via == PromptVia::Arg;
@@ -439,13 +439,13 @@ impl ClaudeCodeAdapter {
             session.id = id.clone();
         }
 
-        let fail = |message: String| -> AgentError {
+        let fail = |message: String| -> PortError {
             on_event(
                 AgentEvent::new(self.cli.clock.now(), AgentEventType::Error)
                     .with_text(message.clone())
                     .with_data(json!({"exitCode": res.code(), "stderr": res.stderr_tail})),
             );
-            AgentError::Failed {
+            PortError::AgentFailed {
                 message,
                 exit_code: res.code(),
                 stderr: Some(res.stderr_tail.clone()),
@@ -457,9 +457,7 @@ impl ClaudeCodeAdapter {
                 AgentEvent::new(self.cli.clock.now(), AgentEventType::Status)
                     .with_text("claude-code turn aborted"),
             );
-            return Err(AgentError::Aborted {
-                session: (!session.id.is_empty()).then(|| session.clone()),
-            });
+            return Err(PortError::Cancelled);
         }
         if let Some(err) = res.spawn_error() {
             return Err(fail(format!("cannot run '{}': {err}", self.cli.binary)));
@@ -472,7 +470,7 @@ impl ClaudeCodeAdapter {
                 } else {
                     result.text.clone()
                 };
-                return Err(AgentError::Failed {
+                return Err(PortError::AgentFailed {
                     message,
                     exit_code: res.code(),
                     stderr: Some(res.stderr_tail.clone()),
@@ -510,7 +508,7 @@ impl AgentAdapter for ClaudeCodeAdapter {
         AgentKind::ClaudeCode
     }
 
-    async fn preflight(&self) -> Preflight {
+    async fn preflight(&self) -> PortResult<Preflight> {
         let mut problems = Vec::new();
         if let Some(p) = self.cli.probe_binary().await {
             problems.push(p);
@@ -524,18 +522,19 @@ impl AgentAdapter for ClaudeCodeAdapter {
         {
             problems.push("ANTHROPIC_API_KEY is not set".to_string());
         }
-        Preflight {
+        Ok(Preflight {
             ok: problems.is_empty(),
             problems,
-        }
+        })
     }
 
     async fn start(
         &self,
         spec: &AgentSpec,
-        on_event: EventCallback<'_>,
-        cancel: &CancellationToken,
-    ) -> Result<AgentSession, AgentError> {
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<AgentSession> {
+        let cancel = cancel.cloned().unwrap_or_default();
         let mut session = AgentSession {
             id: String::new(),
             kind: AgentKind::ClaudeCode,
@@ -546,7 +545,7 @@ impl AgentAdapter for ClaudeCodeAdapter {
             spec,
             &spec.prompt,
             on_event,
-            cancel,
+            &cancel,
             true,
         )
         .await?;
@@ -558,11 +557,12 @@ impl AgentAdapter for ClaudeCodeAdapter {
         session: &mut AgentSession,
         spec: &AgentSpec,
         message: &str,
-        on_event: EventCallback<'_>,
-        cancel: &CancellationToken,
-    ) -> Result<(), AgentError> {
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<()> {
+        let cancel = cancel.cloned().unwrap_or_default();
         let args = self.build_args(spec, Some(&session.id));
-        self.turn(session, args, spec, message, on_event, cancel, false)
+        self.turn(session, args, spec, message, on_event, &cancel, false)
             .await
     }
 }

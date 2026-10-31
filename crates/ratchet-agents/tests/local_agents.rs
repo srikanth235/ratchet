@@ -1,5 +1,7 @@
 mod common;
 
+use ratchet_core::enums::AgentKind;
+use ratchet_core::ports::{AgentAdapter, AgentEvent, AgentEventType, RunnerControl, RunnerHandle};
 use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -11,9 +13,7 @@ use common::{
     AutoOptions, Sandbox, auto_verdicts, base_config, env_of, make_sandbox, make_sandbox_branches,
     sh,
 };
-use ratchet_agents::domain::{
-    AgentAdapter, AgentEvent, AgentEventType, AgentKind, RunnerControl, RunnerHandle,
-};
+
 use ratchet_agents::{
     AgentScript, DetectOptions, HarnessAuth, HarnessInfo, HarnessKind, LocalAdapterOptions,
     LocalAgentControlOptions, LocalRunnerControl, LocalRunnerControlOptions, ScriptStep,
@@ -37,7 +37,7 @@ async fn drive(control: &Arc<LocalRunnerControl>, h: &RunnerHandle) -> Vec<Agent
             move |m| {
                 let (control, h) = (control.clone(), h.clone());
                 tokio::spawn(async move {
-                    let _ = control.send(&h, m).await;
+                    let _ = control.send(&h, &m).await;
                 });
             },
             AutoOptions::default(),
@@ -89,10 +89,9 @@ fn worktree_control(
     let mut options = LocalRunnerControlOptions::new(
         root,
         Arc::new(move |config, _| {
-            Ok(
-                Arc::new(ScriptedAgent::new(scripts[&config.agent_id].clone()))
-                    as Arc<dyn AgentAdapter>,
-            )
+            Ok(Arc::new(ScriptedAgent::new(
+                scripts[config.agent_id.as_str()].clone(),
+            )) as Arc<dyn AgentAdapter>)
         }),
     );
     options.workdirs = WorkdirMode::Worktree;
@@ -109,7 +108,7 @@ fn scripts(pairs: &[(&str, AgentScript)]) -> HashMap<String, AgentScript> {
         .collect()
 }
 
-fn config_for(sb: &Sandbox, agent: &str) -> ratchet_agents::RunnerConfig {
+fn config_for(sb: &Sandbox, agent: &str) -> ratchet_core::ports::RunnerConfig {
     let (agent, branch) = (agent.to_string(), format!("ratchet/{agent}"));
     base_config(sb, move |c| {
         c["agentId"] = agent.into();
@@ -166,7 +165,7 @@ async fn worktree_mode_gives_each_agent_a_worktree_of_one_local_clone_with_its_o
     assert_eq!(
         seen_a
             .iter()
-            .filter(|e| e.kind == AgentEventType::Commit)
+            .filter(|e| e.event_type == AgentEventType::Commit)
             .count(),
         1
     );
@@ -217,12 +216,12 @@ async fn worktree_mode_stop_removes_that_agents_worktree_and_nothing_else_releas
     assert!(root.join("opt1/b").exists());
     assert!(!sh(&root.join("opt1/clone"), &["worktree", "list"]).contains("/a "));
 
-    control.release("opt1").await.unwrap();
+    control.release(&"opt1".into()).await.unwrap();
     assert!(!root.join("opt1").exists());
     // the remote is untouched
     let sha = sh(&sb.remote, &["rev-parse", "ratchet/a"]);
     assert!(sha.len() == 40 && sha.bytes().all(|b| b.is_ascii_hexdigit()));
-    control.release("opt1").await.unwrap(); // idempotent
+    control.release(&"opt1".into()).await.unwrap(); // idempotent
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -240,7 +239,7 @@ async fn worktree_mode_a_start_that_cannot_clone_fails_cleanly_is_not_registered
     let err = control.start(&h, &bad).await.unwrap_err();
     assert!(err.to_string().contains("clone"), "{err}");
     let unknown = control
-        .send(&h, ratchet_agents::RunnerMessage::Pause)
+        .send(&h, &ratchet_core::ports::RunnerMessage::Pause)
         .await
         .unwrap_err();
     assert!(unknown.to_string().contains("unknown runner"), "{unknown}");
@@ -266,7 +265,7 @@ async fn worktree_mode_a_second_run_reuses_the_existing_clone_and_replaces_a_sta
         .unwrap();
     drive(&second, &handle("a")).await;
     assert_eq!(sh(&sb.remote, &["show", "ratchet/a:a2.txt"]), "a2.txt");
-    second.release("opt1").await.unwrap();
+    second.release(&"opt1".into()).await.unwrap();
 }
 
 #[tokio::test]
@@ -276,7 +275,7 @@ async fn poll_reports_an_unknown_lost_agent_as_failed_once_so_the_engine_ends_it
     let first = control.poll(&handle("ghost"), None).await.unwrap();
     assert_eq!(first.events.len(), 1);
     let e = &first.events[0];
-    assert_eq!(e.kind, AgentEventType::Status);
+    assert_eq!(e.event_type, AgentEventType::Status);
     assert_eq!(e.data_str("state"), Some("failed"));
     assert_eq!(e.data_str("reason"), Some("lost"));
     assert!(
@@ -382,11 +381,15 @@ async fn local_agents_run_claude_code_adapter_with_the_detected_binary_the_user_
         .unwrap();
     let events = drive(&control, &h).await;
 
-    assert!(events.iter().any(|e| e.kind == AgentEventType::Commit));
+    assert!(
+        events
+            .iter()
+            .any(|e| e.event_type == AgentEventType::Commit)
+    );
     assert_eq!(
         events
             .iter()
-            .find(|e| e.kind == AgentEventType::Usage)
+            .find(|e| e.event_type == AgentEventType::Usage)
             .and_then(|e| e.usage)
             .and_then(|u| u.cost_usd),
         Some(0.02)
@@ -414,7 +417,7 @@ async fn local_agents_run_claude_code_adapter_with_the_detected_binary_the_user_
         sh(&sb.remote, &["log", "-1", "--format=%B", "ratchet/a"])
             .contains("Ratchet-Candidate: true")
     );
-    control.release("opt1").await.unwrap();
+    control.release(&"opt1".into()).await.unwrap();
     assert!(!root.join("agents/opt1").exists());
 }
 
@@ -457,7 +460,7 @@ async fn local_agents_pass_the_key_only_when_the_harness_reports_api_key_auth() 
             .unwrap()
             .contains("key=sk-ant-OKTOPASS")
     );
-    control.release("opt1").await.unwrap();
+    control.release(&"opt1".into()).await.unwrap();
 }
 
 #[test]

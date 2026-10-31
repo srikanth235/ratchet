@@ -17,12 +17,12 @@ expression: config()
       "min_gain": 0.03
     },
     "evaluator": {
-      "run": "k6 run bench/k6/search.js",
-      "deps": "auto",
       "kind": "benchmark",
       "ref": "ratchet/bench",
+      "run": "k6 run bench/k6/search.js",
       "repeats": 5,
-      "hardware": "c7i.2xlarge"
+      "hardware": "c7i.2xlarge",
+      "deps": "auto"
     },
     "guardrails": [
       {
@@ -42,14 +42,6 @@ expression: config()
       "bench/**",
       "ratchet.yaml"
     ],
-    "bench": {
-      "kind": "benchmark",
-      "ref": "ratchet/bench",
-      "run": "k6 run bench/k6/search.js",
-      "repeats": 5,
-      "hardware": "c7i.2xlarge",
-      "deps": "auto"
-    },
     "agent": {
       "instructions": "RATCHET.md",
       "allowed_instance_types": [

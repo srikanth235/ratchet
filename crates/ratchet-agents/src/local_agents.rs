@@ -12,9 +12,10 @@ use crate::control::local::{
     AdapterFor, LocalRunnerControl, LocalRunnerControlOptions, WorkdirMode,
 };
 use crate::detect::{HarnessAuth, HarnessInfo, HarnessKind, local_agent_env};
-use crate::domain::{AgentAdapter, AgentKind, Clock, RunnerConfig};
 use crate::process::SharedSpawner;
 use crate::runner_loop::LoopTuning;
+use ratchet_core::enums::AgentKind;
+use ratchet_core::ports::{AgentAdapter, Clock, RunnerConfig};
 
 /// Builds the adapter for `kind: mock` (a demo with scripted agents).
 pub type MockFactory = Arc<dyn Fn(&RunnerConfig) -> Arc<dyn AgentAdapter> + Send + Sync>;

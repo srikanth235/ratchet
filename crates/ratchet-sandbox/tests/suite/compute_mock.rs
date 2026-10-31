@@ -313,3 +313,28 @@ async fn mock_instance_ids_are_valid_instance_ids_so_the_real_validators_accept_
     ratchet_sandbox::util::assert_valid_instance_id(&i.id).unwrap();
     assert_eq!(i.id, "i-mock000000000001");
 }
+
+#[tokio::test]
+async fn is_usable_as_the_core_cloud_compute_port_object() {
+    let (_, cloud) = mk(0);
+    let port: Arc<dyn CloudCompute> = Arc::new(cloud);
+    let id = port
+        .create_agent_identity(&OptimizationId::from("o1"), &AgentId::from("a1"))
+        .await
+        .unwrap();
+    let launched = port.launch_runner(&spec(&id)).await.unwrap();
+    assert_eq!(launched.optimization_id, "o1");
+    assert_eq!(
+        port.list_tagged(Some(&OptimizationId::from("o1")))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        port.list_tagged(Some(&OptimizationId::from("o2")))
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}

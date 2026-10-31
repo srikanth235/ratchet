@@ -8,13 +8,14 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use tokio_util::sync::CancellationToken;
 
-use crate::clock::SystemClock;
-use crate::domain::{
-    AgentAdapter, AgentError, AgentEvent, AgentEventType, AgentKind, AgentSession, AgentSpec,
-    AgentUsage, Clock, EventCallback, Preflight,
+use ratchet_core::enums::AgentKind;
+use ratchet_core::ports::mock::SystemClock;
+use ratchet_core::ports::{
+    AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
+    CancellationToken, Clock, EventSink, PortError, PortResult, Preflight,
 };
+
 use crate::git::{GitCall, SharedGit, exec_git};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -201,7 +202,7 @@ impl ScriptedAgent {
 
     fn emit(
         &self,
-        on_event: EventCallback<'_>,
+        on_event: &EventSink<'_>,
         kind: AgentEventType,
         text: Option<String>,
         data: Option<Value>,
@@ -214,25 +215,25 @@ impl ScriptedAgent {
         on_event(e);
     }
 
-    fn inside(&self, workdir: &Path, path: &str) -> Result<PathBuf, AgentError> {
+    fn inside(&self, workdir: &Path, path: &str) -> PortResult<PathBuf> {
         let root = resolve(workdir, ".");
         let full = resolve(workdir, path);
         if full != root && !full.starts_with(&root) {
-            return Err(AgentError::failed(format!(
+            return Err(PortError::agent_failed(format!(
                 "path escapes the workdir: {path}"
             )));
         }
         Ok(full)
     }
 
-    async fn skip_applies(&self, skip: &StepCondition, workdir: &Path) -> Result<bool, AgentError> {
+    async fn skip_applies(&self, skip: &StepCondition, workdir: &Path) -> PortResult<bool> {
         let text = tokio::fs::read_to_string(self.inside(workdir, &skip.file)?)
             .await
             .unwrap_or_default();
         Ok(text.contains(&skip.contains) == (skip.skip_when == SkipWhen::Present))
     }
 
-    async fn is_redundant(&self, steps: &[ScriptStep], workdir: &Path) -> Result<bool, AgentError> {
+    async fn is_redundant(&self, steps: &[ScriptStep], workdir: &Path) -> PortResult<bool> {
         let patches: Vec<&Option<StepCondition>> = steps
             .iter()
             .filter_map(|s| {
@@ -267,11 +268,10 @@ impl ScriptedAgent {
     /// real agent reading the new tree would.
     async fn play_next(
         &self,
-        session: &AgentSession,
         spec: &AgentSpec,
-        on_event: EventCallback<'_>,
+        on_event: &EventSink<'_>,
         cancel: &CancellationToken,
-    ) -> Result<(), AgentError> {
+    ) -> PortResult<()> {
         loop {
             let (attempt, index) = {
                 let mut cursor = self.cursor.lock().unwrap();
@@ -298,9 +298,8 @@ impl ScriptedAgent {
                 .position(|st| !matches!(st, ScriptStep::Git { .. }));
             let housekeeping_len = lead.unwrap_or(attempt.steps.len());
             let (housekeeping, rest) = attempt.steps.split_at(housekeeping_len);
-            self.play(housekeeping, session, spec, on_event, cancel)
-                .await?;
-            let redundant = self.is_redundant(rest, &spec.workdir).await?;
+            self.play(housekeeping, spec, on_event, cancel).await?;
+            let redundant = self.is_redundant(rest, workdir_of(spec)).await?;
             if redundant {
                 self.emit(
                     on_event,
@@ -309,12 +308,10 @@ impl ScriptedAgent {
                     None,
                 );
             } else {
-                self.play(rest, session, spec, on_event, cancel).await?;
+                self.play(rest, spec, on_event, cancel).await?;
             }
             if cancel.is_cancelled() {
-                return Err(AgentError::Aborted {
-                    session: Some(session.clone()),
-                });
+                return Err(PortError::Cancelled);
             }
             if !redundant {
                 return Ok(());
@@ -325,11 +322,10 @@ impl ScriptedAgent {
     async fn play(
         &self,
         steps: &[ScriptStep],
-        session: &AgentSession,
         spec: &AgentSpec,
-        on_event: EventCallback<'_>,
+        on_event: &EventSink<'_>,
         cancel: &CancellationToken,
-    ) -> Result<(), AgentError> {
+    ) -> PortResult<()> {
         for step in steps {
             if cancel.is_cancelled() {
                 self.emit(
@@ -338,16 +334,14 @@ impl ScriptedAgent {
                     Some("scripted turn aborted".into()),
                     None,
                 );
-                return Err(AgentError::Aborted {
-                    session: Some(session.clone()),
-                });
+                return Err(PortError::Cancelled);
             }
             self.play_step(step, spec, on_event, cancel).await?;
         }
         Ok(())
     }
 
-    fn tool(&self, on_event: EventCallback<'_>, name: &str, text: &str, is_error: bool) {
+    fn tool(&self, on_event: &EventSink<'_>, name: &str, text: &str, is_error: bool) {
         self.emit(
             on_event,
             AgentEventType::Tool,
@@ -378,9 +372,9 @@ impl ScriptedAgent {
         &self,
         step: &ScriptStep,
         spec: &AgentSpec,
-        on_event: EventCallback<'_>,
+        on_event: &EventSink<'_>,
         cancel: &CancellationToken,
-    ) -> Result<(), AgentError> {
+    ) -> PortResult<()> {
         match step {
             ScriptStep::Message { text } => {
                 self.emit(on_event, AgentEventType::Message, Some(text.clone()), None)
@@ -401,9 +395,8 @@ impl ScriptedAgent {
                     Some(json!({"phase": "call", "name": name, "input": input.as_ref().map(|i| Value::Object(i.clone()))})),
                 );
                 if let Some(ms) = ms.filter(|ms| *ms > 0) {
-                    self.clock
-                        .sleep(std::time::Duration::from_millis(ms), cancel)
-                        .await;
+                    // an abort ends the sleep early; `play` checks the token before the next step
+                    let _ = self.clock.sleep(ms, Some(cancel)).await;
                 }
                 self.emit(
                     on_event,
@@ -429,24 +422,22 @@ impl ScriptedAgent {
                 );
             }
             ScriptStep::Sleep { ms } => {
-                self.clock
-                    .sleep(std::time::Duration::from_millis(*ms), cancel)
-                    .await
+                let _ = self.clock.sleep(*ms, Some(cancel)).await;
             }
             ScriptStep::Write { path, content } => {
-                let full = self.inside(&spec.workdir, path)?;
+                let full = self.inside(workdir_of(spec), path)?;
                 if let Some(dir) = full.parent() {
                     tokio::fs::create_dir_all(dir)
                         .await
-                        .map_err(|e| AgentError::failed(e.to_string()))?;
+                        .map_err(|e| PortError::agent_failed(e.to_string()))?;
                 }
                 tokio::fs::write(&full, content)
                     .await
-                    .map_err(|e| AgentError::failed(e.to_string()))?;
+                    .map_err(|e| PortError::agent_failed(e.to_string()))?;
                 self.tool(on_event, "Write", path, false);
             }
             ScriptStep::Delete { path } => {
-                let full = self.inside(&spec.workdir, path)?;
+                let full = self.inside(workdir_of(spec), path)?;
                 let _ = tokio::fs::remove_file(&full).await;
                 self.tool(on_event, "Delete", path, false);
             }
@@ -455,7 +446,7 @@ impl ScriptedAgent {
                 find,
                 replace,
             } => {
-                let full = self.inside(&spec.workdir, path)?;
+                let full = self.inside(workdir_of(spec), path)?;
                 let text = tokio::fs::read_to_string(&full).await.ok();
                 let count = text
                     .as_ref()
@@ -474,11 +465,11 @@ impl ScriptedAgent {
                 };
                 tokio::fs::write(&full, text.replacen(find.as_str(), replace, 1))
                     .await
-                    .map_err(|e| AgentError::failed(e.to_string()))?;
+                    .map_err(|e| PortError::agent_failed(e.to_string()))?;
                 self.tool(on_event, "Edit", path, false);
             }
             ScriptStep::Git { args } => {
-                let res = self.git(args, &spec.workdir).await;
+                let res = self.git(args, workdir_of(spec)).await;
                 self.tool(
                     on_event,
                     "Bash",
@@ -496,7 +487,7 @@ impl ScriptedAgent {
             }
             ScriptStep::Patch { name, diff, skip } => {
                 if let Some(cond) = skip
-                    && self.skip_applies(cond, &spec.workdir).await?
+                    && self.skip_applies(cond, workdir_of(spec)).await?
                 {
                     self.emit(
                         on_event,
@@ -516,18 +507,18 @@ impl ScriptedAgent {
                 ));
                 tokio::fs::create_dir_all(&dir)
                     .await
-                    .map_err(|e| AgentError::failed(e.to_string()))?;
+                    .map_err(|e| PortError::agent_failed(e.to_string()))?;
                 let result = async {
                     let file = dir.join("change.patch");
                     tokio::fs::write(&file, diff)
                         .await
-                        .map_err(|e| AgentError::failed(e.to_string()))?;
+                        .map_err(|e| PortError::agent_failed(e.to_string()))?;
                     let args = vec![
                         "apply".to_string(),
                         "--whitespace=nowarn".to_string(),
                         file.to_string_lossy().into_owned(),
                     ];
-                    let res = self.git(&args, &spec.workdir).await;
+                    let res = self.git(&args, workdir_of(spec)).await;
                     self.tool(
                         on_event,
                         "Edit",
@@ -546,7 +537,7 @@ impl ScriptedAgent {
                             Some(json!({"fatal": false})),
                         );
                     }
-                    Ok::<(), AgentError>(())
+                    Ok::<(), PortError>(())
                 }
                 .await;
                 let _ = tokio::fs::remove_dir_all(&dir).await;
@@ -559,11 +550,15 @@ impl ScriptedAgent {
                     Some(message.clone()),
                     Some(json!({"fatal": true})),
                 );
-                return Err(AgentError::failed(message.clone()));
+                return Err(PortError::agent_failed(message.clone()));
             }
         }
         Ok(())
     }
+}
+
+fn workdir_of(spec: &AgentSpec) -> &Path {
+    Path::new(&spec.workdir)
 }
 
 #[async_trait]
@@ -572,24 +567,25 @@ impl AgentAdapter for ScriptedAgent {
         AgentKind::Mock
     }
 
-    async fn preflight(&self) -> Preflight {
+    async fn preflight(&self) -> PortResult<Preflight> {
         let ok = !self.script.attempts.is_empty();
-        Preflight {
+        Ok(Preflight {
             ok,
             problems: if ok {
                 Vec::new()
             } else {
                 vec!["script has no attempts".to_string()]
             },
-        }
+        })
     }
 
     async fn start(
         &self,
         spec: &AgentSpec,
-        on_event: EventCallback<'_>,
-        cancel: &CancellationToken,
-    ) -> Result<AgentSession, AgentError> {
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<AgentSession> {
+        let cancel = &cancel.cloned().unwrap_or_default();
         let n = self.sessions.fetch_add(1, Ordering::SeqCst) + 1;
         let session = AgentSession {
             id: format!("mock-{}-{n}", self.script.name),
@@ -602,7 +598,7 @@ impl AgentAdapter for ScriptedAgent {
             Some(format!("scripted agent '{}' started", self.script.name)),
             Some(json!({"sessionId": session.id})),
         );
-        self.play_next(&session, spec, on_event, cancel).await?;
+        self.play_next(spec, on_event, cancel).await?;
         Ok(session)
     }
 
@@ -611,17 +607,18 @@ impl AgentAdapter for ScriptedAgent {
         session: &mut AgentSession,
         spec: &AgentSpec,
         message: &str,
-        on_event: EventCallback<'_>,
-        cancel: &CancellationToken,
-    ) -> Result<(), AgentError> {
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<()> {
+        let cancel = &cancel.cloned().unwrap_or_default();
         if !self.session_ids.lock().unwrap().contains(&session.id) {
-            return Err(AgentError::failed(format!(
+            return Err(PortError::agent_failed(format!(
                 "unknown scripted session {}",
                 session.id
             )));
         }
         self.received.lock().unwrap().push(message.to_string());
-        self.play_next(session, spec, on_event, cancel).await
+        self.play_next(spec, on_event, cancel).await
     }
 }
 

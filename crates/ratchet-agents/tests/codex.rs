@@ -1,13 +1,15 @@
 mod common;
 
+use ratchet_core::enums::AgentKind;
+use ratchet_core::ports::{
+    AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
+    CancellationToken, PortError,
+};
 use std::sync::Arc;
 use std::time::Duration;
 
 use common::{collect, env_of, fixture};
-use ratchet_agents::domain::{
-    AgentAdapter, AgentError, AgentEvent, AgentEventType, AgentKind, AgentSession, AgentSpec,
-    AgentUsage,
-};
+
 use ratchet_agents::process::KillSignal;
 use ratchet_agents::testing::{FakeProcessSpec, FakeSpawner};
 use ratchet_agents::{
@@ -15,7 +17,6 @@ use ratchet_agents::{
     PromptVia,
 };
 use serde_json::json;
-use tokio_util::sync::CancellationToken;
 
 const TID: &str = "0199a213-81c0-7800-8aa1-bbab2a035a53";
 
@@ -49,7 +50,7 @@ fn parse(
 }
 
 fn label(e: &AgentEvent) -> String {
-    let kind = format!("{:?}", e.kind).to_lowercase();
+    let kind = format!("{:?}", e.event_type).to_lowercase();
     match e
         .data
         .as_ref()
@@ -121,7 +122,7 @@ fn parser_estimates_cost_when_pricing_is_given_with_cached_input_at_the_cached_r
     let (_, events) = parse("codex-success.jsonl", None, Some(pricing));
     let cost = events
         .iter()
-        .find(|e| e.kind == AgentEventType::Usage)
+        .find(|e| e.event_type == AgentEventType::Usage)
         .unwrap()
         .usage
         .unwrap()
@@ -147,7 +148,7 @@ fn parser_is_chunking_independent() {
 fn parser_tolerates_unknown_events_items_and_stdout_noise_and_non_fatal_errors_do_not_fail_the_turn()
  {
     let (parser, events) = parse("codex-noisy.jsonl", None, None);
-    assert_eq!(events.iter().map(|e| e.kind).collect::<Vec<_>>(), {
+    assert_eq!(events.iter().map(|e| e.event_type).collect::<Vec<_>>(), {
         use AgentEventType::*;
         vec![Status, Error, Tool, Message, Usage]
     });
@@ -200,7 +201,7 @@ async fn start_runs_codex_exec_json_with_the_prompt_on_stdin_via_dash_and_return
     let mut s = spec();
     s.model = Some("gpt-5-codex".into());
     let session = adapter
-        .start(&s, &on_event, &CancellationToken::new())
+        .start(&s, &on_event, Some(&CancellationToken::new()))
         .await
         .unwrap();
     assert_eq!(
@@ -232,7 +233,7 @@ async fn start_runs_codex_exec_json_with_the_prompt_on_stdin_via_dash_and_return
     assert_eq!(call.options.env["OPENAI_API_KEY"], "sk-oai");
     assert_eq!(call.options.env["CODEX_API_KEY"], "sk-oai");
     assert_eq!(
-        events.lock().unwrap().last().unwrap().kind,
+        events.lock().unwrap().last().unwrap().event_type,
         AgentEventType::Usage
     );
 }
@@ -254,7 +255,7 @@ async fn resume_runs_codex_exec_resume_thread_json() {
             &spec(),
             "verdict: verified",
             &on_event,
-            &CancellationToken::new(),
+            Some(&CancellationToken::new()),
         )
         .await
         .unwrap();
@@ -266,7 +267,7 @@ async fn resume_runs_codex_exec_resume_thread_json() {
     assert!(
         events
             .iter()
-            .find(|e| e.kind == AgentEventType::Message)
+            .find(|e| e.event_type == AgentEventType::Message)
             .unwrap()
             .text
             .as_deref()
@@ -292,7 +293,7 @@ async fn sandbox_prompt_as_argument_and_extra_overrides_are_configurable() {
         ..CodexOptions::default()
     });
     adapter
-        .start(&spec(), &|_| {}, &CancellationToken::new())
+        .start(&spec(), &|_| {}, Some(&CancellationToken::new()))
         .await
         .unwrap();
     let call = fake.call(0);
@@ -322,7 +323,7 @@ async fn turn_failed_becomes_an_error_carrying_the_vendor_message() {
     );
     let (events, on_event) = collect();
     let err = adapter
-        .start(&spec(), &on_event, &CancellationToken::new())
+        .start(&spec(), &on_event, Some(&CancellationToken::new()))
         .await
         .unwrap_err();
     assert!(err.to_string().contains("429"), "{err}");
@@ -331,7 +332,7 @@ async fn turn_failed_becomes_an_error_carrying_the_vendor_message() {
             .lock()
             .unwrap()
             .iter()
-            .filter(|e| e.kind == AgentEventType::Error)
+            .filter(|e| e.event_type == AgentEventType::Error)
             .count()
             > 0
     );
@@ -353,11 +354,11 @@ async fn non_zero_exit_without_turn_completed_carries_stderr() {
             &spec(),
             "m",
             &|_| {},
-            &CancellationToken::new(),
+            Some(&CancellationToken::new()),
         )
         .await
         .unwrap_err();
-    assert!(matches!(err, AgentError::Failed { .. }));
+    assert!(matches!(err, PortError::AgentFailed { .. }));
     assert!(err.to_string().contains("unknown session"), "{err}");
 }
 
@@ -373,15 +374,15 @@ async fn abort_kills_the_process_group_and_fails_with_aborted() {
     let cancel = CancellationToken::new();
     let trigger = cancel.clone();
     let on_event = move |e: AgentEvent| {
-        if e.kind == AgentEventType::Status {
+        if e.event_type == AgentEventType::Status {
             trigger.cancel();
         }
     };
     let err = adapter
-        .start(&spec(), &on_event, &cancel)
+        .start(&spec(), &on_event, Some(&cancel))
         .await
         .unwrap_err();
-    assert!(err.is_aborted());
+    assert!(err.is_cancelled());
     assert_eq!(fake.call(0).signals, vec![KillSignal::Term]);
 }
 
@@ -392,11 +393,13 @@ async fn preflight_checks_key_and_binary() {
             .1
             .preflight()
             .await
+            .unwrap()
             .ok
     );
     let bad = adapter_for(FakeProcessSpec::spawn_error("ENOENT"), &[])
         .1
         .preflight()
-        .await;
+        .await
+        .unwrap();
     assert_eq!(bad.problems.len(), 2);
 }

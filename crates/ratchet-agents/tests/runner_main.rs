@@ -1,5 +1,8 @@
 mod common;
 
+use ratchet_core::ports::{AgentAdapter, ArtifactStore, RunnerControl, RunnerHandle};
+// the same directory the binary uses for RATCHET_ARTIFACT_DIR (this is the one test binary that links the AWS SDK)
+use ratchet_sandbox::FsArtifactStore;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,13 +14,13 @@ use common::{
     AutoOptions, FakeCompute, Sandbox, auto_verdicts, base_config, base_config_with, env_of,
     make_sandbox_branches,
 };
-use ratchet_agents::domain::{AgentAdapter, ArtifactStore, RunnerControl, RunnerHandle};
+
 use ratchet_agents::git::{GitCall, GitResult, GitRunner};
 use ratchet_agents::testing::{FakeProcessSpec, FakeSpawner};
 use ratchet_agents::{
-    AgentScript, ExecGit, FsArtifactStore, RunnerMainOptions, ScriptStep, ScriptedAgent,
-    SsmRunnerControl, SsmRunnerControlOptions, done_key, git_auth_env, parse_secret_refs,
-    runner_main, runner_prefix, validate_config,
+    AgentScript, ExecGit, RunnerMainOptions, ScriptStep, ScriptedAgent, SsmRunnerControl,
+    SsmRunnerControlOptions, done_key, git_auth_env, parse_secret_refs, runner_main, runner_prefix,
+    validate_config,
 };
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -57,7 +60,7 @@ struct Setup {
     sb: Sandbox,
     _work: tempfile::TempDir,
     store: Arc<FsArtifactStore>,
-    config: ratchet_agents::RunnerConfig,
+    config: ratchet_core::ports::RunnerConfig,
     env: HashMap<String, String>,
     work: PathBuf,
 }
@@ -117,7 +120,7 @@ async fn engine_loop(control: &SsmRunnerControl, finished: &AtomicBool) {
         cursor = Some(r.cursor);
         r.events.iter().for_each(|e| answer(e));
         while let Ok(m) = rx.try_recv() {
-            control.send(&handle(), m).await.unwrap();
+            control.send(&handle(), &m).await.unwrap();
         }
         tokio::time::sleep(Duration::from_millis(15)).await;
     }
@@ -133,9 +136,11 @@ async fn runner_main_reads_config_from_the_store_runs_the_loop_streams_events_an
     let logs = Arc::new(Mutex::new(Vec::<String>::new()));
     let run = {
         let (finished, logs, env) = (finished.clone(), logs.clone(), s.env.clone());
+        let store: Arc<dyn ArtifactStore> = s.store.clone();
         tokio::spawn(async move {
             let code = runner_main(RunnerMainOptions {
                 env,
+                store: Some(store),
                 log: Some(Arc::new(move |l: &str| {
                     logs.lock().unwrap().push(l.to_string())
                 })),
@@ -151,12 +156,12 @@ async fn runner_main_reads_config_from_the_store_runs_the_loop_streams_events_an
     assert_eq!(run.await.unwrap(), 0);
 
     let events = control.poll(&handle(), None).await.unwrap().events;
-    use ratchet_agents::domain::AgentEventType::*;
-    assert_eq!(events.iter().filter(|e| e.kind == Commit).count(), 2);
-    assert_eq!(events.iter().filter(|e| e.kind == Verdict).count(), 2);
+    use ratchet_core::ports::AgentEventType::*;
+    assert_eq!(events.iter().filter(|e| e.event_type == Commit).count(), 2);
+    assert_eq!(events.iter().filter(|e| e.event_type == Verdict).count(), 2);
     let last = events.last().unwrap();
     assert_eq!(
-        (last.kind, last.text.as_deref()),
+        (last.event_type, last.text.as_deref()),
         (Status, Some("runner finished: idle"))
     );
     let done: serde_json::Value = serde_json::from_str(
@@ -260,6 +265,7 @@ async fn runner_main_fetches_ssm_secrets_for_the_agent_never_the_git_token_and_a
     ]));
     let code = runner_main(RunnerMainOptions {
         env,
+        store: Some(s.store.clone()),
         spawner: Some(Arc::new(aws.clone())),
         git: Some(git.clone()),
         adapter_factory: Some(Arc::new(move |_, e| {
@@ -331,16 +337,22 @@ async fn runner_main_fetches_ssm_secrets_for_the_agent_never_the_git_token_and_a
 #[tokio::test]
 async fn runner_main_validates_its_inputs_with_actionable_errors() {
     let s = setup();
-    let err = |env: HashMap<String, String>| async move {
-        runner_main(RunnerMainOptions {
-            env,
-            log: Some(Arc::new(|_| {})),
-            ..RunnerMainOptions::default()
-        })
-        .await
-        .unwrap_err()
-        .to_string()
+    let err_with = |env: HashMap<String, String>, with_store: bool| {
+        let store: Option<Arc<dyn ArtifactStore>> =
+            with_store.then(|| s.store.clone() as Arc<dyn ArtifactStore>);
+        async move {
+            runner_main(RunnerMainOptions {
+                env,
+                store,
+                log: Some(Arc::new(|_| {})),
+                ..RunnerMainOptions::default()
+            })
+            .await
+            .unwrap_err()
+            .to_string()
+        }
     };
+    let err = |env: HashMap<String, String>| err_with(env, true);
     let without = |name: &str| {
         let mut env = s.env.clone();
         env.remove(name);
@@ -351,7 +363,7 @@ async fn runner_main_validates_its_inputs_with_actionable_errors() {
         "RATCHET_OPTIMIZATION_ID is required"
     );
     assert!(
-        err(without("RATCHET_ARTIFACT_DIR"))
+        err_with(without("RATCHET_ARTIFACT_DIR"), false)
             .await
             .contains("RATCHET_ARTIFACTS_BUCKET")
     );

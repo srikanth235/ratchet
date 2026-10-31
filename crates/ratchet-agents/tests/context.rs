@@ -1,12 +1,12 @@
 mod common;
 
-use ratchet_agents::domain::{CandidateVerdict, Direction};
 use ratchet_agents::{
     ContextInput, HistoryEntry, ResumeInput, build_context, build_initial_prompt,
     build_resume_message, format_duration, improvement_pct,
 };
+use ratchet_core::enums::{CandidateVerdict, Direction};
 
-fn config() -> ratchet_agents::RunnerConfig {
+fn config() -> ratchet_core::ports::RunnerConfig {
     common::base_config_with("/nowhere.git", |c| {
         c["deadlineAt"] = (10_000_000i64 + 3 * 3_600_000 + 25 * 60_000).into();
         c["budgetUsd"] = 20.into();
@@ -106,7 +106,7 @@ fn build_context_tells_the_agent_that_dependencies_are_fixed_unless_the_evaluato
     assert!(text.contains("Dependencies are fixed"));
     assert!(text.contains("lockfile"));
     let mut none = config();
-    none.config.evaluator.deps = ratchet_agents::domain::DepsMode::None;
+    none.config.evaluator.deps = ratchet_core::enums::DepsMode::None;
     let no_deps = build_context(&ContextInput {
         config: &none,
         best_value: 20.0,
@@ -150,7 +150,7 @@ fn resume_message_for_a_verified_rejected_and_no_change_turn() {
     fn input<'a>(
         entry: Option<&'a HistoryEntry>,
         no_change: bool,
-        c: &'a ratchet_agents::RunnerConfig,
+        c: &'a ratchet_core::ports::RunnerConfig,
         notes: &'a [String],
         users: &'a [String],
     ) -> ResumeInput<'a> {

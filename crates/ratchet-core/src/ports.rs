@@ -102,10 +102,10 @@ pub type PortResult<T> = Result<T, PortError>;
 /// Where a stream of agent events goes (`onEvent` in TypeScript): a synchronous callback, so that events stay in
 /// order and a sink can react to each one (budget tracking, artifact batching) before the adapter goes on. To
 /// feed a channel use [`channel_sink`].
-pub type EventSink = dyn Fn(AgentEvent) + Send + Sync;
+pub type EventSink<'a> = dyn Fn(AgentEvent) + Send + Sync + 'a;
 
 /// An [`EventSink`] that can be shared and stored.
-pub type SharedEventSink = std::sync::Arc<EventSink>;
+pub type SharedEventSink = std::sync::Arc<EventSink<'static>>;
 
 /// A sink that sends every event into `tx` (events sent after the receiver is gone are dropped).
 pub fn channel_sink(tx: mpsc::UnboundedSender<AgentEvent>) -> SharedEventSink {
@@ -768,7 +768,7 @@ pub trait AgentAdapter: Send + Sync {
     async fn start(
         &self,
         spec: &AgentSpec,
-        events: &EventSink,
+        events: &EventSink<'_>,
         cancel: Option<&CancellationToken>,
     ) -> PortResult<AgentSession>;
     /// Continue the same session with a new message; returns when the turn ends.
@@ -779,7 +779,7 @@ pub trait AgentAdapter: Send + Sync {
         session: &mut AgentSession,
         spec: &AgentSpec,
         message: &str,
-        events: &EventSink,
+        events: &EventSink<'_>,
         cancel: Option<&CancellationToken>,
     ) -> PortResult<()>;
 }

@@ -248,9 +248,26 @@ JSON Schema and OpenAPI (`--features utoipa`) generation (`tests/schemas.rs`).
 | `RangeError` thrown by `mean`, `median`, `noiseFloor`, `evaluateRatchet` | `Result<_, StatsError>` / `Result<_, RatchetError>` | No panics on bad input. |
 | `[z-a]`, an unterminated `{a`: `new RegExp` throws (TS crashes) | the glob never matches | A bad user glob must not take the engine down. Documented in `protected.rs`. |
 | `ledger/*`, `sandbox/lifecycle.ts`, `cost/reconcile.ts` call the concrete `Ledger` | traits `SandboxLedger` / `SpendLedger` in `ledger.rs`; implemented by `ratchet-ledger` | `ratchet-core` must not depend on the database crate. |
-| `AbortSignal`, `onEvent` callbacks | `CancellationToken`, `mpsc::UnboundedSender<AgentEvent>` | Async Rust equivalents. |
+| `AbortSignal`, `onEvent` callbacks | `CancellationToken`, `EventSink<'_>` (`dyn Fn(AgentEvent) + Send + Sync`; `channel_sink` feeds a channel) | Async Rust equivalents. A synchronous callback keeps events in order and lets the runner loop see usage before the adapter goes on. |
 | `subscribe(listener) => unsubscribe` on `EngineApi` | `subscribe() -> broadcast::Receiver<EngineEvent>` | Drop the receiver to unsubscribe. |
 | `ports/index.ts` is types only | `ports.rs` adds `PortError`, `ports::mock` (`SystemClock`, `ManualClock`, `MockCostReconciler`, `MemoryArtifactStore`, `StaticPriceBook`, `MockSandboxProvider`) | The mocks of the AWS / GitHub / agent ports live with their crates. |
+
+## Changes made when `ratchet-sandbox`, `ratchet-github` and `ratchet-agents` were unified with core
+
+Where core and those crates disagreed, core moved when the other shape was better (the TS stays the reference for JSON):
+
+| Change in core | Why |
+|---|---|
+| `SandboxOutputs` is the full `infra/contract.md` shape (`region`, `vpc_id`, `eval_identity`, `confirm_identity`, `deps_identity?`, `sealed_confirm_prefix`, `limits`, `network.bench_subnet_id`, `network.egress_proxy_url`); new `AwsIdentityRef`, `SandboxLimits` | TS has `SandboxOutputs` in core and `AwsSandboxOutputs extends` it in `packages/aws`. A port trait cannot return a subtype and the engine only ever stores and reads the full shape (`row.outputs as AwsSandboxOutputs`), so the AWS shape is the one type. `ports::mock::sample_sandbox_outputs` builds one for tests. |
+| `SandboxInput.max_instance_lifetime_hours` is an `f64` printed like a JS number (`2`, `0.5`) | The contract says "number"; `u32` could not carry `0.5`. `numfmt::serialize_js_number`. |
+| `BenchStats.extra` is an `IndexMap` | JS objects keep insertion order and the TS result report prints the stats in the order the evaluator gave them. |
+| `EventSink<'a>` is a callback type (was an `mpsc` sender); `SharedEventSink`, `channel_sink` | See above. |
+| `AgentAdapter::resume` takes `&mut AgentSession` | A CLI may fork the session id on resume (Claude Code does); the TS adapter mutates the session object. |
+| `PortError::AgentFailed { message, exit_code, stderr }`, `PortError::Http { status, message }`, `status()`, `is_cancelled()`, `agent_failed()`, `From<io::Error>`, `From<serde_json::Error>` | The adapters report the exit code and stderr of a failed turn (events and tests use them); the code host errors carry an HTTP status (TS `err.status`). |
+| `RunnerMessage::Unknown` (`#[serde(other)]`) | A runner older than its engine reports an unknown message and carries on instead of failing to decode it. Never sent. |
+| `AgentEvent::new/with_text/with_data/with_usage/data_str`; `at` defaults to 0 on read; `AgentUsage` is `Copy + Default` | Older event writers omit `at`; the builders are what every adapter and the runner loop use (`with_data` drops top-level `null`s like `JSON.stringify`). |
+| `PullRequestInput.commit_message` (+ `Default`); `CommitFile::new/executable/is_executable`; `RemoteCommand::new` (+ `Default`); `BenchLaunchPurpose::as_str`; `ArtifactStore::put_str` | Used by the GitHub and AWS crates. |
+| `RunnerLoopOptions` removed | It cannot hold the loop's tuning (git handles, retry delays); it lives with `run_runner_loop` in `ratchet-agents` (the TS `RunnerLoopDeps`). |
 
 ## Gaps
 

@@ -1,19 +1,20 @@
 mod common;
 
+use ratchet_core::enums::AgentKind;
+use ratchet_core::ports::{
+    AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
+    CancellationToken, Clock, PortError,
+};
 use std::sync::Arc;
 use std::time::Duration;
 
 use common::{collect, sh, texts, write_file};
-use ratchet_agents::domain::{
-    AgentAdapter, AgentError, AgentEvent, AgentEventType, AgentKind, AgentSession, AgentSpec,
-    AgentUsage, Clock,
-};
+
 use ratchet_agents::scripted::SkipWhen;
 use ratchet_agents::{
     AcceleratedClock, AgentScript, ManualClock, ScriptStep, ScriptedAgent, ScriptedAgentOptions,
     StepCondition, price_usage,
 };
-use tokio_util::sync::CancellationToken;
 
 fn repo(files: &[(&str, &str)]) -> tempfile::TempDir {
     let dir = tempfile::Builder::new()
@@ -33,7 +34,7 @@ fn script(attempts: Vec<Vec<ScriptStep>>) -> AgentScript {
 
 fn spec(dir: &tempfile::TempDir) -> AgentSpec {
     AgentSpec {
-        workdir: dir.path().to_path_buf(),
+        workdir: dir.path().to_string_lossy().into_owned(),
         prompt: "p".into(),
         ..AgentSpec::default()
     }
@@ -65,7 +66,7 @@ fn skip_when_two_present() -> StepCondition {
 fn messages(events: &[AgentEvent]) -> Vec<String> {
     events
         .iter()
-        .filter(|e| e.kind == AgentEventType::Message)
+        .filter(|e| e.event_type == AgentEventType::Message)
         .map(|e| e.text.clone().unwrap())
         .collect()
 }
@@ -79,16 +80,19 @@ async fn start_plays_attempt_zero_each_resume_the_next_then_runs_out_of_ideas() 
     ]));
     let cancel = CancellationToken::new();
     let (a, on_a) = collect();
-    let mut session = agent.start(&spec(&dir), &on_a, &cancel).await.unwrap();
+    let mut session = agent
+        .start(&spec(&dir), &on_a, Some(&cancel))
+        .await
+        .unwrap();
     assert_eq!(session.kind, AgentKind::Mock);
     let (b, on_b) = collect();
     agent
-        .resume(&mut session, &spec(&dir), "verdict A", &on_b, &cancel)
+        .resume(&mut session, &spec(&dir), "verdict A", &on_b, Some(&cancel))
         .await
         .unwrap();
     let (c, on_c) = collect();
     agent
-        .resume(&mut session, &spec(&dir), "verdict B", &on_c, &cancel)
+        .resume(&mut session, &spec(&dir), "verdict B", &on_c, Some(&cancel))
         .await
         .unwrap();
     assert_eq!(messages(&a.lock().unwrap()), vec!["first"]);
@@ -100,10 +104,10 @@ async fn start_plays_attempt_zero_each_resume_the_next_then_runs_out_of_ideas() 
         kind: AgentKind::Mock,
     };
     let err = agent
-        .resume(&mut unknown, &spec(&dir), "x", &|_| {}, &cancel)
+        .resume(&mut unknown, &spec(&dir), "x", &|_| {}, Some(&cancel))
         .await
         .unwrap_err();
-    assert!(matches!(err, AgentError::Failed { .. }));
+    assert!(matches!(err, PortError::AgentFailed { .. }));
 }
 
 #[tokio::test]
@@ -112,7 +116,7 @@ async fn applies_patches_with_git_apply_and_reports_one_that_does_not_apply_with
     let agent = ScriptedAgent::new(script(vec![vec![patch("p1", None), patch("p2", None)]]));
     let (events, on_event) = collect();
     agent
-        .start(&spec(&dir), &on_event, &CancellationToken::new())
+        .start(&spec(&dir), &on_event, Some(&CancellationToken::new()))
         .await
         .unwrap();
     assert_eq!(
@@ -122,7 +126,7 @@ async fn applies_patches_with_git_apply_and_reports_one_that_does_not_apply_with
     let events = events.lock().unwrap();
     let errors: Vec<&AgentEvent> = events
         .iter()
-        .filter(|e| e.kind == AgentEventType::Error)
+        .filter(|e| e.event_type == AgentEventType::Error)
         .collect();
     assert_eq!(errors.len(), 1);
     assert!(
@@ -143,11 +147,11 @@ async fn skip_conditions_make_patches_idempotent() {
     )]]));
     let (events, on_event) = collect();
     agent
-        .start(&spec(&dir), &on_event, &CancellationToken::new())
+        .start(&spec(&dir), &on_event, Some(&CancellationToken::new()))
         .await
         .unwrap();
     let events = events.lock().unwrap();
-    assert!(!events.iter().any(|e| e.kind == AgentEventType::Error));
+    assert!(!events.iter().any(|e| e.event_type == AgentEventType::Error));
     assert!(events.iter().any(|e| {
         e.text
             .as_deref()
@@ -175,7 +179,7 @@ async fn an_attempt_whose_patches_are_all_in_the_tree_is_skipped_within_the_turn
     ]));
     let (events, on_event) = collect();
     agent
-        .start(&spec(&dir), &on_event, &CancellationToken::new())
+        .start(&spec(&dir), &on_event, Some(&CancellationToken::new()))
         .await
         .unwrap();
     assert!(
@@ -209,7 +213,7 @@ async fn write_edit_delete_with_edit_requiring_exactly_one_match_and_paths_confi
     ]]));
     let (events, on_event) = collect();
     agent
-        .start(&spec(&dir), &on_event, &CancellationToken::new())
+        .start(&spec(&dir), &on_event, Some(&CancellationToken::new()))
         .await
         .unwrap();
     assert_eq!(
@@ -225,7 +229,7 @@ async fn write_edit_delete_with_edit_requiring_exactly_one_match_and_paths_confi
         .lock()
         .unwrap()
         .iter()
-        .find(|e| e.kind == AgentEventType::Error)
+        .find(|e| e.event_type == AgentEventType::Error)
         .and_then(|e| e.text.clone())
         .unwrap_or_default();
     assert!(found_two.contains("found 2"), "{found_two}");
@@ -234,7 +238,7 @@ async fn write_edit_delete_with_edit_requiring_exactly_one_match_and_paths_confi
         content: "x".into(),
     }]]));
     let err = escape
-        .start(&spec(&dir), &|_| {}, &CancellationToken::new())
+        .start(&spec(&dir), &|_| {}, Some(&CancellationToken::new()))
         .await
         .unwrap_err();
     assert!(err.to_string().contains("escapes the workdir"), "{err}");
@@ -257,7 +261,7 @@ async fn usage_events_carry_the_scripted_tokens_and_a_believable_cost() {
     ]]));
     let (events, on_event) = collect();
     agent
-        .start(&spec(&dir), &on_event, &CancellationToken::new())
+        .start(&spec(&dir), &on_event, Some(&CancellationToken::new()))
         .await
         .unwrap();
     let usage: Vec<AgentUsage> = events
@@ -294,7 +298,7 @@ async fn sleeps_go_through_the_injected_clock_and_abort_interrupts_a_sleep() {
         let (agent, spec) = (agent.clone(), spec(&dir));
         tokio::spawn(async move {
             agent
-                .start(&spec, &on_event, &CancellationToken::new())
+                .start(&spec, &on_event, Some(&CancellationToken::new()))
                 .await
         })
     };
@@ -341,11 +345,11 @@ async fn sleeps_go_through_the_injected_clock_and_abort_interrupts_a_sleep() {
     let cancel = CancellationToken::new();
     let q = {
         let (slow, spec, cancel) = (slow.clone(), spec(&dir), cancel.clone());
-        tokio::spawn(async move { slow.start(&spec, &|_| {}, &cancel).await })
+        tokio::spawn(async move { slow.start(&spec, &|_| {}, Some(&cancel)).await })
     };
     tokio::time::sleep(Duration::from_millis(20)).await;
     cancel.cancel();
-    assert!(q.await.unwrap().unwrap_err().is_aborted());
+    assert!(q.await.unwrap().unwrap_err().is_cancelled());
 }
 
 #[tokio::test]
@@ -356,14 +360,14 @@ async fn a_fail_step_crashes_the_turn_with_an_error_event() {
     }]]));
     let (events, on_event) = collect();
     let err = agent
-        .start(&spec(&dir), &on_event, &CancellationToken::new())
+        .start(&spec(&dir), &on_event, Some(&CancellationToken::new()))
         .await
         .unwrap_err();
     assert_eq!(err.to_string(), "boom");
     let events = events.lock().unwrap();
     let last = events.last().unwrap();
     assert_eq!(
-        (last.kind, last.text.as_deref()),
+        (last.event_type, last.text.as_deref()),
         (AgentEventType::Error, Some("boom"))
     );
 }
@@ -376,7 +380,7 @@ async fn git_steps_run_in_the_workdir() {
     }]]));
     let (events, on_event) = collect();
     agent
-        .start(&spec(&dir), &on_event, &CancellationToken::new())
+        .start(&spec(&dir), &on_event, Some(&CancellationToken::new()))
         .await
         .unwrap();
     assert!(
@@ -384,6 +388,6 @@ async fn git_steps_run_in_the_workdir() {
             .lock()
             .unwrap()
             .iter()
-            .any(|e| e.kind == AgentEventType::Error)
+            .any(|e| e.event_type == AgentEventType::Error)
     );
 }

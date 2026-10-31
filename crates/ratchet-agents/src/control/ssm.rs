@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use tokio::sync::Mutex;
 
 use crate::artifacts::{config_key, inbox_key, last_seq, read_events, runner_prefix};
-use crate::domain::{
-    ArtifactStore, CloudCompute, ControlError, PollResult, RemoteCommand, RunnerConfig,
+use ratchet_core::ports::{
+    ArtifactStore, CloudCompute, PolledEvents, PortError, PortResult, RemoteCommand, RunnerConfig,
     RunnerControl, RunnerHandle, RunnerMessage,
 };
 
@@ -62,7 +62,7 @@ impl SsmRunnerControl {
     }
 
     fn prefix(h: &RunnerHandle) -> String {
-        runner_prefix(&h.optimization_id, &h.agent_id)
+        runner_prefix(h.optimization_id.as_str(), h.agent_id.as_str())
     }
 
     fn pid_file(&self, h: &RunnerHandle) -> String {
@@ -75,24 +75,19 @@ impl SsmRunnerControl {
 
 #[async_trait]
 impl RunnerControl for SsmRunnerControl {
-    async fn start(
-        &self,
-        handle: &RunnerHandle,
-        config: &RunnerConfig,
-    ) -> Result<(), ControlError> {
+    async fn start(&self, handle: &RunnerHandle, config: &RunnerConfig) -> PortResult<()> {
         let prefix = Self::prefix(handle);
-        let body = serde_json::to_string(config).map_err(|e| ControlError::new(e.to_string()))?;
+        let body = serde_json::to_string(config)?;
         self.options
             .store
             .put(&config_key(&prefix), body.as_bytes())
-            .await
-            .map_err(|e| ControlError::new(e.to_string()))?;
+            .await?;
         let mut env: Vec<(String, String)> = vec![
             (
                 "RATCHET_OPTIMIZATION_ID".to_string(),
-                handle.optimization_id.clone(),
+                handle.optimization_id.to_string(),
             ),
-            ("RATCHET_AGENT_ID".to_string(), handle.agent_id.clone()),
+            ("RATCHET_AGENT_ID".to_string(), handle.agent_id.to_string()),
         ];
         for (k, v) in &self.options.runner_env {
             match env.iter_mut().find(|(ek, _)| ek == k) {
@@ -123,7 +118,7 @@ impl RunnerControl for SsmRunnerControl {
             .compute
             .run_command(
                 &handle.instance_id,
-                RemoteCommand {
+                &RemoteCommand {
                     script,
                     timeout_seconds: Some(60),
                     ..RemoteCommand::default()
@@ -136,7 +131,7 @@ impl RunnerControl for SsmRunnerControl {
             } else {
                 res.stderr.trim()
             };
-            return Err(ControlError::new(format!(
+            return Err(PortError::failed(format!(
                 "failed to start runner on {}: {detail}",
                 handle.instance_id
             )));
@@ -144,11 +139,7 @@ impl RunnerControl for SsmRunnerControl {
         Ok(())
     }
 
-    async fn send(
-        &self,
-        handle: &RunnerHandle,
-        message: RunnerMessage,
-    ) -> Result<(), ControlError> {
+    async fn send(&self, handle: &RunnerHandle, message: &RunnerMessage) -> PortResult<()> {
         let prefix = Self::prefix(handle);
         let k = Self::key(handle);
         let n = {
@@ -156,35 +147,25 @@ impl RunnerControl for SsmRunnerControl {
             let n = match next.get(&k) {
                 Some(n) => *n,
                 None => {
-                    last_seq(self.options.store.as_ref(), &format!("{prefix}inbox/"))
-                        .await
-                        .map_err(|e| ControlError::new(e.to_string()))?
-                        + 1
+                    last_seq(self.options.store.as_ref(), &format!("{prefix}inbox/")).await? + 1
                 }
             };
             next.insert(k, n + 1);
             n
         };
-        let body = serde_json::to_string(&message).map_err(|e| ControlError::new(e.to_string()))?;
+        let body = serde_json::to_string(message)?;
         self.options
             .store
             .put(&inbox_key(&prefix, n), body.as_bytes())
             .await
-            .map_err(|e| ControlError::new(e.to_string()))
     }
 
-    async fn poll(
-        &self,
-        handle: &RunnerHandle,
-        cursor: Option<&str>,
-    ) -> Result<PollResult, ControlError> {
-        read_events(self.options.store.as_ref(), &Self::prefix(handle), cursor)
-            .await
-            .map_err(|e| ControlError::new(e.to_string()))
+    async fn poll(&self, handle: &RunnerHandle, cursor: Option<&str>) -> PortResult<PolledEvents> {
+        read_events(self.options.store.as_ref(), &Self::prefix(handle), cursor).await
     }
 
-    async fn stop(&self, handle: &RunnerHandle) -> Result<(), ControlError> {
-        self.send(handle, RunnerMessage::Stop).await?;
+    async fn stop(&self, handle: &RunnerHandle) -> PortResult<()> {
+        self.send(handle, &RunnerMessage::Stop).await?;
         let pid = q(&self.pid_file(handle));
         let script =
             format!("if [ -f {pid} ]; then kill -TERM \"$(cat {pid})\" 2>/dev/null || true; fi");
@@ -194,7 +175,7 @@ impl RunnerControl for SsmRunnerControl {
             .compute
             .run_command(
                 &handle.instance_id,
-                RemoteCommand {
+                &RemoteCommand {
                     script,
                     timeout_seconds: Some(30),
                     ..RemoteCommand::default()

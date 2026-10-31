@@ -1,5 +1,9 @@
 mod common;
 
+use ratchet_core::enums::CandidateVerdict;
+use ratchet_core::ports::{
+    AgentAdapter, AgentEvent, AgentEventType, Clock, RunnerControl, RunnerHandle, RunnerMessage,
+};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -10,10 +14,7 @@ use common::{
     patch_order, repo_root, sh,
 };
 use ratchet_agents::demo_scripts::demo_search_script_dir;
-use ratchet_agents::domain::{
-    AgentAdapter, AgentEvent, AgentEventType, CandidateVerdict, Clock, RunnerControl, RunnerHandle,
-    RunnerMessage,
-};
+
 use ratchet_agents::workdir::{PrepareWorkdirOptions, prepare_workdir};
 use ratchet_agents::{
     AcceleratedClock, DemoVariant, LocalRunnerControl, LocalRunnerControlOptions, LoopTuning,
@@ -83,7 +84,7 @@ fn make_demo_sandbox(agents: &[&str]) -> Sandbox {
     }
 }
 
-fn demo_config(sb: &Sandbox, agent_id: &str) -> ratchet_agents::RunnerConfig {
+fn demo_config(sb: &Sandbox, agent_id: &str) -> ratchet_core::ports::RunnerConfig {
     let brief = std::fs::read_to_string(demo_dir().join("RATCHET.md")).unwrap();
     let agent = agent_id.to_string();
     let deadline = std::time::SystemTime::now()
@@ -144,7 +145,7 @@ impl DemoEngine {
     ) -> Box<dyn Fn(&AgentEvent) + Send + Sync> {
         let (engine, agent_id) = (self.clone(), agent_id.to_string());
         Box::new(move |e: &AgentEvent| {
-            if e.kind != AgentEventType::Commit {
+            if e.event_type != AgentEventType::Commit {
                 return;
             }
             let sha = e.data_str("sha").unwrap().to_string();
@@ -516,13 +517,13 @@ async fn demo_search_both_scripted_agents_in_parallel_through_local_runner_contr
         .iter()
         .map(|a| RunnerHandle {
             optimization_id: "opt1".into(),
-            agent_id: a.to_string(),
+            agent_id: (*a).into(),
             instance_id: format!("i-{a}"),
         })
         .collect();
     for h in &handles {
         control
-            .start(h, &demo_config(&sb, &h.agent_id))
+            .start(h, &demo_config(&sb, h.agent_id.as_str()))
             .await
             .unwrap();
     }
@@ -531,9 +532,10 @@ async fn demo_search_both_scripted_agents_in_parallel_through_local_runner_contr
         .iter()
         .map(|h| {
             let (control, h) = (control.clone(), h.clone());
-            engine.handler(&h.agent_id.clone(), move |m| {
+            let agent_id = h.agent_id.to_string();
+            engine.handler(&agent_id, move |m| {
                 let (control, h) = (control.clone(), h.clone());
-                tokio::spawn(async move { control.send(&h, m).await.unwrap() });
+                tokio::spawn(async move { control.send(&h, &m).await.unwrap() });
             })
         })
         .collect();

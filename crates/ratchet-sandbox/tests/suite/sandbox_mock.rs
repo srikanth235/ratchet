@@ -128,3 +128,18 @@ async fn records_the_calls_it_receives_in_order() {
     p.destroy(&input()).await.unwrap();
     assert_eq!(p.calls(), ["plan:sim", "apply:sim", "destroy:sim"]);
 }
+
+#[tokio::test]
+async fn is_usable_as_the_core_sandbox_provider_port_object_and_its_outputs_are_the_core_type() {
+    let port: Arc<dyn SandboxProvider> = Arc::new(MockSandboxProvider::default());
+    let out = port.apply(&input()).await.unwrap();
+    assert_eq!(out.region, "us-east-1");
+    assert!(out.deps_identity.is_some());
+    // the outputs are core's: they survive the ledger's JSON column unchanged
+    let json = serde_json::to_value(&out).unwrap();
+    assert_eq!(
+        serde_json::from_value::<ratchet_core::ports::SandboxOutputs>(json).unwrap(),
+        out
+    );
+    assert_eq!(port.outputs("sim").await.unwrap(), Some(out));
+}

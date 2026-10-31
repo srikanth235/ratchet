@@ -119,7 +119,7 @@ walks the device flow against it (start, pending polls, approve, token stored).
 
 ## Rust-only tests (no TS counterpart)
 
-- `domain::tests`: serde shapes match the TS JSON (camelCase, kebab/snake enums), `gain_percent`.
+- `domain::tests`: the `Repo` view-model serializes like the TS `RepoVM`.
 - `numfmt::tests`: JS number formatting (`412` not `412.0`, `toPrecision(5)`).
 - `git::tests`: `parse_git_diff` unit test, sha detection.
 - `mock::tests` (5): the in-memory `MockGitHost` (TS `FakeGit` has no test file; these pin the behaviour the engine tests rely on).
@@ -133,8 +133,26 @@ walks the device flow against it (start, pending polls, approve, token stored).
   `ratchet-engine` crate fills it from `ratchet-ledger`. `bench.run` is passed in (`OptimizationInfo::bench_run`) because
   config parsing lives in `ratchet-core`.
 - **`friendlyMissing` is ported but is engine text**; it may move to `ratchet-engine`.
-- **Number formatting edge cases.** `toFixed` rounds half-up on the decimal expansion in JS and half-to-even in Rust for
-  exact ties (e.g. 0.125 -> `0.13` vs `0.12`); `num` does not switch to exponent form below 1e-6. Neither occurs in any
-  report the TS suite renders. Percentile stat names sort with plain byte order (TS used `localeCompare`) among stats not in
-  the fixed order list.
+- **Number formatting** is `ratchet_core::numfmt` (exact V8 `toFixed` / `toPrecision` / `String(number)`, ties and exponent
+  form included), so the old half-to-even tie difference is gone. Percentile stat names sort with plain byte order (TS used
+  `localeCompare`) among stats not in the fixed order list.
 - **octocrab was not used**, see the crate docs: everything is `reqwest` + `serde`.
+
+## Unified with ratchet-core
+
+`domain.rs` no longer holds stand-ins: `AgentKind`, `CandidateVerdict`, `Direction`, `SpendCategory`, the ids, `BenchStats`, `gain_percent`,
+`CandidateCommit`, `FileDiff`, `CommitFile`, `CommitFilesInput`, `PullRequestInput` and the `GitHost` port (`port.rs` is gone) are
+`ratchet_core`'s. Where the two disagreed:
+
+- `GitHost::open_pull_request` returns `PullRequestRef` (was `PullRequestUrl`), `commit_files` returns `CommitRef { sha }` (TS: `{ sha }`), and
+  `PullRequestInput` gained `commit_message` in core. `CommitFile::executable` is `Option<bool>` like TS; `FileDiff` counts are `u64`.
+- Trait methods return `PortResult`; this crate's `Error` converts with its message verbatim and an HTTP failure keeps its status
+  (`PortError::Http { status, .. }`, was `Error::status()`), which `rethrows_a_422_when_no_open_pr_matches` / `rethrows_non_422_rest_errors` check.
+  The optional-operation `Unsupported` error is core's default `commit_files`.
+- `BenchStats` keeps the evaluator's key order (core's `extra` is an `IndexMap` now), so the report JSON is still the TS snapshot byte for byte; the report's
+  `stats` objects print whole numbers without a fraction through `ser_stats`.
+- `GithubSignIn` takes a core `Clock` (`SignInDeps::clock`) instead of `sleep` / `now` closures; `MockGitHost` stamps commits with a core `Clock`.
+- The report input rows (`OptimizationInfo`, `CandidateInfo`, `RatchetMove`, ...) are the projection the engine assembles from several ledger rows, not
+  ledger rows: they stay here with core's ids and enums (`OptimizationStatus` instead of a string).
+- `Repo` (TS `RepoVM`) and `GithubFlow` (`GithubFlowVM`) are desktop view-models. `ratchet-core` has no view-models (they belong with the OpenAPI contract of the API
+  crate), so they stay in this crate for now; moving them is deferred to the ratchetd / API port.

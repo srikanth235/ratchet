@@ -1,8 +1,11 @@
 //! The text the agent sees: the generated `.ratchet/context.md`, the first prompt and the per-turn resume message.
 
-use crate::domain::{
-    CandidateVerdict, DepsMode, Direction, Guardrail, INSTALL_FILES, ProtectedSource, RunnerConfig,
-    effective_protected,
+use ratchet_core::Guardrail;
+use ratchet_core::enums::{CandidateVerdict, DepsMode, Direction};
+use ratchet_core::numfmt::to_fixed;
+use ratchet_core::ports::RunnerConfig;
+use ratchet_core::protected_set::{
+    INSTALL_FILES, ProtectedConfigInput, ProtectedSource, effective_protected,
 };
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -43,26 +46,6 @@ pub fn format_duration(ms: i64) -> String {
 /// `Math.round` (halves toward +infinity).
 fn js_round(x: f64) -> f64 {
     (x + 0.5).floor()
-}
-
-/// `Number.prototype.toFixed`: like `format!("{:.d}")`, except that an exact tie rounds away from zero instead of to even.
-pub(crate) fn to_fixed(x: f64, digits: usize) -> String {
-    let ax = x.abs();
-    let long = format!("{:.*}", digits + 30, ax);
-    let cut = long.find('.').map_or(long.len(), |dot| dot + 1 + digits);
-    let rest = &long[cut.min(long.len())..];
-    let tie = rest.starts_with('5') && rest[1..].bytes().all(|b| b == b'0');
-    let magnitude = if tie {
-        let scale = 10f64.powi(digits as i32);
-        format!("{:.*}", digits, ((ax * scale).floor() + 1.0) / scale)
-    } else {
-        format!("{:.*}", digits, ax)
-    };
-    if x < 0.0 && magnitude.bytes().any(|b| b != b'0' && b != b'.') {
-        format!("-{magnitude}")
-    } else {
-        magnitude
-    }
 }
 
 /// JS `String(number)` for the values this module prints: integers without a fraction, others rounded to 3 decimals.
@@ -176,11 +159,14 @@ pub fn build_context(input: &ContextInput<'_>) -> String {
     }
     lines.push(String::new());
     lines.push("## Rules".to_string());
-    let guarded: Vec<String> = effective_protected(&config.config)
-        .into_iter()
-        .filter(|e| e.source != ProtectedSource::Install)
-        .map(|e| format!("`{}`", e.glob))
-        .collect();
+    // the automatic set, including the globs of the evaluator template's own files
+    let guarded: Vec<String> =
+        effective_protected(&ProtectedConfigInput::from(&config.config), None)
+            .entries
+            .into_iter()
+            .filter(|e| e.source != ProtectedSource::Install)
+            .map(|e| format!("`{}`", e.glob))
+            .collect();
     let install: Vec<String> = INSTALL_FILES.iter().map(|f| format!("`{f}`")).collect();
     lines.push(format!(
         "- Protected paths (a candidate touching them is blocked): {}, and lockfiles / install config ({}) at any depth",
@@ -192,8 +178,8 @@ pub fn build_context(input: &ContextInput<'_>) -> String {
         .guardrails
         .iter()
         .map(|g| match g {
-            Guardrail::Command { run } => format!("`{run}` must pass"),
-            Guardrail::Threshold { metric, raw, .. } => format!("`{metric}` {raw}"),
+            Guardrail::Command(c) => format!("`{}` must pass", c.run),
+            Guardrail::Threshold(t) => format!("`{}` {}", t.metric, t.raw),
         })
         .collect();
     lines.push(format!(

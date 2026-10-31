@@ -23,6 +23,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_core_types_the_host_exchanges_keep_the_ts_json_shapes() {
+        use ratchet_core::enums::{AgentKind, CandidateVerdict};
+        use ratchet_core::ports::{CandidateCommit, CommitFile};
+        use ratchet_core::{BenchStats, Direction, gain_percent};
+
+        assert_eq!(
+            serde_json::to_string(&AgentKind::ClaudeCode).unwrap(),
+            "\"claude-code\""
+        );
+        assert_eq!(
+            serde_json::to_string(&CandidateVerdict::FailedConfirm).unwrap(),
+            "\"failed_confirm\""
+        );
+        let c = CandidateCommit {
+            sha: "a".into(),
+            branch: "b".into(),
+            message: "m".into(),
+            committed_at: 5,
+        };
+        assert_eq!(
+            serde_json::to_string(&c).unwrap(),
+            r#"{"sha":"a","branch":"b","message":"m","committedAt":5}"#
+        );
+        let f: CommitFile = serde_json::from_str(r#"{"path":"a","content":"b"}"#).unwrap();
+        assert!(!f.is_executable());
+        let stats = BenchStats::new(412.0).with("p50", 240.5);
+        assert_eq!(
+            serde_json::to_value(&stats).unwrap(),
+            serde_json::json!({"value": 412.0, "p50": 240.5})
+        );
+        assert_eq!(gain_percent(Direction::Minimize, 100.0, 75.0), Some(25.0));
+        assert_eq!(gain_percent(Direction::Minimize, 0.0, 1.0), None);
+    }
+
+    #[test]
     fn repo_serializes_like_the_ts_repo_vm() {
         let r = Repo {
             full_name: "a/b".into(),

@@ -1,19 +1,17 @@
 //! Common plumbing for the CLI-backed adapters: spawn, feed lines to a parser, classify the outcome.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use ratchet_core::ports::mock::SystemClock;
+use ratchet_core::ports::{AgentSpec, CancellationToken, Clock};
 use serde_json::{Map, Value};
-use tokio_util::sync::CancellationToken;
 
-use crate::clock::SystemClock;
-use crate::domain::{AgentSpec, Clock};
 use crate::process::{
     RunProcessOptions, RunProcessResult, SharedSpawner, TokioSpawner, run_process,
 };
-
-pub use crate::domain::{AgentError, AgentSession};
 
 #[derive(Clone, Default)]
 pub struct CliAgentOptions {
@@ -59,7 +57,7 @@ pub fn str_of<'a>(v: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
 /// The base environment with the spec's layered on top.
 pub fn build_env(
     base: &HashMap<String, String>,
-    spec: Option<&HashMap<String, String>>,
+    spec: Option<&BTreeMap<String, String>>,
 ) -> HashMap<String, String> {
     let mut env = base.clone();
     if let Some(spec) = spec {
@@ -103,7 +101,7 @@ impl CliAgent {
         cancel: &CancellationToken,
     ) -> RunProcessResult {
         let mut options = RunProcessOptions::new(
-            spec.workdir.clone(),
+            PathBuf::from(&spec.workdir),
             build_env(&self.base_env, spec.env.as_ref()),
         );
         options.stdin = stdin;

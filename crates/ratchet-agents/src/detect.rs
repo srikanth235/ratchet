@@ -39,10 +39,10 @@ impl HarnessKind {
         }
     }
 
-    pub fn agent_kind(self) -> crate::domain::AgentKind {
+    pub fn agent_kind(self) -> ratchet_core::enums::AgentKind {
         match self {
-            HarnessKind::ClaudeCode => crate::domain::AgentKind::ClaudeCode,
-            HarnessKind::Codex => crate::domain::AgentKind::Codex,
+            HarnessKind::ClaudeCode => ratchet_core::enums::AgentKind::ClaudeCode,
+            HarnessKind::Codex => ratchet_core::enums::AgentKind::Codex,
         }
     }
 }
