@@ -53,14 +53,17 @@ public final class AppStore {
     public private(set) var isLoaded = false
     public private(set) var lastError: String?
     public var range: TimeRange = .days90
+    /// True when the data is the built-in sample (no daemon is running): the sidebar says so, quietly.
+    public let isDemoData: Bool
 
     private let cacheURL: URL?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private var pendingWins: [String: RatchetMove] = [:]
 
-    public init(client: any RatchetClient, cacheURL: URL? = nil) {
+    public init(client: any RatchetClient, cacheURL: URL? = nil, isDemoData: Bool = false) {
         self.client = client
         self.cacheURL = cacheURL
+        self.isDemoData = isDemoData
         restoreCache()
     }
 

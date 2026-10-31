@@ -124,9 +124,28 @@ public final class DaemonRatchetClient: RatchetClient {
         try await api.listOptimizations().ok.body.json.optimizations
     }
 
-    /// Every optimization with its detail, fetched side by side. The table needs the clock, the pull request and the
-    /// noise, which only the detail has; one that fails to load shows with what the list knows.
-    private func optimizationRows() async throws -> [(vm: VM.OptimizationVm, optimization: Optimization, detail: VM.OptimizationDetail?)] {
+    /// One row of the table: the list entry, the app's model of it, and the detail it was enriched from.
+    struct OptimizationRow: Sendable {
+        var vm: VM.OptimizationVm
+        var optimization: Optimization
+        var detail: VM.OptimizationDetail?
+    }
+
+    /// Every optimization with its detail. A refresh asks for the table and the benchmarks within moments of each other;
+    /// they share one load.
+    private func optimizationRows() async throws -> [OptimizationRow] {
+        let task = await state.rowsTask { Task { try await self.loadOptimizationRows() } }
+        do {
+            return try await task.value
+        } catch {
+            await state.forgetRows()
+            throw error
+        }
+    }
+
+    /// The list, then every detail side by side. The table needs the clock, the pull request and the noise, which only the
+    /// detail has; one that fails to load shows with what the list knows.
+    private func loadOptimizationRows() async throws -> [OptimizationRow] {
         let list = try await optimizationSnapshot()
         let details = await withTaskGroup(of: (Int, VM.OptimizationDetail?).self) { group in
             for (index, vm) in list.enumerated() {
@@ -139,7 +158,7 @@ public final class DaemonRatchetClient: RatchetClient {
             return found
         }
         return list.enumerated().map { index, vm in
-            (vm, DaemonMapping.optimization(vm, detail: details[index]), details[index])
+            OptimizationRow(vm: vm, optimization: DaemonMapping.optimization(vm, detail: details[index]), detail: details[index])
         }
     }
 
@@ -252,6 +271,7 @@ public final class DaemonRatchetClient: RatchetClient {
                 timeLimitSeconds: Int64(request.timeLimitHours * 3600))
             let created = try await api.createOptimization(body: .json(input)).created.body.json
             _ = try await api.startOptimization(path: .init(id: created.id)).noContent
+            await state.forgetRows()
             var started = try await fetchOptimization(created.id)
             started.goal = goal
             return started
@@ -632,6 +652,20 @@ private actor DaemonClientState {
         }
         return true
     }
+
+    private var rows: (task: Task<[DaemonRatchetClient.OptimizationRow], any Error>, at: Date)?
+
+    /// The load of the optimization table started within the last two seconds, or a new one.
+    func rowsTask(
+        make: () -> Task<[DaemonRatchetClient.OptimizationRow], any Error>
+    ) -> Task<[DaemonRatchetClient.OptimizationRow], any Error> {
+        if let rows, Date().timeIntervalSince(rows.at) < 2 { return rows.task }
+        let task = make()
+        rows = (task, Date())
+        return task
+    }
+
+    func forgetRows() { rows = nil }
 
     func markRealDraft(_ id: String) { realDrafts.insert(id) }
 

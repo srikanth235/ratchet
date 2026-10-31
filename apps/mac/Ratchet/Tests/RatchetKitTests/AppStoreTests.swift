@@ -168,4 +168,20 @@ struct AppStoreTests {
         #expect(second.overview?.spentUSD == 184)
         #expect(second.connectors.count == 8)
     }
+
+    @Test func aResyncEventReloadsWhatIsShown() async {
+        let (store, client) = await loadedStore()
+        await store.loadDetail(id: "opt-checkout")
+        _ = try? await client.addConnector(NewConnector(kind: .github, name: "octo"))
+        #expect(store.connectors.count == 8)
+        store.apply(.resync)
+        for _ in 0..<100 where store.connectors.count == 8 { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.connectors.count == 9)
+        #expect(store.details["opt-checkout"] != nil)
+    }
+
+    @Test func demoDataIsAFlagOfTheStore() {
+        #expect(!AppStore(client: MockRatchetClient(now: testNow)).isDemoData)
+        #expect(AppStore(client: MockRatchetClient(now: testNow), isDemoData: true).isDemoData)
+    }
 }

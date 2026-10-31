@@ -32,6 +32,7 @@ enum SelfTest {
     private static func run(store: AppStore, router: AppRouter) async {
         // Store: the first load.
         check("the store loaded", store.isLoaded)
+        check("test mode runs on demo data", store.isDemoData)
         check("five optimizations", store.optimizations.count == 5)
         check("spent matches the design", store.overview?.spentUSD == 184, "\(String(describing: store.overview?.spentUSD))")
         check("value locked in matches the design", store.overview?.valueLockedPerYearUSD == 15_400)

@@ -11,8 +11,10 @@ import SwiftUI
 //   APP_GRID=1 Ratchet               draw the 8 pt grid and the layout probes over the window
 //   APP_KIT_GALLERY=1 Ratchet        (not built yet) parts gallery
 //
-// Data comes through the RatchetClient protocol (RatchetKit). MockRatchetClient is the only implementation for now;
-// the client generated from ratchetd's OpenAPI replaces it in `Store.makeStore()`.
+// Data comes through the RatchetClient protocol (RatchetKit). With ratchetd running (its socket accepts connections)
+// the app talks to it through DaemonRatchetClient; without it, and always in test and snapshot mode, it shows the
+// built-in sample data (MockRatchetClient) and says "Demo data" in the sidebar. `Store.makeStore()` decides.
+//   APP_DEMO=1 Ratchet               use the sample data even when a daemon is running
 
 @main
 struct RatchetApp: App {
@@ -92,22 +94,30 @@ enum Store {
         !(ProcessInfo.processInfo.environment["APP_STORE"] ?? "").isEmpty
     }
 
-    /// The last snapshot of what the daemon said, shown at once on the next launch.
-    static var cacheURL: URL? {
+    /// The last snapshot of what the daemon said, shown at once on the next launch. The demo data has its own file, so
+    /// sample numbers never flash up before a real daemon answers.
+    static func cacheURL(demo: Bool) -> URL? {
         guard !isOverridden else { return nil }
         return URL.applicationSupportDirectory
             .appending(path: "Ratchet", directoryHint: .isDirectory)
-            .appending(path: "last-snapshot.json")
+            .appending(path: demo ? "demo-snapshot.json" : "last-snapshot.json")
     }
 
     /// 2026-10-31 13:20 UTC: the clock of every snapshot and test run.
     static let fixedNow = Date(timeIntervalSince1970: 1_793_452_800)
 
+    /// The daemon when it is running, else the sample data. A daemon that starts later is picked up on the next launch.
     @MainActor
     static func makeStore() -> AppStore {
-        let client = isOverridden
-            ? MockRatchetClient(now: fixedNow, live: false)
-            : MockRatchetClient(now: Date(), live: true)
-        return AppStore(client: client, cacheURL: cacheURL)
+        if isOverridden {
+            return AppStore(client: MockRatchetClient(now: fixedNow, live: false), cacheURL: nil, isDemoData: true)
+        }
+        let location = DaemonLocation.standard()
+        if ProcessInfo.processInfo.environment["APP_DEMO"] != "1", location.isReachable {
+            // Provisional groups the engine does not have yet are served from sample data, quietly.
+            let sample = MockRatchetClient(now: Date(), live: false)
+            return AppStore(client: DaemonRatchetClient(location: location, fallback: sample), cacheURL: cacheURL(demo: false))
+        }
+        return AppStore(client: MockRatchetClient(now: Date(), live: true), cacheURL: cacheURL(demo: true), isDemoData: true)
     }
 }

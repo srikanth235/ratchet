@@ -1,8 +1,8 @@
 import Foundation
 
 /// Everything the app asks of `ratchetd`, shaped as REST resources plus one server-sent event stream.
-/// `MockRatchetClient` implements it with sample data. A later step adds a client generated from the daemon's OpenAPI
-/// that conforms to the same protocol; `AppStore` and the views never learn which one they talk to.
+/// `MockRatchetClient` implements it with sample data and `DaemonRatchetClient` talks to the real daemon through the
+/// client generated from its OpenAPI; `AppStore` and the views never learn which one they talk to.
 public protocol RatchetClient: Sendable {
     // Overview and spend
     func overview(range: TimeRange) async throws -> Overview
