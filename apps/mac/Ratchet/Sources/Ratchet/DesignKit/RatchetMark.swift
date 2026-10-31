@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// The Ratchet mark: five quarter-discs whose radii grow by the golden ratio. Four sealed chambers in glass, the newest
-/// in brass. Geometry comes from design/icon/ratchet-mark.svg (viewBox 218 337 600 369) and ratchet-menubar.svg.
+/// in brass. Geometry comes from design/icon/ratchet-mark.svg (viewBox 218 338 600 369) and ratchet-menubar.svg.
 struct RatchetMarkGeometry: Sendable {
     /// One quarter disc: the right-angle corner, then the two ends of the arc.
     struct Chamber: Sendable {
@@ -19,24 +19,26 @@ struct RatchetMarkGeometry: Sendable {
     static let aspect: CGFloat = 600.0 / 369.0
 
     static let color = RatchetMarkGeometry(
-        viewBox: CGRect(x: 218, y: 337, width: 600, height: 369), // grid: ok SVG units
+        viewBox: CGRect(x: 218, y: 338, width: 600, height: 369), // grid: ok SVG units
         chambers: [
-            .init(center: CGPoint(x: 407.1, y: 434.5), start: CGPoint(x: 407.1, y: 466.0), end: CGPoint(x: 438.6, y: 434.5), opacity: 0.16),
-            .init(center: CGPoint(x: 361.0, y: 424.6), start: CGPoint(x: 438.6, y: 424.6), end: CGPoint(x: 361.0, y: 347.0), opacity: 0.26),
-            .init(center: CGPoint(x: 351.1, y: 470.8), start: CGPoint(x: 227.3, y: 470.8), end: CGPoint(x: 351.1, y: 347.0), opacity: 0.4),
-            .init(center: CGPoint(x: 443.4, y: 480.7), start: CGPoint(x: 443.4, y: 696.7), end: CGPoint(x: 227.3, y: 480.7), opacity: 0.58),
-            .init(center: CGPoint(x: 453.3, y: 342.2), start: CGPoint(x: 453.3, y: 696.7), end: CGPoint(x: 807.8, y: 342.2), opacity: 1),
+            .init(center: CGPoint(x: 397.8, y: 434.8), start: CGPoint(x: 397.8, y: 466.2), end: CGPoint(x: 366.4, y: 434.8), opacity: 0.12),
+            .init(center: CGPoint(x: 407.7, y: 434.8), start: CGPoint(x: 407.7, y: 466.2), end: CGPoint(x: 439.2, y: 434.8), opacity: 0.18),
+            .init(center: CGPoint(x: 361.6, y: 424.9), start: CGPoint(x: 439.2, y: 424.9), end: CGPoint(x: 361.6, y: 347.3), opacity: 0.28),
+            .init(center: CGPoint(x: 351.7, y: 471.0), start: CGPoint(x: 227.9, y: 471.0), end: CGPoint(x: 351.7, y: 347.3), opacity: 0.42),
+            .init(center: CGPoint(x: 444.0, y: 480.9), start: CGPoint(x: 444.0, y: 697.0), end: CGPoint(x: 227.9, y: 480.9), opacity: 0.6),
+            .init(center: CGPoint(x: 453.9, y: 342.5), start: CGPoint(x: 453.9, y: 697.0), end: CGPoint(x: 808.4, y: 342.5), opacity: 1),
         ])
 
     /// The one-colour version (ratchet-menubar.svg): slightly smaller discs so the gaps survive at 18 pt.
     static let template = RatchetMarkGeometry(
-        viewBox: CGRect(x: 218, y: 337, width: 600, height: 369), // grid: ok SVG units
+        viewBox: CGRect(x: 218, y: 338, width: 600, height: 369), // grid: ok SVG units
         chambers: [
-            .init(center: CGPoint(x: 409.3, y: 436.6), start: CGPoint(x: 409.3, y: 461.8), end: CGPoint(x: 434.4, y: 436.6), opacity: 0.35),
-            .init(center: CGPoint(x: 363.1, y: 422.5), start: CGPoint(x: 434.4, y: 422.5), end: CGPoint(x: 363.1, y: 351.2), opacity: 0.5),
-            .init(center: CGPoint(x: 349.0, y: 468.7), start: CGPoint(x: 231.5, y: 468.7), end: CGPoint(x: 349.0, y: 351.2), opacity: 0.65),
-            .init(center: CGPoint(x: 441.3, y: 482.8), start: CGPoint(x: 441.3, y: 692.6), end: CGPoint(x: 231.5, y: 482.8), opacity: 0.8),
-            .init(center: CGPoint(x: 455.4, y: 344.3), start: CGPoint(x: 455.4, y: 692.6), end: CGPoint(x: 803.6, y: 344.3), opacity: 1),
+            .init(center: CGPoint(x: 395.7, y: 436.9), start: CGPoint(x: 395.7, y: 462.0), end: CGPoint(x: 370.6, y: 436.9), opacity: 0.3),
+            .init(center: CGPoint(x: 409.9, y: 436.9), start: CGPoint(x: 409.9, y: 462.0), end: CGPoint(x: 435.0, y: 436.9), opacity: 0.4),
+            .init(center: CGPoint(x: 363.7, y: 422.8), start: CGPoint(x: 435.0, y: 422.8), end: CGPoint(x: 363.7, y: 351.4), opacity: 0.55),
+            .init(center: CGPoint(x: 349.6, y: 468.9), start: CGPoint(x: 232.1, y: 468.9), end: CGPoint(x: 349.6, y: 351.4), opacity: 0.7),
+            .init(center: CGPoint(x: 441.9, y: 483.0), start: CGPoint(x: 441.9, y: 692.8), end: CGPoint(x: 232.1, y: 483.0), opacity: 0.85),
+            .init(center: CGPoint(x: 456.0, y: 344.6), start: CGPoint(x: 456.0, y: 692.8), end: CGPoint(x: 804.2, y: 344.6), opacity: 1),
         ])
 
     /// A chamber's outline in view-box coordinates (y down, like the SVG).
