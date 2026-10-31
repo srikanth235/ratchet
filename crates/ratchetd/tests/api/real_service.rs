@@ -179,6 +179,7 @@ fn activity(over: impl FnOnce(&mut SandboxActivity)) -> SandboxActivity {
     a
 }
 
+type Sims = Arc<Mutex<Vec<(String, Arc<RecordingRuntime>)>>>;
 type Hook = Arc<dyn Fn(&Arc<RecordingRuntime>) + Send + Sync>;
 
 #[derive(Default)]
@@ -197,7 +198,7 @@ struct Setup {
     probe: Arc<FakeProbe>,
     opened: Arc<Mutex<Vec<String>>>,
     live: Arc<Mutex<Vec<Arc<RecordingRuntime>>>>,
-    sims: Arc<Mutex<Vec<(String, Arc<RecordingRuntime>)>>>,
+    sims: Sims,
     probes: Arc<std::sync::atomic::AtomicUsize>,
     _dir: tempfile::TempDir,
 }
@@ -213,7 +214,7 @@ async fn setup(o: Opts) -> Setup {
     let probe = Arc::new(FakeProbe::default());
     let opened: Arc<Mutex<Vec<String>>> = Arc::default();
     let live: Arc<Mutex<Vec<Arc<RecordingRuntime>>>> = Arc::default();
-    let sims: Arc<Mutex<Vec<(String, Arc<RecordingRuntime>)>>> = Arc::default();
+    let sims: Sims = Arc::default();
     let probes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let found = o.harnesses.clone();
     let harnesses = Arc::new(HarnessCache::new(Arc::new(ScriptedProbe {

@@ -162,13 +162,16 @@ pub fn parse_aws_files(files: &AwsFiles) -> AwsProfileList {
     }
 }
 
+/// Reads one file (the test seam of [`list_aws_profiles`]).
+pub type ReadFile = Box<dyn Fn(&std::path::Path) -> std::io::Result<String>>;
+
 #[derive(Default)]
 pub struct ListAwsProfilesOptions {
     pub config_file_env: Option<String>,
     pub credentials_file_env: Option<String>,
     pub home: Option<PathBuf>,
     /// Test seam; default `std::fs::read_to_string`.
-    pub read_file: Option<Box<dyn Fn(&std::path::Path) -> std::io::Result<String>>>,
+    pub read_file: Option<ReadFile>,
 }
 
 impl ListAwsProfilesOptions {

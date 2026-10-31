@@ -241,7 +241,7 @@ impl SettingsStore {
         self.secrets.get(name.as_str()).ok().flatten()
     }
 
-    fn from_env(&self, name: SecretName) -> Option<String> {
+    fn env_value(&self, name: SecretName) -> Option<String> {
         env_for(name)
             .iter()
             .find_map(|k| self.env.get(*k).filter(|v| !v.is_empty()).cloned())
@@ -249,12 +249,12 @@ impl SettingsStore {
 
     /// Configured = stored in the keychain, or provided through the environment.
     pub fn has_secret(&self, name: SecretName) -> bool {
-        self.stored(name).is_some() || self.from_env(name).is_some()
+        self.stored(name).is_some() || self.env_value(name).is_some()
     }
 
     /// Daemon only: hand to the engine, never to a client.
     pub fn get_secret(&self, name: SecretName) -> Option<String> {
-        self.stored(name).or_else(|| self.from_env(name))
+        self.stored(name).or_else(|| self.env_value(name))
     }
 
     /// Whether the value comes from the store (rather than only the environment).
