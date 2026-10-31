@@ -8,7 +8,7 @@ struct MenuBarLabel: View {
 
     var body: some View {
         HStack(spacing: Space.xs) {
-            Image(systemName: "chart.line.uptrend.xyaxis")
+            Image(nsImage: RatchetMarkImage.menuBar())
             if store.needsYouCount > 0 {
                 Text("\(store.needsYouCount)")
             }
@@ -26,7 +26,8 @@ struct MenuBarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.md) {
-            HStack {
+            HStack(spacing: Space.sm) {
+                RatchetMarkView(height: 14)
                 Text("Ratchet").kitType(.brand).foregroundStyle(Ink.text)
                 Spacer()
                 if store.needsYouCount > 0 {

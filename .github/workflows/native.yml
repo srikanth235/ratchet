@@ -156,6 +156,40 @@ jobs:
           path: /tmp/${{ env.APP_NAME }}-shots
           if-no-files-found: warn
           retention-days: 14
+      # app-icon skill: the icon in Default / Dark / Tinted / Clear at 256 pt plus 32 and 16 pt, rendered with ictool.
+      # Without ictool (no Icon Composer on the runner) it falls back to the compiled AppIcon.icns, exported to PNGs.
+      - name: Icon review
+        if: always()
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/icon-review"
+          mkdir -p "$out"
+          ictool="$(xcode-select -p)/../Applications/Icon Composer.app/Contents/Executables/ictool"
+          if [ -x "$ictool" ]; then
+            echo "ictool found: rendering all looks"
+            tools/icon_review.sh "$out/Ratchet-icon.png"
+          else
+            echo "::warning::ictool not found on this runner; falling back to AppIcon.icns renditions (default look only)"
+            icns=Resources/AppIcon.icns
+            if [ -f "$icns" ]; then
+              iconutil -c iconset "$icns" -o "$out/AppIcon.iconset"
+              for f in icon_256x256@2x icon_32x32@2x icon_16x16@2x icon_16x16; do
+                [ -f "$out/AppIcon.iconset/$f.png" ] && cp "$out/AppIcon.iconset/$f.png" "$out/fallback-$f.png"
+              done
+              rm -rf "$out/AppIcon.iconset"
+            else
+              echo "::error::no Resources/AppIcon.icns"
+              exit 1
+            fi
+          fi
+      - name: Upload icon review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ratchet-icon-review
+          path: ${{ runner.temp }}/icon-review
+          if-no-files-found: warn
+          retention-days: 14
       # Design drift, made visible: the dark snapshots against design/v02.html rendered at the same window size
       # (design/render-reference.mjs writes design/v02/ref-<screen>.png). A warning, never a failure.
       - name: Design diff

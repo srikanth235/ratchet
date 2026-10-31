@@ -8,8 +8,7 @@ struct SidebarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xxl) {
             HStack(spacing: Space.sm) {
-                KitIconView(icon: .optimizations, size: 22, weight: 1.7)
-                    .foregroundStyle(Ink.brass)
+                RatchetMarkView(height: 18)
                 Text("Ratchet").kitType(.brand).foregroundStyle(Ink.text)
             }
             .padding(.horizontal, Space.md)
