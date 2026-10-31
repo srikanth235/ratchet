@@ -1,0 +1,21 @@
+[package]
+name = "ratchet-ledger"
+version = "0.0.0"
+description = "Ratchet ledger: SQLite (sqlx) store with append-only ratchet moves and spend events"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait = "0.1"
+ratchet-core = { path = "../ratchet-core" }
+serde = "1"
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+# `macros` is for `sqlx::migrate!` only: queries are runtime-checked, building needs no database.
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
