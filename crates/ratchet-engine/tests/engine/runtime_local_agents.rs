@@ -394,9 +394,24 @@ async fn runs_a_claude_code_agent_in_a_worktree_verifies_its_commit_then_removes
             .is_none()
     );
 
+    // The ledger row flips to `destroyed` just before the engine publishes the `destroyed` phase: wait for the event.
     let mut events = Vec::new();
-    while let Ok(e) = rx.try_recv() {
-        events.push(e);
+    for _ in 0..200 {
+        while let Ok(e) = rx.try_recv() {
+            events.push(e);
+        }
+        if events.iter().any(|e| {
+            matches!(
+                e,
+                EngineEvent::Sandbox {
+                    phase: SandboxPhase::Destroyed,
+                    ..
+                }
+            )
+        }) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
     let active: Vec<bool> = events
         .iter()
