@@ -343,52 +343,25 @@ impl Ledger {
         }
     }
 
+    /// [`transaction`](Self::transaction) with the typed writes of [`Tx`]:
+    /// `ledger.atomically(|tx| Box::pin(async move { ... }))`.
+    pub async fn atomically<T, F>(&self, f: F) -> Result<T>
+    where
+        F: for<'c> FnOnce(Tx<'c>) -> BoxFuture<'c, Result<T>> + Send + 'static,
+        T: Send,
+    {
+        let now = self.now();
+        self.transaction(move |conn| Box::pin(async move { f(Tx { conn, now }).await }))
+            .await
+    }
+
     // ---- optimizations ----------------------------------------------------------------------------------------
 
     pub async fn create_optimization(
         &self,
         input: CreateOptimizationInput,
     ) -> Result<Optimization> {
-        assert_finite("minGain", input.min_gain)?;
-        assert_finite("budgetUsd", input.budget_usd)?;
-        if input.min_gain < 0.0 {
-            return Err(LedgerError::invalid("minGain must be >= 0"));
-        }
-        if input.budget_usd < 0.0 {
-            return Err(LedgerError::invalid("budgetUsd must be >= 0"));
-        }
-        let id = input.id.unwrap_or_else(OptimizationId::generate);
-        let value = input.value.as_ref();
-        let row = sqlx::query(
-            "INSERT INTO optimizations (id, name, repo, base_ref, metric, direction, min_gain, budget_usd, time_limit_s, status, \
-             created_at, config_yaml, pack, objective_name, evaluator_kind, value_usd_per_unit, value_period, value_basis, \
-             value_unit, sandbox_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20) \
-             RETURNING *",
-        )
-        .bind(id.as_str())
-        .bind(&input.name)
-        .bind(&input.repo)
-        .bind(&input.base_ref)
-        .bind(&input.metric)
-        .bind(input.direction.as_str())
-        .bind(input.min_gain)
-        .bind(input.budget_usd)
-        .bind(input.time_limit_s)
-        .bind(input.status.unwrap_or(OptimizationStatus::Draft).as_str())
-        .bind(input.created_at.unwrap_or_else(|| self.now()))
-        .bind(&input.config_yaml)
-        .bind(&input.pack)
-        .bind(&input.objective_name)
-        .bind(input.evaluator_kind.unwrap_or(EvaluatorKind::Benchmark).as_str())
-        .bind(value.map(|v| v.usd_per_unit))
-        .bind(value.map(|v| v.period.as_str()))
-        .bind(value.map(|v| v.basis.as_str()))
-        .bind(value.and_then(|v| v.unit.clone()))
-        .bind(input.sandbox_id.as_ref().map(SandboxId::as_str))
-        .fetch_one(&mut *self.conn().await?)
-        .await
-        .map_err(db)?;
-        rowmap::optimization(&row)
+        create_optimization(&mut *self.conn().await?, input, self.now()).await
     }
 
     pub async fn get_optimization(&self, id: &OptimizationId) -> Result<Option<Optimization>> {
@@ -930,43 +903,7 @@ impl Ledger {
         let at = at.unwrap_or_else(|| self.now());
         let (opt_id, cand_id) = (optimization_id.clone(), candidate_id.clone());
         self.transaction(move |tx| {
-            Box::pin(async move {
-                let opt = require_optimization(tx, opt_id.as_str()).await?;
-                let cand = require_candidate(tx, cand_id.as_str()).await?;
-                if cand.optimization_id != opt_id {
-                    return Err(LedgerError::invalid(format!("candidate {cand_id} does not belong to optimization {opt_id}")));
-                }
-                let Some(from) = current_best(tx, opt_id.as_str()).await? else {
-                    return Err(LedgerError::new(
-                        ratchet_core::LedgerErrorCode::NoBaseline,
-                        format!("optimization {opt_id} has no baseline yet"),
-                    ));
-                };
-                if !is_improvement(opt.direction, from, to_value) {
-                    return Err(LedgerError::new(
-                        ratchet_core::LedgerErrorCode::RatchetNotImproved,
-                        format!(
-                            "{} is not strictly better than current best {} ({})",
-                            ratchet_core::numfmt::js_number_to_string(to_value),
-                            ratchet_core::numfmt::js_number_to_string(from),
-                            opt.direction
-                        ),
-                    ));
-                }
-                let row = sqlx::query(
-                    "INSERT INTO ratchet_moves (optimization_id, candidate_id, from_value, to_value, at) \
-                     VALUES (?1, ?2, ?3, ?4, ?5) RETURNING *",
-                )
-                .bind(opt_id.as_str())
-                .bind(cand_id.as_str())
-                .bind(from)
-                .bind(to_value)
-                .bind(at)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(db)?;
-                rowmap::ratchet_move(&row)
-            })
+            Box::pin(async move { move_ratchet(tx, &opt_id, &cand_id, to_value, at).await })
         })
         .await
     }
@@ -1010,6 +947,27 @@ impl Ledger {
 
     pub async fn record_spend(&self, input: RecordSpendInput) -> Result<SpendEvent> {
         record_spend(&mut *self.conn().await?, input, self.now()).await
+    }
+
+    /// The distinct `source` values of an optimization's spend rows that start with `prefix` (e.g. `ec2:`), by source.
+    pub async fn spend_sources(
+        &self,
+        optimization_id: &OptimizationId,
+        prefix: &str,
+    ) -> Result<Vec<String>> {
+        let escaped = prefix
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let rows = sqlx::query(
+            "SELECT DISTINCT source FROM spend_events WHERE optimization_id = ?1 AND source LIKE ?2 ESCAPE '\\' ORDER BY source",
+        )
+        .bind(optimization_id.as_str())
+        .bind(format!("{escaped}%"))
+        .fetch_all(&mut *self.conn().await?)
+        .await
+        .map_err(db)?;
+        rows.iter().map(|r| col(r, "source")).collect()
     }
 
     pub async fn total_spend(&self, optimization_id: &OptimizationId) -> Result<f64> {
@@ -1422,4 +1380,216 @@ async fn spend_breakdown(
         out.by_agent.push(per_agent[p].1.clone());
     }
     Ok(out)
+}
+
+async fn create_optimization(
+    conn: &mut SqliteConnection,
+    input: CreateOptimizationInput,
+    now: i64,
+) -> Result<Optimization> {
+    assert_finite("minGain", input.min_gain)?;
+    assert_finite("budgetUsd", input.budget_usd)?;
+    if input.min_gain < 0.0 {
+        return Err(LedgerError::invalid("minGain must be >= 0"));
+    }
+    if input.budget_usd < 0.0 {
+        return Err(LedgerError::invalid("budgetUsd must be >= 0"));
+    }
+    let id = input.id.unwrap_or_else(OptimizationId::generate);
+    let value = input.value.as_ref();
+    let row = sqlx::query(
+        "INSERT INTO optimizations (id, name, repo, base_ref, metric, direction, min_gain, budget_usd, time_limit_s, status, \
+         created_at, config_yaml, pack, objective_name, evaluator_kind, value_usd_per_unit, value_period, value_basis, \
+         value_unit, sandbox_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20) \
+         RETURNING *",
+    )
+    .bind(id.as_str())
+    .bind(&input.name)
+    .bind(&input.repo)
+    .bind(&input.base_ref)
+    .bind(&input.metric)
+    .bind(input.direction.as_str())
+    .bind(input.min_gain)
+    .bind(input.budget_usd)
+    .bind(input.time_limit_s)
+    .bind(input.status.unwrap_or(OptimizationStatus::Draft).as_str())
+    .bind(input.created_at.unwrap_or(now))
+    .bind(&input.config_yaml)
+    .bind(&input.pack)
+    .bind(&input.objective_name)
+    .bind(input.evaluator_kind.unwrap_or(EvaluatorKind::Benchmark).as_str())
+    .bind(value.map(|v| v.usd_per_unit))
+    .bind(value.map(|v| v.period.as_str()))
+    .bind(value.map(|v| v.basis.as_str()))
+    .bind(value.and_then(|v| v.unit.clone()))
+    .bind(input.sandbox_id.as_ref().map(SandboxId::as_str))
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(db)?;
+    rowmap::optimization(&row)
+}
+
+async fn move_ratchet(
+    tx: &mut SqliteConnection,
+    opt_id: &OptimizationId,
+    cand_id: &CandidateId,
+    to_value: f64,
+    at: i64,
+) -> Result<RatchetMove> {
+    let opt = require_optimization(tx, opt_id.as_str()).await?;
+    let cand = require_candidate(tx, cand_id.as_str()).await?;
+    if cand.optimization_id != *opt_id {
+        return Err(LedgerError::invalid(format!(
+            "candidate {cand_id} does not belong to optimization {opt_id}"
+        )));
+    }
+    let Some(from) = current_best(tx, opt_id.as_str()).await? else {
+        return Err(LedgerError::new(
+            ratchet_core::LedgerErrorCode::NoBaseline,
+            format!("optimization {opt_id} has no baseline yet"),
+        ));
+    };
+    if !is_improvement(opt.direction, from, to_value) {
+        return Err(LedgerError::new(
+            ratchet_core::LedgerErrorCode::RatchetNotImproved,
+            format!(
+                "{} is not strictly better than current best {} ({})",
+                ratchet_core::numfmt::js_number_to_string(to_value),
+                ratchet_core::numfmt::js_number_to_string(from),
+                opt.direction
+            ),
+        ));
+    }
+    let row = sqlx::query(
+        "INSERT INTO ratchet_moves (optimization_id, candidate_id, from_value, to_value, at) \
+         VALUES (?1, ?2, ?3, ?4, ?5) RETURNING *",
+    )
+    .bind(opt_id.as_str())
+    .bind(cand_id.as_str())
+    .bind(from)
+    .bind(to_value)
+    .bind(at)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(db)?;
+    rowmap::ratchet_move(&row)
+}
+
+/// The writes of one [`Ledger::atomically`] transaction, for callers that must commit several rows together (the
+/// engine's poll, finalize and metering steps). Each method is the transactional form of the `Ledger` method of the
+/// same name.
+pub struct Tx<'c> {
+    conn: &'c mut SqliteConnection,
+    now: i64,
+}
+
+impl Tx<'_> {
+    pub async fn create_optimization(
+        &mut self,
+        input: CreateOptimizationInput,
+    ) -> Result<Optimization> {
+        create_optimization(self.conn, input, self.now).await
+    }
+
+    pub async fn add_agent(&mut self, input: AddAgentInput) -> Result<Agent> {
+        require_optimization(self.conn, input.optimization_id.as_str()).await?;
+        let id = input.id.unwrap_or_else(AgentId::generate);
+        let row = sqlx::query(
+            "INSERT INTO agents (id, optimization_id, kind, branch, runner_instance_id, status, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING *",
+        )
+        .bind(id.as_str())
+        .bind(input.optimization_id.as_str())
+        .bind(input.kind.as_str())
+        .bind(&input.branch)
+        .bind(&input.runner_instance_id)
+        .bind(input.status.unwrap_or(AgentStatus::Pending).as_str())
+        .bind(input.created_at.unwrap_or(self.now))
+        .fetch_one(&mut *self.conn)
+        .await
+        .map_err(db)?;
+        rowmap::agent(&row)
+    }
+
+    /// Change the status only (the runner instance is kept).
+    pub async fn set_agent_status(&mut self, id: &AgentId, status: AgentStatus) -> Result<Agent> {
+        require_agent(self.conn, id.as_str()).await?;
+        let row = sqlx::query("UPDATE agents SET status = ?1 WHERE id = ?2 RETURNING *")
+            .bind(status.as_str())
+            .bind(id.as_str())
+            .fetch_one(&mut *self.conn)
+            .await
+            .map_err(db)?;
+        rowmap::agent(&row)
+    }
+
+    pub async fn append_agent_event(
+        &mut self,
+        input: AppendAgentEventInput,
+    ) -> Result<AgentEventRecord> {
+        require_agent(self.conn, input.agent_id.as_str()).await?;
+        let payload = input.payload.as_ref().map(json_text).transpose()?;
+        let row = sqlx::query("INSERT INTO agent_events (agent_id, at, type, payload) VALUES (?1, ?2, ?3, ?4) RETURNING *")
+            .bind(input.agent_id.as_str())
+            .bind(input.at.unwrap_or(self.now))
+            .bind(&input.event_type)
+            .bind(payload)
+            .fetch_one(&mut *self.conn)
+            .await
+            .map_err(db)?;
+        rowmap::agent_event(&row)
+    }
+
+    pub async fn record_spend(&mut self, input: RecordSpendInput) -> Result<SpendEvent> {
+        record_spend(self.conn, input, self.now).await
+    }
+
+    pub async fn set_verdict(
+        &mut self,
+        candidate_id: &CandidateId,
+        verdict: CandidateVerdict,
+        reasons: &[String],
+        at: i64,
+    ) -> Result<Candidate> {
+        require_candidate(self.conn, candidate_id.as_str()).await?;
+        let row = sqlx::query("UPDATE candidates SET verdict = ?1, reasons = ?2, verdict_at = ?3 WHERE id = ?4 RETURNING *")
+            .bind(verdict.as_str())
+            .bind(json_text(reasons)?)
+            .bind((verdict != CandidateVerdict::Pending).then_some(at))
+            .bind(candidate_id.as_str())
+            .fetch_one(&mut *self.conn)
+            .await
+            .map_err(db)?;
+        rowmap::candidate(&row)
+    }
+
+    pub async fn move_ratchet(
+        &mut self,
+        optimization_id: &OptimizationId,
+        candidate_id: &CandidateId,
+        to_value: f64,
+        at: i64,
+    ) -> Result<RatchetMove> {
+        assert_finite("toValue", to_value)?;
+        move_ratchet(self.conn, optimization_id, candidate_id, to_value, at).await
+    }
+
+    pub async fn kv_set(&mut self, key: &str, value: &str) -> Result<()> {
+        sqlx::query("INSERT INTO engine_kv (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+            .bind(key)
+            .bind(value)
+            .execute(&mut *self.conn)
+            .await
+            .map_err(db)?;
+        Ok(())
+    }
+
+    pub async fn kv_delete(&mut self, key: &str) -> Result<()> {
+        sqlx::query("DELETE FROM engine_kv WHERE key = ?1")
+            .bind(key)
+            .execute(&mut *self.conn)
+            .await
+            .map_err(db)?;
+        Ok(())
+    }
 }

@@ -156,6 +156,20 @@ impl AwsPriceBook {
         Self::builder(region, client).build()
     }
 
+    /// `connect` with an injected clock and a fallback price book for when the Pricing API fails or has no match.
+    pub async fn connect_with(
+        region: impl Into<String>,
+        profile: Option<&str>,
+        clock: Arc<dyn Clock>,
+        fallback: Arc<dyn PriceBook>,
+    ) -> Self {
+        let cfg = crate::compute::aws::load_sdk_config("us-east-1", profile).await;
+        Self::builder(region, aws_sdk_pricing::Client::new(&cfg))
+            .clock(clock)
+            .fallback(fallback)
+            .build()
+    }
+
     /// A price book on the default credential chain (or `profile`), Pricing API client in us-east-1.
     pub async fn connect(region: impl Into<String>, profile: Option<&str>) -> Self {
         let cfg = crate::compute::aws::load_sdk_config("us-east-1", profile).await;

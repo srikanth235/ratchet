@@ -21,6 +21,8 @@ pub mod launchagent;
 #[cfg(feature = "server")]
 pub mod openapi;
 pub mod paths;
+#[cfg(feature = "engine")]
+pub mod real;
 #[cfg(feature = "server")]
 pub mod routes;
 #[cfg(feature = "server")]
