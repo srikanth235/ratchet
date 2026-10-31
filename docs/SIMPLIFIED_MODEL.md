@@ -62,6 +62,7 @@ objective: { metric: http_req_duration.p95, direction: minimize }
 evaluator:
   template: http-latency              # or a custom `run:`; templates fill run/holdout/guardrails
 environment:                          # all optional
+  scope: full                         # none | single | full: decided by the setup agent, see "Dynamic environments"
   image: .devcontainer/Dockerfile     # toolchain for setup, guardrails and the evaluator
   machine: c7i.2xlarge                # bench hardware; default from the template
   region: us-east-1
@@ -115,3 +116,44 @@ Created on first run in a region (plan shown once, first time only), reused whil
 destroyed automatically after the last run ends plus an idle window (default 30 min), with the
 orphan check. Environments becomes read-only: what is running, what it costs, last teardown receipt.
 Teardown checklist → a receipt on the Result screen.
+
+## Dynamic environments
+
+Each optimization's environment is sized by a **setup agent** before the run, instead of one fixed
+sandbox for everyone. `environment.scope` records the decision:
+
+| scope | what is created | typical goal |
+|---|---|---|
+| `none` | nothing extra: the evaluator runs pure code/tests in its container | unit tests, lint, build graph |
+| `single` | one machine on pinned hardware (`environment.machine`, optional `environment.image`) | a CLI, a build, one service |
+| `full` | app + Postgres/Redis/etc. + seeded data + a separate load generator, as OpenTofu | an API's p95 under load |
+
+The flow (UI: `design/v02.html#s4`):
+
+1. **Draft.** The user's own Claude Code / Codex (local by default, `packages/agents` adapters) reads the
+   repo and the goal and writes only the environment: `environment.scope` in `ratchet.yaml` plus files under
+   `infra/ratchet/`. A `full` draft's `main.tf` instantiates the base module `ratchet/sandbox`
+   (`infra/modules/sandbox`, built on `infra/aws`), which owns placement (private bench subnet, no route out),
+   the evaluation-only identity, encrypted disks, hardened metadata and budget tags. The draft chooses machines,
+   images and seed scripts, never networking or IAM.
+2. **Validate and price.** Ratchet checks the draft (`validateEnvironment`): only the environment is touched
+   (`ratchet.yaml` may change only `environment`, no new egress hosts); no internet on measuring hosts; agents
+   can read neither results nor the holdout; one machine type for baseline and candidates; everything tagged;
+   full teardown; the scope fits the files; every resource priced. `tofu validate` + `tofu plan` then run in the
+   selected AWS account (`TofuEnvironmentChecker`); a draft is never shown as planned if no plan ran. The cost
+   (`estimateMachinesCost`, static price table or live `PriceBook`) is $/h per resource, start-up minutes, and an
+   estimate for the run's time limit.
+3. **Revise.** The user asks for changes in plain words ("smaller", "use RDS"); the same agent session continues
+   and the draft is re-validated. (Managed services that need a second subnet are explained, not added.)
+4. **Approve.** Files are committed to the protected ref, directly or as a pull request, and are **locked**:
+   once `environment.scope` is set, `infra/ratchet/**` and `ratchet.yaml` are automatic protected paths, so any
+   candidate touching them is blocked without spending a bench run. Approval refuses a draft with a failed check
+   or a `ratchet.yaml` that changed since the draft.
+5. **Run.** At run start the engine reads the environment from the protected ref (pinned to one commit),
+   re-validates it, and passes it to the sandbox provider with the sandbox input (`infra:` custom modules take
+   the same path). Optimizations share a sandbox only when region and environment hash match. After the last
+   run plus the idle window the environment is destroyed first, then the sandbox, and the receipt lists it.
+
+In code: `EnvironmentDrafter` (`draft` / `revise` / `approve`) in `@ratchet/core`; `AgentEnvironmentDrafter`
+(real) and `MockEnvironmentDrafter` (deterministic per scope, for simulation, demos and e2e) in
+`@ratchet/engine`; `Engine.draftEnvironment / reviseEnvironment / approveEnvironment`.
