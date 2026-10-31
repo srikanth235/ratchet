@@ -41,7 +41,10 @@ struct SidebarView: View {
         .padding(.top, Space.sm)
         .padding(.bottom, Space.lg)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(Ink.canvas)
+        .background(Ink.sidebar.ignoresSafeArea())
+        .overlay(alignment: .trailing) {
+            Ink.sidebarEdge.frame(width: Dim.hairline).ignoresSafeArea()
+        }
     }
 }
 
