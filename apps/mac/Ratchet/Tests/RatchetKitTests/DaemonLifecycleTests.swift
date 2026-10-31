@@ -4,13 +4,6 @@ import Testing
 
 @Suite("Daemon lifecycle")
 struct DaemonLifecycleTests {
-    private func lifecycle(_ events: [DaemonEvent], mode: DaemonMode = .real) -> (DaemonLifecycle, [[DaemonCommand]]) {
-        var machine = DaemonLifecycle(mode: mode)
-        var out: [[DaemonCommand]] = []
-        for event in events { out.append(machine.handle(event)) }
-        return (machine, out)
-    }
-
     @Test func aFirstLaunchRegistersTheAgentThenWaitsForTheSocket() {
         var machine = DaemonLifecycle()
         #expect(machine.phase == .checking)
