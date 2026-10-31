@@ -5,6 +5,7 @@ import SwiftUI
 struct OverviewPage: View {
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(AppNotifier.self) private var notifier
 
     var body: some View {
         KitPage {
@@ -16,6 +17,11 @@ struct OverviewPage: View {
                     .buttonStyle(.kit(.primary))
             }
             .gridProbe("header", area: "overview")
+
+            if notifier.shouldOfferPrompt && !store.optimizations.isEmpty {
+                NotificationPrompt()
+                    .gridProbe("notification-prompt", area: "overview")
+            }
 
             hero
                 .gridProbe("hero", area: "overview")

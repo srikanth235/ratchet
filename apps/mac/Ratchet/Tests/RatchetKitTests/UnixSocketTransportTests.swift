@@ -146,8 +146,7 @@ struct UnixSocketTransportTests {
 
     private func client(_ server: TestSocketServer, token: String? = "secret") -> DaemonRatchetClient {
         DaemonRatchetClient(
-            transport: UnixSocketTransport(socketPath: server.path, token: { token }),
-            fallback: MockRatchetClient(now: now, live: false))
+            transport: UnixSocketTransport(socketPath: server.path, token: { token }))
     }
 
     @Test func requestsCarryTheTokenAndAnswersComeBackWhole() async throws {
@@ -235,7 +234,7 @@ struct UnixSocketTransportTests {
 
     @Test func aDaemonThatIsNotThereIsReportedPlainly() async {
         let transport = UnixSocketTransport(socketPath: "/tmp/rt-nobody-home.sock", token: { nil })
-        let client = DaemonRatchetClient(transport: transport, fallback: MockRatchetClient(now: now, live: false))
+        let client = DaemonRatchetClient(transport: transport)
         do {
             _ = try await client.optimizations()
             Issue.record("expected a failure")

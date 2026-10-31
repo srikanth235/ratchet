@@ -71,11 +71,52 @@ public struct NewConnector: Codable, Hashable, Sendable {
     public var kind: ConnectorKind
     public var name: String
     public var detail: String
+    /// An API key typed once in the Add sheet (agents). It goes to `ratchetd`, which files it in the Keychain; the app
+    /// keeps it nowhere and never saves it.
+    public var secret: String?
 
-    public init(kind: ConnectorKind, name: String, detail: String = "") {
+    public init(kind: ConnectorKind, name: String, detail: String = "", secret: String? = nil) {
         self.kind = kind
         self.name = name
         self.detail = detail
+        self.secret = secret
+    }
+
+    private enum CodingKeys: String, CodingKey { case kind, name, detail }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(ConnectorKind.self, forKey: .kind)
+        name = try c.decode(String.self, forKey: .name)
+        detail = try c.decode(String.self, forKey: .detail)
+        secret = nil
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(kind, forKey: .kind)
+        try c.encode(name, forKey: .name)
+        try c.encode(detail, forKey: .detail)
+    }
+}
+
+/// The GitHub device flow in progress: the user types `userCode` at `verificationURL`, and the account appears in the
+/// connectors list when GitHub confirms (a `connectorsChanged` event).
+public struct GithubSignInFlow: Codable, Hashable, Sendable {
+    public enum State: String, Codable, Sendable { case pending, expired, denied, error }
+
+    public var state: State
+    public var userCode: String
+    public var verificationURL: String
+    public var expiresAt: Date
+    public var message: String?
+
+    public init(state: State, userCode: String, verificationURL: String, expiresAt: Date, message: String? = nil) {
+        self.state = state
+        self.userCode = userCode
+        self.verificationURL = verificationURL
+        self.expiresAt = expiresAt
+        self.message = message
     }
 }
 

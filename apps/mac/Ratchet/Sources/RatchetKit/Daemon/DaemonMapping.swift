@@ -219,6 +219,20 @@ enum DaemonMapping {
         }
     }
 
+    static func githubFlow(_ vm: VM.GithubFlowVm?) -> GithubSignInFlow? {
+        guard let vm else { return nil }
+        let state: GithubSignInFlow.State
+        switch vm.state {
+        case .pending: state = .pending
+        case .expired: state = .expired
+        case .denied: state = .denied
+        case .error: state = .error
+        }
+        return GithubSignInFlow(
+            state: state, userCode: vm.userCode, verificationURL: vm.verificationUri,
+            expiresAt: date(ms: vm.expiresAt), message: vm.message)
+    }
+
     static func connectorID(_ vm: VM.ConnectorVm) -> String {
         switch vm {
         case .case1(let github): github.id

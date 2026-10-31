@@ -84,7 +84,7 @@ jobs:
     if: needs.detect-mac.outputs.present == 'true'
     # The app targets macOS 26 (Package.swift). Use macos-latest instead if the macos-26 image is ever unavailable.
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: ${{ needs.detect-mac.outputs.dir }}
@@ -97,9 +97,19 @@ jobs:
           sw_vers
           xcodebuild -version
           swift --version
-      # build-and-verify skill, step 1: release build, installed to ~/Applications/<AppName>.app (ad-hoc signed).
+      # The app bundles the Rust daemon (ratchetd) and the CLI, built for arm64 and x86_64 and joined with lipo.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: mac-app-universal
+      # build-and-verify skill, step 1: release build, installed to ~/Applications/<AppName>.app (ad-hoc signed), with
+      # Contents/Helpers/{ratchetd,ratchet} and the LaunchAgent plists inside.
       - name: Build
-        run: ./build.sh
+        env:
+          RATCHET_REQUIRE_DAEMON: "1"
+        run: ./build.sh --universal
       # test-mac-app skill, level 1: Swift Testing unit tests of RatchetKit (formatting, store, mock client, wizard).
       - name: Unit tests
         run: swift test --scratch-path "$HOME/Library/Developer/$APP_NAME/test-build" 2>&1 | tail -n 200
@@ -118,6 +128,15 @@ jobs:
       - name: Self-test
         run: |
           if [ -x tools/selftest.sh ]; then tools/selftest.sh; else echo "no tools/selftest.sh"; fi
+      # The real client path end to end: the bundled `ratchetd serve --mode sim` on a temp socket, and the app's own
+      # self-test (`--selftest-live`) against it, not the sample client. Also checks the bundle layout and plists.
+      - name: Daemon smoke
+        run: tools/smoke-daemon.sh "$HOME/Applications/$APP_NAME.app"
+      - name: Bundle layout
+        if: always()
+        run: |
+          find "$HOME/Applications/$APP_NAME.app/Contents" -maxdepth 3 -not -path '*/Resources/*' | sort > "$RUNNER_TEMP/bundle-layout.txt"
+          cat "$RUNNER_TEMP/bundle-layout.txt"
       # Step 2: snapshot mode walks every page and Settings tab in light and dark and saves one PNG (and a layout JSON)
       # per page and mode to /tmp/<AppName>-shots, on a fresh test store with seed data.
       - name: Snapshots

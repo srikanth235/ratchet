@@ -4,6 +4,7 @@ import SwiftUI
 struct SidebarView: View {
     @Environment(AppRouter.self) private var router
     @Environment(AppStore.self) private var store
+    @Environment(DaemonController.self) private var daemon
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xxl) {
@@ -26,12 +27,17 @@ struct SidebarView: View {
 
             Spacer(minLength: 0)
             VStack(alignment: .leading, spacing: Space.xs) {
-                if store.isDemoData {
+                if !daemon.phase.isRunning && daemon.management != .none {
+                    Text("Starting Ratchet…")
+                        .kitType(.caption).foregroundStyle(Ink.textFaint)
+                        .padding(.horizontal, Space.md)
+                        .help("The background service is starting. What you see is from the last time.")
+                } else if store.isDemoData {
                     Text("Demo data")
                         .kitType(.caption).foregroundStyle(Ink.textFaint)
                         .padding(.horizontal, Space.md)
-                        .help("No ratchetd is running, so Ratchet shows sample data.")
-                        .accessibilityLabel("Demo data, no daemon is running")
+                        .help("Demo mode: Ratchet shows made-up data and uses no accounts. Turn it off in Settings.")
+                        .accessibilityLabel("Demo data, no accounts are used")
                 }
                 SandboxStatusLine()
             }

@@ -52,11 +52,19 @@ public final class AppStore {
     public private(set) var receipt: TeardownReceipt?
     public private(set) var isLoaded = false
     public private(set) var lastError: String?
+    /// The GitHub sign-in in progress: its code is shown until the account appears or the flow ends.
+    public private(set) var githubFlow: GithubSignInFlow?
     public var range: TimeRange = .days90
-    /// True when the data is the built-in sample (no daemon is running): the sidebar says so, quietly.
-    public let isDemoData: Bool
+    /// True when the data is the sample or the simulation (demo mode): the sidebar says so, quietly.
+    public private(set) var isDemoData: Bool
 
-    private let cacheURL: URL?
+    /// Called for each event worth a notification (a win to merge, a run that finished...). The app decides whether and
+    /// how to show it; the store only decides that it happened.
+    @ObservationIgnored public var onNotification: (@MainActor (NotificationRequest) -> Void)?
+    /// Which categories the user has switched on.
+    @ObservationIgnored public var enabledNotifications: @MainActor () -> Set<NotificationCategory> = { Set(NotificationCategory.allCases) }
+
+    private var cacheURL: URL?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private var pendingWins: [String: RatchetMove] = [:]
 
@@ -65,6 +73,24 @@ public final class AppStore {
         self.cacheURL = cacheURL
         self.isDemoData = isDemoData
         restoreCache()
+    }
+
+    /// Switches between the real daemon and the demo daemon (same socket): forgets what is shown, then reloads.
+    public func useSource(isDemoData: Bool, cacheURL: URL?) async {
+        self.isDemoData = isDemoData
+        self.cacheURL = cacheURL
+        overview = nil
+        optimizations = []
+        details = [:]
+        connectors = []
+        benchmarks = []
+        repos = []
+        sandbox = .off
+        receipt = nil
+        githubFlow = nil
+        isLoaded = false
+        restoreCache()
+        await refresh()
     }
 
     // MARK: Loading
@@ -80,6 +106,7 @@ public final class AppStore {
             overview = try await client.overview(range: range)
             optimizations = try await client.optimizations()
             connectors = try await client.connectors()
+            githubFlow = try await client.githubSignInFlow()
             templates = try await client.templates()
             benchmarks = try await client.benchmarks()
             repos = try await client.repos()
@@ -149,8 +176,26 @@ public final class AppStore {
 
     // MARK: Events
 
-    /// Applies one server-sent event to what is on screen.
+    private var observed: ObservedState {
+        ObservedState(optimizations: optimizations, needsYou: needsYou, connectors: connectors)
+    }
+
+    /// Applies one server-sent event to what is on screen, and reports what is new that deserves a notification.
     public func apply(_ event: RatchetEvent) {
+        let before = observed
+        applyEvent(event)
+        guard let onNotification, isLoaded else { return }
+        let enabled = enabledNotifications()
+        if case .environmentDraftReady(let draftID, let repoID) = event {
+            if let request = NotificationRouting.environmentDrafted(draftID: draftID, repoID: repoID, enabled: enabled) {
+                onNotification(request)
+            }
+            return
+        }
+        for request in NotificationRouting.changes(from: before, to: observed, enabled: enabled) { onNotification(request) }
+    }
+
+    private func applyEvent(_ event: RatchetEvent) {
         switch event {
         case .optimizationUpdated(let new):
             applyUpdate(new)
@@ -179,6 +224,10 @@ public final class AppStore {
             overview?.needsYou = items
         case .connectorsChanged(let list):
             connectors = list
+        case .githubFlowChanged(let flow):
+            githubFlow = flow
+        case .environmentDraftReady:
+            break
         case .sandboxChanged(let status):
             sandbox = status
         case .receiptIssued(let issued):
@@ -275,6 +324,25 @@ public final class AppStore {
         }
     }
 
+    /// Starts the GitHub device flow (a new account, or `connectorID` again). The code to type appears in `githubFlow`.
+    public func startGithubSignIn(connectorID: String? = nil) async {
+        do {
+            githubFlow = try await client.startGithubSignIn(connectorID: connectorID)
+            lastError = nil
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    public func cancelGithubSignIn() async {
+        do {
+            try await client.cancelGithubSignIn()
+            githubFlow = nil
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
     public func removeConnector(_ id: String) async {
         do {
             try await client.removeConnector(id: id)
@@ -293,6 +361,11 @@ public final class AppStore {
     }
 
     public func signInConnector(_ id: String) async {
+        // A GitHub sign-in is the device flow again; AWS and agents are checked (their login lives on the Mac).
+        if let connector = connectors.first(where: { $0.id == id }), connector.kind == .github {
+            await startGithubSignIn(connectorID: id)
+            return
+        }
         do {
             _ = try await client.signInConnector(id: id)
             connectors = try await client.connectors()

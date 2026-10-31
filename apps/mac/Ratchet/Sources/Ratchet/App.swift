@@ -11,16 +11,20 @@ import SwiftUI
 //   APP_GRID=1 Ratchet               draw the 8 pt grid and the layout probes over the window
 //   APP_KIT_GALLERY=1 Ratchet        (not built yet) parts gallery
 //
-// Data comes through the RatchetClient protocol (RatchetKit). With ratchetd running (its socket accepts connections)
-// the app talks to it through DaemonRatchetClient; without it, and always in test and snapshot mode, it shows the
-// built-in sample data (MockRatchetClient) and says "Demo data" in the sidebar. `Store.makeStore()` decides.
-//   APP_DEMO=1 Ratchet               use the sample data even when a daemon is running
+// Data comes through the RatchetClient protocol (RatchetKit). The app talks to ratchetd through DaemonRatchetClient: it
+// registers the bundled daemon as a LaunchAgent (DaemonController), shows "Starting Ratchet…" until the socket answers,
+// and follows its event stream. Test and snapshot mode (APP_STORE) use the built-in sample data (MockRatchetClient).
+//   APP_DEMO=1 Ratchet               use the sample data without any daemon
+//   RATCHET_HOME=<dir> Ratchet       talk to a daemon you started yourself (ratchetd serve --mode sim) and do not register one
+//   Ratchet --selftest-live          run the self-test against that daemon (CI smoke step; see tools/smoke-daemon.sh)
 
 @main
 struct RatchetApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var store = Store.makeStore()
     @State private var router = AppRouter()
+    @State private var daemon = DaemonController.make()
+    @State private var notifier = AppNotifier(enabled: !Store.isOverridden)
     @AppStorage("menuBarItem") private var showMenuBarItem = true
 
     var body: some Scene {
@@ -28,6 +32,8 @@ struct RatchetApp: App {
             ContentView()
                 .environment(store)
                 .environment(router)
+                .environment(daemon)
+                .environment(notifier)
                 .overlay { if GridOverlay.enabled { GridOverlay() } }
                 .frame(minWidth: 1080, minHeight: 640)
         }
@@ -54,6 +60,8 @@ struct RatchetApp: App {
             SettingsView()
                 .environment(store)
                 .environment(router)
+                .environment(daemon)
+                .environment(notifier)
         }
         .windowResizability(.contentSize)
 
@@ -111,18 +119,19 @@ enum Store {
     /// 2026-10-31 13:20 UTC: the clock of every snapshot and test run.
     static let fixedNow = Date(timeIntervalSince1970: 1_793_452_800)
 
-    /// The daemon when it is running, else the sample data. A daemon that starts later is picked up on the next launch.
+    /// The daemon client, always (the app starts the daemon itself and waits for it). The sample data only in test and
+    /// snapshot mode and with `APP_DEMO=1`. Demo mode (a Settings switch) is the daemon's own simulation, not the sample.
     @MainActor
     static func makeStore() -> AppStore {
         if isOverridden {
             return AppStore(client: MockRatchetClient(now: fixedNow, live: false), cacheURL: nil, isDemoData: true)
         }
-        let location = DaemonLocation.standard()
-        if ProcessInfo.processInfo.environment["APP_DEMO"] != "1", location.isReachable {
-            // Provisional groups the engine does not have yet are served from sample data, quietly.
-            let sample = MockRatchetClient(now: Date(), live: false)
-            return AppStore(client: DaemonRatchetClient(location: location, fallback: sample), cacheURL: cacheURL(demo: false))
+        if ProcessInfo.processInfo.environment["APP_DEMO"] == "1" {
+            return AppStore(client: MockRatchetClient(now: Date(), live: true), cacheURL: cacheURL(demo: true), isDemoData: true)
         }
-        return AppStore(client: MockRatchetClient(now: Date(), live: true), cacheURL: cacheURL(demo: true), isDemoData: true)
+        let demoMode = UserDefaults.standard.string(forKey: DaemonController.modeKey) == DaemonMode.demo.rawValue
+        return AppStore(
+            client: DaemonRatchetClient(location: DaemonLocation.standard()), cacheURL: cacheURL(demo: demoMode),
+            isDemoData: demoMode)
     }
 }

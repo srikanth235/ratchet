@@ -13,12 +13,27 @@ enum SnapScene: String, CaseIterable {
     case newConnections = "new-connections"
     case newEnvironment = "new-environment"
     case newBudget = "new-budget"
+    // The states the bundled daemon and the notifications add.
+    case daemonStarting = "daemon-starting"
+    case daemonApproval = "daemon-approval"
+    case notificationPrompt = "notification-prompt"
+    case connectorSignIn = "connector-signin"
 
     /// Puts the window in this scene's state.
-    func apply(store: AppStore, router: AppRouter) async {
+    func apply(store: AppStore, router: AppRouter, daemon: DaemonController, notifier: AppNotifier) async {
+        // Every scene starts from the calm state.
+        daemon.preview(nil)
+        notifier.preview(.allowed, prompt: false)
+        await store.cancelGithubSignIn()
         router.show(.overview)
         switch self {
         case .overview: break
+        case .daemonStarting: daemon.preview(.starting)
+        case .daemonApproval: daemon.preview(.needsApproval)
+        case .notificationPrompt: notifier.preview(.notDetermined, prompt: true)
+        case .connectorSignIn:
+            router.show(.connectors)
+            await store.startGithubSignIn()
         case .optimizations: router.show(.optimizations)
         case .benchmarks: router.show(.benchmarks)
         case .connectors: router.show(.connectors)
@@ -55,7 +70,9 @@ enum SnapScene: String, CaseIterable {
 /// (tools/check-layout.swift).
 /// APP_SNAPSHOT_PAGES=overview,new-budget limits the scenes. "all" means every scene; add "settings" for Settings.
 enum Snapshot {
-    static func runIfRequested(store: AppStore, router: AppRouter, openSettings: OpenSettingsAction) {
+    static func runIfRequested(
+        store: AppStore, router: AppRouter, openSettings: OpenSettingsAction, daemon: DaemonController, notifier: AppNotifier
+    ) {
         let env = ProcessInfo.processInfo.environment
         guard let dir = env["APP_SNAPSHOT"], !dir.isEmpty else { return }
         // Snapshots never run against the real data.
@@ -79,13 +96,13 @@ enum Snapshot {
             for mode in ["light", "dark"] {
                 NSApp.appearance = NSAppearance(named: mode == "light" ? .aqua : .darkAqua)
                 for scene in SnapScene.allCases where everything || only?.contains(scene.rawValue) == true {
-                    await scene.apply(store: store, router: router)
+                    await scene.apply(store: store, router: router, daemon: daemon, notifier: notifier)
                     try? await Task.sleep(for: .seconds(1.0))
                     capture(to: "\(dir)/\(scene.rawValue)-\(mode).png")
                 }
             }
             if everything || only?.contains("settings") == true {
-                await SnapScene.overview.apply(store: store, router: router)
+                await SnapScene.overview.apply(store: store, router: router, daemon: daemon, notifier: notifier)
                 let main = NSApp.windows.first { $0.canBecomeMain && !$0.isSheet }
                 openSettings()
                 try? await Task.sleep(for: .seconds(1))

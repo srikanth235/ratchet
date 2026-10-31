@@ -11,7 +11,7 @@ struct LiveDaemonTests {
     private func client() -> DaemonRatchetClient {
         let home = ProcessInfo.processInfo.environment["RATCHET_LIVE_HOME"] ?? "/tmp/rhome"
         let location = DaemonLocation.standard(environment: ["RATCHET_HOME": home])
-        return DaemonRatchetClient(location: location, fallback: MockRatchetClient(now: Date(), live: false))
+        return DaemonRatchetClient(location: location)
     }
 
     @Test func readsEverythingTheAppShows() async throws {

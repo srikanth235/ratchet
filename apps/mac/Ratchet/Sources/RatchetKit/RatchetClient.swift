@@ -36,6 +36,11 @@ public protocol RatchetClient: Sendable {
     func setDefaultConnector(id: String) async throws -> [Connector]
     /// Sign in again (an expired SSO session, a signed-out agent). Returns the refreshed connector.
     func signInConnector(id: String) async throws -> Connector
+    /// The GitHub device flow in progress (its code to show), or nil. The daemon keeps one at a time.
+    func githubSignInFlow() async throws -> GithubSignInFlow?
+    /// Starts the device flow for a new account, or for `connectorID` again. The code is in the returned flow.
+    func startGithubSignIn(connectorID: String?) async throws -> GithubSignInFlow?
+    func cancelGithubSignIn() async throws
     func connectionSelection(repoID: String) async throws -> ConnectionSelection?
     func saveConnectionSelection(_ selection: ConnectionSelection) async throws
 
@@ -61,6 +66,9 @@ public enum RatchetEvent: Sendable, Equatable {
     case agentUpdated(optimizationID: String, agent: Agent)
     case needsYouChanged([NeedsYouItem])
     case connectorsChanged([Connector])
+    case githubFlowChanged(GithubSignInFlow?)
+    /// An environment agent finished drafting (or revising): the draft waits for approval.
+    case environmentDraftReady(draftID: String, repoID: String)
     case sandboxChanged(SandboxStatus)
     case receiptIssued(TeardownReceipt)
     /// The daemon could not replay what was missed (it restarted, or the gap is too old): reload everything shown.

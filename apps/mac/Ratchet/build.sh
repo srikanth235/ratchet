@@ -6,6 +6,11 @@
 # Usage: ./build.sh            release build, install
 #        ./build.sh --debug    debug build, install
 #        ./build.sh --open     install, then quit the running copy and open the new one
+#        ./build.sh --universal  also build ratchetd and ratchet for arm64 and x86_64 (CI; the default is this Mac's arch)
+#
+# The app bundles the Rust daemon: Contents/Helpers/ratchetd and ratchet, and the LaunchAgent plists the app registers
+# with SMAppService in Contents/Library/LaunchAgents/. RATCHET_SKIP_DAEMON=1 leaves them out (a quick UI-only build);
+# RATCHET_REQUIRE_DAEMON=1 makes a failed helper build fail the script (CI).
 set -euo pipefail
 here=${0:A:h}
 name="Ratchet"
@@ -61,6 +66,32 @@ fi
 if [[ -d "$here/Fonts" ]]; then
   mkdir -p "$app/Contents/Resources/Fonts"
   cp -X "$here"/Fonts/* "$app/Contents/Resources/Fonts/"
+fi
+# The daemon and the command line tool, and the LaunchAgent plists that run the daemon (real, and demo on the simulation).
+if [[ -z "${RATCHET_SKIP_DAEMON:-}" ]]; then
+  helpers="$app/Contents/Helpers"
+  agents="$app/Contents/Library/LaunchAgents"
+  flags=()
+  [[ " $* " == *" --universal "* ]] && flags+=(--universal)
+  if "$here/tools/build-helpers.sh" "$helpers" $flags; then
+    mkdir -p "$agents"
+    for demo in "" "--demo"; do
+      plist="$agents/com.ratchet.ratchetd${demo:+.demo}.plist"
+      "$helpers/ratchetd" launchagent print --bundle-program Contents/Helpers/ratchetd \
+        --associated-bundle-id dev.ratchet.app $demo > "$plist"
+      plutil -lint "$plist" >/dev/null
+    done
+    for tool in ratchetd ratchet; do
+      codesign --force --sign "$identity" --identifier "com.ratchet.$tool" "$helpers/$tool" 2>&1 \
+        | grep -v "replacing existing signature" || true
+    done
+  elif [[ -n "${RATCHET_REQUIRE_DAEMON:-}" ]]; then
+    echo "build failed: the daemon could not be built"
+    exit 1
+  else
+    rm -rf "$helpers"
+    echo "warning: ratchetd was not built, so this copy of the app has no bundled daemon (RATCHET_SKIP_DAEMON=1 hides this)"
+  fi
 fi
 xattr -cr "$app"
 codesign --force --sign "$identity" "$app" 2>&1 | grep -v "replacing existing signature" || true

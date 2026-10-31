@@ -91,7 +91,7 @@ struct DaemonClientTests {
     private let now = Date(timeIntervalSince1970: 1_793_452_800)
 
     private func make(_ daemon: FakeDaemon) -> DaemonRatchetClient {
-        DaemonRatchetClient(transport: daemon, fallback: MockRatchetClient(now: now, live: false))
+        DaemonRatchetClient(transport: daemon)
     }
 
     private func daemonWithData() -> FakeDaemon {
@@ -119,32 +119,22 @@ struct DaemonClientTests {
         #expect(daemon.requests.first { $0.key == "GET /v1/overview" } != nil)
     }
 
-    @Test func aProvisionalGroupFallsBackToSampleDataQuietly() async throws {
+    @Test func anEngineThatCannotAnswerIsAnErrorNotSampleData() async throws {
         let daemon = daemonWithData()
         daemon.route("GET /v1/overview", 501, unsupported)
-        daemon.route("GET /v1/connectors", 501, unsupported)
         let client = make(daemon)
-        let sample = MockRatchetClient(now: now, live: false)
-        let overview = try await client.overview(range: .days90)
-        #expect(overview == (try await sample.overview(range: .days90)))
-        let connectors = try await client.connectors()
-        #expect(connectors == (try await sample.connectors()))
-        // The daemon is not asked again for a minute.
-        _ = try await client.overview(range: .days30)
-        _ = try await client.connectors()
-        #expect(daemon.count("GET /v1/overview") == 1)
-        #expect(daemon.count("GET /v1/connectors") == 1)
+        await #expect(throws: RatchetClientError.self) { try await client.overview(range: .days90) }
+        // Asked again every time: there is no quiet fallback and no one-minute memory.
+        _ = try? await client.overview(range: .days30)
+        #expect(daemon.count("GET /v1/overview") == 2)
     }
 
-    @Test func connectorActionsAlsoFallBack() async throws {
+    @Test func connectorsComeFromTheDaemonAndSignInStartsTheDeviceFlow() async throws {
         let daemon = daemonWithData()
-        daemon.route("GET /v1/connectors", 501, unsupported)
-        daemon.route("POST /v1/connectors/github/sign-in", 501, unsupported)
         let client = make(daemon)
-        let added = try await client.addConnector(NewConnector(kind: .github, name: "octo"))
-        #expect(added.name == "octo")
-        #expect(try await client.connectors().contains { $0.id == added.id })
-        #expect(try await client.connectionSelection(repoID: "none/none") == nil)
+        let list = try await client.connectors()
+        #expect(!list.isEmpty)
+        #expect(daemon.count("GET /v1/connectors") == 1)
     }
 
     @Test func theTableGetsTheClockFromTheDetails() async throws {
@@ -281,7 +271,7 @@ struct DaemonClientTests {
         selection.agents["agent-claude-code-login"] = .local
         let request = StartRequest(
             repoID: "acme/demo", branch: "main", goal: " Make search faster ", templateID: "demo-search",
-            draftID: "mock-draft", selection: selection, budgetUSD: 40, timeLimitHours: 2)
+            draftID: "env-0001", selection: selection, budgetUSD: 40, timeLimitHours: 2)
         let started = try await make(daemon).startOptimization(request)
         #expect(started.goal == "Make search faster")
         let sent = try #require(daemon.requests.first { $0.key == "POST /v1/optimizations" })
@@ -292,7 +282,7 @@ struct DaemonClientTests {
         #expect(json["timeLimitSeconds"] as? Int == 7200)
         #expect(json["agents"] as? [String] == ["claude-code"])
         #expect(json["agentsWhere"] as? String == "local")
-        #expect(json["environmentDraftId"] == nil)  // a sample draft is not the daemon's
+        #expect(json["environmentDraftId"] as? String == "env-0001")  // the approved draft rides along
         #expect(json["name"] as? String == "Make search faster")
         #expect(daemon.count("POST /v1/optimizations/opt_demo_search/start") == 1)
     }

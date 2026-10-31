@@ -46,25 +46,20 @@ public struct DaemonLocation: Sendable, Equatable {
 /// `RatchetClient` on the real daemon: the generated OpenAPI client over the unix socket, the daemon's view models
 /// mapped to the app's models, the event stream turned into `RatchetEvent`s.
 ///
-/// The environment drafts of the API are provisional and answer 501 from an engine that does not have them yet (an older
-/// daemon may also answer 501 for the overview and the connectors). For those the client quietly serves the `fallback`
-/// (sample data) instead, and keeps asking the daemon again every minute.
+/// Every group of the API is real: the overview, connectors and environment drafts included. There is no sample-data
+/// fallback; a daemon that cannot answer is an error the app shows (and retries).
 public final class DaemonRatchetClient: RatchetClient {
     private let api: Client
-    private let fallback: any RatchetClient
     private let state = DaemonClientState()
 
-    public init(transport: any ClientTransport, fallback: any RatchetClient) {
+    public init(transport: any ClientTransport) {
         self.api = Client(
             serverURL: URL(string: "http://localhost") ?? URL(fileURLWithPath: "/"),
             transport: transport, middlewares: [APIErrorMiddleware()])
-        self.fallback = fallback
     }
 
-    public convenience init(location: DaemonLocation, fallback: any RatchetClient) {
-        self.init(
-            transport: UnixSocketTransport(socketPath: location.socketPath, token: { location.readToken() }),
-            fallback: fallback)
+    public convenience init(location: DaemonLocation) {
+        self.init(transport: UnixSocketTransport(socketPath: location.socketPath, token: { location.readToken() }))
     }
 
     // MARK: Failures
@@ -83,24 +78,6 @@ public final class DaemonRatchetClient: RatchetClient {
         if let error = error as? UnixSocketError { return error }
         if let wrapped = error as? ClientError { return underlyingSocketError(in: wrapped.underlyingError) }
         return nil
-    }
-
-    /// Runs `real`; when the daemon says "not available in this engine yet", serves `sample` instead.
-    private func providing<T: Sendable>(
-        _ feature: String,
-        real: () async throws -> T,
-        sample: () async throws -> T
-    ) async throws -> T {
-        if await state.isUnsupported(feature) { return try await sample() }
-        do {
-            return try await real()
-        } catch {
-            if let failure = daemonError(in: error), failure.isUnsupported {
-                await state.markUnsupported(feature)
-                return try await sample()
-            }
-            throw translate(error)
-        }
     }
 
     /// Runs `real` and translates its failure.
@@ -174,10 +151,8 @@ public final class DaemonRatchetClient: RatchetClient {
     // MARK: Overview and spend
 
     public func overview(range: TimeRange) async throws -> Overview {
-        try await providing("overview") {
+        try await calling {
             DaemonMapping.overview(try await api.getOverview(query: .init(range: DaemonMapping.range(range))).ok.body.json)
-        } sample: {
-            try await fallback.overview(range: range)
         }
     }
 
@@ -253,7 +228,7 @@ public final class DaemonRatchetClient: RatchetClient {
             }
             let connections = await repoConnections(request.repoID, request.selection, demo: demo != nil)
             let goal = request.goal.trimmingCharacters(in: .whitespacesAndNewlines)
-            let draftID = await state.isRealDraft(request.draftID) ? request.draftID : nil
+            let draftID = request.draftID
             let placements = Set(request.selection.agents.values)
             let input = VM.CreateOptimizationInput(
                 agents: kinds.isEmpty ? [.claudeCode] : kinds,
@@ -384,20 +359,19 @@ public final class DaemonRatchetClient: RatchetClient {
     // MARK: Connectors
 
     public func connectors() async throws -> [Connector] {
-        try await providing("connectors") {
+        try await calling {
             try await api.listConnectors().ok.body.json.connectors.map(DaemonMapping.connector)
-        } sample: {
-            try await fallback.connectors()
         }
     }
 
     /// GitHub starts the device flow (the account appears in the list when it finishes); an AWS profile is connected by its
     /// name; an agent is a CLI login that was removed earlier. The UI for pasting keys and tokens comes later.
     public func addConnector(_ new: NewConnector) async throws -> Connector {
-        try await providing("connectors") {
+        try await calling {
             let list: VM.ConnectorsVm
             switch new.kind {
             case .github:
+                // GitHub signs in with the device flow: the code is in `githubSignInFlow()`, the account appears when it ends.
                 list = try await api.startGithubConnectorSignIn(body: .json(.init())).ok.body.json
                 guard let existing = list.connectors.first(where: { DaemonMapping.connector($0).kind == .github }) else {
                     return Connector(id: "github-pending", kind: .github, name: new.name, detail: "Signing in with GitHub", state: .signedOut)
@@ -407,55 +381,67 @@ public final class DaemonRatchetClient: RatchetClient {
                 list = try await api.addAwsConnector(body: .json(.init(profile: new.name))).ok.body.json
             case .agent:
                 let agent: VM.ConnectorAgent = new.name.lowercased().contains("codex") ? .codex : .claudeCode
-                list = try await api.addAgentConnector(body: .json(.case1(.init(agent: agent, source: .login)))).ok.body.json
+                if let key = new.secret?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty {
+                    // The key goes to the daemon once; it files it in the Keychain and never returns it.
+                    let label = new.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    list = try await api.addAgentConnector(body: .json(.case2(.init(
+                        agent: agent, apiKey: key, name: label.isEmpty ? nil : label, source: .apiKey)))).ok.body.json
+                } else {
+                    list = try await api.addAgentConnector(body: .json(.case1(.init(agent: agent, source: .login)))).ok.body.json
+                }
             }
             let added = list.connectors.map(DaemonMapping.connector).first { $0.kind == new.kind && $0.name == new.name }
             guard let added = added ?? list.connectors.map(DaemonMapping.connector).last(where: { $0.kind == new.kind }) else {
                 throw RatchetClientError.notFound(new.name)
             }
             return added
-        } sample: {
-            try await fallback.addConnector(new)
         }
     }
 
+    public func githubSignInFlow() async throws -> GithubSignInFlow? {
+        try await calling { DaemonMapping.githubFlow(try await api.listConnectors().ok.body.json.githubFlow) }
+    }
+
+    public func startGithubSignIn(connectorID: String?) async throws -> GithubSignInFlow? {
+        try await calling {
+            let list = try await api.startGithubConnectorSignIn(body: .json(.init(connectorId: connectorID))).ok.body.json
+            return DaemonMapping.githubFlow(list.githubFlow)
+        }
+    }
+
+    public func cancelGithubSignIn() async throws {
+        try await calling { _ = try await api.cancelGithubConnectorSignIn().ok }
+    }
+
     public func removeConnector(id: String) async throws {
-        try await providing("connectors") {
+        try await calling {
             _ = try await api.removeConnector(path: .init(id: id)).ok
-        } sample: {
-            try await fallback.removeConnector(id: id)
         }
     }
 
     public func setDefaultConnector(id: String) async throws -> [Connector] {
-        try await providing("connectors") {
+        try await calling {
             try await api.setDefaultConnector(path: .init(id: id)).ok.body.json.connectors.map(DaemonMapping.connector)
-        } sample: {
-            try await fallback.setDefaultConnector(id: id)
         }
     }
 
     public func signInConnector(id: String) async throws -> Connector {
-        try await providing("connectors") {
+        try await calling {
             guard let connector = try await api.testConnector(path: .init(id: id)).ok.body.json.connector else {
                 throw RatchetClientError.notFound(id)
             }
             return DaemonMapping.connector(connector)
-        } sample: {
-            try await fallback.signInConnector(id: id)
         }
     }
 
     public func connectionSelection(repoID: String) async throws -> ConnectionSelection? {
-        try await providing("connectors") {
+        try await calling {
             DaemonMapping.selection(try await api.getConnectorSelection(query: .init(repo: repoID)).ok.body.json)
-        } sample: {
-            try await fallback.connectionSelection(repoID: repoID)
         }
     }
 
     public func saveConnectionSelection(_ selection: ConnectionSelection) async throws {
-        try await providing("connectors") {
+        try await calling {
             guard let aws = selection.awsID else { return }
             var github = selection.githubID
             if github == nil {
@@ -465,38 +451,29 @@ public final class DaemonRatchetClient: RatchetClient {
             let input = VM.SaveRepoConnectionsInput(
                 repo: selection.repoID, selection: DaemonMapping.repoConnections(selection, github: github, aws: aws))
             _ = try await api.saveConnectorSelection(body: .json(input)).ok
-        } sample: {
-            try await fallback.saveConnectionSelection(selection)
         }
     }
 
     // MARK: Environment drafts
 
     public func createDraft(_ request: DraftRequest) async throws -> EnvironmentDraft {
-        try await providing("drafts") {
+        try await calling {
             let input = VM.CreateEnvironmentDraftInput(agentConnector: .claudeCode, goal: request.goal, repo: request.repoID)
             let created = try await api.createEnvironmentDraft(body: .json(input)).created.body.json
-            await state.markRealDraft(created.id)
             return try await settledDraft(created)
-        } sample: {
-            try await fallback.createDraft(request)
         }
     }
 
     public func reviseDraft(id: String, instruction: String) async throws -> EnvironmentDraft {
-        try await providing("drafts") {
+        try await calling {
             let revised = try await api.reviseEnvironmentDraft(path: .init(id: id), body: .json(.init(message: instruction))).ok.body.json
             return try await settledDraft(revised)
-        } sample: {
-            try await fallback.reviseDraft(id: id, instruction: instruction)
         }
     }
 
     public func approveDraft(id: String) async throws -> EnvironmentDraft {
-        try await providing("drafts") {
+        try await calling {
             DaemonMapping.draft(try await api.approveEnvironmentDraft(path: .init(id: id), body: .json(.init())).ok.body.json)
-        } sample: {
-            try await fallback.approveDraft(id: id)
         }
     }
 
@@ -628,12 +605,20 @@ public final class DaemonRatchetClient: RatchetClient {
                     continuation.yield(.receiptIssued(await mappedReceipt(receipt)))
                 }
             }
-        case .connector:
+        case .connector, .github:
             if let list = try? await connectors() { continuation.yield(.connectorsChanged(list)) }
+            if let flow = try? await githubSignInFlow() {
+                continuation.yield(.githubFlowChanged(flow))
+            } else {
+                continuation.yield(.githubFlowChanged(nil))
+            }
             await emitNeedsYou(into: continuation)
-        case .environmentDraft:
+        case .environmentDraft(let draftID, let status):
+            if status == "ready", let draft = try? await api.getEnvironmentDraft(path: .init(id: draftID)).ok.body.json {
+                continuation.yield(.environmentDraftReady(draftID: draftID, repoID: draft.repo))
+            }
             await emitNeedsYou(into: continuation)
-        case .hello, .resync, .notice, .runActive, .github, .unknown:
+        case .hello, .resync, .notice, .runActive, .unknown:
             break
         }
     }
@@ -646,9 +631,8 @@ public final class DaemonRatchetClient: RatchetClient {
         }
     }
 
-    /// "Needs you" comes from the provisional overview; without it nothing is announced.
+    /// "Needs you" comes from the overview.
     private func emitNeedsYou(into continuation: AsyncStream<RatchetEvent>.Continuation) async {
-        if await state.isUnsupported("overview") { return }
         guard let vm = try? await api.getOverview().ok.body.json else { return }
         continuation.yield(.needsYouChanged(vm.needsYou.map(DaemonMapping.needsYou)))
     }
@@ -657,28 +641,12 @@ public final class DaemonRatchetClient: RatchetClient {
 /// What the client remembers between calls.
 private actor DaemonClientState {
     private var agentOwners: [String: String] = [:]
-    private var unsupportedUntil: [String: Date] = [:]
-    private var realDrafts: Set<String> = []
 
     func remember(agents: [String], of optimizationID: String) {
         for agent in agents { agentOwners[agent] = optimizationID }
     }
 
     func owner(ofAgent id: String) -> String? { agentOwners[id] }
-
-    /// The engine said 501 for this group; do not ask again for a minute.
-    func markUnsupported(_ feature: String) {
-        unsupportedUntil[feature] = Date().addingTimeInterval(60)
-    }
-
-    func isUnsupported(_ feature: String) -> Bool {
-        guard let until = unsupportedUntil[feature] else { return false }
-        if until < Date() {
-            unsupportedUntil[feature] = nil
-            return false
-        }
-        return true
-    }
 
     private var rows: (task: Task<[DaemonRatchetClient.OptimizationRow], any Error>, at: Date)?
 
@@ -693,8 +661,4 @@ private actor DaemonClientState {
     }
 
     func forgetRows() { rows = nil }
-
-    func markRealDraft(_ id: String) { realDrafts.insert(id) }
-
-    func isRealDraft(_ id: String?) -> Bool { id.map { realDrafts.contains($0) } ?? false }
 }

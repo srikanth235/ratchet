@@ -83,6 +83,9 @@ struct ServeArgs {
     /// Do not seed demo data into an empty ledger.
     #[arg(long)]
     no_seed: bool,
+    /// Write the log to `<support dir>/ratchetd.log` instead of stderr (the LaunchAgent in the app bundle has no log path).
+    #[arg(long, env = "RATCHET_LOG_TO_SUPPORT_DIR")]
+    log_to_support_dir: bool,
     /// Milliseconds between simulated agent turns.
     #[arg(long, default_value_t = 2500)]
     tick_ms: u64,
@@ -135,24 +138,59 @@ struct InstallArgs {
     /// Write the plist but do not call launchctl.
     #[arg(long)]
     no_load: bool,
+    /// With `--bundle-program`: the agent that runs the simulation with an in-memory ledger (label `com.ratchet.ratchetd.demo`).
+    #[arg(long)]
+    demo: bool,
+    /// `AssociatedBundleIdentifiers` (the app that owns the agent).
+    #[arg(long)]
+    associated_bundle_id: Vec<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_env("RATCHET_LOG")
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .with_writer(std::io::stderr)
-        .init();
     let cli = Cli::parse();
+    init_logging(wants_log_file(&cli));
     match cli.command {
         None => serve(cli.serve).await,
         Some(Command::Serve(a)) => serve(a).await,
         Some(Command::Openapi(a)) => generate(&a),
         Some(Command::Launchagent { action }) => launch_agent(action),
     }
+}
+
+fn wants_log_file(cli: &Cli) -> bool {
+    match &cli.command {
+        None => cli.serve.log_to_support_dir,
+        Some(Command::Serve(a)) => a.log_to_support_dir,
+        _ => false,
+    }
+}
+
+fn init_logging(to_support_dir: bool) {
+    let filter = tracing_subscriber::EnvFilter::try_from_env("RATCHET_LOG")
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    if to_support_dir {
+        let dir = paths::support_dir();
+        let file = std::fs::create_dir_all(&dir).ok().and_then(|()| {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join(paths::LOG_FILE))
+                .ok()
+        });
+        if let Some(file) = file {
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_writer(std::sync::Mutex::new(file))
+                .with_ansi(false)
+                .init();
+            return;
+        }
+    }
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_writer(std::io::stderr)
+        .init();
 }
 
 async fn serve(args: ServeArgs) -> Result<()> {
@@ -295,6 +333,20 @@ fn spec_from(a: &InstallArgs) -> Result<LaunchAgentSpec> {
     };
     let mut spec = LaunchAgentSpec::new(program, paths::support_dir());
     spec.bundle_program.clone_from(&a.bundle_program);
+    spec.associated_bundle_ids
+        .clone_from(&a.associated_bundle_id);
+    if a.bundle_program.is_some() {
+        // The bundle plist is static: the mode and the log are arguments, not paths of the build machine.
+        let mode = if a.demo { "sim" } else { "real" };
+        spec.args = ["serve", "--mode", mode, "--log-to-support-dir"]
+            .map(String::from)
+            .to_vec();
+        if a.demo {
+            spec.label = format!("{}.demo", launchagent::LABEL);
+            // A demo never touches the real ledger.
+            spec.args.extend(["--ledger".into(), ":memory:".into()]);
+        }
+    }
     if let Some(h) = std::env::var_os("RATCHET_HOME") {
         spec.env.push((
             "RATCHET_HOME".into(),

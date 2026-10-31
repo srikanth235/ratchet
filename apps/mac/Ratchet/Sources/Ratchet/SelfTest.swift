@@ -7,16 +7,26 @@ import RatchetKit
 /// (tools/selftest.sh does this.) Add a check for every story with logic.
 @MainActor
 enum SelfTest {
-    static var requested: Bool { CommandLine.arguments.contains("--selftest") }
+    static var requested: Bool { CommandLine.arguments.contains("--selftest") || live }
+    /// `--selftest-live`: the same app against a real `ratchetd` (the simulation) instead of the sample client.
+    static var live: Bool { CommandLine.arguments.contains("--selftest-live") }
     /// Read by AppDelegate.applicationWillTerminate.
     static var exitCode: Int32 = 0
     private static var failures = 0
     private static var count = 0
 
-    static func runIfRequested(store: AppStore, router: AppRouter) {
+    static func runIfRequested(store: AppStore, router: AppRouter, daemon: DaemonController) {
         guard requested else { return }
         // Print each line at once, so a crash keeps the lines before it.
         setvbuf(stdout, nil, _IOLBF, 0)
+        if live {
+            Task {
+                await runLive(store: store, daemon: daemon)
+                print(failures == 0 ? "SELFTEST PASS \(count) checks" : "SELFTEST FAIL \(failures) of \(count) checks")
+                finish(code: failures == 0 ? 0 : 1)
+            }
+            return
+        }
         guard Store.isOverridden else {
             print("SELFTEST refused: set APP_STORE to a file in /tmp")
             finish(code: 1)
@@ -114,6 +124,58 @@ enum SelfTest {
         // Symbols used in the app exist.
         for name in ["chart.line.uptrend.xyaxis", "gearshape", "link"] {
             check("SF Symbol \(name) exists", NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil)
+        }
+    }
+
+    /// The real client path end to end: the generated client, the unix socket, the bearer token, the mapping, the event
+    /// stream, against `ratchetd serve --mode sim`. Run by tools/smoke-daemon.sh; nothing here touches the sample data.
+    private static func runLive(store: AppStore, daemon: DaemonController) async {
+        check("the app uses the daemon, not the sample client", !(store.client is MockRatchetClient) && !Store.isOverridden)
+        check("the daemon answers on the socket", daemon.phase.isRunning, "\(daemon.phase)")
+        check("the store loaded from the daemon", store.isLoaded, store.lastError ?? "no error recorded")
+        check("the overview comes from the daemon", store.overview != nil)
+        check("the simulation seeded optimizations", !store.optimizations.isEmpty, "\(store.optimizations.count)")
+        check("templates load", !store.templates.isEmpty)
+
+        // Connectors, a real group now.
+        do {
+            let list = try await store.client.connectors()
+            check("connectors answer", true, "\(list.count)")
+            let flow = try await store.client.githubSignInFlow()
+            check("the GitHub flow state is readable", flow == nil || flow?.userCode.isEmpty == false)
+            _ = try await store.client.connectionSelection(repoID: "acme/search-api")
+            check("a repo's connection selection answers", true)
+        } catch {
+            check("connectors answer", false, error.localizedDescription)
+        }
+
+        // An optimization's detail, and an action with its live event.
+        guard let live = store.optimizations.first(where: { $0.status == .running }) ?? store.optimizations.first else { return }
+        await store.loadDetail(id: live.id)
+        check("an optimization's detail loads", store.details[live.id] != nil, store.lastError ?? "")
+        if let agent = store.details[live.id]?.agents.first(where: { $0.state == .working }) {
+            await store.pauseAgent(agent.id)
+            var paused = false
+            for _ in 0..<50 where !paused {
+                paused = store.details[live.id]?.agents.first { $0.id == agent.id }?.state == .paused
+                if !paused { try? await Task.sleep(for: .milliseconds(100)) }
+            }
+            check("pausing an agent shows up through the daemon", paused)
+            await store.resumeAgent(agent.id)
+        } else {
+            print("SKIP pausing an agent: no working agent in the simulation")
+        }
+
+        // Environment drafts: draft, revise, approve through the wizard's own flow object.
+        do {
+            let draft = try await store.client.createDraft(DraftRequest(repoID: "acme/search-api", goal: "Make search faster"))
+            check("an environment draft is made", !draft.id.isEmpty && draft.state == .draft)
+            let revised = try await store.client.reviseDraft(id: draft.id, instruction: "Use one machine")
+            check("a draft can be revised", revised.id == draft.id && revised.revision >= draft.revision)
+            let approved = try await store.client.approveDraft(id: draft.id)
+            check("a draft can be approved", approved.state == .approved)
+        } catch {
+            check("environment drafts work", false, error.localizedDescription)
         }
     }
 

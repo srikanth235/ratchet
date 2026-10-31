@@ -18,6 +18,8 @@ pub struct LaunchAgentSpec {
     /// Relative to the app bundle (`Contents/MacOS/ratchetd`): for an `SMAppService` plist.
     pub bundle_program: Option<String>,
     pub args: Vec<String>,
+    /// `AssociatedBundleIdentifiers`: the app that owns this agent, so Login Items shows the app's name.
+    pub associated_bundle_ids: Vec<String>,
     pub stdout_path: PathBuf,
     pub stderr_path: PathBuf,
     /// `(name, value)` pairs, e.g. `RATCHET_HOME`.
@@ -32,6 +34,7 @@ impl LaunchAgentSpec {
             program: program.into(),
             bundle_program: None,
             args: vec!["serve".into()],
+            associated_bundle_ids: Vec::new(),
             stdout_path: log_dir.join(crate::paths::LOG_FILE),
             stderr_path: log_dir.join(crate::paths::LOG_FILE),
             env: Vec::new(),
@@ -79,16 +82,27 @@ pub fn plist(spec: &LaunchAgentSpec) -> String {
     s.push_str("\t<key>RunAtLoad</key>\n\t<true/>\n");
     // restart after a crash, not after a clean exit (`launchctl bootout`, or the user quitting it)
     s.push_str("\t<key>KeepAlive</key>\n\t<dict>\n\t\t<key>SuccessfulExit</key>\n\t\t<false/>\n\t</dict>\n");
+    if !spec.associated_bundle_ids.is_empty() {
+        s.push_str("\t<key>AssociatedBundleIdentifiers</key>\n\t<array>\n");
+        for id in &spec.associated_bundle_ids {
+            s.push_str(&format!("\t\t<string>{}</string>\n", esc(id)));
+        }
+        s.push_str("\t</array>\n");
+    }
     s.push_str("\t<key>ProcessType</key>\n\t<string>Background</string>\n");
     s.push_str("\t<key>ThrottleInterval</key>\n\t<integer>5</integer>\n");
-    s.push_str(&format!(
-        "\t<key>StandardOutPath</key>\n\t<string>{}</string>\n",
-        esc(&spec.stdout_path.display().to_string())
-    ));
-    s.push_str(&format!(
-        "\t<key>StandardErrorPath</key>\n\t<string>{}</string>\n",
-        esc(&spec.stderr_path.display().to_string())
-    ));
+    // An app-bundle plist is written at build time, on another machine: it cannot name a log path under the user's
+    // home. The daemon logs to its support directory itself (`serve --log-to-support-dir`).
+    if spec.bundle_program.is_none() {
+        s.push_str(&format!(
+            "\t<key>StandardOutPath</key>\n\t<string>{}</string>\n",
+            esc(&spec.stdout_path.display().to_string())
+        ));
+        s.push_str(&format!(
+            "\t<key>StandardErrorPath</key>\n\t<string>{}</string>\n",
+            esc(&spec.stderr_path.display().to_string())
+        ));
+    }
     if !spec.env.is_empty() {
         s.push_str("\t<key>EnvironmentVariables</key>\n\t<dict>\n");
         for (k, v) in &spec.env {
@@ -237,6 +251,24 @@ mod tests {
         s.bundle_program = Some("Contents/MacOS/ratchetd".into());
         let p = plist(&s);
         assert!(p.contains("<key>BundleProgram</key>\n\t<string>Contents/MacOS/ratchetd</string>"));
+    }
+
+    #[test]
+    fn an_app_bundle_plist_has_no_machine_specific_log_path_and_names_its_app() {
+        let mut s = spec(Path::new("/builder/home/logs"));
+        s.bundle_program = Some("Contents/Helpers/ratchetd".into());
+        s.args = vec![
+            "serve".into(),
+            "--mode".into(),
+            "real".into(),
+            "--log-to-support-dir".into(),
+        ];
+        s.associated_bundle_ids = vec!["dev.ratchet.app".into()];
+        let p = plist(&s);
+        assert!(!p.contains("StandardOutPath"));
+        assert!(!p.contains("/builder/home"));
+        assert!(p.contains("<string>--log-to-support-dir</string>"));
+        assert!(p.contains("<key>AssociatedBundleIdentifiers</key>\n\t<array>\n\t\t<string>dev.ratchet.app</string>"));
     }
 
     #[test]

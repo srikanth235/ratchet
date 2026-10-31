@@ -15,9 +15,12 @@ public actor MockRatchetClient: RatchetClient {
     private var scriptIndex: [String: Int] = [:]
     private var pending: [String: String] = [:]
     private var counter = 0
+    private var githubFlow: GithubSignInFlow?
+    private let startedAt: Date
 
     public init(now: Date = Date(), live: Bool = false, interval: Duration = .seconds(2)) {
         self.world = MockWorld.standard(now: now)
+        self.startedAt = now
         self.live = live
         self.interval = interval
     }
@@ -211,6 +214,22 @@ public actor MockRatchetClient: RatchetClient {
         world.connectors.append(connector)
         emit([.connectorsChanged(world.connectors)])
         return connector
+    }
+
+    public func githubSignInFlow() async throws -> GithubSignInFlow? { githubFlow }
+
+    public func startGithubSignIn(connectorID: String?) async throws -> GithubSignInFlow? {
+        let flow = GithubSignInFlow(
+            state: .pending, userCode: "WDJB-MJHT", verificationURL: "https://github.com/login/device",
+            expiresAt: startedAt.addingTimeInterval(900))
+        githubFlow = flow
+        emit([.githubFlowChanged(flow)])
+        return flow
+    }
+
+    public func cancelGithubSignIn() async throws {
+        githubFlow = nil
+        emit([.githubFlowChanged(nil)])
     }
 
     public func removeConnector(id: String) async throws {
