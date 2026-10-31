@@ -13,12 +13,14 @@ enum Palette {
     // Dark ground
     static let night900: UInt32 = 0x0B1019
     static let night800: UInt32 = 0x101724
+    static let night850: UInt32 = 0x0E1420
     static let slate400: UInt32 = 0x94A3BE
     static let snow: UInt32 = 0xECEFF4
     static let slate300: UInt32 = 0xA7B1C2
     static let slate500: UInt32 = 0x7E8CA3
     // Light ground
     static let paper: UInt32 = 0xFBFAF6
+    static let paperDeep: UInt32 = 0xF3F1EA
     static let white: UInt32 = 0xFFFFFF
     static let umber: UInt32 = 0x3C3220
     static let ink900: UInt32 = 0x15181F
@@ -44,6 +46,9 @@ enum Palette {
 /// Layer 2: what a color means. Parts never name a hue.
 enum Ink {
     static let canvas = Color(light: Palette.paper, dark: Palette.night900)
+    /// The sidebar's own opaque surface (a touch off the canvas) and the line at its trailing edge.
+    static let sidebar = Color(light: Palette.paperDeep, dark: Palette.night850)
+    static let sidebarEdge = Color(light: 0x1E232D, dark: Palette.slate400, lightAlpha: 0.10, darkAlpha: 0.14)
     static let raised = Color(light: Palette.white, dark: Palette.night800)
     static let hairline = Color(light: Palette.umber, dark: Palette.slate400, lightAlpha: 0.14, darkAlpha: 0.11)
     static let hairlineStrong = Color(light: Palette.umber, dark: Palette.slate400, lightAlpha: 0.24, darkAlpha: 0.20)
@@ -68,11 +73,11 @@ enum Ink {
 
 /// Layer 3: sizes. Pages use `Space` (UI/Grid.swift) for margins and gaps.
 enum Dim {
-    static let radiusButton: CGFloat = 8
+    static let radiusButton: CGFloat = 9
     static let radiusRow: CGFloat = 8
     static let radiusCard: CGFloat = 12
-    static let radiusField: CGFloat = 8
-    static let buttonHeight: CGFloat = 32
+    static let radiusField: CGFloat = 9
+    static let buttonHeight: CGFloat = 34
     static let buttonHeightSmall: CGFloat = 28
     static let fieldHeight: CGFloat = 36
     static let sidebarRow: CGFloat = 32
@@ -85,9 +90,24 @@ enum Dim {
     static let mark: CGFloat = 15
     static let icon: CGFloat = 16
     static let rowPadding: CGFloat = 14
+    /// Rows of a page that has to fit a short window (the Environment step).
+    static let rowPaddingTight: CGFloat = 8
+    /// Heading to content (the reference's h2 margin), and the gap between choice cards.
+    static let sectionGap: CGFloat = 14
+    static let cardGap: CGFloat = 10
     static let heroValue: CGFloat = 56
-    static let chartHeight: CGFloat = 248
+    /// The Overview chart. The reference draws a 760 x 250 viewBox about 440 pt wide, so about 145 pt tall with its axis
+    /// labels; the extra room here is the tooltip's.
+    static let chartHeight: CGFloat = 160
+    /// The chart of a running optimization has the page to itself.
+    static let chartHeightDetail: CGFloat = 248
     static let textLine: CGFloat = 18
+    /// Line heights of the reference (line-height 1.45): 13.5 px text 19.6, 12.5 px text 18. The bundled sans is set
+    /// tighter by default, so text roles get these as a minimum height.
+    /// The page title: font size 32, line-height 1.
+    static let titleLine: CGFloat = 32
+    static let lineBody: CGFloat = 20
+    static let lineMeta: CGFloat = 18
     static let markStroke: CGFloat = 1.5
 }
 

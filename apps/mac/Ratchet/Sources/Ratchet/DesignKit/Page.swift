@@ -43,7 +43,7 @@ struct PageHeader<Trailing: View>: View {
     var body: some View {
         HStack(alignment: .center, spacing: Space.lg) {
             VStack(alignment: .leading, spacing: Space.sm) {
-                Text(title).kitType(.pageTitle).foregroundStyle(Ink.text)
+                Text(title).kitType(.pageTitle).foregroundStyle(Ink.text).frame(height: Dim.titleLine)
                 if let subtitle {
                     Text(subtitle).kitType(.body).foregroundStyle(Ink.textFaint)
                 }
@@ -71,7 +71,7 @@ struct KitSection<Content: View>: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.md) {
+        VStack(alignment: .leading, spacing: Dim.sectionGap) {
             Text(title).kitType(.section).foregroundStyle(Ink.textMuted)
             content
         }
@@ -94,7 +94,6 @@ struct HeroNumber: View {
             HStack(alignment: .firstTextBaseline, spacing: Space.xs) {
                 Text(value)
                     .kitType(.hero)
-                    .tracking(-1)
                     .foregroundStyle(Ink.text)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)

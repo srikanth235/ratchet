@@ -30,9 +30,9 @@ struct NewOptimizationView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: Space.md) {
+        VStack(alignment: .leading, spacing: Space.sm) {
             StepProgress(current: flow.step.rawValue, total: WizardStep.allCases.count, caption: flow.step.caption)
-            VStack(alignment: .leading, spacing: Space.sm) {
+            VStack(alignment: .leading, spacing: Space.xs) {
                 Text(flow.title).kitType(.pageTitle).foregroundStyle(Ink.text).lineLimit(2)
                 Text(subtitle).kitType(.body).foregroundStyle(Ink.textFaint)
             }
@@ -60,6 +60,20 @@ struct NewOptimizationView: View {
     // MARK: Footer
 
     private var footer: some View {
+        VStack(spacing: Space.md) {
+            if flow.step == .environment, flow.draft != nil {
+                AskForChange(flow: flow)
+            }
+            footerButtons
+        }
+        .padding(.horizontal, Space.pageX)
+        .padding(.vertical, flow.step == .environment ? Space.md : Space.lg)
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .top) { Hairline() }
+        .background(Ink.canvas)
+    }
+
+    private var footerButtons: some View {
         HStack(spacing: Space.md) {
             Button(flow.step == .goal ? "Cancel" : "Back") {
                 if flow.step == .goal { router.closeWizard() } else { Task { await flow.back() } }
@@ -74,11 +88,6 @@ struct NewOptimizationView: View {
             }
             primaryButton
         }
-        .padding(.horizontal, Space.pageX)
-        .padding(.vertical, Space.lg)
-        .frame(maxWidth: .infinity)
-        .overlay(alignment: .top) { Hairline() }
-        .background(Ink.canvas)
     }
 
     private var note: String {

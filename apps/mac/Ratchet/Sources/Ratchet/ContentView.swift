@@ -11,11 +11,13 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView()
-                .navigationSplitViewColumnWidth(min: 200, ideal: Dim.sidebarWidth, max: 280)
+                .navigationSplitViewColumnWidth(Dim.sidebarWidth)
         } detail: {
             DetailRoot()
         }
         .toolbar(removing: .title)
+        // The page starts at the top edge, as in the design; the traffic lights sit over the sidebar.
+        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
         .noInitialFocus()
         .task {
             await store.start()
@@ -43,5 +45,6 @@ private struct DetailRoot: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Ink.canvas)
+        .ignoresSafeArea(.container, edges: .top)
     }
 }

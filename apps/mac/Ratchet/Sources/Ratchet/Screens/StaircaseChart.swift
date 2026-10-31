@@ -31,6 +31,8 @@ struct StaircaseChart: View {
     var xAxis: StairAxis = .dates
     /// Show the tooltip of the last win without hovering (snapshots).
     var previewLast = false
+    /// The Overview's small chart: shorter, with the reference's tiny axis labels.
+    var compact = false
 
     @State private var selectedDate: Date?
 
@@ -77,7 +79,7 @@ struct StaircaseChart: View {
                 AxisGridLine().foregroundStyle(Ink.hairline)
                 AxisValueLabel {
                     if let number = value.as(Double.self) {
-                        Text(yFormat(number)).kitType(.mono).foregroundStyle(Ink.textFaint)
+                        Text(yFormat(number)).kitType(compact ? .axisMono : .mono).foregroundStyle(Ink.textFaint)
                     }
                 }
             }
@@ -87,13 +89,13 @@ struct StaircaseChart: View {
             AxisMarks(values: xTicks) { value in
                 AxisValueLabel {
                     if let date = value.as(Date.self) {
-                        Text(xLabel(date)).kitType(.caption).foregroundStyle(Ink.textFaint).lineLimit(1)
+                        Text(xLabel(date)).kitType(compact ? .axis : .caption).foregroundStyle(Ink.textFaint).lineLimit(1)
                     }
                 }
             }
         }
-        .padding(.top, Space.xxl)
-        .frame(height: Dim.chartHeight)
+        .padding(.top, compact ? Space.lg : Space.xxl)
+        .frame(height: compact ? Dim.chartHeight : Dim.chartHeightDetail)
         .accessibilityLabel("Chart")
         .accessibilityValue(summary)
     }

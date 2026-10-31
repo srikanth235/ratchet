@@ -82,10 +82,10 @@ struct SpentCell: View {
 }
 
 enum TableColumns {
-    static let status: CGFloat = 156
-    static let result: CGFloat = 224
-    static let spent: CGFloat = 96
-    static let value: CGFloat = 80
+    static let status: CGFloat = 128
+    static let result: CGFloat = 176
+    static let spent: CGFloat = 88
+    static let value: CGFloat = 72
 }
 
 /// The optimizations table of the Overview and the Optimizations page.

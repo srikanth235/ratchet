@@ -56,6 +56,12 @@ if [[ -d "$here/Icon/AppIcon.icon" ]]; then
   fi
   if [[ -f "$car" ]]; then cp -X "$car" "$here/Resources/AppIcon.icns" "$app/Contents/Resources/" || true; fi
 fi
+# The design's fonts (Instrument Serif and Sans, SIL OFL): Resources/Fonts, found by Info.plist's ATSApplicationFontsPath
+# and registered again at launch (DesignKit/Fonts.swift).
+if [[ -d "$here/Fonts" ]]; then
+  mkdir -p "$app/Contents/Resources/Fonts"
+  cp -X "$here"/Fonts/* "$app/Contents/Resources/Fonts/"
+fi
 xattr -cr "$app"
 codesign --force --sign "$identity" "$app" 2>&1 | grep -v "replacing existing signature" || true
 echo "installed $app (signed: ${identity})"

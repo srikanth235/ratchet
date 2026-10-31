@@ -13,7 +13,6 @@ struct SidebarView: View {
                 Text("Ratchet").kitType(.brand).foregroundStyle(Ink.text)
             }
             .padding(.horizontal, Space.md)
-            .padding(.top, Space.sm)
             .accessibilityElement(children: .combine)
 
             VStack(spacing: Space.xs / 2) {
@@ -42,7 +41,10 @@ struct SidebarView: View {
         .padding(.top, Space.sm)
         .padding(.bottom, Space.lg)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(Ink.canvas)
+        .background(Ink.sidebar.ignoresSafeArea())
+        .overlay(alignment: .trailing) {
+            Ink.sidebarEdge.frame(width: Dim.hairline).ignoresSafeArea()
+        }
     }
 }
 

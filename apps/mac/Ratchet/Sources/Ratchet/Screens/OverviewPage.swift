@@ -22,7 +22,7 @@ struct OverviewPage: View {
 
             HStack(alignment: .top, spacing: Space.pageX) {
                 chartBlock.frame(maxWidth: .infinity, alignment: .leading)
-                needsYouBlock.frame(width: 320, alignment: .leading)
+                needsYouBlock.frame(width: 256, alignment: .leading)
             }
             .gridProbe("chart-and-needs", area: "overview")
 
@@ -66,7 +66,7 @@ struct OverviewPage: View {
     private var chartBlock: some View {
         KitSection("Value locked in, per year") {
             if let series = store.overview?.series, series.count > 1 {
-                StaircaseChart(points: stairPoints(series), yFormat: Money.axis, previewLast: Store.isOverridden)
+                StaircaseChart(points: stairPoints(series), yFormat: Money.axis, previewLast: Store.isOverridden, compact: true)
             } else {
                 Color.clear.frame(height: Dim.chartHeight)
             }

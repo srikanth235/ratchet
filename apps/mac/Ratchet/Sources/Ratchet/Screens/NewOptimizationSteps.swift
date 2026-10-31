@@ -1,7 +1,8 @@
 import RatchetKit
 import SwiftUI
 
-private let cardColumns = [GridItem(.adaptive(minimum: 260), spacing: Space.md, alignment: .top)]
+/// Three cards to a row, as in the design.
+private let cardColumns = Array(repeating: GridItem(.flexible(), spacing: Dim.cardGap, alignment: .top), count: 3)
 
 // MARK: - Step 1: goal and repo
 
@@ -16,7 +17,7 @@ struct GoalStep: View {
                     .accessibilityLabel("Goal")
             }
             KitSection("Repo") {
-                LazyVGrid(columns: cardColumns, alignment: .leading, spacing: Space.md) {
+                LazyVGrid(columns: cardColumns, alignment: .leading, spacing: Dim.cardGap) {
                     ForEach(flow.repos) { repo in
                         ChoiceCard(mark: .radio, isSelected: flow.repoID == repo.id) {
                             Task { await flow.selectRepo(repo.id) }
@@ -64,7 +65,7 @@ struct ConnectionsStep: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.block) {
             KitSection("AWS account") {
-                LazyVGrid(columns: cardColumns, alignment: .leading, spacing: Space.md) {
+                LazyVGrid(columns: cardColumns, alignment: .leading, spacing: Dim.cardGap) {
                     ForEach(flow.connectors.filter { $0.kind == .aws }) { connector in
                         ChoiceCard(mark: .radio, isSelected: flow.awsID == connector.id, isEnabled: connector.state.isUsable) {
                             flow.selectAWS(connector.id)
@@ -76,7 +77,7 @@ struct ConnectionsStep: View {
                 }
             }
             KitSection("Agents") {
-                LazyVGrid(columns: cardColumns, alignment: .leading, spacing: Space.md) {
+                LazyVGrid(columns: cardColumns, alignment: .leading, spacing: Dim.cardGap) {
                     ForEach(flow.connectors.filter { $0.kind == .agent }) { connector in
                         ChoiceCard(mark: .checkbox, isSelected: flow.agents[connector.id] != nil, isEnabled: connector.state.isUsable) {
                             flow.toggleAgent(connector.id)
@@ -106,10 +107,10 @@ struct ConnectionsStep: View {
 
     private func placementLine(_ connector: Connector, _ placement: Placement) -> some View {
         HStack(spacing: Space.xs) {
-            Text("Runs on").foregroundStyle(Ink.textFaint)
-            Text(placement.title).fontWeight(.medium).foregroundStyle(Ink.text)
+            Text("Runs on").kitType(.caption).foregroundStyle(Ink.textFaint)
+            Text(placement.title).kitType(.captionStrong).foregroundStyle(Ink.text)
             if connector.canRunInCloud {
-                Text("·").foregroundStyle(Ink.textFaint)
+                Text("·").kitType(.caption).foregroundStyle(Ink.textFaint)
                 Button("change") { flow.togglePlacement(connector.id) }
                     .buttonStyle(.kit(.link, small: true))
             }
