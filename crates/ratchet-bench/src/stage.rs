@@ -19,7 +19,8 @@ use crate::shell::{assert_safe_ref, json_str};
 /// only the bench identities read it.
 pub const STAGING_PREFIX: &str = "bench-inputs/";
 
-static ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z0-9-]{1,64}$").expect("static regex"));
+static ID_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-z0-9-]{1,64}$").expect("static regex"));
 
 #[derive(Debug, Clone)]
 pub struct StagedSource {
@@ -73,6 +74,7 @@ fn validate(i: &StageBase) -> BenchResult<()> {
 
 /// Materialize `git_ref` with the GitHost, archive it as `<prefix><name>.tgz` and upload it. `.git` and history never leave
 /// the controller.
+#[allow(clippy::too_many_arguments)]
 async fn stage_one(
     i: &StageBase,
     work: &Path,
@@ -168,7 +170,8 @@ pub async fn stage_source(i: &StageInput) -> BenchResult<StagedSource> {
     assert_safe_ref(&i.bench_ref, "bench.ref")?;
 
     let prefix = job_prefix(&i.base.optimization_id);
-    let work = tempfile::tempdir().map_err(|e| BenchError::infra(format!("cannot create a staging directory: {e}")))?;
+    let work = tempfile::tempdir()
+        .map_err(|e| BenchError::infra(format!("cannot create a staging directory: {e}")))?;
     let code = stage_one(
         &i.base,
         work.path(),
@@ -200,7 +203,18 @@ pub async fn stage_deps_base(base: &StageBase, git_ref: &str) -> BenchResult<Sta
     validate(base)?;
     assert_safe_ref(git_ref, "bench.ref")?;
     let prefix = job_prefix(&base.optimization_id);
-    let work = tempfile::tempdir().map_err(|e| BenchError::infra(format!("cannot create a staging directory: {e}")))?;
+    let work = tempfile::tempdir()
+        .map_err(|e| BenchError::infra(format!("cannot create a staging directory: {e}")))?;
     let name = DEPS_BASE_ARCHIVE.trim_end_matches(".tgz");
-    stage_one(base, work.path(), &prefix, "bench.ref", git_ref, name, None, None).await
+    stage_one(
+        base,
+        work.path(),
+        &prefix,
+        "bench.ref",
+        git_ref,
+        name,
+        None,
+        None,
+    )
+    .await
 }

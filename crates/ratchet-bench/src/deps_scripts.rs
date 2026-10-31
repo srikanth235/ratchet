@@ -20,8 +20,8 @@ use serde_json::json;
 use crate::deps::{DEPS_PREFIX, DEPS_USER, DepsStrategy, DepsStrategyId, FileHashes};
 use crate::errors::{BenchError, BenchResult};
 use crate::image_scripts::{
-    ContainerNetwork, ContainerRunSpec, ImageRestore, assert_base_archive, assert_container_runtime,
-    container_run, ctr_function, ensure_image_loaded, is_bucket_name,
+    ContainerNetwork, ContainerRunSpec, ImageRestore, assert_base_archive,
+    assert_container_runtime, container_run, ctr_function, ensure_image_loaded, is_bucket_name,
 };
 use crate::remote_scripts::{Isolation, Layout, StagedArchive};
 use crate::shell::{SENTINEL, fill, json_str, reject_nul, sq};
@@ -96,13 +96,24 @@ pub fn deps_build_script(o: &DepsBuildInput) -> BenchResult<String> {
     let fetch_env = o.strategy.fetch_env(&store);
     for (k, _) in &fetch_env {
         if !is_env_name(k) {
-            return Err(BenchError::infra(format!("invalid environment variable name {k}")));
+            return Err(BenchError::infra(format!(
+                "invalid environment variable name {k}"
+            )));
         }
     }
     reject_nul(
-        [o.layout.work.as_str(), o.strategy.fetch, o.image.as_str(), o.arch.as_str()]
-            .into_iter()
-            .chain(o.lockfiles.iter().flat_map(|(k, v)| [k.as_str(), v.as_str()])),
+        [
+            o.layout.work.as_str(),
+            o.strategy.fetch,
+            o.image.as_str(),
+            o.arch.as_str(),
+        ]
+        .into_iter()
+        .chain(
+            o.lockfiles
+                .iter()
+                .flat_map(|(k, v)| [k.as_str(), v.as_str()]),
+        ),
     )?;
     let env_args = fetch_env
         .iter()
@@ -129,9 +140,7 @@ pub fn deps_build_script(o: &DepsBuildInput) -> BenchResult<String> {
         sq(o.strategy.fetch)
     );
     let run = if isolated {
-        format!(
-            "setpriv --reuid=\"$DU\" --regid=\"$DU\" --clear-groups --no-new-privs -- {clean}"
-        )
+        format!("setpriv --reuid=\"$DU\" --regid=\"$DU\" --clear-groups --no-new-privs -- {clean}")
     } else {
         clean
     };

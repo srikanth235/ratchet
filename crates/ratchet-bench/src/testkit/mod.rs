@@ -14,8 +14,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use ratchet_core::RatchetConfig;
 use ratchet_core::ports::{
-    ArtifactStore, CandidateCommit, CancellationToken, Clock, FileDiff, GitHost, PortError, PortResult,
-    PullRequestInput, PullRequestRef,
+    ArtifactStore, CancellationToken, CandidateCommit, Clock, FileDiff, GitHost, PortError,
+    PortResult, PullRequestInput, PullRequestRef,
 };
 
 pub use compute::LocalFakeCompute;
@@ -118,7 +118,11 @@ impl GitHost for LocalGitHost {
         Ok(())
     }
 
-    async fn list_candidates(&self, _branch: &str, _since: Option<&str>) -> PortResult<Vec<CandidateCommit>> {
+    async fn list_candidates(
+        &self,
+        _branch: &str,
+        _since: Option<&str>,
+    ) -> PortResult<Vec<CandidateCommit>> {
         Ok(Vec::new())
     }
 
@@ -140,7 +144,11 @@ impl GitHost for LocalGitHost {
         }
         std::fs::create_dir_all(dir).map_err(|e| PortError::failed(e.to_string()))?;
         let out = tokio::process::Command::new("sh")
-            .args(["-c", "git -C \"$1\" archive \"$2\" | tar -x -C \"$3\"", "sh"])
+            .args([
+                "-c",
+                "git -C \"$1\" archive \"$2\" | tar -x -C \"$3\"",
+                "sh",
+            ])
             .arg(&self.repo)
             .arg(sha)
             .arg(dir)
@@ -351,7 +359,10 @@ pub fn make_config(o: &ConfigOptions) -> RatchetConfig {
         .protected_globs
         .clone()
         .unwrap_or_else(|| vec!["bench/**".into(), "ratchet.yaml".into(), "tests/**".into()]);
-    let run = o.run.clone().unwrap_or_else(|| "bash bench/bench.sh".into());
+    let run = o
+        .run
+        .clone()
+        .unwrap_or_else(|| "bash bench/bench.sh".into());
     let yaml = format!(
         "version: 0
 objective:
@@ -467,7 +478,11 @@ impl ArtifactStore for MemoryStore {
     }
 
     async fn list(&self, prefix: &str) -> PortResult<Vec<String>> {
-        Ok(self.keys().into_iter().filter(|k| k.starts_with(prefix)).collect())
+        Ok(self
+            .keys()
+            .into_iter()
+            .filter(|k| k.starts_with(prefix))
+            .collect())
     }
 }
 
@@ -539,11 +554,21 @@ impl ArtifactStore for DirStore {
 
 /// Relative paths of every file under `root`.
 pub fn walk_files(root: &Path, rel: &str, out: &mut Vec<String>) {
-    let dir = if rel.is_empty() { root.to_path_buf() } else { root.join(rel) };
-    let Ok(rd) = std::fs::read_dir(&dir) else { return };
+    let dir = if rel.is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(rel)
+    };
+    let Ok(rd) = std::fs::read_dir(&dir) else {
+        return;
+    };
     for e in rd.filter_map(Result::ok) {
         let name = e.file_name().to_string_lossy().into_owned();
-        let r = if rel.is_empty() { name } else { format!("{rel}/{name}") };
+        let r = if rel.is_empty() {
+            name
+        } else {
+            format!("{rel}/{name}")
+        };
         if e.file_type().is_ok_and(|t| t.is_dir()) {
             walk_files(root, &r, out);
         } else {

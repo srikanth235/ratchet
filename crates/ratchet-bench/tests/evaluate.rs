@@ -6,7 +6,9 @@ use ratchet_bench::testkit::{ConfigOptions, make_config};
 use ratchet_bench::{EvaluateCandidateInput, bench_stats, evaluate_candidate, metrics_from_stats};
 use ratchet_core::config::Objective;
 use ratchet_core::ports::{BenchOutcome, BenchRun};
-use ratchet_core::{BenchPhase, CandidateVerdict, Direction, GuardrailResult, ProtectedViolation, Verdict};
+use ratchet_core::{
+    BenchPhase, CandidateVerdict, Direction, GuardrailResult, ProtectedViolation, Verdict,
+};
 
 fn run(value: f64, extra: &[(&str, f64)]) -> BenchRun {
     let mut metrics: BTreeMap<String, f64> = BTreeMap::new();
@@ -14,10 +16,18 @@ fn run(value: f64, extra: &[(&str, f64)]) -> BenchRun {
     for (k, v) in extra {
         metrics.insert((*k).to_owned(), *v);
     }
-    BenchRun { value, metrics, duration_ms: 10 }
+    BenchRun {
+        value,
+        metrics,
+        duration_ms: 10,
+    }
 }
 
-fn outcome(values: &[f64], guardrails: Vec<GuardrailResult>, extra: &[(&str, f64)]) -> BenchOutcome {
+fn outcome(
+    values: &[f64],
+    guardrails: Vec<GuardrailResult>,
+    extra: &[(&str, f64)],
+) -> BenchOutcome {
     BenchOutcome {
         runs: values.iter().map(|v| run(*v, extra)).collect(),
         samples: values.to_vec(),
@@ -29,7 +39,11 @@ fn outcome(values: &[f64], guardrails: Vec<GuardrailResult>, extra: &[(&str, f64
 }
 
 fn failed(name: &str, detail: Option<&str>) -> GuardrailResult {
-    GuardrailResult { name: name.into(), passed: false, detail: detail.map(str::to_owned) }
+    GuardrailResult {
+        name: name.into(),
+        passed: false,
+        detail: detail.map(str::to_owned),
+    }
 }
 
 fn objective() -> Objective {
@@ -46,7 +60,13 @@ struct Case {
 
 impl Case {
     fn new(bench: BenchOutcome) -> Self {
-        Case { objective: objective(), bench, confirm: None, confirm_best: None, violations: vec![] }
+        Case {
+            objective: objective(),
+            bench,
+            confirm: None,
+            confirm_best: None,
+            violations: vec![],
+        }
     }
 
     fn eval(&self) -> ratchet_bench::CandidateEvaluation {
@@ -70,7 +90,10 @@ fn rejects_a_noise_level_change() {
     assert_eq!(r.verdict, Verdict::Rejected);
     assert_eq!(r.ledger_verdict, CandidateVerdict::Rejected);
     assert!(!r.needs_confirm && !r.verified);
-    assert_eq!(r.results.iter().map(|x| x.phase).collect::<Vec<_>>(), [BenchPhase::Bench]);
+    assert_eq!(
+        r.results.iter().map(|x| x.phase).collect::<Vec<_>>(),
+        [BenchPhase::Bench]
+    );
 }
 
 #[test]
@@ -88,7 +111,15 @@ fn asks_for_a_confirm_run_on_a_bench_win_then_verifies_it() {
     assert_eq!(done.verdict, Verdict::Verified);
     assert_eq!(done.ledger_verdict, CandidateVerdict::Verified);
     assert!(done.verified && !done.needs_confirm);
-    assert!((done.outcome.confirm_improvement.expect("confirm improvement") - 34.5).abs() < 1e-9);
+    assert!(
+        (done
+            .outcome
+            .confirm_improvement
+            .expect("confirm improvement")
+            - 34.5)
+            .abs()
+            < 1e-9
+    );
     assert_eq!(
         done.results.iter().map(|x| x.phase).collect::<Vec<_>>(),
         [BenchPhase::Bench, BenchPhase::Confirm]
@@ -108,18 +139,35 @@ fn fails_a_bench_win_that_does_not_hold_on_the_hidden_trace() {
 #[test]
 fn blocks_on_a_failed_guardrail_from_either_run_or_a_protected_violation_whatever_the_speed() {
     let fast = [10.0, 10.0, 10.0];
-    let g1 = Case::new(outcome(&fast, vec![failed("error_rate < 0.001", Some("x"))], &[])).eval();
-    assert_eq!((g1.verdict, g1.ledger_verdict), (Verdict::Blocked, CandidateVerdict::Blocked));
+    let g1 = Case::new(outcome(
+        &fast,
+        vec![failed("error_rate < 0.001", Some("x"))],
+        &[],
+    ))
+    .eval();
+    assert_eq!(
+        (g1.verdict, g1.ledger_verdict),
+        (Verdict::Blocked, CandidateVerdict::Blocked)
+    );
     assert!(g1.reasons[0].contains("error_rate < 0.001"));
 
     let mut c = Case::new(outcome(&fast, vec![], &[]));
     c.confirm = Some(outcome(&fast, vec![failed("peak_rss < 1.2x", None)], &[]));
     let g2 = c.eval();
     assert_eq!(g2.verdict, Verdict::Blocked);
-    assert_eq!(g2.guardrails.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["peak_rss < 1.2x"]);
+    assert_eq!(
+        g2.guardrails
+            .iter()
+            .map(|g| g.name.as_str())
+            .collect::<Vec<_>>(),
+        ["peak_rss < 1.2x"]
+    );
 
     let mut c = Case::new(outcome(&fast, vec![], &[]));
-    c.violations = vec![ProtectedViolation { path: "bench/k6/search.js".into(), pattern: "bench/**".into() }];
+    c.violations = vec![ProtectedViolation {
+        path: "bench/k6/search.js".into(),
+        pattern: "bench/**".into(),
+    }];
     let v = c.eval();
     assert_eq!(v.verdict, Verdict::Blocked);
     assert!(v.reasons.join(",").contains("bench/k6/search.js"));
@@ -137,7 +185,10 @@ fn blocks_without_calling_the_rule_when_the_bench_produced_no_samples() {
     };
     let r = Case::new(bench).eval();
     assert_eq!(r.verdict, Verdict::Blocked);
-    assert_eq!(r.reasons, ["guardrail failed: pnpm test (exited with status 1)"]);
+    assert_eq!(
+        r.reasons,
+        ["guardrail failed: pnpm test (exited with status 1)"]
+    );
     assert!(r.outcome.candidate_value.is_nan());
     assert_eq!(r.outcome.required_gain, 3.0); // max(noise 1, 3% of 100)
     assert!(r.results.is_empty(), "a ledger row needs a finite value");
@@ -153,16 +204,31 @@ fn maximize_works_through_core() {
 
 #[test]
 fn bench_stats_has_the_headline_value_summary_and_per_metric_medians() {
-    let s = bench_stats(&outcome(&[10.0, 12.0, 11.0], vec![], &[("peak_rss_mb", 200.0)])).expect("stats");
+    let s = bench_stats(&outcome(
+        &[10.0, 12.0, 11.0],
+        vec![],
+        &[("peak_rss_mb", 200.0)],
+    ))
+    .expect("stats");
     assert_eq!(s.value, 11.0);
-    for (k, v) in [("n", 3.0), ("median", 11.0), ("min", 10.0), ("max", 12.0), ("metrics.peak_rss_mb", 200.0), ("metrics.http_req_duration.p95", 11.0)] {
+    for (k, v) in [
+        ("n", 3.0),
+        ("median", 11.0),
+        ("min", 10.0),
+        ("max", 12.0),
+        ("metrics.peak_rss_mb", 200.0),
+        ("metrics.http_req_duration.p95", 11.0),
+    ] {
         assert_eq!(s.get(k), Some(v), "{k}");
     }
     let flat: BTreeMap<String, f64> = s.extra.clone();
     let m = metrics_from_stats(&flat);
     assert_eq!(
         m,
-        BTreeMap::from([("peak_rss_mb".to_owned(), 200.0), ("http_req_duration.p95".to_owned(), 11.0)])
+        BTreeMap::from([
+            ("peak_rss_mb".to_owned(), 200.0),
+            ("http_req_duration.p95".to_owned(), 11.0)
+        ])
     );
 }
 

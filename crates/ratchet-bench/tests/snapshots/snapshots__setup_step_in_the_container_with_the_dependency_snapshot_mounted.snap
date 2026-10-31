@@ -1,0 +1,72 @@
+---
+source: crates/ratchet-bench/tests/snapshots.rs
+expression: "step_script(&i).expect(\"script\")"
+---
+set -uo pipefail
+W='/var/tmp/ratchet-bench/opt1-1234'
+CODE="$W/code"; STAGE="$W/stage"; G="$W/repo.git"; H="$W/harness"
+emit() { printf '%s %s %s\n' '@@RATCHET@@' "$1" "$2"; }
+b64() { base64 | tr -d '\n'; }
+
+parents_real() {
+  local d acc="$CODE" part; local -a parts
+  d=$(dirname -- "$1"); [ "$d" = . ] && return 0
+  IFS=/ read -ra parts <<< "$d"
+  for part in "${parts[@]}"; do acc="$acc/$part"; [ -L "$acc" ] && return 1; [ -d "$acc" ] || return 1; done
+  return 0
+}
+ensure_parents() {
+  local d acc="$CODE" part; local -a parts
+  d=$(dirname -- "$1"); [ "$d" = . ] && return 0
+  IFS=/ read -ra parts <<< "$d"
+  for part in "${parts[@]}"; do
+    acc="$acc/$part"
+    if [ -L "$acc" ] || { [ -e "$acc" ] && [ ! -d "$acc" ]; }; then rm -f -- "${acc:?}"; fi
+    [ -d "$acc" ] || mkdir -- "$acc"
+  done
+}
+same() {
+  if [ -L "$1" ]; then [ -L "$2" ] && [ "$(readlink -- "$1")" = "$(readlink -- "$2")" ]
+  else [ -f "$2" ] && [ ! -L "$2" ] && cmp -s -- "$1" "$2"; fi
+}
+copied=0
+apply() {
+  local mode="$1" p
+  : > "$W/changed.list"
+  while IFS= read -r -d '' p; do
+    if [ "$mode" = check ] && parents_real "$p" && same "$STAGE/$p" "$CODE/$p"; then continue; fi
+    [ "$mode" = check ] && printf '%s\0' "$p" >> "$W/changed.list"
+    ensure_parents "$p"
+    rm -rf -- "${CODE:?}/${p:?}"
+    cp -P -p -- "$STAGE/$p" "$CODE/$p" || return 1
+    copied=$((copied+1))
+  done < "$W/bench.match"
+}
+
+BU='ratchet-bench'; HU='ratchet-holdout'
+kill_users() { pkill -KILL -u "$BU" 2>/dev/null || true; pkill -KILL -u "$HU" 2>/dev/null || true; }
+kill_users
+export RATCHET_CANDIDATE_DIR="$CODE" RATCHET_CANDIDATE_HOME="$W/home" RATCHET_CANDIDATE_TMP="$W/tmp" RATCHET_CANDIDATE_PATH="$PATH"
+BUID=$(id -u "$BU"); BGID=$(id -g "$BU"); HUID=$(id -u "$HU"); HGID=$(id -g "$HU")
+CN="ratchet-$(basename -- "$W")-setup"
+docker rm -f "$CN" >/dev/null 2>&1 || true
+
+apply check
+if [ -s "$W/changed.list" ]; then
+  emit tampered "{\"paths_b64\":\"$(tr '\0' '\n' < "$W/changed.list" | head -c 4000 | b64)\"}"
+  exit 87
+fi
+cd "$CODE" || exit 30
+export RATCHET_PHASE='confirm'
+OUT="$W/logs/setup"
+s=$(date +%s%N)
+timeout -k 10 60 docker run --rm --name "$CN" --pull never --init --network none --cap-drop ALL --security-opt no-new-privileges --read-only --tmpfs /tmp:rw,exec,nosuid,nodev,size=2g --pids-limit 4096 --user "$BUID:$BGID" --workdir "$CODE" -v "$CODE:$CODE" -v "$W/home:$W/home" -v "$W/tmp:$W/tmp" -v "$W/deps:$W/deps:ro" -e RATCHET_PHASE -e "HOME=$W/home" -e "TMPDIR=$W/tmp" -e "USER=$BU" -e "LOGNAME=$BU" --entrypoint sh 'ratchet-env:img-ffffffffffffffffffffffffffffffffffffffff' -c 'if command -v bash >/dev/null 2>&1; then exec bash -c "$1"; else exec sh -c "$1"; fi' ratchet-step 'pnpm install --frozen-lockfile' </dev/null >"$OUT.stdout" 2>"$OUT.stderr"; rc=$?
+e=$(date +%s%N); ms=$(( (e - s) / 1000000 ))
+docker rm -f "$CN" >/dev/null 2>&1 || true
+kill_users
+
+to=false
+if [ $rc -eq 124 ] || { [ $rc -eq 137 ] && [ $ms -ge $(( 60 * 1000 )) ]; }; then to=true; fi
+emit step "{\"exit\":$rc,\"ms\":$ms,\"timedOut\":$to}"
+echo "--- output tail ---"; { tail -c 4000 "$OUT.stdout"; tail -c 2000 "$OUT.stderr"; }
+exit 0

@@ -16,8 +16,15 @@ name = "ratchet_bench"
 name = "ratchet-candidate-launcher"
 path = "src/bin/ratchet-candidate-launcher.rs"
 
+# Test seam of the launcher tests: the same code with the configuration path taken from the environment. Never ship it.
+[[bin]]
+name = "ratchet-candidate-launcher-seam"
+path = "src/bin/ratchet-candidate-launcher-seam.rs"
+required-features = ["launcher-seam"]
+
 [features]
 default = []
+launcher-seam = []
 # Test doubles for the ports the runners use (fake bench instance that runs the scripts with local bash, docker shim,
 # fixture git repo, directory-backed artifact store). Enabled by this crate's own tests.
 testkit = []
@@ -42,7 +49,7 @@ uuid = { version = "1", features = ["v4"] }
 [dev-dependencies]
 insta = { version = "1", features = ["json"] }
 proptest = "1"
-ratchet-bench = { path = ".", features = ["testkit"] }
+ratchet-bench = { path = ".", features = ["testkit", "launcher-seam"] }
 tokio = { version = "1", features = ["process", "fs", "time", "rt-multi-thread", "sync", "macros", "io-util"] }
 
 [lints.rust]

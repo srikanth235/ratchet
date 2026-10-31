@@ -15,22 +15,22 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use ratchet_core::RatchetConfig;
 use ratchet_core::ports::{
     ArtifactStore, BenchJob, BenchLaunchPurpose, BenchLaunchSpec, CancellationToken, GitHost,
 };
-use ratchet_core::RatchetConfig;
 use tokio::sync::{OnceCell, watch};
 
 use crate::deps::{
-    DepsKeyInput, DepsManifest, DepsPlan, DepsStrategy, DepsStrategyId, FileHashes, arch_from_instance_type,
-    deps_key, hash_named_files, manifest_key, parse_deps_manifest, pinned_deps_files, resolve_deps_strategy,
-    root_entries,
+    DepsKeyInput, DepsManifest, DepsPlan, DepsStrategy, DepsStrategyId, FileHashes,
+    arch_from_instance_type, deps_key, hash_named_files, manifest_key, parse_deps_manifest,
+    pinned_deps_files, resolve_deps_strategy, root_entries,
 };
 use crate::deps_scripts::{DepsBuildInput, deps_build_script};
 use crate::errors::{BenchError, BenchResult};
 use crate::image::{
-    ImageKeyInput, ImageManifest, ImagePlan, ResolvedImage, image_key, image_manifest_key, image_tag,
-    parse_image_manifest, read_environment, resolve_image_source,
+    ImageKeyInput, ImageManifest, ImagePlan, ResolvedImage, image_key, image_manifest_key,
+    image_tag, parse_image_manifest, read_environment, resolve_image_source,
 };
 use crate::image_scripts::{ContainerOptions, ImageBuildInput, ImageRestore, image_build_script};
 use crate::log::BenchLog;
@@ -155,7 +155,11 @@ impl DepsSnapshots {
     /// `want_deps_opt` is false, i.e. the runner has no setup command) and the repo's container image
     /// (`environment.image`). Both are built from bench.ref on ONE throwaway instance when either is missing; with the image
     /// present the snapshot's fetch runs inside it.
-    pub async fn prepare(&self, a: &EnsureInput<'_>, want_deps_opt: bool) -> BenchResult<PreparedEnvironment> {
+    pub async fn prepare(
+        &self,
+        a: &EnsureInput<'_>,
+        want_deps_opt: bool,
+    ) -> BenchResult<PreparedEnvironment> {
         let log = a.log;
         let config = a.config;
         let image_path = read_environment(config)?.image;
@@ -241,8 +245,16 @@ impl DepsSnapshots {
         if need_image || need_deps {
             let build_key = format!(
                 "{}|{}",
-                if need_image { img_key.clone().unwrap_or_default() } else { String::new() },
-                if need_deps { d_key.clone().unwrap_or_default() } else { String::new() }
+                if need_image {
+                    img_key.clone().unwrap_or_default()
+                } else {
+                    String::new()
+                },
+                if need_deps {
+                    d_key.clone().unwrap_or_default()
+                } else {
+                    String::new()
+                }
             );
             let what = BuildWhat {
                 arch: arch.clone(),
@@ -309,7 +321,12 @@ impl DepsSnapshots {
 
     /// The manifest of the saved image for `key`, if it exists, matches what the controller computed, and its archive is
     /// still in the bucket.
-    async fn lookup_image(&self, expect: &ImageKeyInput, key: &str, log: &BenchLog) -> BenchResult<Option<ImageManifest>> {
+    async fn lookup_image(
+        &self,
+        expect: &ImageKeyInput,
+        key: &str,
+        log: &BenchLog,
+    ) -> BenchResult<Option<ImageManifest>> {
         let Some(store) = &self.o.store else {
             return Err(BenchError::infra(
                 "container images need an artifacts store (stagingStore or artifacts): the bench has no network",
@@ -341,7 +358,11 @@ impl DepsSnapshots {
 
     /// Strategy, lockfile hashes and (with `environment.image`) the resolved container of bench.ref's tree. Cached per
     /// commit (a commit never changes).
-    async fn inspect_base(&self, config: &RatchetConfig, image_path: Option<&str>) -> BenchResult<Arc<BaseInfo>> {
+    async fn inspect_base(
+        &self,
+        config: &RatchetConfig,
+        image_path: Option<&str>,
+    ) -> BenchResult<Arc<BaseInfo>> {
         let git = self.o.git.clone();
         let mode = config.evaluator.deps;
         let bench_ref = config.evaluator.git_ref.clone();
@@ -360,15 +381,18 @@ impl DepsSnapshots {
                 let dir = tempfile::Builder::new()
                     .prefix("ratchet-deps-base-")
                     .tempdir()
-                    .map_err(|e| BenchError::infra(format!("cannot create a scratch directory: {e}")))?;
+                    .map_err(|e| {
+                        BenchError::infra(format!("cannot create a scratch directory: {e}"))
+                    })?;
                 let tree = dir.path().join("base");
-                git.checkout(&commit, &tree)
-                    .await
-                    .map_err(|e| BenchError::infra(format!("cannot check out bench.ref {bench_ref}: {e}")))?;
+                git.checkout(&commit, &tree).await.map_err(|e| {
+                    BenchError::infra(format!("cannot check out bench.ref {bench_ref}: {e}"))
+                })?;
                 let commit2 = commit.clone();
                 let info = tokio::task::spawn_blocking(move || -> BenchResult<BaseInfo> {
                     let resolved = resolve_deps_strategy(mode, root_entries(&tree)?)?;
-                    let lockfiles = hash_named_files(&tree, &pinned_deps_files(&resolved.strategy))?;
+                    let lockfiles =
+                        hash_named_files(&tree, &pinned_deps_files(&resolved.strategy))?;
                     let image = match &image_path {
                         Some(p) => Some(resolve_image_source(&tree, p)?),
                         None => None,
@@ -391,7 +415,12 @@ impl DepsSnapshots {
     }
 
     /// The manifest for `key`, if it exists, matches what the controller computed, and its archive is still in the bucket.
-    async fn lookup(&self, key: &str, expect: &DepsKeyInput, log: &BenchLog) -> BenchResult<Option<DepsManifest>> {
+    async fn lookup(
+        &self,
+        key: &str,
+        expect: &DepsKeyInput,
+        log: &BenchLog,
+    ) -> BenchResult<Option<DepsManifest>> {
         let Some(store) = &self.o.store else {
             return Err(BenchError::infra(
                 "dependency snapshots need an artifacts store (stagingStore or artifacts): the bench has no network",
@@ -422,7 +451,12 @@ impl DepsSnapshots {
         Ok(Some(manifest))
     }
 
-    async fn build_once<F, Fut>(&self, key: &str, cancel: Option<&CancellationToken>, run: F) -> BenchResult<()>
+    async fn build_once<F, Fut>(
+        &self,
+        key: &str,
+        cancel: Option<&CancellationToken>,
+        run: F,
+    ) -> BenchResult<()>
     where
         F: FnOnce() -> Fut,
         Fut: std::future::Future<Output = BenchResult<()>>,
@@ -441,7 +475,8 @@ impl DepsSnapshots {
             match result {
                 Ok(()) => return Ok(()),
                 // The job that was building was cancelled: that is not this job's failure, build it ourselves.
-                Err(BenchError::Aborted) if !cancel.is_some_and(CancellationToken::is_cancelled) => {}
+                Err(BenchError::Aborted)
+                    if !cancel.is_some_and(CancellationToken::is_cancelled) => {}
                 Err(e) => return Err(e),
             }
         }
@@ -470,7 +505,11 @@ impl DepsSnapshots {
             .bench_instance_type
             .clone()
             .unwrap_or_else(|| config.evaluator.hardware.clone());
-        let deps_type = self.o.instance_type.clone().unwrap_or_else(|| bench_type.clone());
+        let deps_type = self
+            .o
+            .instance_type
+            .clone()
+            .unwrap_or_else(|| bench_type.clone());
         if arch_from_instance_type(&deps_type) != arch_from_instance_type(&bench_type) {
             return Err(BenchError::infra(format!(
                 "the dependency snapshot job runs on {deps_type} but the bench on {bench_type}: different architectures would fetch different native packages and images"
@@ -483,7 +522,9 @@ impl DepsSnapshots {
             f(BenchProgress::Deps);
         }
         let what = [
-            w.image.as_ref().map(|(k, _)| format!("container image {k}")),
+            w.image
+                .as_ref()
+                .map(|(k, _)| format!("container image {k}")),
             w.deps.as_ref().map(|k| format!("dependency snapshot {k}")),
         ]
         .into_iter()
@@ -517,7 +558,11 @@ impl DepsSnapshots {
                 purpose: BenchLaunchPurpose::Deps,
             })
             .await
-            .map_err(|e| BenchError::infra(format!("cannot launch the dependency snapshot instance: {e}")))?;
+            .map_err(|e| {
+                BenchError::infra(format!(
+                    "cannot launch the dependency snapshot instance: {e}"
+                ))
+            })?;
         log.line(&format!(
             "dependency snapshot instance {} ({deps_type}) launched",
             instance.id
@@ -554,7 +599,13 @@ impl DepsSnapshots {
                 .optimization_id
                 .as_str()
                 .chars()
-                .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '_' })
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
                 .collect();
             let id = uuid::Uuid::new_v4().to_string();
             format!("{}/{kind}-{opt}-{}", self.o.work_root, &id[..8])
@@ -580,13 +631,19 @@ impl DepsSnapshots {
                     image_ms + 10 * 60_000,
                 )
                 .await?;
-            let done = parse_sentinels(&res.stdout).into_iter().find(|x| x.kind == "image");
+            let done = parse_sentinels(&res.stdout)
+                .into_iter()
+                .find(|x| x.kind == "image");
             let Some(done) = done.filter(|_| res.exit_code == 0) else {
                 return Err(BenchError::infra(format!(
                     "building the container image from {} failed (exit {}): {}. The image job runs in the agent subnet: the registries the Dockerfile pulls from must be reachable through the egress proxy / DNS allow-list (docs/real-env/aws.md)",
                     bi.spec.path,
                     res.exit_code,
-                    tail600(if res.stderr.is_empty() { &res.stdout } else { &res.stderr })
+                    tail600(if res.stderr.is_empty() {
+                        &res.stdout
+                    } else {
+                        &res.stderr
+                    })
                 )));
             };
             log.line(&format!(
@@ -625,7 +682,10 @@ impl DepsSnapshots {
                         base: staged.clone(),
                         key: dkey.clone(),
                         lockfiles: base.lockfiles.clone(),
-                        image: w.image_key.clone().unwrap_or_else(|| self.o.image_ref.clone()),
+                        image: w
+                            .image_key
+                            .clone()
+                            .unwrap_or_else(|| self.o.image_ref.clone()),
                         arch: w.arch.clone(),
                         bucket: bucket.to_owned(),
                         timeout_ms: self.o.deps_ms,
@@ -635,13 +695,19 @@ impl DepsSnapshots {
                     self.o.deps_ms + 5 * 60_000,
                 )
                 .await?;
-            let done = parse_sentinels(&res.stdout).into_iter().find(|x| x.kind == "deps");
+            let done = parse_sentinels(&res.stdout)
+                .into_iter()
+                .find(|x| x.kind == "deps");
             let Some(done) = done.filter(|_| res.exit_code == 0) else {
                 return Err(BenchError::infra(format!(
                     "building the {} dependency snapshot failed (exit {}): {}. The snapshot job runs in the agent subnet and needs the package registry through the egress proxy / DNS allow-list (docs/real-env/aws.md)",
                     base.strategy.id,
                     res.exit_code,
-                    tail600(if res.stderr.is_empty() { &res.stdout } else { &res.stderr })
+                    tail600(if res.stderr.is_empty() {
+                        &res.stdout
+                    } else {
+                        &res.stderr
+                    })
                 )));
             };
             log.line(&format!(

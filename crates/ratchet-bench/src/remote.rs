@@ -18,8 +18,9 @@ use async_trait::async_trait;
 use base64::Engine as _;
 use indexmap::IndexMap;
 use ratchet_core::ports::{
-    ArtifactStore, BaselineMetrics, BenchJob, BenchJobPhase, BenchLaunchPurpose, BenchLaunchSpec, BenchOutcome,
-    BenchRunner, CancellationToken, Clock, CloudCompute, GitHost, InstanceInfo, PortResult,
+    ArtifactStore, BaselineMetrics, BenchJob, BenchJobPhase, BenchLaunchPurpose, BenchLaunchSpec,
+    BenchOutcome, BenchRunner, CancellationToken, Clock, CloudCompute, GitHost, InstanceInfo,
+    PortResult,
 };
 use ratchet_core::{ProtectedConfigInput, RatchetConfig, effective_protected};
 
@@ -28,8 +29,8 @@ use crate::deps::{
 };
 use crate::errors::{BenchError, BenchResult};
 use crate::image::{
-    ImagePlan, container_setup_hint, environment_change_guardrail, environment_changes, environment_files_of,
-    read_environment,
+    ImagePlan, container_setup_hint, environment_change_guardrail, environment_changes,
+    environment_files_of, read_environment,
 };
 use crate::image_scripts::{ContainerOptions, ContainerRuntime, ImageRestore};
 use crate::log::BenchLog;
@@ -39,8 +40,8 @@ use crate::pipeline::{
 };
 use crate::remote_deps::{DepsSnapshotOptions, DepsSnapshots, EnsureInput, PreparedEnvironment};
 use crate::remote_scripts::{
-    CheckoutScriptInput, DepsRestore, HOLDOUT_FETCH_EXIT, Isolation, Layout, StepScriptInput, checkout_script,
-    deps_paths, parse_sentinels, step_script,
+    CheckoutScriptInput, DepsRestore, HOLDOUT_FETCH_EXIT, Isolation, Layout, StepScriptInput,
+    checkout_script, deps_paths, parse_sentinels, step_script,
 };
 use crate::remote_session::{InstanceSession, SessionOptions, WarningSink, tail600};
 use crate::stage::{StageBase, StageInput, StagedSource, stage_source};
@@ -177,7 +178,9 @@ impl BenchRunner for RemoteBenchRunner {
         baseline: Option<&BaselineMetrics>,
         cancel: Option<&CancellationToken>,
     ) -> PortResult<BenchOutcome> {
-        Ok(self.run_with_progress(job, config, baseline, cancel, None).await?)
+        Ok(self
+            .run_with_progress(job, config, baseline, cancel, None)
+            .await?)
     }
 }
 
@@ -291,7 +294,13 @@ impl RemoteExecutor {
             .optimization_id
             .as_str()
             .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '_' })
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect();
         let id = uuid::Uuid::new_v4().to_string();
         let layout = Layout::new(format!("{}/{opt}-{}", o.work_root(), &id[..8]));
@@ -369,7 +378,11 @@ impl RemoteExecutor {
     }
 
     fn runtime(&self, plan: &ImagePlan) -> ContainerRuntime {
-        self.o.container.clone().unwrap_or_default().runtime(plan.tag.clone())
+        self.o
+            .container
+            .clone()
+            .unwrap_or_default()
+            .runtime(plan.tag.clone())
     }
 
     /// The saved container image the checkout loads (offline) before setup.
@@ -396,7 +409,10 @@ impl PipelineExecutor for RemoteExecutor {
         // just archived, so a candidate that touches the lockfile never gets as far as running anything.
         if let Some(deps) = &self.deps {
             let empty = crate::deps::FileHashes::new();
-            let base = lockfile_changes(&deps.lockfiles, staged.bench.files.as_ref().unwrap_or(&empty));
+            let base = lockfile_changes(
+                &deps.lockfiles,
+                staged.bench.files.as_ref().unwrap_or(&empty),
+            );
             if !base.is_empty() {
                 return Err(BenchError::infra(format!(
                     "bench.ref {bench_ref} moved while the job was starting: {} no longer matches the dependency snapshot {}",
@@ -404,7 +420,10 @@ impl PipelineExecutor for RemoteExecutor {
                     deps.key
                 )));
             }
-            let changed = lockfile_changes(&deps.lockfiles, staged.code.files.as_ref().unwrap_or(&empty));
+            let changed = lockfile_changes(
+                &deps.lockfiles,
+                staged.code.files.as_ref().unwrap_or(&empty),
+            );
             if !changed.is_empty() {
                 self.log.line(&format!(
                     "!!! dependency change: {} differs from bench.ref {bench_ref}",
@@ -420,7 +439,8 @@ impl PipelineExecutor for RemoteExecutor {
         // devcontainer or a file it copies in is blocked, not built with network access.
         if let Some(image) = &self.image {
             let empty = crate::deps::FileHashes::new();
-            let moved = environment_changes(&image.files, staged.bench.env.as_ref().unwrap_or(&empty));
+            let moved =
+                environment_changes(&image.files, staged.bench.env.as_ref().unwrap_or(&empty));
             if !moved.is_empty() {
                 return Err(BenchError::infra(format!(
                     "bench.ref {bench_ref} moved while the job was starting: {} no longer matches the container image {}",
@@ -428,7 +448,8 @@ impl PipelineExecutor for RemoteExecutor {
                     image.key
                 )));
             }
-            let changed = environment_changes(&image.files, staged.code.env.as_ref().unwrap_or(&empty));
+            let changed =
+                environment_changes(&image.files, staged.code.env.as_ref().unwrap_or(&empty));
             if !changed.is_empty() {
                 self.log.line(&format!(
                     "!!! environment change: {} differs from bench.ref {bench_ref}",
@@ -484,18 +505,26 @@ impl PipelineExecutor for RemoteExecutor {
             return Err(BenchError::infra(format!(
                 "checkout on the bench instance failed (exit {}): {}",
                 res.exit_code,
-                tail600(if res.stderr.is_empty() { &res.stdout } else { &res.stderr })
+                tail600(if res.stderr.is_empty() {
+                    &res.stdout
+                } else {
+                    &res.stderr
+                })
             )));
         };
         let num = |k: &str| s.data.get(k).and_then(serde_json::Value::as_f64);
         let matched = num("matched").or_else(|| num("copied")).unwrap_or(f64::NAN);
-        if !(matched > 0.0) {
+        if !matches!(matched.partial_cmp(&0.0), Some(std::cmp::Ordering::Greater)) {
             return Err(BenchError::infra(format!(
                 "bench.ref {bench_ref} contains no files matching the protected globs [{}]; refusing to benchmark with an unprotected bench",
                 protected_globs.join(", ")
             )));
         }
-        let shown = |k: &str| s.data.get(k).map_or_else(|| "undefined".to_owned(), json_text);
+        let shown = |k: &str| {
+            s.data
+                .get(k)
+                .map_or_else(|| "undefined".to_owned(), json_text)
+        };
         self.log.line(&format!(
             "overlay: {} protected file(s) from {bench_ref}, {} candidate-only protected file(s) removed",
             shown("copied"),
@@ -570,13 +599,20 @@ impl PipelineExecutor for RemoteExecutor {
         }
         input.candidate_launcher = self.o.candidate_launcher.clone();
         let script = step_script(&input)?;
-        let res = self.session.call(&spec.name, &script, spec.timeout_ms).await?;
+        let res = self
+            .session
+            .call(&spec.name, &script, spec.timeout_ms)
+            .await?;
         let sentinels = parse_sentinels(&res.stdout);
         if spec.trace.is_some() && HOLDOUT_FETCH_EXIT.contains(&res.exit_code) {
             return Err(BenchError::infra(format!(
                 "fetching the holdout on the bench instance failed (exit {}): {}",
                 res.exit_code,
-                tail600(if res.stderr.is_empty() { &res.stdout } else { &res.stderr })
+                tail600(if res.stderr.is_empty() {
+                    &res.stdout
+                } else {
+                    &res.stderr
+                })
             )));
         }
         if let Some(held) = sentinels.iter().find(|x| x.kind == "holdout") {
@@ -586,7 +622,11 @@ impl PipelineExecutor for RemoteExecutor {
             ));
         }
         if let Some(t) = sentinels.iter().find(|s| s.kind == "tampered") {
-            let b64 = t.data.get("paths_b64").and_then(|v| v.as_str()).unwrap_or("");
+            let b64 = t
+                .data
+                .get("paths_b64")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let decoded = base64::engine::general_purpose::STANDARD
                 .decode(b64)
                 .map(|b| String::from_utf8_lossy(&b).into_owned())
@@ -619,7 +659,11 @@ impl PipelineExecutor for RemoteExecutor {
                 error: Some(format!(
                     "no result from the bench instance (script exit {}): {}",
                     res.exit_code,
-                    tail600(if res.stderr.is_empty() { &res.stdout } else { &res.stderr })
+                    tail600(if res.stderr.is_empty() {
+                        &res.stdout
+                    } else {
+                        &res.stderr
+                    })
                 )),
                 ..StepOutcome::default()
             });
@@ -651,7 +695,9 @@ impl PipelineExecutor for RemoteExecutor {
             "[exit {}{} after {}ms]",
             exit_code.map_or_else(|| "null".to_owned(), |c| c.to_string()),
             if timed_out { ", timed out" } else { "" },
-            r.data.get("ms").map_or_else(|| "undefined".to_owned(), json_text)
+            r.data
+                .get("ms")
+                .map_or_else(|| "undefined".to_owned(), json_text)
         ));
         Ok(StepOutcome {
             exit_code,

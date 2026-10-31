@@ -156,7 +156,10 @@ pub fn apply_overlay<S: AsRef<str>>(
     let mut removed = Vec::new();
     if prune {
         let in_bench: BTreeSet<&String> = copied.iter().collect();
-        for p in list_files(code_dir)?.into_iter().filter(|p| is_protected(p, globs)) {
+        for p in list_files(code_dir)?
+            .into_iter()
+            .filter(|p| is_protected(p, globs))
+        {
             let path = code_dir.join(&p);
             remove_any(&path).map_err(|e| io_err("cannot remove", &path, e))?;
             if !in_bench.contains(&p) {

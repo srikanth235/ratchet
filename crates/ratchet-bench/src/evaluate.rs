@@ -7,8 +7,8 @@ use ratchet_core::config::Objective;
 use ratchet_core::ports::BenchOutcome;
 use ratchet_core::ratchet::RatchetError;
 use ratchet_core::{
-    BenchPhase, BenchStats, CandidateVerdict, GuardrailResult, ProtectedViolation, RatchetInput, RatchetOutcome, Verdict,
-    evaluate_ratchet, summarize,
+    BenchPhase, BenchStats, CandidateVerdict, GuardrailResult, ProtectedViolation, RatchetInput,
+    RatchetOutcome, Verdict, evaluate_ratchet, summarize,
 };
 
 use crate::flatten::median_metrics;
@@ -108,7 +108,9 @@ pub struct CandidateEvaluation {
 /// Compose core's `evaluate_ratchet` with bench outcomes. Any failed guardrail (from either run) or protected-path violation
 /// blocks. A bench that produced no samples (it never ran because a command guardrail failed, or a run crashed) is blocked
 /// by its failed guardrail without calling the rule (which needs at least one sample).
-pub fn evaluate_candidate(input: &EvaluateCandidateInput<'_>) -> Result<CandidateEvaluation, RatchetError> {
+pub fn evaluate_candidate(
+    input: &EvaluateCandidateInput<'_>,
+) -> Result<CandidateEvaluation, RatchetError> {
     let (bench, confirm) = (input.bench, input.confirm);
     let min_gain = input
         .min_gain
@@ -153,9 +155,7 @@ pub fn evaluate_candidate(input: &EvaluateCandidateInput<'_>) -> Result<Candidat
             reasons,
             candidate_value: f64::NAN,
             improvement: f64::NAN,
-            required_gain: input
-                .noise_floor
-                .max(min_gain * input.current_best.abs()),
+            required_gain: input.noise_floor.max(min_gain * input.current_best.abs()),
             confirm_improvement: None,
         }
     } else {
@@ -165,7 +165,9 @@ pub fn evaluate_candidate(input: &EvaluateCandidateInput<'_>) -> Result<Candidat
             noise_floor: input.noise_floor,
             current_best: input.current_best,
             candidate: bench.samples.clone(),
-            confirm: confirm.filter(|c| !c.samples.is_empty()).map(|c| c.samples.clone()),
+            confirm: confirm
+                .filter(|c| !c.samples.is_empty())
+                .map(|c| c.samples.clone()),
             confirm_best: input.confirm_best,
             guardrails: guardrails.clone(),
             protected_violations: input.protected_violations.to_vec(),

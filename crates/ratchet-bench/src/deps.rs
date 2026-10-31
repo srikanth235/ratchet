@@ -538,8 +538,14 @@ pub fn parse_deps_manifest(text: &str, expect: &DepsKeyInput, key: &str) -> Mani
     if !same_hashes(m.get("lockfiles"), &expect.lockfiles) {
         return bad("has different lockfile hashes");
     }
-    let node = m.get("node").and_then(Value::as_str).filter(|s| is_version(s));
-    let pm = m.get("pm").and_then(Value::as_str).filter(|s| is_version(s));
+    let node = m
+        .get("node")
+        .and_then(Value::as_str)
+        .filter(|s| is_version(s));
+    let pm = m
+        .get("pm")
+        .and_then(Value::as_str)
+        .filter(|s| is_version(s));
     let (Some(node), Some(pm)) = (node, pm) else {
         return bad("has no valid tool versions");
     };
@@ -548,7 +554,11 @@ pub fn parse_deps_manifest(text: &str, expect: &DepsKeyInput, key: &str) -> Mani
         Some("gzip") => Compression::Gzip,
         _ => return bad("has an unknown compression"),
     };
-    let Some(sha) = m.get("sha256").and_then(Value::as_str).filter(|s| is_sha256_hex(s)) else {
+    let Some(sha) = m
+        .get("sha256")
+        .and_then(Value::as_str)
+        .filter(|s| is_sha256_hex(s))
+    else {
         return bad("has no valid sha256");
     };
     let ext = match compression {
@@ -578,7 +588,10 @@ pub fn parse_deps_manifest(text: &str, expect: &DepsKeyInput, key: &str) -> Mani
         archive: want,
         sha256: sha.to_owned(),
         bytes: bytes as u64,
-        created_at: m.get("createdAt").and_then(Value::as_f64).map_or(0, |n| n as i64),
+        created_at: m
+            .get("createdAt")
+            .and_then(Value::as_f64)
+            .map_or(0, |n| n as i64),
     })
 }
 

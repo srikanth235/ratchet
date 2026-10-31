@@ -3,14 +3,16 @@
 use std::fs;
 use std::os::unix::fs::symlink;
 
+use ratchet_bench::BenchError;
 use ratchet_bench::deps::{
-    self, Compression, DepsKeyInput, DepsManifest, DepsStrategyId, FileHashes, NO_DEPS, NPM, PNPM,
-    arch_from_instance_type, dependency_change_guardrail, deps_key, hash_named_files, lockfile_changes, manifest_key,
-    parse_deps_manifest, resolve_deps_strategy, root_entries,
+    Compression, DepsKeyInput, DepsManifest, DepsStrategyId, FileHashes, NO_DEPS, NPM, PNPM,
+    arch_from_instance_type, dependency_change_guardrail, deps_key, hash_named_files,
+    lockfile_changes, manifest_key, parse_deps_manifest, resolve_deps_strategy, root_entries,
 };
 use ratchet_bench::deps_scripts::{DepsBuildInput, deps_build_script};
-use ratchet_bench::remote_scripts::{CheckoutScriptInput, DepsRestore, Isolation, Layout, StagedArchive, checkout_script};
-use ratchet_bench::BenchError;
+use ratchet_bench::remote_scripts::{
+    CheckoutScriptInput, DepsRestore, Isolation, Layout, StagedArchive, checkout_script,
+};
 use ratchet_core::DepsMode as DepsMode_;
 use serde_json::json;
 
@@ -23,7 +25,10 @@ fn archive(name: &str) -> StagedArchive {
 }
 
 fn h(pairs: &[(&str, &str)]) -> FileHashes {
-    pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect()
+    pairs
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .collect()
 }
 
 fn infra(e: BenchError) -> String {
@@ -35,7 +40,11 @@ mod resolve_deps_strategy_tests {
 
     #[test]
     fn auto_pnpm_wins_then_npm_otherwise_none() {
-        let auto = |files: &[&str]| resolve_deps_strategy(DepsMode_::Auto, files.iter().copied()).expect("auto").strategy;
+        let auto = |files: &[&str]| {
+            resolve_deps_strategy(DepsMode_::Auto, files.iter().copied())
+                .expect("auto")
+                .strategy
+        };
         assert_eq!(auto(&["package.json", "pnpm-lock.yaml"]), PNPM);
         assert_eq!(auto(&["pnpm-lock.yaml", "package-lock.json"]), PNPM);
         assert_eq!(auto(&["package.json", "package-lock.json"]), NPM);
@@ -49,13 +58,18 @@ mod resolve_deps_strategy_tests {
         let r = resolve_deps_strategy(DepsMode_::Auto, ["yarn.lock"]).expect("auto");
         assert_eq!(r.strategy, NO_DEPS);
         let note = r.note.expect("a note");
-        assert!(note.contains("yarn.lock") && note.contains("pnpm and npm only"), "{note}");
+        assert!(
+            note.contains("yarn.lock") && note.contains("pnpm and npm only"),
+            "{note}"
+        );
     }
 
     #[test]
     fn none_always_means_none_even_with_a_lockfile() {
         assert_eq!(
-            resolve_deps_strategy(DepsMode_::None, ["pnpm-lock.yaml"]).expect("none").strategy,
+            resolve_deps_strategy(DepsMode_::None, ["pnpm-lock.yaml"])
+                .expect("none")
+                .strategy,
             NO_DEPS
         );
     }
@@ -63,7 +77,9 @@ mod resolve_deps_strategy_tests {
     #[test]
     fn an_explicit_package_manager_demands_its_lockfile() {
         assert_eq!(
-            resolve_deps_strategy(DepsMode_::Npm, ["package-lock.json"]).expect("npm").strategy,
+            resolve_deps_strategy(DepsMode_::Npm, ["package-lock.json"])
+                .expect("npm")
+                .strategy,
             NPM
         );
         let e = resolve_deps_strategy(DepsMode_::Pnpm, ["package-lock.json"]).expect_err("refused");
@@ -85,7 +101,9 @@ mod strategies {
     use super::*;
 
     fn get<'a>(env: &'a [(String, String)], k: &str) -> Option<&'a str> {
-        env.iter().find(|(key, _)| key == k).map(|(_, v)| v.as_str())
+        env.iter()
+            .find(|(key, _)| key == k)
+            .map(|(_, v)| v.as_str())
     }
 
     #[test]
@@ -95,7 +113,10 @@ mod strategies {
         assert_eq!(get(&env, "npm_config_store_dir"), Some("/w/store"));
         assert_eq!(get(&env, "PNPM_STORE_DIR"), Some("/w/store"));
         assert_eq!(get(&env, "npm_config_ignore_scripts"), Some("true"));
-        assert_eq!(get(&env, "npm_config_manage_package_manager_versions"), Some("false"));
+        assert_eq!(
+            get(&env, "npm_config_manage_package_manager_versions"),
+            Some("false")
+        );
     }
 
     #[test]
@@ -104,7 +125,10 @@ mod strategies {
         assert_eq!(get(&env, "npm_config_store_dir"), Some("/w/deps/store"));
         assert_eq!(get(&env, "PNPM_STORE_DIR"), Some("/w/deps/store"));
         assert_eq!(get(&env, "npm_config_offline"), Some("true"));
-        assert_eq!(get(&env, "npm_config_package_import_method"), Some("clone-or-copy"));
+        assert_eq!(
+            get(&env, "npm_config_package_import_method"),
+            Some("clone-or-copy")
+        );
         // the candidate's own install scripts do run in setup
         assert_eq!(get(&env, "npm_config_ignore_scripts"), None);
     }
@@ -118,7 +142,10 @@ mod strategies {
     #[test]
     fn npm_installs_with_ignore_scripts_and_keeps_only_the_cache() {
         assert_eq!(NPM.fetch, "npm ci --ignore-scripts --no-audit --no-fund");
-        assert_eq!(get(&NPM.fetch_env("/w/store"), "npm_config_cache"), Some("/w/store"));
+        assert_eq!(
+            get(&NPM.fetch_env("/w/store"), "npm_config_cache"),
+            Some("/w/store")
+        );
         let env = NPM.setup_env("/w/deps/store", "/s");
         assert_eq!(get(&env, "npm_config_cache"), Some("/w/deps/store"));
         assert_eq!(get(&env, "npm_config_offline"), Some("true"));
@@ -133,10 +160,16 @@ mod hashing_and_comparing_lockfiles {
     fn hashes_the_files_that_exist_by_content() {
         let a = tempfile::tempdir().expect("tmp");
         fs::write(a.path().join("pnpm-lock.yaml"), "x").expect("write");
-        let hs = hash_named_files(a.path(), &["pnpm-lock.yaml", "package-lock.json"]).expect("hash");
+        let hs =
+            hash_named_files(a.path(), &["pnpm-lock.yaml", "package-lock.json"]).expect("hash");
         assert_eq!(hs.keys().collect::<Vec<_>>(), ["pnpm-lock.yaml"]);
         let v = &hs["pnpm-lock.yaml"];
-        assert!(v.len() == 64 && v.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)), "{v}");
+        assert!(
+            v.len() == 64
+                && v.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+            "{v}"
+        );
     }
 
     #[test]
@@ -165,7 +198,10 @@ mod hashing_and_comparing_lockfiles {
     #[test]
     fn lockfile_changes_counts_changed_added_and_removed_and_sorts() {
         assert!(lockfile_changes(&h(&[("a", "1")]), &h(&[("a", "1")])).is_empty());
-        assert_eq!(lockfile_changes(&h(&[("a", "1")]), &h(&[("a", "2")])), ["a"]);
+        assert_eq!(
+            lockfile_changes(&h(&[("a", "1")]), &h(&[("a", "2")])),
+            ["a"]
+        );
         assert_eq!(lockfile_changes(&h(&[("a", "1")]), &h(&[])), ["a"]);
         assert_eq!(lockfile_changes(&h(&[]), &h(&[("b", "1")])), ["b"]);
         assert_eq!(
@@ -177,7 +213,10 @@ mod hashing_and_comparing_lockfiles {
     #[test]
     fn the_blocking_reason_says_why_and_how_to_fix_it() {
         let g = dependency_change_guardrail(&["pnpm-lock.yaml".into()], "ratchet/bench");
-        assert_eq!((g.name.as_str(), g.passed), ("dependencies unchanged", false));
+        assert_eq!(
+            (g.name.as_str(), g.passed),
+            ("dependencies unchanged", false)
+        );
         let d = g.detail.expect("detail");
         assert!(d.contains("dependency changes are not allowed in v0: the bench has no network"));
         assert!(d.contains("pnpm-lock.yaml differs from ratchet/bench"));
@@ -199,7 +238,12 @@ mod snapshot_key {
     #[test]
     fn is_strategy_dash_40_hex_and_stable() {
         let k = deps_key(&base());
-        assert!(k.starts_with("pnpm-") && k.len() == 45 && k[5..].bytes().all(|b| b.is_ascii_hexdigit()), "{k}");
+        assert!(
+            k.starts_with("pnpm-")
+                && k.len() == 45
+                && k[5..].bytes().all(|b| b.is_ascii_hexdigit()),
+            "{k}"
+        );
         assert_eq!(k, deps_key(&base()));
         assert_eq!(manifest_key(&k), format!("bench-deps/{k}.json"));
     }
@@ -227,29 +271,41 @@ mod snapshot_key {
 
     #[test]
     fn does_not_depend_on_the_order_lockfiles_were_listed_in() {
-        let l1 = h(&[("package-lock.json", &"a".repeat(64)), ("npm-shrinkwrap.json", &"b".repeat(64))]);
-        let l2 = h(&[("npm-shrinkwrap.json", &"b".repeat(64)), ("package-lock.json", &"a".repeat(64))]);
-        let mk = |lockfiles| DepsKeyInput { strategy: NPM, lockfiles, image: "ami-1".into(), arch: "x86_64".into() };
+        let l1 = h(&[
+            ("package-lock.json", &"a".repeat(64)),
+            ("npm-shrinkwrap.json", &"b".repeat(64)),
+        ]);
+        let l2 = h(&[
+            ("npm-shrinkwrap.json", &"b".repeat(64)),
+            ("package-lock.json", &"a".repeat(64)),
+        ]);
+        let mk = |lockfiles| DepsKeyInput {
+            strategy: NPM,
+            lockfiles,
+            image: "ami-1".into(),
+            arch: "x86_64".into(),
+        };
         assert_eq!(deps_key(&mk(l1)), deps_key(&mk(l2)));
     }
 
-    #[test]
-    fn instance_types_map_to_architectures() {
-        for (t, arch) in [
-            ("c7i.2xlarge", "x86_64"),
-            ("m7i.large", "x86_64"),
-            ("t3.medium", "x86_64"),
-            ("g5.xlarge", "x86_64"),
-            ("c7g.large", "arm64"),
-            ("m6gd.xlarge", "arm64"),
-            ("t4g.nano", "arm64"),
-            ("im4gn.large", "arm64"),
-            ("is4gen.medium", "arm64"),
-            ("hpc7g.4xlarge", "arm64"),
-            ("a1.large", "arm64"),
-        ] {
-            assert_eq!(arch_from_instance_type(t), arch, "{t}");
-        }
+    macro_rules! arch_is {
+        ($($name:ident: $t:literal => $arch:literal;)*) => {
+            $( #[test] fn $name() { assert_eq!(arch_from_instance_type($t), $arch); } )*
+        };
+    }
+
+    arch_is! {
+        arch_of_c7i_2xlarge: "c7i.2xlarge" => "x86_64";
+        arch_of_m7i_large: "m7i.large" => "x86_64";
+        arch_of_t3_medium: "t3.medium" => "x86_64";
+        arch_of_g5_xlarge: "g5.xlarge" => "x86_64";
+        arch_of_c7g_large: "c7g.large" => "arm64";
+        arch_of_m6gd_xlarge: "m6gd.xlarge" => "arm64";
+        arch_of_t4g_nano: "t4g.nano" => "arm64";
+        arch_of_im4gn_large: "im4gn.large" => "arm64";
+        arch_of_is4gen_medium: "is4gen.medium" => "arm64";
+        arch_of_hpc7g_4xlarge: "hpc7g.4xlarge" => "arm64";
+        arch_of_a1_large: "a1.large" => "arm64";
     }
 }
 
@@ -265,7 +321,12 @@ mod manifest_validation {
 
     fn fixture() -> Fixture {
         let lockfiles = h(&[("pnpm-lock.yaml", &"a".repeat(64))]);
-        let input = DepsKeyInput { strategy: PNPM, lockfiles: lockfiles.clone(), image: "ami-1".into(), arch: "x86_64".into() };
+        let input = DepsKeyInput {
+            strategy: PNPM,
+            lockfiles: lockfiles.clone(),
+            image: "ami-1".into(),
+            arch: "x86_64".into(),
+        };
         let key = deps_key(&input);
         let digest = "d".repeat(64);
         let good = json!({
@@ -273,7 +334,12 @@ mod manifest_validation {
             "node": "v22.22.0", "pm": "10.28.0", "compression": "zstd", "archive": format!("bench-deps/{key}/{digest}.tar.zst"),
             "sha256": digest, "bytes": 1234, "createdAt": 1,
         });
-        Fixture { input, key, good, digest }
+        Fixture {
+            input,
+            key,
+            good,
+            digest,
+        }
     }
 
     fn check(f: &Fixture, patch: serde_json::Value) -> Result<DepsManifest, String> {
@@ -311,33 +377,46 @@ mod manifest_validation {
                 created_at: 1,
             }
         );
-        let gz = check(&f, json!({"compression": "gzip", "archive": format!("bench-deps/{}/{}.tgz", f.key, f.digest)}));
+        let gz = check(
+            &f,
+            json!({"compression": "gzip", "archive": format!("bench-deps/{}/{}.tgz", f.key, f.digest)}),
+        );
         assert!(gz.is_ok());
     }
 
+    macro_rules! rejects {
+        ($($name:ident: |$f:ident| $patch:expr => $want:literal;)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let $f = fixture();
+                    let e = check(&$f, $patch).expect_err(stringify!($name));
+                    assert!(e.contains($want), "{e}");
+                }
+            )*
+        };
+    }
+
+    rejects! {
+        rejects_another_key: |f| json!({"key": format!("pnpm-{}", "0".repeat(40))}) => "another key";
+        rejects_other_lockfile_hashes: |f| json!({"lockfiles": {"pnpm-lock.yaml": "b".repeat(64)}}) => "different lockfile hashes";
+        rejects_an_extra_lockfile: |f| json!({"lockfiles": {"pnpm-lock.yaml": "a".repeat(64), "x.yaml": "c".repeat(64)}}) => "different lockfile hashes";
+        rejects_another_image: |f| json!({"image": "ami-2"}) => "another image";
+        rejects_another_arch: |f| json!({"arch": "arm64"}) => "another image or architecture";
+        rejects_another_strategy_revision: |f| json!({"rev": PNPM.rev + 1}) => "strategy revision";
+        rejects_an_archive_outside_its_prefix: |f| json!({"archive": format!("bench-deps/other/{}.tar.zst", f.digest)}) => "outside its own prefix";
+        rejects_a_traversing_archive: |f| json!({"archive": format!("bench-deps/{}/../../x/{}.tar.zst", f.key, f.digest)}) => "outside its own prefix";
+        rejects_an_archive_of_another_digest: |f| json!({"archive": format!("bench-deps/{}/{}.tar.zst", f.key, "e".repeat(64))}) => "outside its own prefix";
+        rejects_an_extension_that_does_not_match_the_compression: |f| json!({"archive": format!("bench-deps/{}/{}.tgz", f.key, f.digest)}) => "outside its own prefix";
+        rejects_a_bad_digest: |f| json!({"sha256": "xyz"}) => "sha256";
+        rejects_a_shell_looking_node_version: |f| json!({"node": "v22; rm -rf /"}) => "tool versions";
+        rejects_an_unknown_compression: |f| json!({"compression": "xz"}) => "compression";
+        rejects_a_negative_size: |f| json!({"bytes": -1}) => "size";
+    }
+
     #[test]
-    fn rejects_everything_that_does_not_match_what_the_controller_computed() {
+    fn rejects_text_that_is_not_json() {
         let f = fixture();
-        let cases: Vec<(&str, serde_json::Value, &str)> = vec![
-            ("another key", json!({"key": format!("pnpm-{}", "0".repeat(40))}), "another key"),
-            ("other lockfile hashes", json!({"lockfiles": {"pnpm-lock.yaml": "b".repeat(64)}}), "different lockfile hashes"),
-            ("an extra lockfile", json!({"lockfiles": {"pnpm-lock.yaml": "a".repeat(64), "x.yaml": "c".repeat(64)}}), "different lockfile hashes"),
-            ("another image", json!({"image": "ami-2"}), "another image"),
-            ("another arch", json!({"arch": "arm64"}), "another image or architecture"),
-            ("another strategy revision", json!({"rev": PNPM.rev + 1}), "strategy revision"),
-            ("an archive outside its prefix", json!({"archive": format!("bench-deps/other/{}.tar.zst", f.digest)}), "outside its own prefix"),
-            ("a traversing archive", json!({"archive": format!("bench-deps/{}/../../x/{}.tar.zst", f.key, f.digest)}), "outside its own prefix"),
-            ("an archive of another digest", json!({"archive": format!("bench-deps/{}/{}.tar.zst", f.key, "e".repeat(64))}), "outside its own prefix"),
-            ("an extension that does not match the compression", json!({"archive": format!("bench-deps/{}/{}.tgz", f.key, f.digest)}), "outside its own prefix"),
-            ("a bad digest", json!({"sha256": "xyz"}), "sha256"),
-            ("a shell-looking node version", json!({"node": "v22; rm -rf /"}), "tool versions"),
-            ("an unknown compression", json!({"compression": "xz"}), "compression"),
-            ("a negative size", json!({"bytes": -1}), "size"),
-        ];
-        for (name, patch, want) in cases {
-            let e = check(&f, patch).expect_err(name);
-            assert!(e.contains(want), "{name}: {e}");
-        }
         let e = parse_deps_manifest("nope", &f.input, &f.key).expect_err("not json");
         assert!(e.contains("not JSON"), "{e}");
     }
@@ -377,11 +456,22 @@ mod the_dependency_snapshot_job_script {
         let s = script();
         let downloads = s
             .lines()
-            .filter(|l| l.starts_with("aws s3 cp --only-show-errors 's3://") && l.contains("\"$W/in/base.tgz\""))
+            .filter(|l| {
+                l.starts_with("aws s3 cp --only-show-errors 's3://")
+                    && l.contains("\"$W/in/base.tgz\"")
+            })
             .count();
         assert_eq!(downloads, 1);
         assert!(s.contains("s3://ratchet-test-artifacts/bench-inputs/opt1/job1/deps-base.tgz"));
-        for needle in ["code.tgz", "bench.tgz", "git ", "bench-results", "sealed", "holdout", "RATCHET_TRACE"] {
+        for needle in [
+            "code.tgz",
+            "bench.tgz",
+            "git ",
+            "bench-results",
+            "sealed",
+            "holdout",
+            "RATCHET_TRACE",
+        ] {
             assert!(!s.contains(needle), "{needle}");
         }
     }
@@ -390,7 +480,9 @@ mod the_dependency_snapshot_job_script {
     fn refuses_to_be_built_for_the_candidate_archive_or_another_basename() {
         let mut i = input();
         i.base = archive("code.tgz");
-        assert!(infra(deps_build_script(&i).expect_err("refused")).contains("ending in deps-base.tgz"));
+        assert!(
+            infra(deps_build_script(&i).expect_err("refused")).contains("ending in deps-base.tgz")
+        );
         let mut i = input();
         i.base.uri = "s3://b/../deps-base.tgz".into();
         assert!(matches!(deps_build_script(&i), Err(BenchError::Infra(_))));
@@ -407,16 +499,27 @@ mod the_dependency_snapshot_job_script {
         let s = script();
         assert!(s.contains("DU='ratchet-deps'"));
         assert!(s.contains("setpriv --reuid=\"$DU\" --regid=\"$DU\" --clear-groups --no-new-privs -- env -i PATH=\"$PATH\""));
-        assert!(!s.contains("AWS_"), "credentials never reach the unprivileged user");
+        assert!(
+            !s.contains("AWS_"),
+            "credentials never reach the unprivileged user"
+        );
         assert!(s.contains("for v in HTTPS_PROXY https_proxy HTTP_PROXY http_proxy NO_PROXY no_proxy NODE_USE_ENV_PROXY"));
     }
 
     #[test]
     fn checks_the_user_and_the_imds_block_before_it_runs_anything_as_that_user() {
         let s = script();
-        let run = idx(&s, "setpriv --reuid=\"$DU\" --regid=\"$DU\" --clear-groups --no-new-privs -- env -i");
+        let run = idx(
+            &s,
+            "setpriv --reuid=\"$DU\" --regid=\"$DU\" --clear-groups --no-new-privs -- env -i",
+        );
         assert!(idx(&s, "id -u \"$DU\"") < run);
-        assert!(idx(&s, "iptables -C OUTPUT -m owner --uid-owner \"$DU\" -d 169.254.169.254 -j REJECT") < run);
+        assert!(
+            idx(
+                &s,
+                "iptables -C OUTPUT -m owner --uid-owner \"$DU\" -d 169.254.169.254 -j REJECT"
+            ) < run
+        );
         assert!(idx(&s, "/dev/tcp/169.254.169.254/80") < run);
         assert!(s.contains("exit 13") && s.contains("exit 14"));
     }
@@ -433,7 +536,11 @@ mod the_dependency_snapshot_job_script {
         i.strategy = NPM;
         i.key = format!("npm-{}", "e".repeat(40));
         i.lockfiles = h(&[("package-lock.json", &"a".repeat(64))]);
-        assert!(deps_build_script(&i).expect("npm").contains("bash -c 'npm ci --ignore-scripts --no-audit --no-fund'"));
+        assert!(
+            deps_build_script(&i)
+                .expect("npm")
+                .contains("bash -c 'npm ci --ignore-scripts --no-audit --no-fund'")
+        );
     }
 
     #[test]
@@ -442,7 +549,10 @@ mod the_dependency_snapshot_job_script {
         let fetch_done = idx(&s, "the package fetch (pnpm) exited with status");
         let pack = idx(&s, "tar -C \"$STORE\"");
         let upload_archive = idx(&s, "\"s3://ratchet-test-artifacts/$ARCHIVE\"");
-        let upload_manifest = idx(&s, &format!("s3://ratchet-test-artifacts/bench-deps/{KEY}.json"));
+        let upload_manifest = idx(
+            &s,
+            &format!("s3://ratchet-test-artifacts/bench-deps/{KEY}.json"),
+        );
         assert!(fetch_done < pack && pack < upload_archive && upload_archive < upload_manifest);
         assert!(s.contains(&format!("ARCHIVE='bench-deps/{KEY}'/\"$SHA.$EXT\"")));
     }
@@ -470,7 +580,9 @@ mod the_dependency_snapshot_job_script {
         assert!(infra(deps_build_script(&i).expect_err("bucket")).contains("valid bucket"));
         let mut i = input();
         i.strategy = NO_DEPS;
-        assert!(infra(deps_build_script(&i).expect_err("strategy")).contains("nothing to snapshot"));
+        assert!(
+            infra(deps_build_script(&i).expect_err("strategy")).contains("nothing to snapshot")
+        );
     }
 
     #[test]
@@ -489,7 +601,11 @@ mod the_snapshot_restore_inside_the_checkout_script {
     fn restore() -> DepsRestore {
         DepsRestore {
             strategy: PNPM,
-            uri: format!("s3://ratchet-test-artifacts/bench-deps/pnpm-{}/{}.tar.zst", "f".repeat(40), "d".repeat(64)),
+            uri: format!(
+                "s3://ratchet-test-artifacts/bench-deps/pnpm-{}/{}.tar.zst",
+                "f".repeat(40),
+                "d".repeat(64)
+            ),
             sha256: "d".repeat(64),
             compression: Compression::Zstd,
             node: "v22.22.0".into(),
@@ -511,7 +627,11 @@ mod the_snapshot_restore_inside_the_checkout_script {
     }
 
     fn script() -> String {
-        checkout(Some(restore()), PNPM.lockfiles.iter().map(|s| (*s).to_owned()).collect()).expect("script")
+        checkout(
+            Some(restore()),
+            PNPM.lockfiles.iter().map(|s| (*s).to_owned()).collect(),
+        )
+        .expect("script")
     }
 
     fn at(s: &str, needle: &str) -> usize {
@@ -559,9 +679,14 @@ mod the_snapshot_restore_inside_the_checkout_script {
     }
 
     #[test]
-    fn the_lockfile_is_pinned_like_a_protected_path_but_does_not_count_as_the_user_protecting_something() {
+    fn the_lockfile_is_pinned_like_a_protected_path_but_does_not_count_as_the_user_protecting_something()
+     {
         let s = script();
-        assert!(s.contains("RE_USER=") && s.contains("matched=$(") && s.contains("\\\"matched\\\":$matched"));
+        assert!(
+            s.contains("RE_USER=")
+                && s.contains("matched=$(")
+                && s.contains("\\\"matched\\\":$matched")
+        );
         let re = regex::Regex::new(r"(?m)^RE='([^']*)'; RE_USER='([^']*)'").expect("re");
         let c = re.captures(&s).expect("RE line");
         assert!(c[1].contains("pnpm-lock"));
@@ -584,19 +709,32 @@ mod the_snapshot_restore_inside_the_checkout_script {
         assert!(!none.contains("dependency snapshot") && !none.contains("\"$D/in/snapshot\""));
     }
 
+    fn refused(f: impl FnOnce(&mut DepsRestore)) {
+        let mut r = restore();
+        f(&mut r);
+        assert!(matches!(
+            checkout(Some(r), vec![]),
+            Err(BenchError::Infra(_))
+        ));
+    }
+
     #[test]
-    fn rejects_a_uri_outside_bench_deps_a_traversing_uri_a_bad_digest_and_a_shell_looking_version() {
-        let mut r = restore();
-        r.uri = "s3://ratchet-test-artifacts/bench-inputs/x/code.tgz".into();
-        assert!(matches!(checkout(Some(r), vec![]), Err(BenchError::Infra(_))));
-        let mut r = restore();
-        r.uri = "s3://b/bench-deps/../bench-inputs/x.tgz".into();
-        assert!(matches!(checkout(Some(r), vec![]), Err(BenchError::Infra(_))));
-        let mut r = restore();
-        r.sha256 = "nope".into();
-        assert!(matches!(checkout(Some(r), vec![]), Err(BenchError::Infra(_))));
-        let mut r = restore();
-        r.node = "v22'; rm -rf /; '".into();
-        assert!(matches!(checkout(Some(r), vec![]), Err(BenchError::Infra(_))));
+    fn rejects_a_uri_outside_bench_deps() {
+        refused(|r| r.uri = "s3://ratchet-test-artifacts/bench-inputs/x/code.tgz".into());
+    }
+
+    #[test]
+    fn rejects_a_traversing_uri() {
+        refused(|r| r.uri = "s3://b/bench-deps/../bench-inputs/x.tgz".into());
+    }
+
+    #[test]
+    fn rejects_a_bad_digest() {
+        refused(|r| r.sha256 = "nope".into());
+    }
+
+    #[test]
+    fn rejects_a_shell_looking_version() {
+        refused(|r| r.node = "v22'; rm -rf /; '".into());
     }
 }

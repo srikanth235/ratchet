@@ -16,8 +16,8 @@ use async_trait::async_trait;
 use nix::sys::signal::{Signal, kill};
 use nix::unistd::Pid;
 use ratchet_core::ports::{
-    AgentIdentity, BenchLaunchPurpose, BenchLaunchSpec, CloudCompute, InstanceInfo, InstanceState, PortError,
-    PortResult, RemoteCommand, RemoteCommandResult, RunnerLaunchSpec, SecretRef,
+    AgentIdentity, BenchLaunchPurpose, BenchLaunchSpec, CloudCompute, InstanceInfo, InstanceState,
+    PortError, PortResult, RemoteCommand, RemoteCommandResult, RunnerLaunchSpec, SecretRef,
 };
 use ratchet_core::{AgentId, InstanceRole, OptimizationId};
 
@@ -41,7 +41,11 @@ pub struct LocalFakeCompute {
 }
 
 impl LocalFakeCompute {
-    pub fn new(scratch: impl Into<PathBuf>, extra_env: &[(&str, &str)], s3_dir: Option<&Path>) -> Self {
+    pub fn new(
+        scratch: impl Into<PathBuf>,
+        extra_env: &[(&str, &str)],
+        s3_dir: Option<&Path>,
+    ) -> Self {
         let scratch = scratch.into();
         let shim = scratch.join("shim");
         fs::create_dir_all(&shim).expect("create the shim dir");
@@ -103,7 +107,10 @@ if [[ \"$dst\" == s3://* ]]; then mkdir -p \"$(dirname \"{s3}/${{dst#s3://}}\")\
     }
 
     pub fn scripts(&self) -> Vec<String> {
-        lock(&self.commands).iter().map(|(_, s)| s.clone()).collect()
+        lock(&self.commands)
+            .iter()
+            .map(|(_, s)| s.clone())
+            .collect()
     }
 
     pub fn clear_commands(&self) {
@@ -143,7 +150,10 @@ if [[ \"$dst\" == s3://* ]]; then mkdir -p \"$(dirname \"{s3}/${{dst#s3://}}\")\
                 };
                 if let Ok(stat) = fs::read_to_string(format!("/proc/{p}/stat"))
                     && let Some(i) = stat.rfind(')')
-                    && let Some(ppid) = stat[i + 2..].split(' ').nth(1).and_then(|s| s.parse::<u32>().ok())
+                    && let Some(ppid) = stat[i + 2..]
+                        .split(' ')
+                        .nth(1)
+                        .and_then(|s| s.parse::<u32>().ok())
                 {
                     parent_of.insert(p, ppid);
                 }
@@ -212,10 +222,16 @@ impl CloudCompute for LocalFakeCompute {
         Ok(())
     }
 
-    async fn run_command(&self, instance_id: &str, command: &RemoteCommand) -> PortResult<RemoteCommandResult> {
+    async fn run_command(
+        &self,
+        instance_id: &str,
+        command: &RemoteCommand,
+    ) -> PortResult<RemoteCommandResult> {
         if self.not_ready_for.load(Ordering::SeqCst) > 0 {
             self.not_ready_for.fetch_sub(1, Ordering::SeqCst);
-            return Err(PortError::failed("InvalidInstanceId: instance not registered"));
+            return Err(PortError::failed(
+                "InvalidInstanceId: instance not registered",
+            ));
         }
         let index = {
             let mut c = lock(&self.commands);
@@ -268,7 +284,11 @@ impl CloudCompute for LocalFakeCompute {
     }
 
     // ---- unused by the bench runner
-    async fn create_agent_identity(&self, _: &OptimizationId, _: &AgentId) -> PortResult<AgentIdentity> {
+    async fn create_agent_identity(
+        &self,
+        _: &OptimizationId,
+        _: &AgentId,
+    ) -> PortResult<AgentIdentity> {
         Err(PortError::failed("not implemented"))
     }
 
@@ -280,7 +300,13 @@ impl CloudCompute for LocalFakeCompute {
         Ok(())
     }
 
-    async fn put_secret(&self, _: &OptimizationId, _: &AgentId, _: &str, _: &str) -> PortResult<SecretRef> {
+    async fn put_secret(
+        &self,
+        _: &OptimizationId,
+        _: &AgentId,
+        _: &str,
+        _: &str,
+    ) -> PortResult<SecretRef> {
         Err(PortError::failed("not implemented"))
     }
 

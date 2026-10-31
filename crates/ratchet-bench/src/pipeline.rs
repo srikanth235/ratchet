@@ -14,13 +14,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use ratchet_core::config::evaluate_threshold;
 use ratchet_core::config::{CommandGuardrail, ThresholdGuardrail};
 use ratchet_core::ports::{
-    ArtifactStore, BaselineMetrics, BenchJob, BenchJobPhase, BenchOutcome, BenchRun, BenchRunner, CancellationToken,
-    Clock, PortResult,
+    ArtifactStore, BaselineMetrics, BenchJob, BenchJobPhase, BenchOutcome, BenchRun, BenchRunner,
+    CancellationToken, Clock, PortResult,
 };
-use ratchet_core::config::evaluate_threshold;
-use ratchet_core::{Guardrail, GuardrailResult, RatchetConfig, extract_last_json_object, lookup_path};
+use ratchet_core::{
+    Guardrail, GuardrailResult, RatchetConfig, extract_last_json_object, lookup_path,
+};
 use serde_json::Value;
 
 use crate::errors::{BenchError, BenchResult};
@@ -60,8 +62,16 @@ pub enum BenchProgress {
     Deps,
     Checkout,
     Setup,
-    Guardrails { index: usize, total: usize, name: String },
-    Bench { run: u64, of: u64, phase: BenchJobPhase },
+    Guardrails {
+        index: usize,
+        total: usize,
+        name: String,
+    },
+    Bench {
+        run: u64,
+        of: u64,
+        phase: BenchJobPhase,
+    },
     Evaluate,
 }
 
@@ -257,7 +267,9 @@ pub fn evaluate_thresholds(
                 return GuardrailResult {
                     name,
                     passed: true,
-                    detail: Some("skipped: relative bounds are measured against this baseline run".into()),
+                    detail: Some(
+                        "skipped: relative bounds are measured against this baseline run".into(),
+                    ),
                 };
             }
             let Some((key, value)) = resolve_metric(&medians, &g.metric) else {
@@ -285,7 +297,11 @@ pub fn evaluate_thresholds(
         .collect()
 }
 
-pub fn command_guardrail_result(g: &CommandGuardrail, out: &StepOutcome, timeout_ms: u64) -> GuardrailResult {
+pub fn command_guardrail_result(
+    g: &CommandGuardrail,
+    out: &StepOutcome,
+    timeout_ms: u64,
+) -> GuardrailResult {
     let name = g.run.clone();
     if out.timed_out {
         return GuardrailResult {
@@ -353,7 +369,10 @@ pub async fn run_pipeline(ctx: PipelineContext<'_>) -> BenchResult<PipelineResul
     let mut base_env = indexmap::IndexMap::new();
     base_env.insert("RATCHET_PHASE".to_owned(), phase.to_owned());
     base_env.insert("RATCHET_SHA".to_owned(), job.sha.clone());
-    base_env.insert("RATCHET_OPTIMIZATION".to_owned(), job.optimization_id.to_string());
+    base_env.insert(
+        "RATCHET_OPTIMIZATION".to_owned(),
+        job.optimization_id.to_string(),
+    );
     base_env.insert("RATCHET_REPEATS".to_owned(), job.repeats.to_string());
     let emit = |p: BenchProgress| {
         if let Some(f) = on_progress {
@@ -643,6 +662,7 @@ where
     Fut: Future<Output = BenchResult<Box<dyn PipelineExecutor>>> + Send,
 {
     let started_at = deps.clock.now();
+    tracing::info!(optimization = %job.optimization_id, phase = phase_str(job.phase), sha = %job.sha, repeats = job.repeats, "bench job started");
     let log = BenchLog::new(deps.clock.clone());
     log.line(&format!(
         "bench job: optimization={} phase={} sha={} repeats={}{}",
@@ -662,7 +682,9 @@ where
         throw_if_aborted(cancel)?;
         let e = make_executor(log.clone()).await?;
         exec = Some(e);
-        let exec_ref = exec.as_mut().map(|b| &mut **b).ok_or_else(|| BenchError::infra("no executor"))?;
+        let exec_ref = exec
+            .as_deref_mut()
+            .ok_or_else(|| BenchError::infra("no executor"))?;
         result = Some(
             run_pipeline(PipelineContext {
                 job,
@@ -682,6 +704,7 @@ where
     }
     .await;
     if let Err(err) = outcome {
+        tracing::warn!(optimization = %job.optimization_id, sha = %job.sha, error = %err, "bench job failed");
         log.line(&format!("\n!!! {}", error_line(&err)));
         failure = Some(err);
     }

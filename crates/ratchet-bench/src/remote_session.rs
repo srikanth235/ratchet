@@ -4,7 +4,10 @@
 
 use std::sync::Arc;
 
-use ratchet_core::ports::{CancellationToken, Clock, CloudCompute, InstanceInfo, PortError, RemoteCommand, RemoteCommandResult};
+use ratchet_core::ports::{
+    CancellationToken, Clock, CloudCompute, InstanceInfo, PortError, RemoteCommand,
+    RemoteCommandResult,
+};
 
 use crate::errors::{BenchError, BenchResult};
 use crate::log::BenchLog;
@@ -70,7 +73,10 @@ impl InstanceSession {
                 }
                 self.o
                     .clock
-                    .sleep(self.o.ready_delay_ms.unwrap_or(10_000), self.cancel.as_ref())
+                    .sleep(
+                        self.o.ready_delay_ms.unwrap_or(10_000),
+                        self.cancel.as_ref(),
+                    )
                     .await
                     .map_err(|e| match e {
                         PortError::Cancelled => BenchError::Aborted,
@@ -82,8 +88,17 @@ impl InstanceSession {
     }
 
     /// One `run_command`, raced against the cancellation token; the output (minus sentinel lines) goes to the log.
-    pub async fn call(&self, name: &str, script: &str, timeout_ms: u64) -> BenchResult<RemoteCommandResult> {
-        if self.cancel.as_ref().is_some_and(CancellationToken::is_cancelled) {
+    pub async fn call(
+        &self,
+        name: &str,
+        script: &str,
+        timeout_ms: u64,
+    ) -> BenchResult<RemoteCommandResult> {
+        if self
+            .cancel
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
+        {
             return Err(BenchError::Aborted);
         }
         let command = RemoteCommand {
@@ -133,6 +148,7 @@ impl InstanceSession {
                     "FAILED to terminate {} instance {}: {err} (the reaper must clean it up)",
                     self.label, self.instance.id
                 );
+                tracing::warn!(instance = %self.instance.id, error = %err, "failed to terminate a bench instance; the reaper must clean it up");
                 self.log.line(&msg);
                 if let Some(w) = &self.o.on_warning {
                     w(&msg);

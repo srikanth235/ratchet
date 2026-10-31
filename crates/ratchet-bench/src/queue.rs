@@ -42,12 +42,27 @@ pub struct JobRef {
 #[derive(Debug, Clone, PartialEq)]
 pub enum QueueEvent {
     /// `position` 0 = next to run.
-    Queued { job: JobRef, position: usize },
+    Queued {
+        job: JobRef,
+        position: usize,
+    },
     Started(JobRef),
-    Progress { job: JobRef, progress: BenchProgress },
-    Done { job: JobRef, outcome: BenchOutcome },
-    Failed { job: JobRef, error: String },
-    Cancelled { job: JobRef, was_running: bool },
+    Progress {
+        job: JobRef,
+        progress: BenchProgress,
+    },
+    Done {
+        job: JobRef,
+        outcome: BenchOutcome,
+    },
+    Failed {
+        job: JobRef,
+        error: String,
+    },
+    Cancelled {
+        job: JobRef,
+        was_running: bool,
+    },
 }
 
 impl QueueEvent {
@@ -174,18 +189,17 @@ impl Inner {
         let listeners: Vec<Listener> = lock(&self.listeners).clone();
         for l in listeners {
             // a broken UI listener must not break the queue
-            let _ = catch_unwind(AssertUnwindSafe(|| l(e)));
+            if catch_unwind(AssertUnwindSafe(|| l(e))).is_err() {
+                tracing::warn!(job = %e.job().id, "a bench queue listener panicked; ignored");
+            }
         }
     }
 
     /// The order in which queued entries will run (simulates the rotation without mutating it).
     fn order(lane: &Lane) -> Vec<Arc<Entry>> {
         let mut rotation: Vec<AgentId> = lane.rotation.clone();
-        let mut queues: HashMap<&AgentId, Vec<Arc<Entry>>> = lane
-            .per_agent
-            .iter()
-            .map(|(k, v)| (k, v.clone()))
-            .collect();
+        let mut queues: HashMap<&AgentId, Vec<Arc<Entry>>> =
+            lane.per_agent.iter().map(|(k, v)| (k, v.clone())).collect();
         let mut out = Vec::new();
         while !rotation.is_empty() {
             let agent = rotation.remove(0);
@@ -206,10 +220,13 @@ impl Inner {
     fn take_next(lane: &mut Lane) -> Option<Arc<Entry>> {
         while !lane.rotation.is_empty() {
             let agent = lane.rotation.remove(0);
-            let next = lane
-                .per_agent
-                .get_mut(&agent)
-                .and_then(|q| if q.is_empty() { None } else { Some(q.remove(0)) });
+            let next = lane.per_agent.get_mut(&agent).and_then(|q| {
+                if q.is_empty() {
+                    None
+                } else {
+                    Some(q.remove(0))
+                }
+            });
             let more = lane.per_agent.get(&agent).is_some_and(|q| !q.is_empty());
             if more {
                 lane.rotation.push(agent);
@@ -235,11 +252,15 @@ impl Inner {
 fn pump(inner: &Arc<Inner>, opt: &OptimizationId) {
     let entry = {
         let mut st = lock(&inner.state);
-        let Some(lane) = st.lanes.get_mut(opt) else { return };
+        let Some(lane) = st.lanes.get_mut(opt) else {
+            return;
+        };
         if lane.running.is_some() {
             return;
         }
-        let Some(entry) = Inner::take_next(lane) else { return };
+        let Some(entry) = Inner::take_next(lane) else {
+            return;
+        };
         lane.running = Some(entry.clone());
         entry
     };
@@ -431,7 +452,10 @@ impl BenchQueue {
             }
         };
         let (tx, rx) = oneshot::channel();
-        let pre_cancelled = req.cancel.as_ref().is_some_and(CancellationToken::is_cancelled);
+        let pre_cancelled = req
+            .cancel
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled);
         let entry = Arc::new(Entry {
             r: JobRef {
                 id: id.clone(),
@@ -530,7 +554,11 @@ impl BenchQueue {
     }
 
     /// Cancel everything queued or running for an agent (optionally within one optimization).
-    pub fn cancel_agent(&self, agent_id: &AgentId, optimization_id: Option<&OptimizationId>) -> usize {
+    pub fn cancel_agent(
+        &self,
+        agent_id: &AgentId,
+        optimization_id: Option<&OptimizationId>,
+    ) -> usize {
         self.cancel_where(|e| {
             e.r.agent_id == *agent_id
                 && optimization_id.is_none_or(|o| e.r.job.optimization_id == *o)

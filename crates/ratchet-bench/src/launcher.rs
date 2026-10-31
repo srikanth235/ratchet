@@ -13,7 +13,7 @@
 //! (/usr/local/libexec/ratchet, mode 0700) and bind-mounted read-only into the confirm and bench harness containers only.
 //!
 //! What it allows is read from /ratchet/launcher.conf, a root-owned file the bench script writes before each harness
-//! container starts and also bind-mounts read-only: "<caller uid> <target uid> <target gid>". It refuses to do anything
+//! container starts and also bind-mounts read-only: `<caller uid> <target uid> <target gid>`. It refuses to do anything
 //! unless the REAL uid of its caller is the caller uid, the file is a root-owned regular file that nobody else can write, and
 //! the target is neither root nor the caller. The container runs with every capability dropped except SETUID and SETGID, so
 //! this is the only way the harness can change uid at all.
@@ -136,9 +136,9 @@ pub fn read_conf(path: &Path) -> Result<LauncherConf, LauncherError> {
                 "no launcher configuration (this launcher only works inside a bench container)",
             )
         })?;
-    let md = file
-        .metadata()
-        .map_err(|_| LauncherError::not_allowed("the launcher configuration is not a root-owned regular file"))?;
+    let md = file.metadata().map_err(|_| {
+        LauncherError::not_allowed("the launcher configuration is not a root-owned regular file")
+    })?;
     if !md.is_file() || md.uid() != 0 || md.mode() & 0o022 != 0 {
         return Err(LauncherError::not_allowed(
             "the launcher configuration is not a root-owned regular file",
@@ -315,7 +315,11 @@ fn exec_in_path(plan: &Plan) -> LauncherError {
         candidates.push(cmd.as_bytes().to_vec());
     } else {
         for dir in plan.path.as_bytes().split(|b| *b == b':') {
-            let mut p = if dir.is_empty() { b".".to_vec() } else { dir.to_vec() };
+            let mut p = if dir.is_empty() {
+                b".".to_vec()
+            } else {
+                dir.to_vec()
+            };
             p.push(b'/');
             p.extend_from_slice(cmd.as_bytes());
             candidates.push(p);
@@ -342,7 +346,12 @@ fn exec_in_path(plan: &Plan) -> LauncherError {
         }
         match err {
             Errno::EACCES => saw_access = true,
-            Errno::ENOENT | Errno::ENOTDIR | Errno::ESTALE | Errno::ENAMETOOLONG | Errno::ENODEV | Errno::ETIMEDOUT => {}
+            Errno::ENOENT
+            | Errno::ENOTDIR
+            | Errno::ESTALE
+            | Errno::ENAMETOOLONG
+            | Errno::ENODEV
+            | Errno::ETIMEDOUT => {}
             other => {
                 last = other;
                 break;
@@ -358,7 +367,11 @@ fn exec_in_path(plan: &Plan) -> LauncherError {
         } else {
             EXIT_NOT_EXECUTABLE
         },
-        format!("cannot run {}: {}", String::from_utf8_lossy(cmd.as_bytes()), last.desc()),
+        format!(
+            "cannot run {}: {}",
+            String::from_utf8_lossy(cmd.as_bytes()),
+            last.desc()
+        ),
     )
 }
 
@@ -411,7 +424,12 @@ mod tests {
             .iter()
             .map(|(k, v)| ((*k).to_owned(), OsString::from(v)))
             .collect();
-        move |name| owned.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone())
+        move |name| {
+            owned
+                .iter()
+                .find(|(k, _)| k == name)
+                .map(|(_, v)| v.clone())
+        }
     }
 
     const HARNESS: [(&str, &str); 3] = [
@@ -424,7 +442,11 @@ mod tests {
     fn conf_is_three_numbers_and_nothing_else() {
         assert_eq!(
             parse_conf("65534 65533 65533\n"),
-            Ok(LauncherConf { caller: 65534, uid: 65533, gid: 65533 })
+            Ok(LauncherConf {
+                caller: 65534,
+                uid: 65533,
+                gid: 65533
+            })
         );
         assert_eq!(parse_conf("1002 1001 1001").map(|c| c.caller), Ok(1002));
         for bad in [
@@ -444,14 +466,33 @@ mod tests {
 
     #[test]
     fn only_the_configured_caller_may_run_and_never_towards_root_or_itself() {
-        let conf = LauncherConf { caller: 1002, uid: 1001, gid: 1001 };
+        let conf = LauncherConf {
+            caller: 1002,
+            uid: 1001,
+            gid: 1001,
+        };
         assert!(check_caller(&conf, 1002).is_ok());
         assert_eq!(check_caller(&conf, 0).unwrap_err().code, EXIT_NOT_ALLOWED); // root is not the caller either
-        assert_eq!(check_caller(&conf, 65000).unwrap_err().code, EXIT_NOT_ALLOWED);
+        assert_eq!(
+            check_caller(&conf, 65000).unwrap_err().code,
+            EXIT_NOT_ALLOWED
+        );
         for bad in [
-            LauncherConf { caller: 1002, uid: 0, gid: 0 },
-            LauncherConf { caller: 1002, uid: 1002, gid: 1002 },
-            LauncherConf { caller: 1002, uid: 1001, gid: 0 },
+            LauncherConf {
+                caller: 1002,
+                uid: 0,
+                gid: 0,
+            },
+            LauncherConf {
+                caller: 1002,
+                uid: 1002,
+                gid: 1002,
+            },
+            LauncherConf {
+                caller: 1002,
+                uid: 1001,
+                gid: 0,
+            },
         ] {
             assert_eq!(check_caller(&bad, 1002).unwrap_err().code, EXIT_NOT_ALLOWED);
         }
@@ -470,16 +511,34 @@ mod tests {
     fn the_environment_is_built_from_scratch() {
         let args: Vec<OsString> = ["FOO=bar", "sh", "-c", "X=1 id"].map(os).to_vec();
         let mut vars = HARNESS.to_vec();
-        vars.extend([("PATH", "/usr/bin"), ("RATCHET_TRACE", "secret"), ("AWS_SECRET_ACCESS_KEY", "x"), ("OTHER", "1")]);
+        vars.extend([
+            ("PATH", "/usr/bin"),
+            ("RATCHET_TRACE", "secret"),
+            ("AWS_SECRET_ACCESS_KEY", "x"),
+            ("OTHER", "1"),
+        ]);
         let plan = build_plan(&args, env_of(&vars)).expect("plan");
         assert_eq!(plan.dir, os("/work/code"));
         assert_eq!(
             plan.env,
-            ["PATH=/usr/bin", "HOME=/work/home", "TMPDIR=/work/tmp", "USER=ratchet-bench", "LOGNAME=ratchet-bench", "LANG=C.UTF-8", "FOO=bar"].map(os).to_vec()
+            [
+                "PATH=/usr/bin",
+                "HOME=/work/home",
+                "TMPDIR=/work/tmp",
+                "USER=ratchet-bench",
+                "LOGNAME=ratchet-bench",
+                "LANG=C.UTF-8",
+                "FOO=bar"
+            ]
+            .map(os)
+            .to_vec()
         );
         assert_eq!(plan.command, ["sh", "-c", "X=1 id"].map(os).to_vec());
         for leak in ["RATCHET_TRACE", "AWS_SECRET", "OTHER"] {
-            assert!(plan.env.iter().all(|e| !e.to_string_lossy().contains(leak)), "{leak}");
+            assert!(
+                plan.env.iter().all(|e| !e.to_string_lossy().contains(leak)),
+                "{leak}"
+            );
         }
     }
 
@@ -491,8 +550,14 @@ mod tests {
             v.extend_from_slice(extra);
             build_plan(&args, env_of(&v)).expect("plan").path
         };
-        assert_eq!(with(&[("RATCHET_CANDIDATE_PATH", "/a"), ("PATH", "/b")]), os("/a"));
-        assert_eq!(with(&[("RATCHET_CANDIDATE_PATH", ""), ("PATH", "/b")]), os("/b"));
+        assert_eq!(
+            with(&[("RATCHET_CANDIDATE_PATH", "/a"), ("PATH", "/b")]),
+            os("/a")
+        );
+        assert_eq!(
+            with(&[("RATCHET_CANDIDATE_PATH", ""), ("PATH", "/b")]),
+            os("/b")
+        );
         assert_eq!(with(&[]), os(DEFAULT_PATH));
     }
 
@@ -509,8 +574,16 @@ mod tests {
 
     #[test]
     fn missing_directory_variables_and_missing_command_are_refused() {
-        for missing in ["RATCHET_CANDIDATE_DIR", "RATCHET_CANDIDATE_HOME", "RATCHET_CANDIDATE_TMP"] {
-            let vars: Vec<(&str, &str)> = HARNESS.iter().filter(|(k, _)| *k != missing).copied().collect();
+        for missing in [
+            "RATCHET_CANDIDATE_DIR",
+            "RATCHET_CANDIDATE_HOME",
+            "RATCHET_CANDIDATE_TMP",
+        ] {
+            let vars: Vec<(&str, &str)> = HARNESS
+                .iter()
+                .filter(|(k, _)| *k != missing)
+                .copied()
+                .collect();
             let e = build_plan(&[os("true")], env_of(&vars)).expect_err(missing);
             assert_eq!(e.code, EXIT_REFUSED);
             assert_eq!(e.message, format!("{missing} is not set"));
@@ -519,14 +592,24 @@ mod tests {
         assert_eq!(e.code, EXIT_REFUSED);
         assert!(e.message.starts_with("usage:"));
         // the first word that is not NAME=value starts the command, even if a later one looks like an assignment
-        let plan = build_plan(&[os("FOO=1"), os("env"), os("BAR=2")], env_of(&HARNESS)).expect("plan");
+        let plan =
+            build_plan(&[os("FOO=1"), os("env"), os("BAR=2")], env_of(&HARNESS)).expect("plan");
         assert_eq!(plan.command, [os("env"), os("BAR=2")]);
     }
 
     #[test]
     fn this_file_states_what_the_launcher_refuses() {
         let text = include_str!("launcher.rs");
-        for w in ["setuid", "launcher.conf", "no_new_privs", "RATCHET_TRACE", "AWS_", "read-only", "PR_SET_NO_NEW_PRIVS", "setgroups(&[])"] {
+        for w in [
+            "setuid",
+            "launcher.conf",
+            "no_new_privs",
+            "RATCHET_TRACE",
+            "AWS_",
+            "read-only",
+            "PR_SET_NO_NEW_PRIVS",
+            "setgroups(&[])",
+        ] {
             assert!(text.contains(w), "{w}");
         }
         assert!(text.contains("/ratchet/launcher.conf"));

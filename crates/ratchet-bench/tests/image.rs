@@ -4,9 +4,10 @@ use std::fs;
 use std::path::Path;
 
 use ratchet_bench::image::{
-    ImageKeyInput, ImageKind, ImageSpec, environment_change_guardrail, environment_changes, environment_files_of,
-    image_key, image_manifest_key, image_tag, normalize_repo_relative, parse_dockerfile, parse_image_manifest,
-    parse_jsonc, read_environment_value, resolve_image_source,
+    ImageKeyInput, ImageKind, ImageSpec, environment_change_guardrail, environment_changes,
+    environment_files_of, image_key, image_manifest_key, image_tag, normalize_repo_relative,
+    parse_dockerfile, parse_image_manifest, parse_jsonc, read_environment_value,
+    resolve_image_source,
 };
 use ratchet_bench::{BenchError, FileHashes};
 use serde_json::json;
@@ -28,7 +29,10 @@ fn tree(files: &[(&str, &str)]) -> tempfile::TempDir {
 }
 
 fn h(pairs: &[(&str, &str)]) -> FileHashes {
-    pairs.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect()
+    pairs
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .collect()
 }
 
 fn err(e: BenchError) -> String {
@@ -41,9 +45,18 @@ mod read_environment {
 
     #[test]
     fn returns_nothing_for_configs_without_an_environment() {
-        for cfg in [json!({}), json!(null), json!({"environment": "x"}), json!({"environment": []})] {
+        for cfg in [
+            json!({}),
+            json!(null),
+            json!({"environment": "x"}),
+            json!({"environment": []}),
+        ] {
             let e = read_environment_value(&cfg).expect("ok");
-            assert_eq!((e.image, e.machine, e.region, e.network), (None, None, None, None), "{cfg}");
+            assert_eq!(
+                (e.image, e.machine, e.region, e.network),
+                (None, None, None, None),
+                "{cfg}"
+            );
         }
     }
 
@@ -59,12 +72,34 @@ mod read_environment {
         assert_eq!(e.network, Some(vec!["registry.npmjs.org".to_owned()]));
     }
 
+    fn refuses_image_path(p: &str) {
+        let r = read_environment_value(&json!({"environment": {"image": p}}));
+        assert!(matches!(r, Err(BenchError::Infra(_))), "{p:?}");
+    }
+
     #[test]
-    fn refuses_an_image_path_that_leaves_the_repository() {
-        for p in ["/etc/passwd", "../outside/Dockerfile", "a/../../b", "", "  "] {
-            let r = read_environment_value(&json!({"environment": {"image": p}}));
-            assert!(matches!(r, Err(BenchError::Infra(_))), "{p:?}");
-        }
+    fn refuses_an_image_path_that_leaves_the_repository_absolute() {
+        refuses_image_path("/etc/passwd");
+    }
+
+    #[test]
+    fn refuses_an_image_path_that_leaves_the_repository_parent() {
+        refuses_image_path("../outside/Dockerfile");
+    }
+
+    #[test]
+    fn refuses_an_image_path_that_leaves_the_repository_nested() {
+        refuses_image_path("a/../../b");
+    }
+
+    #[test]
+    fn refuses_an_empty_image_path() {
+        refuses_image_path("");
+    }
+
+    #[test]
+    fn refuses_a_blank_image_path() {
+        refuses_image_path("  ");
     }
 
     #[test]
@@ -75,7 +110,10 @@ mod read_environment {
 
     #[test]
     fn normalizes() {
-        assert_eq!(normalize_repo_relative("./a//b/./c/", "x").expect("ok"), "a/b/c");
+        assert_eq!(
+            normalize_repo_relative("./a//b/./c/", "x").expect("ok"),
+            "a/b/c"
+        );
         assert_eq!(normalize_repo_relative(".", "x").expect("ok"), ".");
     }
 }
@@ -130,7 +168,10 @@ EOF
             digest()
         ));
         assert_eq!(info.base_images, [format!("node:22@{}", digest())]);
-        assert_eq!(info.copy_sources, ["package.json", "pnpm-lock.yaml", "tools/", "a b.txt"]);
+        assert_eq!(
+            info.copy_sources,
+            ["package.json", "pnpm-lock.yaml", "tools/", "a b.txt"]
+        );
     }
 }
 
@@ -138,7 +179,10 @@ mod resolve_image_source_tests {
     use super::*;
 
     fn dockerfile() -> String {
-        format!("FROM node:22@{}\nCOPY tools.txt /opt/tools.txt\nCOPY scripts/ /opt/scripts/\n", digest())
+        format!(
+            "FROM node:22@{}\nCOPY tools.txt /opt/tools.txt\nCOPY scripts/ /opt/scripts/\n",
+            digest()
+        )
     }
 
     fn files() -> Vec<(&'static str, String)> {
@@ -154,12 +198,16 @@ mod resolve_image_source_tests {
     }
 
     fn files_tree(over: &[(&str, &str)]) -> tempfile::TempDir {
-        let mut all: Vec<(String, String)> = files().into_iter().map(|(a, b)| (a.to_owned(), b)).collect();
+        let mut all: Vec<(String, String)> = files()
+            .into_iter()
+            .map(|(a, b)| (a.to_owned(), b))
+            .collect();
         for (k, v) in over {
             all.retain(|(f, _)| f != k);
             all.push(((*k).to_owned(), (*v).to_owned()));
         }
-        let borrowed: Vec<(&str, &str)> = all.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+        let borrowed: Vec<(&str, &str)> =
+            all.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
         tree(&borrowed)
     }
 
@@ -174,7 +222,10 @@ mod resolve_image_source_tests {
         let t = files_tree(&[]);
         let r = resolve_image_source(t.path(), ".devcontainer/Dockerfile").expect("resolves");
         assert_eq!(r.spec.kind, ImageKind::Dockerfile);
-        assert_eq!(r.spec.dockerfile.as_deref(), Some(".devcontainer/Dockerfile"));
+        assert_eq!(
+            r.spec.dockerfile.as_deref(),
+            Some(".devcontainer/Dockerfile")
+        );
         assert_eq!(r.spec.context.as_deref(), Some(".devcontainer"));
         assert_eq!(r.spec.base_digests, [digest()]);
         assert!(r.spec.notes.is_empty());
@@ -209,19 +260,35 @@ mod resolve_image_source_tests {
           "postCreateCommand": "pnpm i",
         }"#,
             ),
-            (".devcontainer/Dockerfile", "FROM node:22\nCOPY .devcontainer/tools.txt /t\n"),
+            (
+                ".devcontainer/Dockerfile",
+                "FROM node:22\nCOPY .devcontainer/tools.txt /t\n",
+            ),
         ]);
-        let r = resolve_image_source(t.path(), ".devcontainer/devcontainer.json").expect("resolves");
+        let r =
+            resolve_image_source(t.path(), ".devcontainer/devcontainer.json").expect("resolves");
         assert_eq!(r.spec.kind, ImageKind::Dockerfile);
-        assert_eq!(r.spec.dockerfile.as_deref(), Some(".devcontainer/Dockerfile"));
+        assert_eq!(
+            r.spec.dockerfile.as_deref(),
+            Some(".devcontainer/Dockerfile")
+        );
         assert_eq!(r.spec.context.as_deref(), Some("."));
         assert_eq!(r.spec.target.as_deref(), Some("dev"));
         assert_eq!(r.spec.args.get("NODE").map(String::as_str), Some("22"));
         assert_eq!(
             sorted_keys(&r.files),
-            [".devcontainer/Dockerfile", ".devcontainer/devcontainer.json", ".devcontainer/tools.txt"]
+            [
+                ".devcontainer/Dockerfile",
+                ".devcontainer/devcontainer.json",
+                ".devcontainer/tools.txt"
+            ]
         );
-        assert!(r.spec.notes.join(" ").contains("features, postCreateCommand"));
+        assert!(
+            r.spec
+                .notes
+                .join(" ")
+                .contains("features, postCreateCommand")
+        );
     }
 
     #[test]
@@ -230,9 +297,13 @@ mod resolve_image_source_tests {
             ".devcontainer/devcontainer.json",
             r#"{ "image": "mcr.microsoft.com/devcontainers/base:ubuntu" }"#,
         )]);
-        let r = resolve_image_source(t.path(), ".devcontainer/devcontainer.json").expect("resolves");
+        let r =
+            resolve_image_source(t.path(), ".devcontainer/devcontainer.json").expect("resolves");
         assert_eq!(r.spec.kind, ImageKind::Image);
-        assert_eq!(r.spec.image.as_deref(), Some("mcr.microsoft.com/devcontainers/base:ubuntu"));
+        assert_eq!(
+            r.spec.image.as_deref(),
+            Some("mcr.microsoft.com/devcontainers/base:ubuntu")
+        );
         assert!(r.spec.notes.join(" ").contains("not pinned by digest"));
     }
 
@@ -241,14 +312,29 @@ mod resolve_image_source_tests {
         let case = |files: &[(&str, &str)], path: &str| -> String {
             err(resolve_image_source(tree(files).path(), path).expect_err("refused"))
         };
-        assert!(case(&[("d.json", r#"{ "dockerComposeFile": "c.yml" }"#)], "d.json").contains("dockerComposeFile is not supported"));
-        assert!(case(&[("d.json", r#"{ "name": "x" }"#)], "d.json").contains("needs \"build.dockerfile\""));
+        assert!(
+            case(
+                &[("d.json", r#"{ "dockerComposeFile": "c.yml" }"#)],
+                "d.json"
+            )
+            .contains("dockerComposeFile is not supported")
+        );
+        assert!(
+            case(&[("d.json", r#"{ "name": "x" }"#)], "d.json")
+                .contains("needs \"build.dockerfile\"")
+        );
         assert!(case(&[("d.json", "{ nope")], "d.json").contains("not valid JSON"));
         assert!(case(&[], "Dockerfile").contains("does not exist"));
         assert!(case(&[("Dockerfile", "# nothing\n")], "Dockerfile").contains("no FROM"));
         assert!(
             case(
-                &[("d.json", r#"{ "build": { "dockerfile": "D", "args": { "A": "x y;rm" } } }"#), ("D", "FROM a\n")],
+                &[
+                    (
+                        "d.json",
+                        r#"{ "build": { "dockerfile": "D", "args": { "A": "x y;rm" } } }"#
+                    ),
+                    ("D", "FROM a\n")
+                ],
                 "d.json"
             )
             .contains("not a plain build argument")
@@ -257,22 +343,35 @@ mod resolve_image_source_tests {
 
     #[test]
     fn refuses_a_dockerfile_that_copies_the_repository_into_the_image() {
-        let t = tree(&[("Dockerfile", "FROM node:22\nCOPY . /app\n"), ("ratchet.yaml", "version: 0\n"), ("src/a.ts", "1")]);
+        let t = tree(&[
+            ("Dockerfile", "FROM node:22\nCOPY . /app\n"),
+            ("ratchet.yaml", "version: 0\n"),
+            ("src/a.ts", "1"),
+        ]);
         let e = err(resolve_image_source(t.path(), "Dockerfile").expect_err("refused"));
-        assert!(e.contains("copies ratchet.yaml (or the whole repository)"), "{e}");
+        assert!(
+            e.contains("copies ratchet.yaml (or the whole repository)"),
+            "{e}"
+        );
     }
 
     #[test]
     fn a_root_level_dockerfile_may_copy_a_manifest_without_copying_the_repository() {
         let t = tree(&[
-            ("Dockerfile", "FROM node:22\nCOPY package.json pnpm-lock.yaml ./\n"),
+            (
+                "Dockerfile",
+                "FROM node:22\nCOPY package.json pnpm-lock.yaml ./\n",
+            ),
             ("package.json", "{}"),
             ("pnpm-lock.yaml", "x"),
             ("src/a.ts", "1"),
             ("ratchet.yaml", "v"),
         ]);
         let r = resolve_image_source(t.path(), "Dockerfile").expect("resolves");
-        assert_eq!(sorted_keys(&r.files), ["Dockerfile", "package.json", "pnpm-lock.yaml"]);
+        assert_eq!(
+            sorted_keys(&r.files),
+            ["Dockerfile", "package.json", "pnpm-lock.yaml"]
+        );
     }
 
     #[test]
@@ -285,12 +384,19 @@ mod resolve_image_source_tests {
             ("ctx/sub/d.cfg", "4"),
         ]);
         let r = resolve_image_source(t.path(), "ctx/Dockerfile").expect("resolves");
-        assert_eq!(sorted_keys(&r.files), ["ctx/Dockerfile", "ctx/a.cfg", "ctx/b.cfg"]);
+        assert_eq!(
+            sorted_keys(&r.files),
+            ["ctx/Dockerfile", "ctx/a.cfg", "ctx/b.cfg"]
+        );
     }
 
     #[test]
     fn treats_a_variable_copy_source_conservatively_as_the_whole_small_context() {
-        let t = tree(&[("ctx/Dockerfile", "FROM a\nARG F=x\nCOPY $F /x\n"), ("ctx/x", "1"), ("ctx/y", "2")]);
+        let t = tree(&[
+            ("ctx/Dockerfile", "FROM a\nARG F=x\nCOPY $F /x\n"),
+            ("ctx/x", "1"),
+            ("ctx/y", "2"),
+        ]);
         let r = resolve_image_source(t.path(), "ctx/Dockerfile").expect("resolves");
         assert_eq!(sorted_keys(&r.files), ["ctx/Dockerfile", "ctx/x", "ctx/y"]);
         assert!(r.spec.notes.join(" ").contains("uses a variable"));
@@ -308,11 +414,14 @@ mod resolve_image_source_tests {
         use super::*;
 
         fn resolved(p: &Path) -> FileHashes {
-            resolve_image_source(p, ".devcontainer/Dockerfile").expect("resolves").files
+            resolve_image_source(p, ".devcontainer/Dockerfile")
+                .expect("resolves")
+                .files
         }
 
         #[test]
-        fn detects_a_changed_dockerfile_a_changed_added_removed_file_and_an_unresolvable_environment() {
+        fn detects_a_changed_dockerfile_a_changed_added_removed_file_and_an_unresolvable_environment()
+         {
             let base_tree = files_tree(&[]);
             let base = resolved(base_tree.path());
             let of = |over: &[(&str, &str)]| -> FileHashes {
@@ -324,35 +433,55 @@ mod resolve_image_source_tests {
             ]);
             assert!(environment_changes(&base, &same).is_empty());
 
-            let df = of(&[(".devcontainer/Dockerfile", &format!("{}RUN curl evil\n", dockerfile()))]);
-            assert_eq!(environment_changes(&base, &df), [".devcontainer/Dockerfile"]);
+            let df = of(&[(
+                ".devcontainer/Dockerfile",
+                &format!("{}RUN curl evil\n", dockerfile()),
+            )]);
+            assert_eq!(
+                environment_changes(&base, &df),
+                [".devcontainer/Dockerfile"]
+            );
 
             let tools = of(&[(".devcontainer/tools.txt", "k6\nevil\n")]);
-            assert_eq!(environment_changes(&base, &tools), [".devcontainer/tools.txt"]);
+            assert_eq!(
+                environment_changes(&base, &tools),
+                [".devcontainer/tools.txt"]
+            );
 
             let added = of(&[(".devcontainer/scripts/c.sh", "echo c\n")]);
-            assert_eq!(environment_changes(&base, &added), [".devcontainer/scripts/c.sh"]);
+            assert_eq!(
+                environment_changes(&base, &added),
+                [".devcontainer/scripts/c.sh"]
+            );
 
             let without_dockerfile: Vec<(String, String)> = files()
                 .into_iter()
                 .filter(|(f, _)| *f != ".devcontainer/Dockerfile")
                 .map(|(a, b)| (a.to_owned(), b))
                 .collect();
-            let borrowed: Vec<(&str, &str)> =
-                without_dockerfile.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+            let borrowed: Vec<(&str, &str)> = without_dockerfile
+                .iter()
+                .map(|(a, b)| (a.as_str(), b.as_str()))
+                .collect();
             let deleted = environment_files_of(tree(&borrowed).path(), ".devcontainer/Dockerfile");
-            assert!(
-                environment_changes(&base, &deleted)
-                    .contains(&"the environment (Dockerfile / devcontainer) no longer resolves".to_owned())
-            );
+            assert!(environment_changes(&base, &deleted).contains(
+                &"the environment (Dockerfile / devcontainer) no longer resolves".to_owned()
+            ));
         }
 
         #[test]
         fn the_verdict_text_says_environment_changes_are_not_allowed_in_v0() {
-            let g = environment_change_guardrail(&[".devcontainer/Dockerfile".into()], "ratchet/bench");
-            assert_eq!((g.name.as_str(), g.passed), ("environment unchanged", false));
+            let g =
+                environment_change_guardrail(&[".devcontainer/Dockerfile".into()], "ratchet/bench");
+            assert_eq!(
+                (g.name.as_str(), g.passed),
+                ("environment unchanged", false)
+            );
             let d = g.detail.expect("detail");
-            assert!(d.contains("environment changes are not allowed in v0") && d.contains(".devcontainer/Dockerfile"));
+            assert!(
+                d.contains("environment changes are not allowed in v0")
+                    && d.contains(".devcontainer/Dockerfile")
+            );
         }
     }
 }
@@ -367,7 +496,10 @@ mod image_key_and_the_manifest {
             dockerfile: Some("Dockerfile".into()),
             context: Some(".".into()),
             target: None,
-            args: args.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect(),
+            args: args
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
             image: None,
             base_images: vec!["node:22".into()],
             base_digests: digests,
@@ -386,7 +518,10 @@ mod image_key_and_the_manifest {
     #[test]
     fn is_content_addressed() {
         let k = image_key(&base());
-        assert!(k.starts_with("img-") && k.len() == 44 && k[4..].bytes().all(|b| b.is_ascii_hexdigit()), "{k}");
+        assert!(
+            k.starts_with("img-") && k.len() == 44 && k[4..].bytes().all(|b| b.is_ascii_hexdigit()),
+            "{k}"
+        );
         let reordered = ImageKeyInput {
             spec: spec(&[("B", "2"), ("A", "1")], vec![]),
             files: h(&[("b.txt", "h2"), ("Dockerfile", "h1")]),
@@ -396,11 +531,20 @@ mod image_key_and_the_manifest {
         let mut changed = base();
         changed.files.insert("Dockerfile".into(), "other".into());
         assert_ne!(image_key(&changed), k);
-        let changed = ImageKeyInput { spec: spec(&[("A", "9")], vec![]), ..base() };
+        let changed = ImageKeyInput {
+            spec: spec(&[("A", "9")], vec![]),
+            ..base()
+        };
         assert_ne!(image_key(&changed), k);
-        let changed = ImageKeyInput { spec: spec(&[("A", "1"), ("B", "2")], vec![digest()]), ..base() };
+        let changed = ImageKeyInput {
+            spec: spec(&[("A", "1"), ("B", "2")], vec![digest()]),
+            ..base()
+        };
         assert_ne!(image_key(&changed), k);
-        let changed = ImageKeyInput { arch: "arm64".into(), ..base() };
+        let changed = ImageKeyInput {
+            arch: "arm64".into(),
+            ..base()
+        };
         assert_ne!(image_key(&changed), k);
         assert_eq!(image_tag(&k), format!("ratchet-env:{k}"));
         assert_eq!(image_manifest_key(&k), format!("bench-images/{k}.json"));
@@ -431,15 +575,26 @@ mod image_key_and_the_manifest {
                 assert!(e.contains(w), "{patch}: {e}");
             }
         };
-        rejected(json!({"key": format!("img-{}", "0".repeat(40))}), Some("another key"));
+        rejected(
+            json!({"key": format!("img-{}", "0".repeat(40))}),
+            Some("another key"),
+        );
         rejected(json!({"arch": "arm64"}), Some("architecture"));
-        rejected(json!({"files": {"Dockerfile": "evil"}}), Some("file hashes"));
+        rejected(
+            json!({"files": {"Dockerfile": "evil"}}),
+            Some("file hashes"),
+        );
         rejected(json!({"tag": "ratchet-env:other"}), None);
         rejected(json!({"imageId": "latest"}), Some("image id"));
-        rejected(json!({"archive": format!("bench-images/other/{sha}.tar.zst")}), Some("outside its own prefix"));
-        rejected(json!({"archive": format!("bench-inputs/{key}/{sha}.tar.zst")}), None);
+        rejected(
+            json!({"archive": format!("bench-images/other/{sha}.tar.zst")}),
+            Some("outside its own prefix"),
+        );
+        rejected(
+            json!({"archive": format!("bench-inputs/{key}/{sha}.tar.zst")}),
+            None,
+        );
         rejected(json!({"compression": "gzip"}), None); // the archive name says zstd
         rejected(json!({"rev": 2}), None);
     }
 }
-

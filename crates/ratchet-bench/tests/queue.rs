@@ -6,13 +6,26 @@ use std::time::Duration;
 use async_trait::async_trait;
 use ratchet_bench::pipeline::ProgressFn;
 use ratchet_bench::testkit::{ConfigOptions, make_config};
-use ratchet_bench::{BenchError, BenchProgress, BenchQueue, BenchRequest, BenchResult, BenchTicket, ProgressBenchRunner, QueueEvent, state_label};
-use ratchet_core::ports::{BaselineMetrics, BenchJob, BenchJobPhase, BenchOutcome, BenchRunner, CancellationToken, PortResult};
+use ratchet_bench::{
+    BenchError, BenchProgress, BenchQueue, BenchRequest, BenchResult, BenchTicket,
+    ProgressBenchRunner, QueueEvent, state_label,
+};
+use ratchet_core::ports::{
+    BaselineMetrics, BenchJob, BenchJobPhase, BenchOutcome, BenchRunner, CancellationToken,
+    PortResult,
+};
 use ratchet_core::{AgentId, OptimizationId, RatchetConfig};
 use tokio::sync::{mpsc, oneshot};
 
 fn outcome(v: f64) -> BenchOutcome {
-    BenchOutcome { runs: vec![], samples: vec![v], guardrails: vec![], started_at: 0, finished_at: 1, logs_key: None }
+    BenchOutcome {
+        runs: vec![],
+        samples: vec![v],
+        guardrails: vec![],
+        started_at: 0,
+        finished_at: 1,
+        logs_key: None,
+    }
 }
 
 struct Call {
@@ -36,7 +49,9 @@ impl Call {
     }
 
     fn aborted(&self) -> bool {
-        self.cancel.as_ref().is_some_and(CancellationToken::is_cancelled)
+        self.cancel
+            .as_ref()
+            .is_some_and(CancellationToken::is_cancelled)
     }
 }
 
@@ -56,7 +71,12 @@ impl ControlledRunner {
             .lock()
             .expect("lock")
             .iter()
-            .map(|c| c.job.candidate_id.as_ref().map_or_else(|| c.job.sha.clone(), |id| id.to_string()))
+            .map(|c| {
+                c.job
+                    .candidate_id
+                    .as_ref()
+                    .map_or_else(|| c.job.sha.clone(), |id| id.to_string())
+            })
             .collect()
     }
 }
@@ -70,7 +90,9 @@ impl BenchRunner for ControlledRunner {
         baseline: Option<&BaselineMetrics>,
         cancel: Option<&CancellationToken>,
     ) -> PortResult<BenchOutcome> {
-        Ok(self.run_with_progress(job, config, baseline, cancel, None).await?)
+        Ok(self
+            .run_with_progress(job, config, baseline, cancel, None)
+            .await?)
     }
 }
 
@@ -139,10 +161,17 @@ fn setup() -> Setup {
     let sink = events.clone();
     let queue = BenchQueue::with_options(
         runner.clone(),
-        Some(Arc::new(move |e: &QueueEvent| sink.lock().expect("lock").push(e.clone()))),
+        Some(Arc::new(move |e: &QueueEvent| {
+            sink.lock().expect("lock").push(e.clone())
+        })),
         None,
     );
-    Setup { runner, events, queue, config: make_config(&ConfigOptions::default()) }
+    Setup {
+        runner,
+        events,
+        queue,
+        config: make_config(&ConfigOptions::default()),
+    }
 }
 
 impl Setup {
@@ -242,7 +271,10 @@ async fn cancels_a_queued_job_without_running_it() {
     tick().await;
     let t2_id = t2.id.clone();
     t2.cancel();
-    assert_eq!(t2.wait().await.expect_err("cancelled"), BenchError::Cancelled);
+    assert_eq!(
+        t2.wait().await.expect_err("cancelled"),
+        BenchError::Cancelled
+    );
     s.runner.call(0).resolve(None);
     tick().await;
     assert_eq!(s.runner.started(), ["a1", "b1"]);
@@ -268,12 +300,25 @@ async fn aborts_a_running_job_and_moves_on_to_the_next() {
     assert!(!s.runner.call(0).aborted());
     t1.cancel();
     assert!(s.runner.call(0).aborted());
-    assert_eq!(t1.wait().await.expect_err("cancelled"), BenchError::Cancelled);
+    assert_eq!(
+        t1.wait().await.expect_err("cancelled"),
+        BenchError::Cancelled
+    );
     tick().await;
     assert_eq!(s.runner.started(), ["a1", "b1"]);
     let events = s.events();
-    assert!(events.iter().any(|e| matches!(e, QueueEvent::Cancelled { was_running: true, .. })));
-    assert!(!events.iter().any(|e| matches!(e, QueueEvent::Failed { .. })));
+    assert!(events.iter().any(|e| matches!(
+        e,
+        QueueEvent::Cancelled {
+            was_running: true,
+            ..
+        }
+    )));
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, QueueEvent::Failed { .. }))
+    );
 }
 
 #[tokio::test]
@@ -284,15 +329,31 @@ async fn cancel_agent_cancel_optimization_and_close() {
     let b1 = s.a("B", "b1");
     let x1 = s.submit("A", "x1", "optX");
     tick().await;
-    assert_eq!(s.queue.cancel_agent(&AgentId::new("A"), Some(&OptimizationId::new("opt1"))), 2); // running a1 + queued a2
-    assert_eq!(a1.wait().await.expect_err("cancelled"), BenchError::Cancelled);
-    assert_eq!(a2.wait().await.expect_err("cancelled"), BenchError::Cancelled);
+    assert_eq!(
+        s.queue
+            .cancel_agent(&AgentId::new("A"), Some(&OptimizationId::new("opt1"))),
+        2
+    ); // running a1 + queued a2
+    assert_eq!(
+        a1.wait().await.expect_err("cancelled"),
+        BenchError::Cancelled
+    );
+    assert_eq!(
+        a2.wait().await.expect_err("cancelled"),
+        BenchError::Cancelled
+    );
     tick().await;
     assert_eq!(s.runner.started(), ["a1", "x1", "b1"]);
     assert_eq!(s.queue.cancel_optimization(&OptimizationId::new("optX")), 1);
-    assert_eq!(x1.wait().await.expect_err("cancelled"), BenchError::Cancelled);
+    assert_eq!(
+        x1.wait().await.expect_err("cancelled"),
+        BenchError::Cancelled
+    );
     s.queue.close();
-    assert_eq!(b1.wait().await.expect_err("cancelled"), BenchError::Cancelled);
+    assert_eq!(
+        b1.wait().await.expect_err("cancelled"),
+        BenchError::Cancelled
+    );
     let late = s
         .queue
         .submit(BenchRequest {
@@ -324,7 +385,10 @@ async fn honours_an_external_cancellation_token_even_one_already_cancelled() {
         })
         .expect("submit");
     external.cancel();
-    assert_eq!(t2.wait().await.expect_err("cancelled"), BenchError::Cancelled);
+    assert_eq!(
+        t2.wait().await.expect_err("cancelled"),
+        BenchError::Cancelled
+    );
     let pre = CancellationToken::new();
     pre.cancel();
     let t3 = s
@@ -337,7 +401,10 @@ async fn honours_an_external_cancellation_token_even_one_already_cancelled() {
             cancel: Some(pre),
         })
         .expect("submit");
-    assert_eq!(t3.wait().await.expect_err("cancelled"), BenchError::Cancelled);
+    assert_eq!(
+        t3.wait().await.expect_err("cancelled"),
+        BenchError::Cancelled
+    );
     s.runner.call(0).resolve(None);
     tick().await;
     assert_eq!(s.runner.started(), ["a1"]);
@@ -352,9 +419,21 @@ async fn emits_queued_started_progress_and_done_events_with_ui_labels() {
     for step in [
         BenchProgress::Deps,
         BenchProgress::Checkout,
-        BenchProgress::Guardrails { index: 1, total: 2, name: "pnpm test".into() },
-        BenchProgress::Bench { run: 2, of: 5, phase: BenchJobPhase::Bench },
-        BenchProgress::Bench { run: 1, of: 3, phase: BenchJobPhase::Confirm },
+        BenchProgress::Guardrails {
+            index: 1,
+            total: 2,
+            name: "pnpm test".into(),
+        },
+        BenchProgress::Bench {
+            run: 2,
+            of: 5,
+            phase: BenchJobPhase::Bench,
+        },
+        BenchProgress::Bench {
+            run: 1,
+            of: 3,
+            phase: BenchJobPhase::Confirm,
+        },
     ] {
         p.send(step).expect("send");
     }
@@ -364,7 +443,16 @@ async fn emits_queued_started_progress_and_done_events_with_ui_labels() {
     let labels: Vec<String> = s.events().iter().map(state_label).collect();
     assert_eq!(
         labels,
-        ["queued (next)", "starting", "dependencies", "checkout", "guardrails 1/2", "bench 2/5", "confirm 1/3", "done"]
+        [
+            "queued (next)",
+            "starting",
+            "dependencies",
+            "checkout",
+            "guardrails 1/2",
+            "bench 2/5",
+            "confirm 1/3",
+            "done"
+        ]
     );
 }
 
@@ -374,8 +462,13 @@ async fn reports_a_failing_runner_as_a_failed_event_and_keeps_going() {
     let t1 = s.a("A", "a1");
     let t2 = s.a("A", "a2");
     tick().await;
-    s.runner.call(0).reject(BenchError::infra("instance exploded"));
-    assert_eq!(t1.wait().await.expect_err("failed").to_string(), "instance exploded");
+    s.runner
+        .call(0)
+        .reject(BenchError::infra("instance exploded"));
+    assert_eq!(
+        t1.wait().await.expect_err("failed").to_string(),
+        "instance exploded"
+    );
     tick().await;
     let failed = s.events().into_iter().find_map(|e| match e {
         QueueEvent::Failed { error, .. } => Some(error),
@@ -397,22 +490,45 @@ async fn snapshot_lists_the_running_job_and_the_waiting_ones_in_service_order() 
     tick().await;
     let snap = s.queue.snapshot();
     let lane = &snap[0];
-    assert_eq!(lane.running.as_ref().and_then(|r| r.job.candidate_id.as_ref()).map(ToString::to_string), Some("a1".into()));
+    assert_eq!(
+        lane.running
+            .as_ref()
+            .and_then(|r| r.job.candidate_id.as_ref())
+            .map(ToString::to_string),
+        Some("a1".into())
+    );
     let queued: Vec<(String, usize)> = lane
         .queued
         .iter()
         .map(|(r, pos)| (r.job.candidate_id.as_ref().expect("id").to_string(), *pos))
         .collect();
-    assert_eq!(queued, [("a2".to_owned(), 0), ("b1".to_owned(), 1), ("a3".to_owned(), 2)]);
+    assert_eq!(
+        queued,
+        [
+            ("a2".to_owned(), 0),
+            ("b1".to_owned(), 1),
+            ("a3".to_owned(), 2)
+        ]
+    );
 }
 
 #[tokio::test]
 async fn survives_a_throwing_listener() {
     let runner = Arc::new(ControlledRunner::default());
-    let queue = BenchQueue::with_options(runner.clone(), Some(Arc::new(|_: &QueueEvent| panic!("ui bug"))), None);
+    let queue = BenchQueue::with_options(
+        runner.clone(),
+        Some(Arc::new(|_: &QueueEvent| panic!("ui bug"))),
+        None,
+    );
     let config = make_config(&ConfigOptions::default());
     let t = queue
-        .submit(BenchRequest { agent_id: AgentId::new("A"), job: job("a1", "opt1"), config, baseline: None, cancel: None })
+        .submit(BenchRequest {
+            agent_id: AgentId::new("A"),
+            job: job("a1", "opt1"),
+            config,
+            baseline: None,
+            cancel: None,
+        })
         .expect("submit");
     tick().await;
     runner.call(0).resolve(None);

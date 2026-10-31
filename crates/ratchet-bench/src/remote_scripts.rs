@@ -14,8 +14,8 @@ use crate::deps::{DepsStrategy, FileHashes};
 use crate::errors::{BenchError, BenchResult};
 use crate::image_scripts::{
     ContainerNetwork, ContainerRunSpec, ContainerRuntime, HELPER_IN_CONTAINER, ImageRestore,
-    assert_container_runtime, container_run, helper_mounts, ids_fragment,
-    image_restore_fragment, launcher_conf_fragment,
+    assert_container_runtime, container_run, helper_mounts, ids_fragment, image_restore_fragment,
+    launcher_conf_fragment,
 };
 pub use crate::shell::{BENCH_USER, HOLDOUT_USER, SENTINEL, assert_safe_ref, sq};
 use crate::shell::{fill, json_str, reject_nul};
@@ -45,7 +45,11 @@ pub struct StagedArchive {
 }
 
 impl StagedArchive {
-    pub fn new(uri: impl Into<String>, sha256: impl Into<String>, commit: impl Into<String>) -> Self {
+    pub fn new(
+        uri: impl Into<String>,
+        sha256: impl Into<String>,
+        commit: impl Into<String>,
+    ) -> Self {
         StagedArchive {
             uri: uri.into(),
             sha256: sha256.into(),
@@ -224,7 +228,10 @@ pub fn glob_regex_body(glob: &str) -> String {
         } else if c == ',' && in_brace {
             re.push('|');
         } else {
-            if matches!(c, '.' | '+' | '^' | '$' | '(' | ')' | '|' | '\\' | '{' | '}' | ']') {
+            if matches!(
+                c,
+                '.' | '+' | '^' | '$' | '(' | ')' | '|' | '\\' | '{' | '}' | ']'
+            ) {
                 re.push('\\');
             }
             re.push(c);
@@ -354,7 +361,8 @@ rm -f "$W/holdout/.probe"
 /// package manager's per-project bookkeeping, outside the store). Exit 25 to 29.
 fn deps_restore_fragment(r: &DepsRestore, isolated: bool, container: bool) -> BenchResult<String> {
     static URI: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
-        regex::Regex::new(r"^s3://[a-z0-9][a-z0-9.-]*/bench-deps/[A-Za-z0-9._/-]+$").expect("static regex")
+        regex::Regex::new(r"^s3://[a-z0-9][a-z0-9.-]*/bench-deps/[A-Za-z0-9._/-]+$")
+            .expect("static regex")
     });
     if !URI.is_match(&r.uri) || r.uri.contains("..") {
         return Err(BenchError::infra(format!(
@@ -363,7 +371,9 @@ fn deps_restore_fragment(r: &DepsRestore, isolated: bool, container: bool) -> Be
         )));
     }
     if !crate::deps::is_sha256_hex(&r.sha256) {
-        return Err(BenchError::infra("snapshot digest is not a sha256 hex string"));
+        return Err(BenchError::infra(
+            "snapshot digest is not a sha256 hex string",
+        ));
     }
     if !crate::deps::is_version(&r.node) || !crate::deps::is_version(&r.pm) {
         return Err(BenchError::infra(
@@ -380,8 +390,12 @@ fn deps_restore_fragment(r: &DepsRestore, isolated: bool, container: bool) -> Be
         }
     };
     let extract = match r.compression {
-        crate::deps::Compression::Zstd => "command -v zstd >/dev/null 2>&1 || { echo \"zstd is missing on this image (rebuild the bench image)\" >&2; exit 28; }\nzstd -dc -- \"$D/in/snapshot\" | tar -x -C \"$STORE\" --no-same-owner --no-same-permissions || exit 29",
-        crate::deps::Compression::Gzip => "tar -xzf \"$D/in/snapshot\" -C \"$STORE\" --no-same-owner --no-same-permissions || exit 29",
+        crate::deps::Compression::Zstd => {
+            "command -v zstd >/dev/null 2>&1 || { echo \"zstd is missing on this image (rebuild the bench image)\" >&2; exit 28; }\nzstd -dc -- \"$D/in/snapshot\" | tar -x -C \"$STORE\" --no-same-owner --no-same-permissions || exit 29"
+        }
+        crate::deps::Compression::Gzip => {
+            "tar -xzf \"$D/in/snapshot\" -C \"$STORE\" --no-same-owner --no-same-permissions || exit 29"
+        }
     };
     let where_ = if container { "container" } else { "instance" };
     let tool_node = tool("node --version");
@@ -448,7 +462,12 @@ pub struct CheckoutScriptInput {
 }
 
 impl CheckoutScriptInput {
-    pub fn new(layout: Layout, code: StagedArchive, bench: StagedArchive, globs: Vec<String>) -> Self {
+    pub fn new(
+        layout: Layout,
+        code: StagedArchive,
+        bench: StagedArchive,
+        globs: Vec<String>,
+    ) -> Self {
         CheckoutScriptInput {
             layout,
             code,
@@ -486,7 +505,9 @@ pub fn checkout_script(o: &CheckoutScriptInput) -> BenchResult<String> {
             )));
         }
         if !crate::deps::is_sha256_hex(&a.sha256) {
-            return Err(BenchError::infra("staged archive digest is not a sha256 hex string"));
+            return Err(BenchError::infra(
+                "staged archive digest is not a sha256 hex string",
+            ));
         }
     }
     let launcher = o
@@ -561,7 +582,10 @@ apply init || exit 24
             ("code_commit", &o.code.commit),
             ("bench_commit", &o.bench.commit),
             ("isolation", o.isolation.as_str()),
-            ("container", if o.image.is_some() { "true" } else { "false" }),
+            (
+                "container",
+                if o.image.is_some() { "true" } else { "false" },
+            ),
         ],
     );
     Ok(format!("{}{OVERLAY_FNS}{body}", prelude(&o.layout)))
@@ -735,7 +759,8 @@ pub fn step_script(o: &StepScriptInput) -> BenchResult<String> {
 
     // Setup and guardrails: candidate code as BENCH_USER without new privileges. The bench harness: HOLDOUT_USER, with its
     // own HOME/TMPDIR/output dir. Both lose the AWS_* variables even though a stock SSM environment has none.
-    let scrub = "env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN -u AWS_PROFILE";
+    let scrub =
+        "env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN -u AWS_PROFILE";
     if let Some(c) = &o.container {
         assert_container_runtime(c, &o.layout.work)?;
     }

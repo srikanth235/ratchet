@@ -314,7 +314,10 @@ pub fn parse_dockerfile(text: &str) -> DockerfileInfo {
                 .into_iter()
                 .filter(|x| x.starts_with("--"))
                 .collect();
-            if flags.iter().any(|f| f.to_lowercase().starts_with("--from=")) {
+            if flags
+                .iter()
+                .any(|f| f.to_lowercase().starts_with("--from="))
+            {
                 continue;
             }
             let plain = || -> Vec<String> {
@@ -374,7 +377,9 @@ fn js_string(v: &Value) -> String {
         Value::String(s) => s.clone(),
         Value::Null => "null".into(),
         Value::Bool(b) => b.to_string(),
-        Value::Number(n) => ratchet_core::numfmt::js_number_to_string(n.as_f64().unwrap_or(f64::NAN)),
+        Value::Number(n) => {
+            ratchet_core::numfmt::js_number_to_string(n.as_f64().unwrap_or(f64::NAN))
+        }
         other => other.to_string(),
     }
 }
@@ -493,8 +498,7 @@ fn files_under(tree: &Path, rel: &str, budget: &mut i64) -> BenchResult<Vec<Stri
 }
 
 fn walk_env(tree: &Path, dir: &str, budget: &mut i64, out: &mut Vec<String>) -> BenchResult<()> {
-    let rd = fs::read_dir(tree.join(dir))
-        .map_err(|e| BenchError::infra(format!("{dir}: {e}")))?;
+    let rd = fs::read_dir(tree.join(dir)).map_err(|e| BenchError::infra(format!("{dir}: {e}")))?;
     let mut entries: Vec<_> = rd.filter_map(Result::ok).collect();
     entries.sort_by_key(|e| e.file_name());
     for e in entries {
@@ -527,10 +531,13 @@ fn build_string_map(raw: Option<&Value>, what: &str) -> BenchResult<IndexMap<Str
     let mut out = IndexMap::new();
     let Some(raw) = raw else { return Ok(out) };
     let Value::Object(map) = raw else {
-        return Err(BenchError::infra(format!("{what} must be an object of strings")));
+        return Err(BenchError::infra(format!(
+            "{what} must be an object of strings"
+        )));
     };
     for (k, v) in map {
-        let ok = BUILD_ARG_NAME.is_match(k) && v.as_str().is_some_and(|s| BUILD_ARG_VALUE.is_match(s));
+        let ok =
+            BUILD_ARG_NAME.is_match(k) && v.as_str().is_some_and(|s| BUILD_ARG_VALUE.is_match(s));
         if !ok {
             return Err(BenchError::infra(format!(
                 "{what}.{k} is not a plain build argument (names [A-Za-z_][A-Za-z0-9_]*, values of letters, digits and . _ / : @ + = , ~ -)"
@@ -657,7 +664,11 @@ pub fn resolve_image_source(tree: &Path, image_path: &str) -> BenchResult<Resolv
             )));
         }
     }
-    let base_digests: Vec<String> = info.base_images.iter().filter_map(|r| pinned_digest(r)).collect();
+    let base_digests: Vec<String> = info
+        .base_images
+        .iter()
+        .filter_map(|r| pinned_digest(r))
+        .collect();
     let unpinned: Vec<&String> = info
         .base_images
         .iter()
@@ -705,7 +716,8 @@ pub fn resolve_image_source(tree: &Path, image_path: &str) -> BenchResult<Resolv
             &format!("COPY source {}", json_str(src)),
         )?;
         let joined = format!("{ctx_prefix}{}", if rel == "." { "" } else { rel.as_str() });
-        let full = normalize_repo_relative(if joined.is_empty() { "." } else { &joined }, "COPY source")?;
+        let full =
+            normalize_repo_relative(if joined.is_empty() { "." } else { &joined }, "COPY source")?;
         if !rel.contains(['*', '?', '[', '{']) {
             // A literal path: a file, or a directory (all of it). A missing source fails the build, which reports it.
             hash_names.extend(files_under(tree, &full, &mut budget)?);
@@ -740,7 +752,10 @@ pub fn resolve_image_source(tree: &Path, image_path: &str) -> BenchResult<Resolv
     }
     let mut names: Vec<String> = {
         let mut seen = BTreeSet::new();
-        hash_names.into_iter().filter(|n| seen.insert(n.clone())).collect()
+        hash_names
+            .into_iter()
+            .filter(|n| seen.insert(n.clone()))
+            .collect()
     };
     js_sort(&mut names);
     if names.iter().any(|n| n == "ratchet.yaml") {
@@ -805,7 +820,9 @@ fn ignored_note(dc: &Map<String, Value>, notes: &mut Vec<String>) {
         "containerUser",
     ];
     // (workspaceMount, workspaceFolder follow)
-    let all = KEYS.iter().chain(["workspaceMount", "workspaceFolder"].iter());
+    let all = KEYS
+        .iter()
+        .chain(["workspaceMount", "workspaceFolder"].iter());
     let present: Vec<&str> = all.copied().filter(|k| dc.get(*k).is_some()).collect();
     if !present.is_empty() {
         notes.push(format!(
@@ -933,7 +950,11 @@ pub fn parse_image_manifest(text: &str, expect: &ImageKeyInput, key: &str) -> Im
         Some("gzip") => Compression::Gzip,
         _ => return bad("has an unknown compression"),
     };
-    let Some(sha) = m.get("sha256").and_then(Value::as_str).filter(|s| is_sha256_hex(s)) else {
+    let Some(sha) = m
+        .get("sha256")
+        .and_then(Value::as_str)
+        .filter(|s| is_sha256_hex(s))
+    else {
         return bad("has no valid sha256");
     };
     let ext = match compression {
@@ -963,7 +984,10 @@ pub fn parse_image_manifest(text: &str, expect: &ImageKeyInput, key: &str) -> Im
         archive: want,
         sha256: sha.to_owned(),
         bytes: bytes as u64,
-        created_at: m.get("createdAt").and_then(Value::as_f64).map_or(0, |n| n as i64),
+        created_at: m
+            .get("createdAt")
+            .and_then(Value::as_f64)
+            .map_or(0, |n| n as i64),
     })
 }
 
@@ -1023,7 +1047,12 @@ pub fn environment_changes(base: &FileHashes, candidate: &FileHashes) -> Vec<Str
 
 /// The reason a candidate is blocked when it changes the environment. Same text for every runner.
 pub fn environment_change_guardrail(changed: &[String], bench_ref: &str) -> GuardrailResult {
-    let shown = changed.iter().take(10).cloned().collect::<Vec<_>>().join(", ");
+    let shown = changed
+        .iter()
+        .take(10)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
     let more = if changed.len() > 10 { ", ..." } else { "" };
     GuardrailResult {
         name: "environment unchanged".into(),

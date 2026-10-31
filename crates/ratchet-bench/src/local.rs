@@ -17,14 +17,16 @@ use std::sync::{Arc, LazyLock};
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use ratchet_core::ports::{
-    ArtifactStore, BaselineMetrics, BenchJob, BenchOutcome, BenchRunner, CancellationToken, Clock, GitHost, PortResult,
+    ArtifactStore, BaselineMetrics, BenchJob, BenchOutcome, BenchRunner, CancellationToken, Clock,
+    GitHost, PortResult,
 };
 use ratchet_core::{ProtectedConfigInput, RatchetConfig, effective_protected};
 use regex::Regex;
 
+use crate::deps::DepsStrategyId;
 use crate::deps::{
-    dependency_change_guardrail, hash_named_files, lockfile_changes, pinned_deps_files, resolve_deps_strategy,
-    root_entries,
+    dependency_change_guardrail, hash_named_files, lockfile_changes, pinned_deps_files,
+    resolve_deps_strategy, root_entries,
 };
 use crate::errors::{BenchError, BenchResult};
 use crate::exec::{OnData, ProcessOptions, run_process, signal_name};
@@ -35,7 +37,6 @@ use crate::pipeline::{
     CheckoutVeto, DEFAULT_TIMEOUTS, JobDeps, PipelineExecutor, ProgressBenchRunner, ProgressFn,
     StepOutcome, StepSpec, StepTimeouts, run_bench_job, with_limits,
 };
-use crate::deps::DepsStrategyId;
 
 #[derive(Clone)]
 pub struct LocalBenchRunnerOptions {
@@ -66,7 +67,11 @@ pub struct LocalBenchRunnerOptions {
 }
 
 impl LocalBenchRunnerOptions {
-    pub fn new(git: Arc<dyn GitHost>, scratch_root: impl Into<PathBuf>, clock: Arc<dyn Clock>) -> Self {
+    pub fn new(
+        git: Arc<dyn GitHost>,
+        scratch_root: impl Into<PathBuf>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
         LocalBenchRunnerOptions {
             git,
             scratch_root: scratch_root.into(),
@@ -105,7 +110,9 @@ impl BenchRunner for LocalBenchRunner {
         baseline: Option<&BaselineMetrics>,
         cancel: Option<&CancellationToken>,
     ) -> PortResult<BenchOutcome> {
-        Ok(self.run_with_progress(job, config, baseline, cancel, None).await?)
+        Ok(self
+            .run_with_progress(job, config, baseline, cancel, None)
+            .await?)
     }
 }
 
@@ -141,17 +148,27 @@ impl ProgressBenchRunner for LocalBenchRunner {
                 async move {
                     tokio::fs::create_dir_all(&o.scratch_root)
                         .await
-                        .map_err(|e| BenchError::infra(format!("{}: {e}", o.scratch_root.display())))?;
+                        .map_err(|e| {
+                            BenchError::infra(format!("{}: {e}", o.scratch_root.display()))
+                        })?;
                     let prefix: String = job
                         .optimization_id
                         .as_str()
                         .chars()
-                        .map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') { c } else { '_' })
+                        .map(|c| {
+                            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                                c
+                            } else {
+                                '_'
+                            }
+                        })
                         .collect();
                     let root = tempfile::Builder::new()
                         .prefix(&format!("{prefix}-"))
                         .tempdir_in(&o.scratch_root)
-                        .map_err(|e| BenchError::infra(format!("cannot create the job directory: {e}")))?
+                        .map_err(|e| {
+                            BenchError::infra(format!("cannot create the job directory: {e}"))
+                        })?
                         .keep();
                     let exec: Box<dyn PipelineExecutor> =
                         Box::new(LocalExecutor::new(o, job, config, log, root, cancel));
@@ -177,7 +194,9 @@ struct LocalExecutor {
 }
 
 /// Run blocking filesystem work off the async workers.
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> BenchResult<T> + Send + 'static) -> BenchResult<T> {
+async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> BenchResult<T> + Send + 'static,
+) -> BenchResult<T> {
     tokio::task::spawn_blocking(f)
         .await
         .map_err(|e| BenchError::infra(format!("filesystem task failed: {e}")))?
@@ -379,7 +398,10 @@ impl PipelineExecutor for LocalExecutor {
             None => format!(
                 "[exit {}{} after {}ms]",
                 r.exit_code.map_or_else(
-                    || format!("signal {}", r.signal.map_or_else(|| "null".into(), signal_name)),
+                    || format!(
+                        "signal {}",
+                        r.signal.map_or_else(|| "null".into(), signal_name)
+                    ),
                     |c| c.to_string()
                 ),
                 if r.timed_out { ", timed out" } else { "" },

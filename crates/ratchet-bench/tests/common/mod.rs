@@ -7,12 +7,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ratchet_bench::testkit::{ConfigOptions, DirStore, FixtureRepo, InstantClock, LocalFakeCompute, MemoryStore, make_config, walk_files};
+use ratchet_bench::ProgressBenchRunner;
+use ratchet_bench::testkit::{
+    ConfigOptions, DirStore, FixtureRepo, InstantClock, LocalFakeCompute, MemoryStore, make_config,
+    walk_files,
+};
 use ratchet_bench::{BenchError, RemoteBenchRunner, RemoteBenchRunnerOptions};
 use ratchet_core::RatchetConfig;
 use ratchet_core::ports::{BaselineMetrics, BenchJob, BenchJobPhase, BenchOutcome};
 use ratchet_core::{CandidateId, OptimizationId};
-use ratchet_bench::ProgressBenchRunner;
 
 pub const BUCKET: &str = "ratchet-test-artifacts";
 
@@ -41,7 +44,10 @@ pub fn job_with(sha: &str, f: impl FnOnce(&mut BenchJob)) -> BenchJob {
 
 /// `makeConfig({ guardrails: [], ... })`.
 pub fn no_guardrails(f: impl FnOnce(&mut ConfigOptions)) -> RatchetConfig {
-    let mut o = ConfigOptions { guardrails: Some(vec![]), ..ConfigOptions::default() };
+    let mut o = ConfigOptions {
+        guardrails: Some(vec![]),
+        ..ConfigOptions::default()
+    };
     f(&mut o);
     make_config(&o)
 }
@@ -51,7 +57,9 @@ pub fn cfg() -> RatchetConfig {
 }
 
 pub fn baseline(pairs: &[(&str, f64)]) -> BaselineMetrics {
-    BaselineMetrics { metrics: pairs.iter().map(|(k, v)| ((*k).to_owned(), *v)).collect() }
+    BaselineMetrics {
+        metrics: pairs.iter().map(|(k, v)| ((*k).to_owned(), *v)).collect(),
+    }
 }
 
 /// Run a job on any progress runner, with the `BenchError` result (not the port error).
@@ -61,13 +69,18 @@ pub async fn run(
     config: &RatchetConfig,
     baseline: Option<&BaselineMetrics>,
 ) -> Result<BenchOutcome, BenchError> {
-    runner.run_with_progress(j, config, baseline, None, None).await
+    runner
+        .run_with_progress(j, config, baseline, None, None)
+        .await
 }
 
 pub async fn wait_for(pred: impl Fn() -> bool, ms: u64) {
     let t0 = Instant::now();
     while !pred() {
-        assert!(t0.elapsed() < Duration::from_millis(ms), "wait_for timed out");
+        assert!(
+            t0.elapsed() < Duration::from_millis(ms),
+            "wait_for timed out"
+        );
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
@@ -124,31 +137,53 @@ impl Rig {
 
 /// A `RemoteBenchRunner` over `LocalFakeCompute` (scripts run by local bash, `aws s3 cp` is a directory copy). `tweak` edits
 /// the runner options before it is built (`isolation: user` also points the candidate launcher at the shim of that name).
-pub fn rig(fx: &FixtureRepo, extra_env: &[(&str, &str)], tweak: impl FnOnce(&mut RemoteBenchRunnerOptions)) -> Rig {
+pub fn rig(
+    fx: &FixtureRepo,
+    extra_env: &[(&str, &str)],
+    tweak: impl FnOnce(&mut RemoteBenchRunnerOptions),
+) -> Rig {
     let n = seq();
     let s3 = fx.path().join(format!("s3-{n}"));
     let flags = fx.path().join(format!("flags-{n}"));
     fs::create_dir_all(&flags).expect("flags");
-    let compute = Arc::new(LocalFakeCompute::new(fx.path().join(format!("ssm-{n}")), extra_env, Some(&s3)));
+    let compute = Arc::new(LocalFakeCompute::new(
+        fx.path().join(format!("ssm-{n}")),
+        extra_env,
+        Some(&s3),
+    ));
     let store = MemoryStore::new();
     let staging = DirStore::new(s3.join(BUCKET));
     let clock = InstantClock::new();
     let warnings: Arc<Mutex<Vec<String>>> = Arc::default();
     let work_root = fx.path().join(format!("work-{n}"));
-    let mut o = RemoteBenchRunnerOptions::new(compute.clone(), fx.host.clone(), clock.clone(), "ami-test");
+    let mut o =
+        RemoteBenchRunnerOptions::new(compute.clone(), fx.host.clone(), clock.clone(), "ami-test");
     o.artifacts = Some(store.clone());
     o.staging_bucket = Some(BUCKET.into());
     o.staging_store = Some(staging.clone());
     o.isolation = ratchet_bench::Isolation::None; // scripts run as the developer here; the 'user' path is exercised with shims
     o.work_root = Some(work_root.to_string_lossy().into_owned());
     let sink = warnings.clone();
-    o.on_warning = Some(Arc::new(move |w: &str| sink.lock().expect("lock").push(w.to_owned())));
+    o.on_warning = Some(Arc::new(move |w: &str| {
+        sink.lock().expect("lock").push(w.to_owned())
+    }));
     tweak(&mut o);
     if o.isolation == ratchet_bench::Isolation::User && o.candidate_launcher.is_none() {
         o.candidate_launcher = Some(compute.shim_path("ratchet-candidate"));
     }
     let log = fx.path().join(format!("shim-{n}.log"));
-    Rig { runner: RemoteBenchRunner::new(o), compute, store, staging, s3, work_root, warnings, clock, flags, log }
+    Rig {
+        runner: RemoteBenchRunner::new(o),
+        compute,
+        store,
+        staging,
+        s3,
+        work_root,
+        warnings,
+        clock,
+        flags,
+        log,
+    }
 }
 
 /// The shims that stand in for the OS tools of an `isolation: user` instance (the real users, iptables and sudo are image
@@ -185,7 +220,11 @@ pub fn install(compute: &LocalFakeCompute, shims: &[(String, String)]) {
 }
 
 /// A fixture-repo-backed rig with the user-isolation shims installed (the shim log is `rig.log`).
-pub fn user_rig(fx: &FixtureRepo, overrides: &[(&str, &str)], tweak: impl FnOnce(&mut RemoteBenchRunnerOptions)) -> Rig {
+pub fn user_rig(
+    fx: &FixtureRepo,
+    overrides: &[(&str, &str)],
+    tweak: impl FnOnce(&mut RemoteBenchRunnerOptions),
+) -> Rig {
     let r = rig(fx, &[], |o| {
         o.isolation = ratchet_bench::Isolation::User;
         tweak(o);

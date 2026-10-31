@@ -286,11 +286,7 @@ pub fn container_run(s: &ContainerRunSpec) -> String {
     w.extend(s.extra.iter().cloned());
     w.push("--entrypoint sh".into());
     w.push(sq(&s.rt.tag));
-    w.push(format!(
-        "-c {} ratchet-step {}",
-        sq(STEP_SHELL),
-        s.command
-    ));
+    w.push(format!("-c {} ratchet-step {}", sq(STEP_SHELL), s.command));
     w.into_iter()
         .filter(|x| !x.is_empty())
         .collect::<Vec<_>>()
@@ -340,7 +336,8 @@ pub struct ImageRestore {
 
 fn assert_restore(r: &ImageRestore) -> BenchResult<()> {
     static URI: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^s3://[a-z0-9][a-z0-9.-]*/bench-images/[A-Za-z0-9._/-]+$").expect("static regex")
+        Regex::new(r"^s3://[a-z0-9][a-z0-9.-]*/bench-images/[A-Za-z0-9._/-]+$")
+            .expect("static regex")
     });
     static ID: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"^sha256:[0-9a-f]{64}$").expect("static regex"));
@@ -365,7 +362,10 @@ fn daemon_ready(code: u8, attempts: u32) -> String {
 for _i in $(seq 1 {{n}}); do docker info >/dev/null 2>&1 && break; sleep 2; done
 docker info >/dev/null 2>&1 || { echo "the docker daemon is not running" >&2; exit {{code}}; }
 "#,
-        &[("code", &code.to_string()), ("n", &attempts.max(1).to_string())],
+        &[
+            ("code", &code.to_string()),
+            ("n", &attempts.max(1).to_string()),
+        ],
     )
 }
 
@@ -579,7 +579,8 @@ pub struct ImageBuildInput {
 /// A staged-base uri must be a plain `s3://` uri ending in `deps-base.tgz`.
 pub(crate) fn assert_base_archive(base: &BaseArchive) -> BenchResult<()> {
     static URI: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^s3://[a-z0-9][a-z0-9.-]*/[A-Za-z0-9._/-]+/deps-base\.tgz$").expect("static regex")
+        Regex::new(r"^s3://[a-z0-9][a-z0-9.-]*/[A-Za-z0-9._/-]+/deps-base\.tgz$")
+            .expect("static regex")
     });
     assert_safe_ref(&base.commit, "base commit")?;
     if !URI.is_match(&base.uri) || base.uri.contains("..") {
@@ -639,7 +640,10 @@ pub fn image_build_script(o: &ImageBuildInput) -> BenchResult<String> {
         if PLAIN.is_match(p) && !p.contains("..") {
             Ok(p.to_owned())
         } else {
-            Err(BenchError::infra(format!("path {} is not plain", json_str(p))))
+            Err(BenchError::infra(format!(
+                "path {} is not plain",
+                json_str(p)
+            )))
         }
     };
     let build = if s.kind == ImageKind::Dockerfile {

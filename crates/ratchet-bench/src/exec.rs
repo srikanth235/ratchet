@@ -166,7 +166,11 @@ fn kill_group(pid: Option<u32>) {
 pub async fn run_process(command: &str, opts: &ProcessOptions) -> ProcessResult {
     let t0 = Instant::now();
     let mut res = ProcessResult::default();
-    if opts.cancel.as_ref().is_some_and(CancellationToken::is_cancelled) {
+    if opts
+        .cancel
+        .as_ref()
+        .is_some_and(CancellationToken::is_cancelled)
+    {
         res.aborted = true;
         return res;
     }
@@ -239,7 +243,10 @@ pub async fn run_process(command: &str, opts: &ProcessOptions) -> ProcessResult 
             let _ = r.await;
         }
     };
-    if tokio::time::timeout(Duration::from_millis(1000), drain).await.is_err() {
+    if tokio::time::timeout(Duration::from_millis(1000), drain)
+        .await
+        .is_err()
+    {
         for r in &readers {
             r.abort();
         }

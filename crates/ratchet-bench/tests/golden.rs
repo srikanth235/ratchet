@@ -13,21 +13,25 @@ use ratchet_bench::deps::{
     self, Compression, DepsKeyInput, DepsStrategyId, FileHashes, deps_strategy, parse_deps_manifest,
 };
 use ratchet_bench::deps_scripts::{DepsBuildInput, deps_build_script};
-use ratchet_bench::image::{self, ImageKeyInput, ImageSpec, image_key, parse_image_manifest, resolve_image_source};
+use ratchet_bench::image::{
+    self, ImageKeyInput, ImageSpec, image_key, parse_image_manifest, resolve_image_source,
+};
 use ratchet_bench::image_scripts::{
-    self, ContainerRunSpec, ContainerRuntime, ImageBuildInput, ImageRestore, container_run, image_build_script,
-    image_restore_fragment,
+    self, ContainerRunSpec, ContainerRuntime, ImageBuildInput, ImageRestore, container_run,
+    image_build_script, image_restore_fragment,
 };
 use ratchet_bench::remote_scripts::{
-    self, CheckoutScriptInput, DepsRestore, Isolation, Layout, StagedArchive, StepKind, StepScriptInput,
-    checkout_script, protected_pcre, step_script, wrap_step,
+    self, CheckoutScriptInput, DepsRestore, Isolation, Layout, StagedArchive, StepKind,
+    StepScriptInput, checkout_script, protected_pcre, step_script, wrap_step,
 };
 use ratchet_bench::shell;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 fn golden(name: &str) -> Value {
-    let p: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(name);
+    let p: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden")
+        .join(name);
     serde_json::from_str(&fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display())))
         .unwrap_or_else(|e| panic!("{}: {e}", p.display()))
 }
@@ -136,7 +140,10 @@ fn shell_helpers() {
         let input = text(c, "input");
         let r = shell::assert_safe_ref(&input, "ref");
         match c.get("error") {
-            Some(e) => assert_eq!(r.expect_err("refused").to_string(), e.as_str().unwrap_or_default()),
+            Some(e) => assert_eq!(
+                r.expect_err("refused").to_string(),
+                e.as_str().unwrap_or_default()
+            ),
             None => assert!(r.is_ok(), "{input}"),
         }
     }
@@ -150,7 +157,10 @@ fn shell_helpers() {
     for c in g["nodeShim"].as_array().expect("shim") {
         let a = c["input"].as_array().expect("args");
         assert_eq!(
-            ratchet_bench::node_path::node_shim_script(a[0].as_str().unwrap_or_default(), a[1].as_bool().unwrap_or(false)),
+            ratchet_bench::node_path::node_shim_script(
+                a[0].as_str().unwrap_or_default(),
+                a[1].as_bool().unwrap_or(false)
+            ),
             text(c, "output")
         );
     }
@@ -195,7 +205,12 @@ fn protected_pcre_matches_the_typescript_translation() {
 
 #[test]
 fn container_run_command_lines() {
-    for (i, c) in golden("container_run.json").as_array().expect("cases").iter().enumerate() {
+    for (i, c) in golden("container_run.json")
+        .as_array()
+        .expect("cases")
+        .iter()
+        .enumerate()
+    {
         let spec: ContainerRunSpec = serde_json::from_value(c["input"].clone()).expect("spec");
         assert_eq!(container_run(&spec), text(c, "output"), "#{i}");
     }
@@ -222,7 +237,12 @@ fn checkout_scripts_are_byte_identical() {
     let cases = g.as_array().expect("cases");
     assert!(cases.len() > 100);
     for (i, c) in cases.iter().enumerate() {
-        check_text("checkout", i, c, checkout_script(&checkout_input(&c["input"])));
+        check_text(
+            "checkout",
+            i,
+            c,
+            checkout_script(&checkout_input(&c["input"])),
+        );
     }
 }
 
@@ -242,7 +262,11 @@ fn step_scripts_are_byte_identical() {
         );
         input.env = get(v, "env")
             .as_object()
-            .map(|m| m.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_owned())).collect())
+            .map(|m| {
+                m.iter()
+                    .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_owned()))
+                    .collect()
+            })
             .unwrap_or_default();
         input.isolation = opt::<Isolation>(v, "isolation").unwrap_or_default();
         input.holdout = v.get("holdout").map(|h| text(h, "uri"));
@@ -302,12 +326,21 @@ fn image_job_and_restore_scripts_are_byte_identical() {
             "image restore",
             i,
             c,
-            image_restore_fragment(&restore, &text(v, "work"), get(v, "isolated").as_bool().unwrap_or(false)),
+            image_restore_fragment(
+                &restore,
+                &text(v, "work"),
+                get(v, "isolated").as_bool().unwrap_or(false),
+            ),
         );
     }
     for (i, c) in g["ensure"].as_array().expect("ensure").iter().enumerate() {
         let restore: ImageRestore = serde_json::from_value(c["input"].clone()).expect("restore");
-        check_text("ensure image loaded", i, c, image_scripts::ensure_image_loaded(&restore));
+        check_text(
+            "ensure image loaded",
+            i,
+            c,
+            image_scripts::ensure_image_loaded(&restore),
+        );
     }
     let f = &g["fragments"];
     for c in f["ctr"].as_array().expect("ctr") {
@@ -320,10 +353,16 @@ fn image_job_and_restore_scripts_are_byte_identical() {
             text(c, "output")
         );
     }
-    assert_eq!(image_scripts::launcher_conf_fragment(), f["launcherConf"].as_str().unwrap_or_default());
+    assert_eq!(
+        image_scripts::launcher_conf_fragment(),
+        f["launcherConf"].as_str().unwrap_or_default()
+    );
     for c in f["helperMounts"].as_array().expect("mounts") {
         let rt: ContainerRuntime = serde_json::from_value(c["input"].clone()).expect("rt");
-        assert_eq!(serde_json::json!(image_scripts::helper_mounts(&rt)), c["output"]);
+        assert_eq!(
+            serde_json::json!(image_scripts::helper_mounts(&rt)),
+            c["output"]
+        );
     }
 }
 
@@ -352,7 +391,10 @@ fn keys_and_manifests() {
         assert_eq!(image_key(&input), text(c, "output"), "{v}");
     }
     for c in g["arch"].as_array().expect("arch") {
-        assert_eq!(deps::arch_from_instance_type(&text(c, "input")), text(c, "output"));
+        assert_eq!(
+            deps::arch_from_instance_type(&text(c, "input")),
+            text(c, "output")
+        );
     }
     for c in g["pinned"].as_array().expect("pinned") {
         let want: Vec<String> = serde_json::from_value(c["output"].clone()).expect("list");
@@ -361,10 +403,18 @@ fn keys_and_manifests() {
     for c in g["strategyEnv"].as_array().expect("env") {
         let s = strategy(&text(c, "input"));
         let obj = |pairs: Vec<(String, String)>| {
-            Value::Object(pairs.into_iter().map(|(k, v)| (k, Value::String(v))).collect())
+            Value::Object(
+                pairs
+                    .into_iter()
+                    .map(|(k, v)| (k, Value::String(v)))
+                    .collect(),
+            )
         };
         assert_eq!(obj(s.fetch_env("/w/store")), c["fetchEnv"]);
-        assert_eq!(obj(s.setup_env("/w/deps/store", "/w/home/.ratchet-deps")), c["setupEnv"]);
+        assert_eq!(
+            obj(s.setup_env("/w/deps/store", "/w/home/.ratchet-deps")),
+            c["setupEnv"]
+        );
         assert_eq!(s.fetch, text(c, "fetch"));
         assert_eq!(s.version, text(c, "version"));
         assert_eq!(s.prune, text(c, "prune"));
@@ -372,15 +422,40 @@ fn keys_and_manifests() {
     }
     let gr = &g["guardrails"];
     let detail = |r: ratchet_core::GuardrailResult| serde_json::to_value(r).expect("json");
-    assert_eq!(detail(deps::dependency_change_guardrail(&["a".into(), "b".into()], "ratchet/bench")), gr["deps"]);
-    assert_eq!(deps::offline_setup_hint(&deps::PNPM, "ratchet/bench"), text(gr, "hint"));
-    assert_eq!(deps::offline_setup_hint(&deps::NPM, "main"), text(gr, "hintNpm"));
-    assert_eq!(detail(image::environment_change_guardrail(&["a".into()], "ratchet/bench")), gr["env"]);
+    assert_eq!(
+        detail(deps::dependency_change_guardrail(
+            &["a".into(), "b".into()],
+            "ratchet/bench"
+        )),
+        gr["deps"]
+    );
+    assert_eq!(
+        deps::offline_setup_hint(&deps::PNPM, "ratchet/bench"),
+        text(gr, "hint")
+    );
+    assert_eq!(
+        deps::offline_setup_hint(&deps::NPM, "main"),
+        text(gr, "hintNpm")
+    );
+    assert_eq!(
+        detail(image::environment_change_guardrail(
+            &["a".into()],
+            "ratchet/bench"
+        )),
+        gr["env"]
+    );
     let many: Vec<String> = (0..12).map(|i| format!("f{i}")).collect();
-    assert_eq!(detail(image::environment_change_guardrail(&many, "r")), gr["envMany"]);
-    assert_eq!(image::container_setup_hint("ratchet/bench"), text(gr, "container"));
+    assert_eq!(
+        detail(image::environment_change_guardrail(&many, "r")),
+        gr["envMany"]
+    );
+    assert_eq!(
+        image::container_setup_hint("ratchet/bench"),
+        text(gr, "container")
+    );
     for c in g["logKeys"].as_array().expect("log keys") {
-        let job: ratchet_core::ports::BenchJob = serde_json::from_value(c["input"].clone()).expect("job");
+        let job: ratchet_core::ports::BenchJob =
+            serde_json::from_value(c["input"].clone()).expect("job");
         assert_eq!(ratchet_bench::pipeline::log_key(&job), text(c, "output"));
     }
 }
@@ -401,7 +476,12 @@ fn same_ok_manifest(got: &Value, want: &Value) {
 #[test]
 fn manifests_are_accepted_and_rejected_like_the_typescript() {
     let g = golden("keys.json");
-    for (i, c) in g["depsManifests"].as_array().expect("deps manifests").iter().enumerate() {
+    for (i, c) in g["depsManifests"]
+        .as_array()
+        .expect("deps manifests")
+        .iter()
+        .enumerate()
+    {
         let v = &c["input"];
         let input = DepsKeyInput {
             strategy: strategy(&text(v, "strategy")),
@@ -422,7 +502,12 @@ fn manifests_are_accepted_and_rejected_like_the_typescript() {
             }
         }
     }
-    for (i, c) in g["imageManifests"].as_array().expect("image manifests").iter().enumerate() {
+    for (i, c) in g["imageManifests"]
+        .as_array()
+        .expect("image manifests")
+        .iter()
+        .enumerate()
+    {
         let v = &c["input"];
         let input = ImageKeyInput {
             spec: from(v, "spec"),
@@ -466,7 +551,12 @@ fn dockerfile_jsonc_and_path_parsing() {
     for c in g["normalize"].as_array().expect("normalize") {
         let got = image::normalize_repo_relative(&text(c, "input"), "x");
         match c.get("error") {
-            Some(e) => assert_eq!(got.expect_err("refused").to_string(), e.as_str().unwrap_or_default(), "{}", c["input"]),
+            Some(e) => assert_eq!(
+                got.expect_err("refused").to_string(),
+                e.as_str().unwrap_or_default(),
+                "{}",
+                c["input"]
+            ),
             None => assert_eq!(got.expect("ok"), text(c, "output"), "{}", c["input"]),
         }
     }
@@ -489,7 +579,8 @@ fn resolve_image_source_matches_the_typescript() {
         }
         if let Some(links) = input["symlink"].as_object() {
             for (f, target) in links {
-                std::os::unix::fs::symlink(target.as_str().unwrap_or_default(), dir.join(f)).expect("symlink");
+                std::os::unix::fs::symlink(target.as_str().unwrap_or_default(), dir.join(f))
+                    .expect("symlink");
             }
         }
         let path = text(input, "path");
@@ -501,11 +592,19 @@ fn resolve_image_source_matches_the_typescript() {
                     s.split_once("(comments and trailing commas are allowed): ")
                         .map_or(s.to_owned(), |(a, _)| a.to_owned())
                 };
-                assert_eq!(cut(&e.to_string()), cut(want.as_str().unwrap_or_default()), "#{n} {input}");
+                assert_eq!(
+                    cut(&e.to_string()),
+                    cut(want.as_str().unwrap_or_default()),
+                    "#{n} {input}"
+                );
             }
             (Ok(r), None) => {
                 let want = &c["output"];
-                assert_eq!(serde_json::to_value(&r.spec).expect("spec"), want["spec"], "#{n} {input}");
+                assert_eq!(
+                    serde_json::to_value(&r.spec).expect("spec"),
+                    want["spec"],
+                    "#{n} {input}"
+                );
                 assert_eq!(
                     serde_json::to_string(&r.files).expect("files"),
                     serde_json::to_string(&want["files"]).expect("files"),
@@ -515,11 +614,16 @@ fn resolve_image_source_matches_the_typescript() {
             (a, b) => panic!("#{n} {input}: Rust {a:?}, TypeScript {b:?}"),
         }
         let env = image::environment_files_of(&dir, &path);
-        let want_env: BTreeMap<String, String> = serde_json::from_value(c["env"].clone()).expect("env");
+        let want_env: BTreeMap<String, String> =
+            serde_json::from_value(c["env"].clone()).expect("env");
         let got_env: BTreeMap<String, String> = env.into_iter().collect();
         if text(c, "error").contains("is not valid JSON") {
             // the marker hashes the parser's message (V8's vs serde_json's): only the shape is comparable
-            assert_eq!(got_env.keys().collect::<Vec<_>>(), want_env.keys().collect::<Vec<_>>(), "#{n} {input}");
+            assert_eq!(
+                got_env.keys().collect::<Vec<_>>(),
+                want_env.keys().collect::<Vec<_>>(),
+                "#{n} {input}"
+            );
         } else {
             assert_eq!(got_env, want_env, "#{n} {input}");
         }
