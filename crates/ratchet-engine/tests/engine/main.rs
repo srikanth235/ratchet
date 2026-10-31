@@ -9,6 +9,7 @@ mod runtime_bench_contract;
 mod runtime_live;
 mod runtime_live_checks;
 mod runtime_local_agents;
+mod runtime_simulation;
 mod runtime_summary;
 mod sandbox_auto;
 mod sandbox_lifecycle;

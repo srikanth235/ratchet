@@ -7,6 +7,7 @@
 pub mod clock;
 pub mod live;
 pub mod live_checks;
+pub mod simulate;
 pub mod simulation;
 pub mod summary;
 
@@ -19,6 +20,7 @@ pub use live_checks::{
     ConnectionResult, ConnectionTarget, ConnectionTester, ConnectionTesterDeps, HttpProbe,
     create_connection_tester,
 };
+pub use simulate::{SimulateOptions, SimulateResult, simulate};
 pub use simulation::{
     SIMULATION_PROJECTS, SimOverlay, SimulationOptions, SimulationProject, SimulationRepo,
     SimulationRuntime, create_simulation_runtime, prepare_simulation_repo,
