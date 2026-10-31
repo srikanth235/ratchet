@@ -14,16 +14,19 @@ use tokio::sync::OnceCell;
 
 use super::user_data::{RunnerNetworkOptions, bench_user_data, deps_user_data, runner_user_data};
 use crate::civil;
-use crate::domain::{
-    AgentIdentity, BenchLaunchSpec, BenchPurpose, Clock, InstanceInfo, InstanceRole, InstanceState,
-    RemoteCommand, RemoteCommandResult, RunnerLaunchSpec, SandboxOutputs, SecretRef,
-};
 use crate::error::{Error, Result, sdk};
 use crate::identity::CallerIdentity;
-use crate::ports::Compute;
 use crate::util::{
-    DEFAULT_AGENT_ROLE_PATH, SystemClock, TAG_AGENT, TAG_OPT, TAG_PURPOSE, TAG_ROLE, TAG_SANDBOX,
-    arn_name, assert_valid_id, assert_valid_instance_id, bounded_name, json_str, sh_quote,
+    DEFAULT_AGENT_ROLE_PATH, TAG_AGENT, TAG_OPT, TAG_PURPOSE, TAG_ROLE, TAG_SANDBOX, arn_name,
+    assert_valid_id, assert_valid_instance_id, bounded_name, json_str, sh_quote,
+};
+use ratchet_core::enums::InstanceRole;
+use ratchet_core::ids::{AgentId, OptimizationId};
+use ratchet_core::ports::mock::SystemClock;
+use ratchet_core::ports::{
+    AgentIdentity, BenchLaunchPurpose, BenchLaunchSpec, Clock, CloudCompute, InstanceInfo,
+    InstanceState, PortResult, RemoteCommand, RemoteCommandResult, RunnerLaunchSpec,
+    SandboxOutputs, SecretRef,
 };
 
 pub const KILL_SWITCH_POLICY_NAME: &str = "ratchet-kill-switch";
@@ -398,12 +401,12 @@ impl AwsCloudCompute {
                     let launched_at = inst
                         .and_then(|i| i.launch_time())
                         .and_then(|t| t.to_millis().ok())
-                        .unwrap_or_else(|| self.opts.clock.now_ms());
+                        .unwrap_or_else(|| self.opts.clock.now());
                     return Ok(InstanceInfo {
                         id: id.to_string(),
                         role,
-                        optimization_id: optimization_id.to_string(),
-                        agent_id: agent_id.map(str::to_string),
+                        optimization_id: optimization_id.into(),
+                        agent_id: agent_id.map(AgentId::from),
                         instance_type: instance_type.to_string(),
                         state: InstanceState::Pending,
                         launched_at,
@@ -416,9 +419,10 @@ impl AwsCloudCompute {
                     let propagating = e.code() == "InvalidParameterValue"
                         && matches!(&e, Error::Aws { message, .. } if message.to_lowercase().contains("instance profile"));
                     if attempt < retries && propagating {
-                        self.opts
+                        let _ = self
+                            .opts
                             .clock
-                            .sleep((2000u64 << attempt.min(20)).min(15_000))
+                            .sleep((2000u64 << attempt.min(20)).min(15_000), None)
                             .await;
                         attempt += 1;
                         continue;
@@ -452,11 +456,12 @@ fn tags(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
         .collect()
 }
 
-#[async_trait]
-impl Compute for AwsCloudCompute {
+/// The typed implementations behind the [`CloudCompute`] port: ids are plain strings and failures are this
+/// crate's [`Error`], whose AWS error codes drive the idempotency and retry rules.
+impl AwsCloudCompute {
     // ---- identity -----------------------------------------------------------
 
-    async fn create_agent_identity(
+    async fn create_agent_identity_impl(
         &self,
         optimization_id: &str,
         agent_id: &str,
@@ -555,14 +560,14 @@ impl Compute for AwsCloudCompute {
         });
 
         Ok(AgentIdentity {
-            optimization_id: optimization_id.to_string(),
-            agent_id: agent_id.to_string(),
+            optimization_id: optimization_id.into(),
+            agent_id: agent_id.into(),
             role_ref: role_arn,
             instance_profile_ref: profile_arn,
         })
     }
 
-    async fn revoke_agent_identity(&self, identity: &AgentIdentity) -> Result<()> {
+    async fn revoke_agent_identity_impl(&self, identity: &AgentIdentity) -> Result<()> {
         let doc = json!({
             "Version": "2012-10-17",
             "Statement": [{ "Sid": "KillSwitchDenyAll", "Effect": "Deny", "Action": "*", "Resource": "*" }],
@@ -581,7 +586,7 @@ impl Compute for AwsCloudCompute {
 
     /// Order matters: the role must leave its instance profile before either can be deleted, and a role cannot be
     /// deleted while inline/managed policies remain.
-    async fn delete_agent_identity(&self, identity: &AgentIdentity) -> Result<()> {
+    async fn delete_agent_identity_impl(&self, identity: &AgentIdentity) -> Result<()> {
         let iam = &self.clients.iam;
         let role = arn_name(&identity.role_ref);
         let profile = arn_name(&identity.instance_profile_ref);
@@ -676,7 +681,7 @@ impl Compute for AwsCloudCompute {
 
     // ---- secrets ------------------------------------------------------------
 
-    async fn put_secret(
+    async fn put_secret_impl(
         &self,
         optimization_id: &str,
         agent_id: &str,
@@ -728,7 +733,7 @@ impl Compute for AwsCloudCompute {
         })
     }
 
-    async fn delete_secrets(&self, optimization_id: &str, agent_id: &str) -> Result<()> {
+    async fn delete_secrets_impl(&self, optimization_id: &str, agent_id: &str) -> Result<()> {
         assert_valid_id("optimization", optimization_id)?;
         assert_valid_id("agent", agent_id)?;
         let ssm = &self.clients.ssm;
@@ -767,9 +772,9 @@ impl Compute for AwsCloudCompute {
 
     // ---- compute ------------------------------------------------------------
 
-    async fn launch_runner(&self, spec: &RunnerLaunchSpec) -> Result<InstanceInfo> {
-        assert_valid_id("optimization", &spec.optimization_id)?;
-        assert_valid_id("agent", &spec.agent_id)?;
+    async fn launch_runner_impl(&self, spec: &RunnerLaunchSpec) -> Result<InstanceInfo> {
+        assert_valid_id("optimization", spec.optimization_id.as_str())?;
+        assert_valid_id("agent", spec.agent_id.as_str())?;
         let net =
             RunnerNetworkOptions::new(self.cfg.region.clone(), self.cfg.egress_proxy_url.clone());
         let user_data = runner_user_data(spec, self.lifetime_hours(), Some(&net))?;
@@ -781,8 +786,8 @@ impl Compute for AwsCloudCompute {
             profile: Profile::Arn(spec.identity.instance_profile_ref.clone()),
             user_data,
             tags: tags(&[
-                (TAG_OPT, &spec.optimization_id),
-                (TAG_AGENT, &spec.agent_id),
+                (TAG_OPT, spec.optimization_id.as_str()),
+                (TAG_AGENT, spec.agent_id.as_str()),
                 (TAG_ROLE, "agent_runner"),
                 (TAG_SANDBOX, &self.cfg.sandbox_id),
                 (
@@ -794,8 +799,8 @@ impl Compute for AwsCloudCompute {
         self.run_instance(
             &params,
             InstanceRole::AgentRunner,
-            &spec.optimization_id,
-            Some(&spec.agent_id),
+            spec.optimization_id.as_str(),
+            Some(spec.agent_id.as_str()),
             &spec.instance_type,
         )
         .await
@@ -809,10 +814,10 @@ impl Compute for AwsCloudCompute {
     /// security group (egress, through the allow-list proxy when it is enabled), under its own profile that can write
     /// `bench-deps/` and nothing else. It never executes candidate code, and there is no fallback from `deps` to a bench
     /// subnet or profile or the other way round.
-    async fn launch_bench_instance(&self, spec: &BenchLaunchSpec) -> Result<InstanceInfo> {
-        assert_valid_id("optimization", &spec.optimization_id)?;
+    async fn launch_bench_instance_impl(&self, spec: &BenchLaunchSpec) -> Result<InstanceInfo> {
+        assert_valid_id("optimization", spec.optimization_id.as_str())?;
         let p = bench_profile_for(&self.cfg, spec.purpose)?;
-        let deps = spec.purpose == BenchPurpose::Deps;
+        let deps = spec.purpose == BenchLaunchPurpose::Deps;
         let bench_subnet = match (&self.cfg.bench_subnet_id, deps) {
             (_, true) => None,
             (Some(s), false) if !s.is_empty() => Some(s.clone()),
@@ -847,7 +852,7 @@ impl Compute for AwsCloudCompute {
             },
             user_data,
             tags: tags(&[
-                (TAG_OPT, &spec.optimization_id),
+                (TAG_OPT, spec.optimization_id.as_str()),
                 (TAG_ROLE, "bench"),
                 (TAG_PURPOSE, spec.purpose.as_str()),
                 (TAG_SANDBOX, &self.cfg.sandbox_id),
@@ -865,14 +870,14 @@ impl Compute for AwsCloudCompute {
         self.run_instance(
             &params,
             InstanceRole::Bench,
-            &spec.optimization_id,
+            spec.optimization_id.as_str(),
             None,
             &spec.instance_type,
         )
         .await
     }
 
-    async fn terminate(&self, instance_ids: &[String]) -> Result<()> {
+    async fn terminate_impl(&self, instance_ids: &[String]) -> Result<()> {
         if instance_ids.is_empty() {
             return Ok(());
         }
@@ -900,7 +905,7 @@ impl Compute for AwsCloudCompute {
         }
     }
 
-    async fn list_tagged(&self, optimization_id: Option<&str>) -> Result<Vec<InstanceInfo>> {
+    async fn list_tagged_impl(&self, optimization_id: Option<&str>) -> Result<Vec<InstanceInfo>> {
         // `*` and `?` are wildcards in EC2 filter values, so an unvalidated id could list other optimizations.
         if let Some(id) = optimization_id {
             assert_valid_id("optimization", id)?;
@@ -944,7 +949,7 @@ impl Compute for AwsCloudCompute {
 
     // ---- remote commands ----------------------------------------------------
 
-    async fn run_command(
+    async fn run_command_impl(
         &self,
         instance_id: &str,
         command: &RemoteCommand,
@@ -984,9 +989,9 @@ impl Compute for AwsCloudCompute {
         };
 
         let clock = &self.opts.clock;
-        let deadline = clock.now_ms() + (timeout as i64 + 60) * 1000;
+        let deadline = clock.now() + (timeout as i64 + 60) * 1000;
         loop {
-            clock.sleep(self.opts.poll_interval_ms).await;
+            let _ = clock.sleep(self.opts.poll_interval_ms, None).await;
             let inv = match ssm
                 .get_command_invocation()
                 .command_id(&command_id)
@@ -1000,7 +1005,7 @@ impl Compute for AwsCloudCompute {
                     if e.code() != "InvocationDoesNotExist" {
                         return Err(e); // not registered yet is the only error worth waiting out
                     }
-                    if clock.now_ms() > deadline {
+                    if clock.now() > deadline {
                         return Err(Error::other(format!(
                             "SSM command {command_id} never registered on {instance_id}"
                         )));
@@ -1038,13 +1043,85 @@ impl Compute for AwsCloudCompute {
                     ),
                 });
             }
-            if clock.now_ms() > deadline {
+            if clock.now() > deadline {
                 return Err(Error::other(format!(
                     "SSM command {command_id} on {instance_id} still {status} after {}s",
                     timeout + 60
                 )));
             }
         }
+    }
+}
+
+#[async_trait]
+impl CloudCompute for AwsCloudCompute {
+    async fn create_agent_identity(
+        &self,
+        optimization_id: &OptimizationId,
+        agent_id: &AgentId,
+    ) -> PortResult<AgentIdentity> {
+        Ok(self
+            .create_agent_identity_impl(optimization_id.as_str(), agent_id.as_str())
+            .await?)
+    }
+
+    async fn revoke_agent_identity(&self, identity: &AgentIdentity) -> PortResult<()> {
+        Ok(self.revoke_agent_identity_impl(identity).await?)
+    }
+
+    async fn delete_agent_identity(&self, identity: &AgentIdentity) -> PortResult<()> {
+        Ok(self.delete_agent_identity_impl(identity).await?)
+    }
+
+    async fn put_secret(
+        &self,
+        optimization_id: &OptimizationId,
+        agent_id: &AgentId,
+        name: &str,
+        value: &str,
+    ) -> PortResult<SecretRef> {
+        Ok(self
+            .put_secret_impl(optimization_id.as_str(), agent_id.as_str(), name, value)
+            .await?)
+    }
+
+    async fn delete_secrets(
+        &self,
+        optimization_id: &OptimizationId,
+        agent_id: &AgentId,
+    ) -> PortResult<()> {
+        Ok(self
+            .delete_secrets_impl(optimization_id.as_str(), agent_id.as_str())
+            .await?)
+    }
+
+    async fn launch_runner(&self, spec: &RunnerLaunchSpec) -> PortResult<InstanceInfo> {
+        Ok(self.launch_runner_impl(spec).await?)
+    }
+
+    async fn launch_bench_instance(&self, spec: &BenchLaunchSpec) -> PortResult<InstanceInfo> {
+        Ok(self.launch_bench_instance_impl(spec).await?)
+    }
+
+    async fn terminate(&self, instance_ids: &[String]) -> PortResult<()> {
+        Ok(self.terminate_impl(instance_ids).await?)
+    }
+
+    async fn list_tagged(
+        &self,
+        optimization_id: Option<&OptimizationId>,
+    ) -> PortResult<Vec<InstanceInfo>> {
+        Ok(self
+            .list_tagged_impl(optimization_id.map(OptimizationId::as_str))
+            .await?)
+    }
+
+    async fn run_command(
+        &self,
+        instance_id: &str,
+        command: &RemoteCommand,
+    ) -> PortResult<RemoteCommandResult> {
+        Ok(self.run_command_impl(instance_id, command).await?)
     }
 }
 
@@ -1073,13 +1150,13 @@ pub fn secret_prefix(opt: &str, agent: &str) -> Result<String> {
 
 /// Picks the instance profile for a bench phase; the sealed-capable one only for `confirm`, the `bench-deps/` writer
 /// only for `deps`. Anything not configured fails closed.
-pub fn bench_profile_for(cfg: &AwsComputeConfig, purpose: BenchPurpose) -> Result<&str> {
+pub fn bench_profile_for(cfg: &AwsComputeConfig, purpose: BenchLaunchPurpose) -> Result<&str> {
     match purpose {
-        BenchPurpose::Baseline | BenchPurpose::Bench => Ok(&cfg.bench_instance_profile),
-        BenchPurpose::Confirm => cfg.confirm_instance_profile.as_deref().filter(|p| !p.is_empty()).ok_or_else(|| {
+        BenchLaunchPurpose::Baseline | BenchLaunchPurpose::Bench => Ok(&cfg.bench_instance_profile),
+        BenchLaunchPurpose::Confirm => cfg.confirm_instance_profile.as_deref().filter(|p| !p.is_empty()).ok_or_else(|| {
             Error::other("confirmInstanceProfile is not configured (confirm_identity_ref): refusing to run a confirm job under the bench identity")
         }),
-        BenchPurpose::Deps => cfg.deps_instance_profile.as_deref().filter(|p| !p.is_empty()).ok_or_else(|| {
+        BenchLaunchPurpose::Deps => cfg.deps_instance_profile.as_deref().filter(|p| !p.is_empty()).ok_or_else(|| {
             Error::other("depsInstanceProfile is not configured (deps_identity_ref): re-apply the sandbox to create the dependency-snapshot identity; refusing to build a snapshot under another identity")
         }),
     }
@@ -1122,8 +1199,8 @@ pub fn to_instance_info(i: &ec2t::Instance) -> Option<InstanceInfo> {
     let mut info = InstanceInfo {
         id: id.to_string(),
         role,
-        optimization_id: opt,
-        agent_id: agent.filter(|a| !a.is_empty()),
+        optimization_id: opt.into(),
+        agent_id: agent.filter(|a| !a.is_empty()).map(AgentId::from),
         instance_type: i
             .instance_type()
             .map_or("unknown", |t| t.as_str())

@@ -6,11 +6,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::domain::{PullRequestInput, PullRequestUrl};
 use crate::error::{Error, Result};
 use crate::git::{
     BaseGitHostOptions, CommandGitRunner, Git, GitBackend, GitHostCore, GitRunOptions, GitRunner,
 };
+use ratchet_core::ports::{PullRequestInput, PullRequestRef};
 
 #[derive(Clone)]
 pub struct LocalGitHostOptions {
@@ -100,7 +100,7 @@ impl GitBackend for LocalBackend {
         Ok(())
     }
 
-    async fn create_pull_request(&self, input: &PullRequestInput) -> Result<PullRequestUrl> {
+    async fn create_pull_request(&self, input: &PullRequestInput) -> Result<PullRequestRef> {
         tokio::fs::create_dir_all(&self.pr_dir).await?;
         let stem = input.head.replace(['/', '\\'], "__");
         let body_path = self.pr_dir.join(format!("{stem}.md"));
@@ -108,7 +108,7 @@ impl GitBackend for LocalBackend {
         let meta = serde_json::json!({ "base": input.base, "head": input.head, "title": input.title, "shas": input.shas });
         let meta = serde_json::to_string_pretty(&meta).map_err(Error::invalid)?;
         tokio::fs::write(self.pr_dir.join(format!("{stem}.json")), meta).await?;
-        Ok(PullRequestUrl {
+        Ok(PullRequestRef {
             url: file_url(&body_path),
         })
     }

@@ -17,13 +17,15 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use super::infra_override::{ContractCheckOptions, assert_sandbox_contract};
 use super::process::{ProcessResult, ProcessRunner, ProcessSpec, TokioProcessRunner};
-use crate::domain::{
-    AwsIdentityRef, PlanAction, PlanChange, SandboxInput, SandboxLimits, SandboxNetwork,
-    SandboxOutputs, SandboxPlan, js_number,
-};
 use crate::error::{Error, Result};
-use crate::ports::SandboxProvider;
-use crate::util::assert_valid_sandbox_id;
+use crate::util::{assert_valid_sandbox_id, js_number};
+use ratchet_core::ports::{
+    AwsIdentityRef, PlanAction, PlanChange, PortError, PortResult, SandboxInput, SandboxLimits,
+    SandboxNetwork, SandboxOutputs, SandboxPlan, SandboxProvider,
+};
+
+/// The TypeScript name of [`SandboxOutputs`] in `packages/aws`: core's outputs type is the full AWS shape.
+pub type AwsSandboxOutputs = SandboxOutputs;
 
 /// A failed `tofu` invocation.
 #[derive(Debug, Clone)]
@@ -333,14 +335,14 @@ impl TofuSandboxProvider {
 
 #[async_trait]
 impl SandboxProvider for TofuSandboxProvider {
-    async fn plan(&self, input: &SandboxInput) -> Result<SandboxPlan> {
+    async fn plan(&self, input: &SandboxInput) -> PortResult<SandboxPlan> {
         let _g = self.lock(&input.sandbox_id).await?;
         let ctx = self.prepare(input).await?;
         self.init(&ctx).await?;
-        self.make_plan(&ctx).await
+        Ok(self.make_plan(&ctx).await?)
     }
 
-    async fn apply(&self, input: &SandboxInput) -> Result<SandboxOutputs> {
+    async fn apply(&self, input: &SandboxInput) -> PortResult<SandboxOutputs> {
         let _g = self.lock(&input.sandbox_id).await?;
         let ctx = self.prepare(input).await?;
         self.init(&ctx).await?;
@@ -356,12 +358,12 @@ impl SandboxProvider for TofuSandboxProvider {
         )
         .await?;
         let _ = tokio::fs::remove_file(&ctx.plan_path).await;
-        self.read_outputs(&ctx)
-            .await?
-            .ok_or_else(|| Error::other("tofu apply succeeded but produced no contract outputs"))
+        self.read_outputs(&ctx).await?.ok_or_else(|| {
+            PortError::failed("tofu apply succeeded but produced no contract outputs")
+        })
     }
 
-    async fn destroy(&self, input: &SandboxInput) -> Result<()> {
+    async fn destroy(&self, input: &SandboxInput) -> PortResult<()> {
         let _g = self.lock(&input.sandbox_id).await?;
         let roles = self
             .opts
@@ -369,7 +371,9 @@ impl SandboxProvider for TofuSandboxProvider {
             .list_runtime_agent_roles(input)
             .await?;
         if !roles.is_empty() {
-            return Err(TeardownBlockedError { roles }.into());
+            return Err(PortError::TeardownBlocked(
+                TeardownBlockedError { roles }.to_string(),
+            ));
         }
         let ctx = self.prepare(input).await?;
         self.init(&ctx).await?;
@@ -389,7 +393,7 @@ impl SandboxProvider for TofuSandboxProvider {
         Ok(())
     }
 
-    async fn outputs(&self, sandbox_id: &str) -> Result<Option<SandboxOutputs>> {
+    async fn outputs(&self, sandbox_id: &str) -> PortResult<Option<SandboxOutputs>> {
         let _g = self.lock(sandbox_id).await?;
         let dir = self.work_dir(sandbox_id)?;
         let state_path = dir.join("terraform.tfstate");
@@ -413,6 +417,7 @@ impl SandboxProvider for TofuSandboxProvider {
             plan_path: PathBuf::new(),
         })
         .await
+        .map_err(PortError::from)
     }
 }
 

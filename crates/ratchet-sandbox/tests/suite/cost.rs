@@ -2,14 +2,15 @@
 
 use std::sync::{Arc, Mutex};
 
+use ratchet_core::enums::AgentKind;
+use ratchet_core::ids::{AgentId, OptimizationId};
+use ratchet_core::ports::CloudCompute;
+use ratchet_core::ports::mock::ManualClock;
+use ratchet_core::ports::{AgentIdentity, BenchLaunchPurpose, BenchLaunchSpec, RunnerLaunchSpec};
 use ratchet_sandbox::cost::{
     BudgetGuard, BudgetState, BudgetStatus, CostMeter, CostMeterOptions, Crossed, MeteredCategory,
 };
-use ratchet_sandbox::domain::{
-    AgentIdentity, AgentKind, BenchLaunchSpec, BenchPurpose, RunnerLaunchSpec,
-};
-use ratchet_sandbox::ports::Compute;
-use ratchet_sandbox::{ManualClock, MockCloudCompute, StaticPriceBook};
+use ratchet_sandbox::{MockCloudCompute, StaticPriceBook};
 
 const HOUR: i64 = 3_600_000;
 
@@ -29,7 +30,10 @@ async fn setup() -> Setup {
         ("m7i.large", 0.2),
     ]));
     let meter = CostMeter::new(CostMeterOptions::new(cloud.clone(), prices).clock(clock.clone()));
-    let id: AgentIdentity = cloud.create_agent_identity("o1", "a1").await.unwrap();
+    let id: AgentIdentity = cloud
+        .create_agent_identity(&OptimizationId::from("o1"), &AgentId::from("a1"))
+        .await
+        .unwrap();
     let spec = RunnerLaunchSpec {
         optimization_id: "o1".into(),
         agent_id: "a1".into(),
@@ -54,7 +58,7 @@ fn bench(instance_type: &str) -> BenchLaunchSpec {
         optimization_id: "o1".into(),
         instance_type: instance_type.into(),
         image_ref: "a".into(),
-        purpose: BenchPurpose::Bench,
+        purpose: BenchLaunchPurpose::Bench,
     }
 }
 
@@ -72,7 +76,11 @@ async fn computes_live_spend_per_optimization_agent_role_from_lifetimes() {
         .await
         .unwrap(); // 0.4/h
     s.clock.advance(HOUR * 3 / 2);
-    let snap = s.meter.snapshot(Some("o1")).await.unwrap();
+    let snap = s
+        .meter
+        .snapshot(Some(&OptimizationId::from("o1")))
+        .await
+        .unwrap();
     let o = &snap.by_optimization["o1"];
     close(o.by_category[&MeteredCategory::AgentRunner], 0.15);
     close(o.by_category[&MeteredCategory::Experiment], 0.3);
@@ -110,7 +118,7 @@ async fn collect_emits_only_new_spend_ledger_shaped_aggregated_per_opt_agent_cat
     assert_eq!(
         (
             exp.optimization_id.as_str(),
-            exp.agent_id.as_deref(),
+            exp.agent_id.as_ref().map(AgentId::as_str),
             exp.estimated,
             exp.source.as_str(),
             exp.at

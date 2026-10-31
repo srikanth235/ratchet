@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use async_trait::async_trait;
+use ratchet_core::ports::{CancellationToken, Clock, PortError, PortResult};
 use ratchet_github::testing::{
     DEVICE_CODE, FAKE_LOGIN, FAKE_TOKEN, FakeGithubConfig, FakeGithubServer, repo, test_client,
 };
@@ -340,8 +342,66 @@ impl AccountStore for TestStore {
     }
 }
 
-fn instant() -> ratchet_github::signin::SleepFn {
-    Arc::new(|_, _| Box::pin(async {}))
+/// How a [`TestClock`] sleeps.
+enum Sleep {
+    /// Returns at once.
+    Instant,
+    /// Waits for the cancellation, then reports it.
+    UntilCancelled,
+    /// A real (short) pause.
+    Real(Duration),
+}
+
+/// The clock of the sign-in tests: records every sleep and moves `now` by `step` ms per sleep.
+struct TestClock {
+    t: AtomicI64,
+    step: i64,
+    sleeps: Mutex<Vec<u64>>,
+    mode: Sleep,
+}
+
+impl TestClock {
+    fn new(mode: Sleep, step: i64) -> Arc<Self> {
+        Arc::new(TestClock {
+            t: AtomicI64::new(0),
+            step,
+            sleeps: Mutex::default(),
+            mode,
+        })
+    }
+
+    fn instant() -> Arc<Self> {
+        Self::new(Sleep::Instant, 0)
+    }
+
+    fn sleeps(&self) -> Vec<u64> {
+        self.sleeps.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl Clock for TestClock {
+    fn now(&self) -> i64 {
+        self.t.load(Ordering::SeqCst)
+    }
+
+    async fn sleep(&self, ms: u64, cancel: Option<&CancellationToken>) -> PortResult<()> {
+        self.sleeps.lock().unwrap().push(ms);
+        self.t.fetch_add(self.step, Ordering::SeqCst);
+        match &self.mode {
+            Sleep::Instant => Ok(()),
+            Sleep::UntilCancelled => {
+                if let Some(c) = cancel {
+                    c.cancelled().await;
+                }
+                Err(PortError::Cancelled)
+            }
+            Sleep::Real(d) => {
+                tokio::time::sleep(*d).await;
+                Ok(())
+            }
+        }
+    }
 }
 
 async fn wait_until(what: &str, mut cond: impl FnMut() -> bool) {
@@ -375,17 +435,13 @@ async fn sign_in_shows_the_code_opens_the_browser_polls_until_approved_then_keep
     });
     let store = Arc::new(TestStore::default());
     let opened = Arc::new(Mutex::new(Vec::<String>::new()));
-    let sleeps = Arc::new(Mutex::new(Vec::<u64>::new()));
+    let clock = TestClock::instant();
     let signed_in = Arc::new(AtomicUsize::new(0));
 
     let mut deps = SignInDeps::new(api.clone(), store.clone());
     let o = opened.clone();
     deps.open_external = Some(Arc::new(move |u| o.lock().unwrap().push(u.to_string())));
-    let sl = sleeps.clone();
-    deps.sleep = Some(Arc::new(move |ms, _| {
-        sl.lock().unwrap().push(ms);
-        Box::pin(async {})
-    }));
+    deps.clock = clock.clone();
     let si = signed_in.clone();
     deps.on_signed_in = Some(Arc::new(move || {
         si.fetch_add(1, Ordering::SeqCst);
@@ -409,7 +465,7 @@ async fn sign_in_shows_the_code_opens_the_browser_polls_until_approved_then_keep
     );
     assert_eq!(flow.current(), None);
     // the interval GitHub asked for (5 s), then slowed down (+5 s at least)
-    assert_eq!(sleeps.lock().unwrap()[..3], [5000, 5000, 10_000]);
+    assert_eq!(clock.sleeps()[..3], [5000, 5000, 10_000]);
     assert!(!serde_json::to_string(&f).unwrap().contains("gho_"));
 }
 
@@ -431,7 +487,7 @@ async fn sign_in_ends_with_a_message_and_stores_nothing() {
         api.with(|s| s.polls = [poll.clone()].into());
         let store = Arc::new(TestStore::default());
         let mut deps = SignInDeps::new(api, store.clone());
-        deps.sleep = Some(instant());
+        deps.clock = TestClock::instant();
         let flow = GithubSignIn::new(deps);
         flow.start().await.unwrap();
         wait_until("terminal state", || {
@@ -449,16 +505,10 @@ async fn sign_in_ends_with_a_message_and_stores_nothing() {
 #[tokio::test]
 async fn sign_in_expires_on_its_own_when_the_code_outlives_its_time() {
     let api = Arc::new(MockGithubApi::new());
-    let t = Arc::new(AtomicI64::new(0));
     let store = Arc::new(TestStore::default());
     let mut deps = SignInDeps::new(api, store);
-    let t1 = t.clone();
-    deps.now = Some(Arc::new(move || t1.load(Ordering::SeqCst)));
-    let t2 = t.clone();
-    deps.sleep = Some(Arc::new(move |_, _| {
-        t2.fetch_add(1_000_000, Ordering::SeqCst);
-        Box::pin(async {})
-    }));
+    // every sleep jumps 1000 s ahead: the code (900 s) has expired by the first poll
+    deps.clock = TestClock::new(Sleep::Instant, 1_000_000);
     let flow = GithubSignIn::new(deps);
     flow.start().await.unwrap();
     wait_until("expiry", || {
@@ -474,9 +524,7 @@ async fn sign_in_cancel_stops_the_loop_and_a_second_start_replaces_the_first_flo
     let store = Arc::new(TestStore::default());
     let mut deps = SignInDeps::new(api.clone(), store.clone());
     // sleeps until cancelled
-    deps.sleep = Some(Arc::new(|_, cancel| {
-        Box::pin(async move { cancel.cancelled().await })
-    }));
+    deps.clock = TestClock::new(Sleep::UntilCancelled, 0);
     let flow = GithubSignIn::new(deps);
     flow.start().await.unwrap();
     flow.cancel();
@@ -496,9 +544,7 @@ async fn sign_in_end_to_end_against_the_fake_server() {
     let api: Arc<dyn GithubApi> = Arc::new(api_for(&server, "e2e-client-id"));
     let store = Arc::new(TestStore::default());
     let mut deps = SignInDeps::new(api, store.clone());
-    deps.sleep = Some(Arc::new(|_, _| {
-        Box::pin(async { tokio::time::sleep(Duration::from_millis(10)).await })
-    }));
+    deps.clock = TestClock::new(Sleep::Real(Duration::from_millis(10)), 0);
     let flow = GithubSignIn::new(deps);
     let f = flow.start().await.unwrap();
     assert_eq!(f.user_code, DEVICE_CODE);

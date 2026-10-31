@@ -8,8 +8,8 @@ use aws_sdk_pricing::operation::get_products::{
 };
 use aws_sdk_pricing::types::FilterType;
 use aws_smithy_mocks::{RuleMode, mock, mock_client};
-use ratchet_sandbox::ManualClock;
-use ratchet_sandbox::ports::Pricing;
+use ratchet_core::ports::PriceBook;
+use ratchet_core::ports::mock::ManualClock;
 use ratchet_sandbox::pricing::{AwsPriceBook, StaticPriceBook, parse_on_demand_usd};
 
 fn item(usd: &str, unit: &str) -> String {

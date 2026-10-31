@@ -6,20 +6,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use ratchet_core::enums::AgentKind;
+use ratchet_core::numfmt::to_fixed;
+use ratchet_core::ports::mock::SystemClock;
+use ratchet_core::ports::{AgentAdapter, ArtifactStore, CancellationToken, Clock, RunnerConfig};
 use serde_json::Value;
-use tokio_util::sync::CancellationToken;
 
 use crate::artifacts::{
-    ArtifactEventSink, ArtifactInbox, AwsCliArtifactStore, EventSinkOptions, FsArtifactStore,
-    config_key, done_key, runner_prefix,
+    ArtifactEventSink, ArtifactInbox, AwsCliArtifactStore, EventSinkOptions, config_key, done_key,
+    runner_prefix,
 };
 use crate::claude_code::{ClaudeCodeAdapter, ClaudeCodeOptions, ClaudePermissionMode};
 use crate::cli_agent::CliAgentOptions;
-use crate::clock::{AcceleratedClock, SystemClock};
+use crate::clock::AcceleratedClock;
 use crate::codex::{CodexAdapter, CodexOptions};
-use crate::context::to_fixed;
 use crate::demo_scripts::{DemoVariant, load_demo_search_script, load_script};
-use crate::domain::{AgentAdapter, AgentKind, ArtifactStore, Clock, RunnerConfig};
 use crate::git::{SharedGit, exec_git};
 use crate::process::{RunProcessOptions, SharedSpawner, TokioSpawner, run_process};
 use crate::runner_loop::{
@@ -50,7 +51,8 @@ pub struct RunnerMainOptions {
     pub env: HashMap<String, String>,
     pub spawner: Option<SharedSpawner>,
     pub git: Option<SharedGit>,
-    /// Replaces the S3/filesystem store chosen from the environment (tests).
+    /// Replaces the S3 store chosen from `RATCHET_ARTIFACTS_BUCKET`. The `ratchet-runner` binary puts a `ratchet_sandbox::FsArtifactStore` here for
+    /// `RATCHET_ARTIFACT_DIR`, so the library (and every test that links it) does not link the AWS SDK.
     pub store: Option<Arc<dyn ArtifactStore>>,
     pub clock: Option<Arc<dyn Clock>>,
     pub signal: Option<CancellationToken>,
@@ -280,11 +282,9 @@ pub async fn runner_main(options: RunnerMainOptions) -> Result<i32, RunnerMainEr
                     Some(env.clone()),
                     env.get("AWS_REGION").cloned(),
                 ))
-            } else if let Some(dir) = env.get("RATCHET_ARTIFACT_DIR").filter(|d| !d.is_empty()) {
-                Arc::new(FsArtifactStore::new(dir))
             } else {
                 return Err(RunnerMainError::new(
-                    "set RATCHET_ARTIFACTS_BUCKET (S3) or RATCHET_ARTIFACT_DIR (local directory)",
+                    "set RATCHET_ARTIFACTS_BUCKET (S3), or RATCHET_ARTIFACT_DIR (local directory, `ratchet-runner` only)",
                 ));
             }
         }

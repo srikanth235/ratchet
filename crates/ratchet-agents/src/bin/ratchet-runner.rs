@@ -4,8 +4,12 @@
 //!
 //! Exit codes: 0 finished, 1 the agent failed or was unavailable, 2 misconfigured.
 
+use std::sync::Arc;
+
 use clap::Parser;
 use ratchet_agents::{RunnerMainOptions, runner_main};
+use ratchet_core::ports::ArtifactStore;
+use ratchet_sandbox::FsArtifactStore;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio_util::sync::CancellationToken;
 
@@ -36,8 +40,19 @@ async fn main() {
         }
     }
 
+    let env: std::collections::HashMap<String, String> = std::env::vars().collect();
+    // S3 (the `aws` CLI) when a bucket is set; otherwise a local directory, the stand-in for S3 in simulation
+    let store: Option<Arc<dyn ArtifactStore>> = match (
+        env.get("RATCHET_ARTIFACTS_BUCKET")
+            .filter(|b| !b.is_empty()),
+        env.get("RATCHET_ARTIFACT_DIR").filter(|d| !d.is_empty()),
+    ) {
+        (None, Some(dir)) => Some(Arc::new(FsArtifactStore::new(dir))),
+        _ => None,
+    };
     let options = RunnerMainOptions {
-        env: std::env::vars().collect(),
+        env,
+        store,
         signal: Some(cancel),
         ..RunnerMainOptions::default()
     };

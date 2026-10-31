@@ -1,9 +1,9 @@
 //! Drop transcripts captured from the real CLIs (docs/real-env/agents.md) into `tests/fixtures/` as `real-claude-*.jsonl` /
 //! `real-codex-*.jsonl`; they are checked here with no further test code. With none present the test passes without checking anything.
 
+use ratchet_core::ports::AgentEventType;
 use std::path::Path;
 
-use ratchet_agents::domain::AgentEventType;
 use ratchet_agents::{ClaudeStreamParser, CodexStreamParser};
 
 #[test]
@@ -27,7 +27,7 @@ fn transcripts_captured_from_the_real_clis_parse_completely() {
             assert!(p.session_id.is_some(), "{file}: session id");
             assert!(p.result.is_some(), "{file}: result line");
             assert!(
-                events.iter().any(|e| e.kind == AgentEventType::Usage),
+                events.iter().any(|e| e.event_type == AgentEventType::Usage),
                 "{file}: usage"
             );
             assert!(

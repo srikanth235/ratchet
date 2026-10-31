@@ -1,12 +1,14 @@
 mod common;
 
+use ratchet_core::ports::{
+    ArtifactStore, CancellationToken, Clock, PortResult, RunnerInbox, RunnerMessage,
+};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use ratchet_agents::domain::{ArtifactStore, Clock, RunnerInbox, RunnerMessage, StoreError};
+
 use ratchet_agents::{ArtifactInbox, event_key, inbox_key, read_events};
-use tokio_util::sync::CancellationToken;
 
 /// A store where a listed object reads as empty the first time: a writer that has created the file but not filled it.
 #[derive(Default)]
@@ -17,20 +19,20 @@ struct RacyStore {
 
 #[async_trait]
 impl ArtifactStore for RacyStore {
-    async fn put(&self, key: &str, body: &[u8]) -> Result<(), StoreError> {
+    async fn put(&self, key: &str, body: &[u8]) -> PortResult<()> {
         self.files
             .lock()
             .unwrap()
             .insert(key.to_string(), String::from_utf8_lossy(body).into_owned());
         Ok(())
     }
-    async fn get(&self, key: &str) -> Result<Option<String>, StoreError> {
+    async fn get(&self, key: &str) -> PortResult<Option<String>> {
         if self.empty_once.lock().unwrap().remove(key) {
             return Ok(Some(String::new()));
         }
         Ok(self.files.lock().unwrap().get(key).cloned())
     }
-    async fn list(&self, prefix: &str) -> Result<Vec<String>, StoreError> {
+    async fn list(&self, prefix: &str) -> PortResult<Vec<String>> {
         Ok(self
             .files
             .lock()
@@ -80,12 +82,13 @@ impl Clock for CountingClock {
     fn now(&self) -> i64 {
         0
     }
-    async fn sleep(&self, _duration: Duration, _cancel: &CancellationToken) {
+    async fn sleep(&self, _ms: u64, _cancel: Option<&CancellationToken>) -> PortResult<()> {
         let mut n = self.sleeps.lock().unwrap();
         *n += 1;
         if *n > 20 {
             self.cancel.cancel();
         }
+        Ok(())
     }
 }
 
@@ -107,7 +110,7 @@ async fn the_inbox_retries_a_message_that_read_as_empty_instead_of_dropping_it()
     let inbox = ArtifactInbox::new(store, "p/")
         .with_clock(clock.clone())
         .with_poll_interval(Duration::from_millis(1));
-    let message = inbox.next(&cancel).await;
+    let message = inbox.next(Some(&cancel)).await.unwrap();
     assert!(
         matches!(message, Some(RunnerMessage::Verdict { ref sha, .. }) if sha == "abc"),
         "{message:?}"

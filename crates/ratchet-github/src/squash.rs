@@ -1,8 +1,9 @@
 //! The squash commit message for a pull request of verified wins.
 
-use crate::domain::{AgentKind, Direction, gain_percent};
 use crate::error::{Error, Result};
 use crate::numfmt::{num, to_fixed};
+use ratchet_core::enums::{AgentKind, Direction};
+use ratchet_core::gain_percent;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SquashWin {

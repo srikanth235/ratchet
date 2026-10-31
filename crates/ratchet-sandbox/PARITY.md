@@ -4,8 +4,8 @@ The TypeScript suites under `packages/aws/src` are the executable spec. Each TS 
 replaces it. All Rust tests live in `tests/suite/` (one module per TS test file, one test binary: each integration-test
 binary links the whole AWS SDK) plus a few unit tests next to the code (`src/util.rs`, `src/civil.rs`).
 
-Counts: **208** vitest cases (160 `it(...)` plus 6 `it.each` blocks that expand to 48 cases) -> **195** Rust tests
-(190 in `tests/suite`, 5 unit tests in `src/`). The `it.each` blocks become one Rust test that loops over the same cases
+Counts: **208** vitest cases (160 `it(...)` plus 6 `it.each` blocks that expand to 48 cases) -> **199** Rust tests
+(193 in `tests/suite`, 6 unit tests in `src/`). The `it.each` blocks become one Rust test that loops over the same cases
 (a failure names the case), which is why the Rust count is lower even though every TS case is covered, and
 dozens of extra tests are new (marked "new" below). No TS test is dropped.
 
@@ -17,10 +17,28 @@ Security-relevant behaviour (user data, secret-ref validation, id validation, pr
 artifact atomicity, reaper safety, the `infra:` override) is covered by the ported tests; the user-data scripts are also
 pinned byte-for-byte by insta snapshots, and those 11 outputs were diffed against the TypeScript output when ported.
 
-Naming: Rust traits follow the capability names (`Compute`, `ArtifactStore`, `CostSource`, `Pricing`, `ImageLookup`,
+Naming: the ports are `ratchet_core::ports` traits (`CloudCompute`, `ArtifactStore`, `CostReconciler`, `PriceBook`,
 `SandboxProvider`); the implementations keep their TS names (`AwsCloudCompute`, `MockCloudCompute`, `S3ArtifactStore`,
 `FsArtifactStore`, `AwsCostReconciler`, `MockCostReconciler`, `AwsPriceBook`, `StaticPriceBook`,
-`TofuSandboxProvider`, `MockSandboxProvider`). `Ec2ImageLookup`/`MockImageLookup` are new (TS had free functions).
+`TofuSandboxProvider`, `MockSandboxProvider`). `ImageLookup` (`Ec2ImageLookup`/`MockImageLookup`) is new (TS had free functions) and
+the one capability core has no port for.
+
+## Unified with ratchet-core
+
+`domain.rs` (the local copies of the ports' data types) and the local port traits are gone; every implementation here implements the core
+trait, returns `PortResult`, takes core's `OptimizationId` / `AgentId`, and uses core's `Clock`. Consequences:
+
+- `SystemClock` / `ManualClock` are `ratchet_core::ports::mock`'s (same behaviour: `sleep` advances the manual one); the crate's copy and its
+  unit test are removed. The other mocks differ from core's of the same name and stay: `StaticPriceBook` knows the common c7i/m7i prices,
+  `MockCostReconciler` can compute its answer from the query, `FsArtifactStore` is a directory (core's `MemoryArtifactStore` is not), and
+  `MockSandboxProvider` is the TS `aws` mock (resources, contract outputs, teardown guard; core's records calls).
+- `SandboxOutputs` is core's (the TS `AwsSandboxOutputs` merged into it, see core's PARITY); `AwsSandboxOutputs` stays as an alias.
+  `BenchPurpose` is core's `BenchLaunchPurpose`.
+- `Error` stays the crate's internal error (AWS codes drive the idempotency and retry rules); `From<Error> for PortError` keeps the message
+  verbatim and a refused teardown as `PortError::TeardownBlocked`. `AwsCloudCompute` keeps its typed id-as-`&str` methods privately
+  (`*_impl`) behind the port. Tests that matched on `Error::Tofu` / `Error::ContractViolation` of a provider call now match the message
+  (`PortError::Failed`); `Reaper::reap` and `CostMeter::{snapshot, collect}` take `Option<&OptimizationId>`.
+- New tests: `error::tests` (2), `fs_store_behaves_like_s3_for_put_get_list_by_prefix_under_the_runner_layout` (moved from ratchet-agents with the store), `is_usable_as_the_core_cloud_compute_port_object`, `is_usable_as_the_core_sandbox_provider_port_object_and_its_outputs_are_the_core_type`.
 
 ## artifacts.test.ts -> tests/suite/artifacts.rs
 
@@ -274,13 +292,13 @@ The new `TokioProcessRunner` tests spawn `sh`/`cat`, not tofu. The `/tmp/claude-
 
 - **Closed enums.** `BenchPurpose`, `AgentKind`, `InstanceRole`, ... are enums, so "unknown bench purpose" cannot be
   constructed; the JSON form is rejected by serde (asserted). The `default:` arm of `benchProfileFor` is gone.
-- **No abort signals.** `Clock::sleep` and `ProcessRunner::run` take no `AbortSignal`; cancel by dropping the future
-  (`TokioProcessRunner` kills the child on drop). Nothing in `packages/aws` used the signals.
+- **No abort signals.** `ProcessRunner::run` takes no `AbortSignal`; cancel by dropping the future (`TokioProcessRunner` kills the
+  child on drop). `Clock::sleep` takes core's optional `CancellationToken`, which nothing in `packages/aws` passes.
 - **`RemoteCommand.env` is sorted** by name (a `BTreeMap`); TS exported in insertion order. Exports are independent.
 - **SSM `ResponseCode`.** The Rust SDK reports an absent `ResponseCode` as `0`, TS saw `undefined`. A non-`Success`
   status with code `0` is therefore reported as exit code `1`, as TS did for an absent code. A `Success` is `0`.
 - **Plan/outputs JSON** are `serde_json` values with `preserve_order`, so key order follows insertion like JS objects.
-- **`SandboxOutputs`** merges TS `SandboxOutputs` and `AwsSandboxOutputs` (the engine only stores the AWS shape);
+- **`SandboxOutputs`** (core's) merges TS `SandboxOutputs` and `AwsSandboxOutputs` (the engine only stores the AWS shape);
   `AwsSandboxOutputs` is a type alias. Whole-number floats serialize as JSON integers (`2`, not `2.0`) like JS.
 - **`TofuSandboxProvider` error text** truncates stderr/stdout by characters, not UTF-16 units.
 - **Pricing single-flight** uses a shared future (`futures::Shared`), so concurrent failing lookups share one result,

@@ -1,13 +1,13 @@
-//! Clocks: the wall clock, an accelerated one for simulation, and a manual one for tests.
+//! Clocks beyond core's: an accelerated one for simulation, and a manual one for tests whose sleepers wake only when time is
+//! advanced. The wall clock (`SystemClock`) and the clock that jumps on `sleep` (`ManualClock`) are
+//! `ratchet_core::ports::mock`'s.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
+use ratchet_core::ports::{CancellationToken, Clock, PortError, PortResult};
 use tokio::sync::oneshot;
-use tokio_util::sync::CancellationToken;
-
-pub use crate::domain::Clock;
 
 fn epoch_ms() -> i64 {
     SystemTime::now()
@@ -16,28 +16,24 @@ fn epoch_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// Sleeps for `duration`; returns early (never errors) when `cancel` fires. A zero duration or an already-cancelled token returns at once.
-async fn sleep_for(duration: Duration, cancel: &CancellationToken) {
-    if cancel.is_cancelled() || duration.is_zero() {
-        return;
+/// Sleeps for `duration`; `Err(Cancelled)` when `cancel` fires first. A zero duration returns at once.
+async fn sleep_for(duration: Duration, cancel: Option<&CancellationToken>) -> PortResult<()> {
+    if cancel.is_some_and(CancellationToken::is_cancelled) {
+        return Err(PortError::Cancelled);
     }
-    tokio::select! {
-        _ = tokio::time::sleep(duration) => {}
-        _ = cancel.cancelled() => {}
+    if duration.is_zero() {
+        return Ok(());
     }
-}
-
-/// The wall clock.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct SystemClock;
-
-#[async_trait]
-impl Clock for SystemClock {
-    fn now(&self) -> i64 {
-        epoch_ms()
-    }
-    async fn sleep(&self, duration: Duration, cancel: &CancellationToken) {
-        sleep_for(duration, cancel).await
+    let sleep = tokio::time::sleep(duration);
+    match cancel {
+        None => {
+            sleep.await;
+            Ok(())
+        }
+        Some(c) => tokio::select! {
+            () = sleep => Ok(()),
+            () = c.cancelled() => Err(PortError::Cancelled),
+        },
     }
 }
 
@@ -82,8 +78,8 @@ impl Clock for AcceleratedClock {
         let real_ms = self.real_start.elapsed().as_secs_f64() * 1000.0;
         self.virtual_start + (real_ms * self.speed) as i64
     }
-    async fn sleep(&self, duration: Duration, cancel: &CancellationToken) {
-        sleep_for(duration.div_f64(self.speed), cancel).await
+    async fn sleep(&self, ms: u64, cancel: Option<&CancellationToken>) -> PortResult<()> {
+        sleep_for(Duration::from_millis(ms).div_f64(self.speed), cancel).await
     }
 }
 
@@ -154,20 +150,29 @@ impl Clock for ManualClock {
     fn now(&self) -> i64 {
         self.state.lock().unwrap().time
     }
-    async fn sleep(&self, duration: Duration, cancel: &CancellationToken) {
-        if cancel.is_cancelled() || duration.is_zero() {
-            return;
+    async fn sleep(&self, ms: u64, cancel: Option<&CancellationToken>) -> PortResult<()> {
+        if cancel.is_some_and(CancellationToken::is_cancelled) {
+            return Err(PortError::Cancelled);
+        }
+        if ms == 0 {
+            return Ok(());
         }
         let rx = {
             let mut st = self.state.lock().unwrap();
             let (tx, rx) = oneshot::channel();
-            let at = st.time + duration.as_millis() as i64;
+            let at = st.time + ms as i64;
             st.sleepers.push(Sleeper { at, wake: tx });
             rx
         };
-        tokio::select! {
-            _ = rx => {}
-            _ = cancel.cancelled() => {}
+        match cancel {
+            None => {
+                let _ = rx.await;
+                Ok(())
+            }
+            Some(c) => tokio::select! {
+                _ = rx => Ok(()),
+                () = c.cancelled() => Err(PortError::Cancelled),
+            },
         }
     }
 }
@@ -183,8 +188,9 @@ mod tests {
         let t0 = clock.now();
         let started = Instant::now();
         clock
-            .sleep(Duration::from_secs(5), &CancellationToken::new())
-            .await; // 5 ms real
+            .sleep(5_000, Some(&CancellationToken::new()))
+            .await
+            .unwrap(); // 5 ms real
         assert!(started.elapsed() < Duration::from_secs(1));
         assert!(clock.now() - t0 >= 4_000);
     }
@@ -205,7 +211,10 @@ mod tests {
             c2.cancel();
         });
         let started = Instant::now();
-        SystemClock.sleep(Duration::from_secs(60), &cancel).await;
+        let res = AcceleratedClock::new(1.0)
+            .sleep(60_000, Some(&cancel))
+            .await;
+        assert_eq!(res, Err(PortError::Cancelled));
         assert!(started.elapsed() < Duration::from_secs(5));
     }
 
@@ -217,8 +226,7 @@ mod tests {
         for (name, ms) in [("late", 300u64), ("early", 100)] {
             let (c, l) = (clock.clone(), log.clone());
             tasks.push(tokio::spawn(async move {
-                c.sleep(Duration::from_millis(ms), &CancellationToken::new())
-                    .await;
+                c.sleep(ms, Some(&CancellationToken::new())).await.unwrap();
                 l.lock().unwrap().push((name, c.now()));
             }));
         }

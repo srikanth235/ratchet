@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -7,15 +7,15 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
+use ratchet_core::ids::OptimizationId;
+use ratchet_core::ports::mock::SystemClock;
+use ratchet_core::ports::{
+    AgentAdapter, AgentEvent, AgentEventType, CancellationToken, Clock, PolledEvents, PortError,
+    PortResult, RunnerConfig, RunnerControl, RunnerHandle, RunnerMessage,
+};
 use serde_json::json;
 use tokio::sync::{Mutex as AsyncMutex, OnceCell};
-use tokio_util::sync::CancellationToken;
 
-use crate::clock::SystemClock;
-use crate::domain::{
-    AgentAdapter, AgentEvent, AgentEventType, Clock, ControlError, PollResult, RunnerConfig,
-    RunnerControl, RunnerHandle, RunnerMessage,
-};
 use crate::git::{Git, SharedGit};
 use crate::inbox::MemoryInbox;
 use crate::runner_loop::{
@@ -32,7 +32,7 @@ pub type AdapterFor = Arc<
 >;
 /// Extra environment for the agent processes of one agent (passed to the loop as `agent_env`).
 pub type AgentEnvFor =
-    Arc<dyn Fn(&RunnerConfig, &RunnerHandle) -> Option<HashMap<String, String>> + Send + Sync>;
+    Arc<dyn Fn(&RunnerConfig, &RunnerHandle) -> Option<BTreeMap<String, String>> + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WorkdirMode {
@@ -134,7 +134,7 @@ impl LocalRunnerControl {
         self.options.root_dir.join(optimization_id).join("clone")
     }
 
-    async fn clone_for(&self, optimization_id: &str, repo_url: &str) -> Result<Git, ControlError> {
+    async fn clone_for(&self, optimization_id: &str, repo_url: &str) -> PortResult<Git> {
         let cell = self
             .clones
             .lock()
@@ -151,19 +151,19 @@ impl LocalRunnerControl {
                 env: self.options.git_env.clone(),
             })
             .await
-            .map_err(|e| ControlError::new(e.to_string()))
+            .map_err(|e| PortError::failed(e.to_string()))
         })
         .await
         .cloned()
     }
 
-    fn get(&self, handle: &RunnerHandle) -> Result<Arc<LocalRunner>, ControlError> {
+    fn get(&self, handle: &RunnerHandle) -> PortResult<Arc<LocalRunner>> {
         self.runners
             .lock()
             .unwrap()
             .get(&key_of(handle))
             .cloned()
-            .ok_or_else(|| ControlError::new(format!("unknown runner {}", key_of(handle))))
+            .ok_or_else(|| PortError::failed(format!("unknown runner {}", key_of(handle))))
     }
 
     async fn finish(&self, runner: &LocalRunner) {
@@ -194,11 +194,11 @@ impl LocalRunnerControl {
     }
 
     /// Resolves with the loop's result when the runner finishes by itself or after `stop`.
-    pub async fn result(&self, handle: &RunnerHandle) -> Result<RunnerLoopResult, ControlError> {
+    pub async fn result(&self, handle: &RunnerHandle) -> PortResult<RunnerLoopResult> {
         Ok(self.get(handle)?.done.clone().await)
     }
 
-    pub fn workdir_of(&self, handle: &RunnerHandle) -> Result<PathBuf, ControlError> {
+    pub fn workdir_of(&self, handle: &RunnerHandle) -> PortResult<PathBuf> {
         Ok(self.get(handle)?.workdir.clone())
     }
 
@@ -232,34 +232,30 @@ fn lost_result() -> RunnerLoopResult {
 
 #[async_trait]
 impl RunnerControl for LocalRunnerControl {
-    async fn start(
-        &self,
-        handle: &RunnerHandle,
-        config: &RunnerConfig,
-    ) -> Result<(), ControlError> {
+    async fn start(&self, handle: &RunnerHandle, config: &RunnerConfig) -> PortResult<()> {
         let key = key_of(handle);
         if self.runners.lock().unwrap().contains_key(&key) {
-            return Err(ControlError::new(format!("runner {key} already started")));
+            return Err(PortError::failed(format!("runner {key} already started")));
         }
         let workdir = self
             .options
             .root_dir
-            .join(&handle.optimization_id)
-            .join(&handle.agent_id);
+            .join(handle.optimization_id.as_str())
+            .join(handle.agent_id.as_str());
         let events: Arc<Mutex<Vec<AgentEvent>>> = Arc::new(Mutex::new(Vec::new()));
         let abort = CancellationToken::new();
         let inbox = Arc::new(MemoryInbox::new());
-        let adapter = (self.options.adapter_for)(config, handle).map_err(ControlError::new)?;
+        let adapter = (self.options.adapter_for)(config, handle).map_err(PortError::failed)?;
 
         let mut tuning = self.options.loop_tuning.clone();
         let mut clone: Option<Git> = None;
         match self.options.workdirs {
             WorkdirMode::Worktree => {
                 let c = self
-                    .clone_for(&handle.optimization_id, &config.repo_url)
+                    .clone_for(handle.optimization_id.as_str(), &config.repo_url)
                     .await?;
                 {
-                    let queue = self.queue(&handle.optimization_id);
+                    let queue = self.queue(handle.optimization_id.as_str());
                     let _guard = queue.lock().await;
                     add_worktree(AddWorktreeOptions {
                         clone: c.clone(),
@@ -274,7 +270,7 @@ impl RunnerControl for LocalRunnerControl {
                         env: self.options.git_env.clone(),
                     })
                     .await
-                    .map_err(|e| ControlError::new(e.to_string()))?;
+                    .map_err(|e| PortError::failed(e.to_string()))?;
                 }
                 // Refs outside HEAD are shared by every worktree of the clone: give each agent its own.
                 tuning.accepted_ref = Some(format!("refs/ratchet/{}/accepted", handle.agent_id));
@@ -294,7 +290,7 @@ impl RunnerControl for LocalRunnerControl {
                     env: self.options.git_env.clone(),
                 })
                 .await
-                .map_err(|e| ControlError::new(e.to_string()))?;
+                .map_err(|e| PortError::failed(e.to_string()))?;
             }
         }
         if let Some(git) = &self.options.git {
@@ -338,31 +334,23 @@ impl RunnerControl for LocalRunnerControl {
         let mut runners = self.runners.lock().unwrap();
         if runners.contains_key(&key) {
             runner.abort.cancel();
-            return Err(ControlError::new(format!("runner {key} already started")));
+            return Err(PortError::failed(format!("runner {key} already started")));
         }
         runners.insert(key, runner);
         Ok(())
     }
 
-    async fn send(
-        &self,
-        handle: &RunnerHandle,
-        message: RunnerMessage,
-    ) -> Result<(), ControlError> {
-        self.get(handle)?.inbox.push(message);
+    async fn send(&self, handle: &RunnerHandle, message: &RunnerMessage) -> PortResult<()> {
+        self.get(handle)?.inbox.push(message.clone());
         Ok(())
     }
 
-    async fn poll(
-        &self,
-        handle: &RunnerHandle,
-        cursor: Option<&str>,
-    ) -> Result<PollResult, ControlError> {
+    async fn poll(&self, handle: &RunnerHandle, cursor: Option<&str>) -> PortResult<PolledEvents> {
         let runner = self.runners.lock().unwrap().get(&key_of(handle)).cloned();
         let Some(runner) = runner else {
             // The process restarted since this agent was launched: its loop is gone. Say so once, so the engine can end it.
             if cursor == Some("lost") {
-                return Ok(PollResult {
+                return Ok(PolledEvents {
                     events: Vec::new(),
                     cursor: "lost".to_string(),
                 });
@@ -370,29 +358,30 @@ impl RunnerControl for LocalRunnerControl {
             let lost = AgentEvent::new(self.clock.now(), AgentEventType::Status)
                 .with_text("local agent lost: the app was restarted while it was running")
                 .with_data(json!({"state": "failed", "reason": "lost"}));
-            return Ok(PollResult {
+            return Ok(PolledEvents {
                 events: vec![lost],
                 cursor: "lost".to_string(),
             });
         };
         let events = runner.events.lock().unwrap();
         let from: usize = cursor.and_then(|c| c.parse().ok()).unwrap_or(0);
-        Ok(PollResult {
+        Ok(PolledEvents {
             events: events.iter().skip(from).cloned().collect(),
             cursor: events.len().to_string(),
         })
     }
 
-    async fn stop(&self, handle: &RunnerHandle) -> Result<(), ControlError> {
+    async fn stop(&self, handle: &RunnerHandle) -> PortResult<()> {
         let runner = self.get(handle)?;
         self.finish(&runner).await;
-        self.cleanup(&handle.optimization_id, &runner).await;
+        self.cleanup(handle.optimization_id.as_str(), &runner).await;
         Ok(())
     }
 
     /// Teardown of one optimization: stop its agents, remove their worktrees and delete the local clone. Idempotent; the commits the
     /// agents pushed are on the remote and are not touched.
-    async fn release(&self, optimization_id: &str) -> Result<(), ControlError> {
+    async fn release(&self, optimization_id: &OptimizationId) -> PortResult<()> {
+        let optimization_id = optimization_id.as_str();
         let prefix = format!("{optimization_id}/");
         let mine: Vec<Arc<LocalRunner>> = self
             .runners

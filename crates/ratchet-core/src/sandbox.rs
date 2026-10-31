@@ -141,7 +141,7 @@ fn fallback_input(row: &Sandbox) -> SandboxInput {
         region: row.region.clone(),
         allowed_instance_types: vec!["c7i.2xlarge".into()],
         max_instances_per_agent: 2,
-        max_instance_lifetime_hours: 4,
+        max_instance_lifetime_hours: 4.0,
         tags: None,
     }
 }

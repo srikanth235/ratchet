@@ -6,14 +6,15 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
-use ratchet_sandbox::ports::SandboxProvider;
+use ratchet_core::ports::SandboxProvider;
+use ratchet_core::ports::{PortError, SandboxInput};
 use ratchet_sandbox::sandbox::tofu::{SharedRoles, parse_tofu_outputs};
 use ratchet_sandbox::sandbox::{
     ContractCheckOptions, GitSource, ProcessResult, ProcessRunner, ProcessSpec,
     TofuSandboxProvider, TofuSandboxProviderOptions, assert_sandbox_contract,
     check_sandbox_contract, materialize_infra_override, read_infra_override,
 };
-use ratchet_sandbox::{Error, Result, SandboxInput};
+use ratchet_sandbox::{Error, Result};
 use serde_json::{Value, json};
 
 const ACCT: &str = "123456789012";
@@ -326,7 +327,7 @@ async fn fails_apply_with_the_list_of_problems_when_the_module_does_not_satisfy_
         .apply(&sbx_input())
         .await
         .unwrap_err();
-    assert!(matches!(e, Error::ContractViolation(_)), "{e:?}");
+    assert!(matches!(e, PortError::Failed(_)), "{e:?}");
     let msg = e.to_string();
     assert!(
         msg.contains("does not satisfy the sandbox contract")
@@ -365,7 +366,7 @@ async fn validation_also_runs_when_outputs_are_read_later() {
     std::fs::write(dir.path().join("sbx/terraform.tfstate"), "{}").unwrap();
     assert!(matches!(
         p.outputs("sbx").await.unwrap_err(),
-        Error::ContractViolation(_)
+        PortError::Failed(m) if m.contains("does not satisfy the sandbox contract")
     ));
 }
 

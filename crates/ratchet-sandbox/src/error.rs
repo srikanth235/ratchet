@@ -33,10 +33,26 @@ pub enum Error {
     /// Anything else the TypeScript code threw as a plain `Error`.
     #[error("{0}")]
     Other(String),
+    /// A failure reported by a port implementation (the reaper and the cost meter call ports).
+    #[error(transparent)]
+    Port(#[from] ratchet_core::ports::PortError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+}
+
+/// Port implementations return core's [`PortError`](ratchet_core::ports::PortError): the message is kept verbatim, a
+/// refused teardown keeps its own variant so callers can tell "nothing changed" from a failure.
+impl From<Error> for ratchet_core::ports::PortError {
+    fn from(e: Error) -> Self {
+        use ratchet_core::ports::PortError;
+        match e {
+            Error::Port(p) => p,
+            Error::TeardownBlocked(t) => PortError::TeardownBlocked(t.to_string()),
+            other => PortError::Failed(other.to_string()),
+        }
+    }
 }
 
 fn aws_display(code: &str, message: &str) -> String {
@@ -99,4 +115,40 @@ where
     R: fmt::Debug + 'static,
 {
     Error::from_sdk(e)
+}
+
+#[cfg(test)]
+mod tests {
+    use ratchet_core::ports::PortError;
+
+    use super::*;
+
+    #[test]
+    fn a_refused_teardown_keeps_its_variant_for_the_port() {
+        let blocked = Error::TeardownBlocked(TeardownBlockedError {
+            roles: vec!["r1".into()],
+        });
+        let message = blocked.to_string();
+        assert_eq!(
+            PortError::from(blocked),
+            PortError::TeardownBlocked(message)
+        );
+    }
+
+    #[test]
+    fn every_other_error_reaches_the_port_with_its_message_verbatim() {
+        let aws = Error::aws("AccessDenied", "nope");
+        assert_eq!(
+            PortError::from(aws),
+            PortError::Failed("AccessDenied: nope".into())
+        );
+        let invalid = Error::invalid("invalid agent id \"x y\"");
+        assert_eq!(
+            PortError::from(invalid),
+            PortError::Failed("invalid agent id \"x y\"".into())
+        );
+        // a port error that went through this crate comes out unchanged
+        let cancelled = Error::from(PortError::Cancelled);
+        assert_eq!(PortError::from(cancelled), PortError::Cancelled);
+    }
 }

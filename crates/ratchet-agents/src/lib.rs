@@ -8,7 +8,8 @@
 //! - `scripted`, `demo_scripts`, `testing`, `clock`: simulation and test doubles
 //! - `runner_main` and the `ratchet-runner` binary
 //!
-//! Types that belong to `ratchet-core` / `ratchet-sandbox` are defined in `domain` until those crates land.
+//! The ports (`AgentAdapter`, `RunnerControl`, `RunnerInbox`, `Clock`, `ArtifactStore`, `CloudCompute`) and the data they exchange
+//! are `ratchet-core`'s; the filesystem artifact store is `ratchet-sandbox`'s.
 
 pub mod artifacts;
 pub mod claude_code;
@@ -19,7 +20,6 @@ pub mod context;
 pub mod control;
 pub mod demo_scripts;
 pub mod detect;
-pub mod domain;
 pub mod git;
 pub mod inbox;
 pub mod local_agents;
@@ -31,15 +31,15 @@ pub mod testing;
 pub mod workdir;
 
 pub use artifacts::{
-    ArtifactEventSink, ArtifactInbox, AwsCliArtifactStore, EventSinkOptions, FsArtifactStore,
-    config_key, done_key, event_key, inbox_key, last_seq, read_events, runner_prefix, seq_of,
+    ArtifactEventSink, ArtifactInbox, AwsCliArtifactStore, EventSinkOptions, config_key, done_key,
+    event_key, inbox_key, last_seq, read_events, runner_prefix, seq_of,
 };
 pub use claude_code::{
     ClaudeCodeAdapter, ClaudeCodeOptions, ClaudePermissionMode, ClaudeResult, ClaudeStreamParser,
     DEFAULT_CLAUDE_TOOLS, PromptVia,
 };
 pub use cli_agent::{CliAgent, CliAgentOptions};
-pub use clock::{AcceleratedClock, ManualClock, SystemClock};
+pub use clock::{AcceleratedClock, ManualClock};
 pub use codex::{
     CodexAdapter, CodexOptions, CodexPricing, CodexSandbox, CodexStreamParser, CodexTurnResult,
 };
@@ -59,11 +59,6 @@ pub use detect::{
     DetectFs, DetectOptions, HarnessAuth, HarnessInfo, HarnessKind, LoginPath, NodeDetectFs,
     Platform, detect_harnesses, fallback_path_dirs, local_agent_env, parse_version,
     resolve_login_path,
-};
-pub use domain::{
-    AgentAdapter, AgentError, AgentEvent, AgentEventType, AgentKind, AgentSession, AgentSpec,
-    AgentUsage, ArtifactStore, CandidateVerdict, Clock, CloudCompute, ControlError, PollResult,
-    Preflight, RunnerConfig, RunnerControl, RunnerHandle, RunnerInbox, RunnerMessage, StoreError,
 };
 pub use git::{
     CANDIDATE_TRAILER, ExecGit, Git, GitCall, GitError, GitResult, GitRunner, exec_git,

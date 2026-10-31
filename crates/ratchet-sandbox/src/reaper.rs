@@ -2,7 +2,7 @@
 //! terminate-on-shutdown) and cleans up after ended optimizations and stopped agents. (TS `reaper.ts`)
 //!
 //! Safety: stateless and idempotent. It reads the cloud, terminates, and a second run finds nothing left. It only ever
-//! touches instances carrying the `ratchet:opt` tag (what `Compute::list_tagged` returns), skips instances already
+//! touches instances carrying the `ratchet:opt` tag (what `CloudCompute::list_tagged` returns), skips instances already
 //! `stopping`/`terminated`, and a terminate failure is reported, never panicked on or retried in a loop.
 
 use std::collections::HashMap;
@@ -11,10 +11,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{AgentId, Clock, InstanceInfo, InstanceRole, InstanceState, OptimizationId};
 use crate::error::Result;
-use crate::ports::Compute;
-use crate::util::SystemClock;
+use ratchet_core::enums::InstanceRole;
+use ratchet_core::ids::{AgentId, OptimizationId};
+use ratchet_core::ports::mock::SystemClock;
+use ratchet_core::ports::{Clock, CloudCompute, InstanceInfo, InstanceState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -65,7 +66,7 @@ pub trait ReaperPolicy: Send + Sync {
 }
 
 pub struct ReaperOptions {
-    pub compute: Arc<dyn Compute>,
+    pub compute: Arc<dyn CloudCompute>,
     pub policy: Arc<dyn ReaperPolicy>,
     pub clock: Arc<dyn Clock>,
     /// `limits.max_instance_lifetime_hours` from the sandbox, in hours.
@@ -76,7 +77,7 @@ pub struct ReaperOptions {
 
 impl ReaperOptions {
     pub fn new(
-        compute: Arc<dyn Compute>,
+        compute: Arc<dyn CloudCompute>,
         policy: Arc<dyn ReaperPolicy>,
         max_instance_lifetime_hours: f64,
     ) -> Self {
@@ -117,8 +118,8 @@ impl Reaper {
         Self { opts }
     }
 
-    pub async fn reap(&self, optimization_id: Option<&str>) -> Result<ReaperReport> {
-        let now = self.opts.clock.now_ms();
+    pub async fn reap(&self, optimization_id: Option<&OptimizationId>) -> Result<ReaperReport> {
+        let now = self.opts.clock.now();
         let max_age = self.opts.max_instance_lifetime_hours * 3_600_000.0;
         let all = self.opts.compute.list_tagged(optimization_id).await?;
         // 'stopping'/'terminated' are already on their way out: skipping keeps reruns idempotent.
@@ -131,8 +132,8 @@ impl Reaper {
             errors: vec![],
         };
 
-        let mut opt_ended: HashMap<String, bool> = HashMap::new();
-        let mut agent_stopped: HashMap<(String, String), bool> = HashMap::new();
+        let mut opt_ended: HashMap<OptimizationId, bool> = HashMap::new();
+        let mut agent_stopped: HashMap<(OptimizationId, AgentId), bool> = HashMap::new();
         let mut doomed: HashMap<String, ReapReason> = HashMap::new();
 
         for i in &candidates {
@@ -140,7 +141,7 @@ impl Reaper {
                 let ended = self
                     .opts
                     .policy
-                    .is_optimization_ended(&i.optimization_id)
+                    .is_optimization_ended(i.optimization_id.as_str())
                     .await;
                 opt_ended.insert(i.optimization_id.clone(), ended);
             }
@@ -154,7 +155,7 @@ impl Reaper {
                     let stopped = self
                         .opts
                         .policy
-                        .is_agent_stopped(&i.optimization_id, agent)
+                        .is_agent_stopped(i.optimization_id.as_str(), agent.as_str())
                         .await;
                     agent_stopped.insert(k.clone(), stopped);
                 }
@@ -172,8 +173,9 @@ impl Reaper {
 
         if let Some(quota) = self.opts.max_instances_per_agent {
             // (optimization, agent) groups in first-seen order, like a JS Map.
-            let mut order: Vec<(String, String)> = vec![];
-            let mut by_agent: HashMap<(String, String), Vec<&InstanceInfo>> = HashMap::new();
+            let mut order: Vec<(OptimizationId, AgentId)> = vec![];
+            let mut by_agent: HashMap<(OptimizationId, AgentId), Vec<&InstanceInfo>> =
+                HashMap::new();
             for i in &candidates {
                 let Some(agent) = &i.agent_id else { continue };
                 if i.role != InstanceRole::Experiment

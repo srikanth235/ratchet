@@ -10,11 +10,11 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use indexmap::IndexMap;
 
-use crate::domain::{
-    CandidateCommit, CommitFilesInput, FileDiff, PullRequestInput, PullRequestUrl,
+use ratchet_core::ports::mock::ManualClock;
+use ratchet_core::ports::{
+    CandidateCommit, Clock, CommitFilesInput, CommitRef, FileDiff, GitHost, PortError, PortResult,
+    PullRequestInput, PullRequestRef,
 };
-use crate::error::{Error, Result};
-use crate::port::GitHost;
 
 /// A shared, ordered log of calls (`git.createBranch:<branch>`, `git.openPullRequest`, …).
 pub type CallLog = Arc<Mutex<Vec<String>>>;
@@ -43,24 +43,24 @@ pub struct MockGitState {
 
 pub struct MockGitHost {
     pub log: CallLog,
-    now: Arc<dyn Fn() -> i64 + Send + Sync>,
+    clock: Arc<dyn Clock>,
     state: Mutex<MockGitState>,
 }
 
 impl MockGitHost {
     pub fn new(files: BTreeMap<String, String>) -> Self {
-        Self::with(Arc::default(), Arc::new(|| 1_700_000_000_000), files)
+        Self::with(
+            Arc::default(),
+            Arc::new(ManualClock::new(1_700_000_000_000)),
+            files,
+        )
     }
 
-    /// With a shared call log and a clock (milliseconds since the epoch) for `committed_at`.
-    pub fn with(
-        log: CallLog,
-        now: Arc<dyn Fn() -> i64 + Send + Sync>,
-        files: BTreeMap<String, String>,
-    ) -> Self {
+    /// With a shared call log and the clock that stamps `committed_at`.
+    pub fn with(log: CallLog, clock: Arc<dyn Clock>, files: BTreeMap<String, String>) -> Self {
         MockGitHost {
             log,
-            now,
+            clock,
             state: Mutex::new(MockGitState {
                 files,
                 ..Default::default()
@@ -78,7 +78,7 @@ impl MockGitHost {
 
     /// Script a candidate commit on `branch` (what the runner would push).
     pub fn push(&self, branch: &str, sha: &str, changed: &[&str], message: Option<&str>) {
-        let committed_at = (self.now)();
+        let committed_at = self.clock.now();
         let message = message
             .map(String::from)
             .unwrap_or_else(|| format!("perf: {sha}\n\nRatchet-Candidate: true"));
@@ -105,7 +105,7 @@ impl MockGitHost {
 
 #[async_trait]
 impl GitHost for MockGitHost {
-    async fn create_branch(&self, from_ref: &str, branch: &str) -> Result<()> {
+    async fn create_branch(&self, from_ref: &str, branch: &str) -> PortResult<()> {
         self.log(format!("git.createBranch:{branch}"));
         self.state(|s| s.branches.insert(branch.to_string(), from_ref.to_string()));
         Ok(())
@@ -115,7 +115,7 @@ impl GitHost for MockGitHost {
         &self,
         branch: &str,
         since_sha: Option<&str>,
-    ) -> Result<Vec<CandidateCommit>> {
+    ) -> PortResult<Vec<CandidateCommit>> {
         Ok(self.state(|s| {
             let list = s.commits.get(branch).cloned().unwrap_or_default();
             let start = since_sha
@@ -125,21 +125,21 @@ impl GitHost for MockGitHost {
         }))
     }
 
-    async fn changed_files(&self, _base_ref: &str, sha: &str) -> Result<Vec<String>> {
+    async fn changed_files(&self, _base_ref: &str, sha: &str) -> PortResult<Vec<String>> {
         self.state(|s| {
             if s.fail_changed_files.contains(sha) {
-                return Err(Error::Git(format!("cannot diff {sha}")));
+                return Err(PortError::failed(format!("cannot diff {sha}")));
             }
             s.commits
                 .values()
                 .flatten()
                 .find(|c| c.commit.sha == sha)
                 .map(|c| c.files.clone())
-                .ok_or_else(|| Error::Git(format!("unknown sha {sha}")))
+                .ok_or_else(|| PortError::failed(format!("unknown sha {sha}")))
         })
     }
 
-    async fn diff(&self, base_ref: &str, sha: &str) -> Result<Vec<FileDiff>> {
+    async fn diff(&self, base_ref: &str, sha: &str) -> PortResult<Vec<FileDiff>> {
         Ok(self
             .changed_files(base_ref, sha)
             .await?
@@ -154,7 +154,7 @@ impl GitHost for MockGitHost {
             .collect())
     }
 
-    async fn checkout(&self, _sha: &str, dir: &Path) -> Result<()> {
+    async fn checkout(&self, _sha: &str, dir: &Path) -> PortResult<()> {
         let files = self.state(|s| s.files.clone());
         for (path, body) in files {
             let full = dir.join(path);
@@ -166,18 +166,18 @@ impl GitHost for MockGitHost {
         Ok(())
     }
 
-    async fn open_pull_request(&self, input: &PullRequestInput) -> Result<PullRequestUrl> {
+    async fn open_pull_request(&self, input: &PullRequestInput) -> PortResult<PullRequestRef> {
         self.log("git.openPullRequest");
         let n = self.state(|s| {
             s.prs.push(input.clone());
             s.prs.len()
         });
-        Ok(PullRequestUrl {
+        Ok(PullRequestRef {
             url: format!("https://example.test/pr/{n}"),
         })
     }
 
-    async fn resolve_ref(&self, reference: &str) -> Result<String> {
+    async fn resolve_ref(&self, reference: &str) -> PortResult<String> {
         Ok(self
             .state(|s| s.resolved.get(reference).cloned())
             .unwrap_or_else(|| format!("{reference}-sha")))
@@ -187,11 +187,11 @@ impl GitHost for MockGitHost {
         "https://example.test/acme/repo.git".into()
     }
 
-    async fn commit_files(&self, input: &CommitFilesInput) -> Result<String> {
+    async fn commit_files(&self, input: &CommitFilesInput) -> PortResult<CommitRef> {
         self.log(format!("git.commitFiles:{}", input.branch));
         self.state(|s| {
             if s.fail_commit_files || s.existing_branches.contains(&input.branch) {
-                return Err(Error::Git(format!(
+                return Err(PortError::failed(format!(
                     "branch {} already exists",
                     input.branch
                 )));
@@ -199,7 +199,7 @@ impl GitHost for MockGitHost {
             s.existing_branches.insert(input.branch.clone());
             let sha = format!("files-{}", s.files_committed.len() + 1);
             s.files_committed.push((input.clone(), sha.clone()));
-            Ok(sha)
+            Ok(CommitRef { sha })
         })
     }
 }
@@ -207,7 +207,7 @@ impl GitHost for MockGitHost {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::CommitFile;
+    use ratchet_core::ports::CommitFile;
 
     fn host() -> MockGitHost {
         MockGitHost::new(BTreeMap::from([("src/a.txt".to_string(), "a".to_string())]))
@@ -286,7 +286,7 @@ mod tests {
             message: "m".into(),
             files: vec![CommitFile::new("a", "b")],
         };
-        assert_eq!(h.commit_files(&input).await.unwrap(), "files-1");
+        assert_eq!(h.commit_files(&input).await.unwrap().sha, "files-1");
         assert!(
             h.commit_files(&input)
                 .await

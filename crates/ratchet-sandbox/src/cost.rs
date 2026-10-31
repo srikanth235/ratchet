@@ -5,12 +5,11 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
-use crate::domain::{
-    AgentId, Clock, InstanceInfo, InstanceRole, InstanceState, OptimizationId, SpendCategory,
-};
 use crate::error::{Error, Result};
-use crate::ports::{Compute, Pricing};
-use crate::util::SystemClock;
+use ratchet_core::enums::{InstanceRole, SpendCategory};
+use ratchet_core::ids::{AgentId, OptimizationId};
+use ratchet_core::ports::mock::SystemClock;
+use ratchet_core::ports::{Clock, CloudCompute, InstanceInfo, InstanceState, PriceBook};
 
 /// The ledger categories the meter produces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -89,8 +88,8 @@ pub struct CostSnapshot {
 }
 
 pub struct CostMeterOptions {
-    pub compute: Arc<dyn Compute>,
-    pub prices: Arc<dyn Pricing>,
+    pub compute: Arc<dyn CloudCompute>,
+    pub prices: Arc<dyn PriceBook>,
     pub clock: Arc<dyn Clock>,
     /// EC2 Linux bills per second with a 60 s minimum.
     pub min_billed_seconds: f64,
@@ -98,7 +97,7 @@ pub struct CostMeterOptions {
 }
 
 impl CostMeterOptions {
-    pub fn new(compute: Arc<dyn Compute>, prices: Arc<dyn Pricing>) -> Self {
+    pub fn new(compute: Arc<dyn CloudCompute>, prices: Arc<dyn PriceBook>) -> Self {
         Self {
             compute,
             prices,
@@ -138,8 +137,8 @@ impl CostMeter {
     }
 
     /// Cumulative cost of every tagged instance (optionally one optimization).
-    pub async fn snapshot(&self, optimization_id: Option<&str>) -> Result<CostSnapshot> {
-        let now = self.opts.clock.now_ms();
+    pub async fn snapshot(&self, optimization_id: Option<&OptimizationId>) -> Result<CostSnapshot> {
+        let now = self.opts.clock.now();
         let list = self.opts.compute.list_tagged(optimization_id).await?;
         let mut snap = CostSnapshot {
             at: now,
@@ -189,10 +188,14 @@ impl CostMeter {
     }
 
     /// New spend since the previous `collect()`, aggregated per (optimization, agent, category).
-    pub async fn collect(&self, optimization_id: Option<&str>) -> Result<Vec<SpendDelta>> {
+    pub async fn collect(
+        &self,
+        optimization_id: Option<&OptimizationId>,
+    ) -> Result<Vec<SpendDelta>> {
         let snap = self.snapshot(optimization_id).await?;
         let mut order: Vec<SpendDelta> = vec![];
-        let mut index: HashMap<(String, String, MeteredCategory), usize> = HashMap::new();
+        let mut index: HashMap<(OptimizationId, Option<AgentId>, MeteredCategory), usize> =
+            HashMap::new();
         let mut state = self.state.lock().expect("meter state poisoned");
         for c in &snap.instances {
             let delta = c.usd - state.emitted.get(&c.instance_id).copied().unwrap_or(0.0);
@@ -200,11 +203,7 @@ impl CostMeter {
                 continue;
             }
             state.emitted.insert(c.instance_id.clone(), c.usd);
-            let key = (
-                c.optimization_id.clone(),
-                c.agent_id.clone().unwrap_or_default(),
-                c.category,
-            );
+            let key = (c.optimization_id.clone(), c.agent_id.clone(), c.category);
             match index.get(&key) {
                 Some(&i) => order[i].usd += delta,
                 None => {

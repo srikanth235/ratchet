@@ -3,10 +3,9 @@
 mod common;
 
 use common::*;
-use ratchet_github::{
-    AgentKind, CommitFile, CommitFilesInput, Direction, FileDiff, GitHost, PullRequestInput,
-    SquashPlanInput, SquashWin, build_squash_plan,
-};
+use ratchet_core::enums::{AgentKind, Direction};
+use ratchet_core::ports::{CommitFile, CommitFilesInput, FileDiff, GitHost, PullRequestInput};
+use ratchet_github::{SquashPlanInput, SquashWin, build_squash_plan};
 
 fn s(v: &str) -> String {
     v.to_string()
@@ -327,7 +326,8 @@ async fn commit_files_creates_a_branch_with_one_commit_on_the_base_that_adds_and
             files: template_files(),
         })
         .await
-        .unwrap();
+        .unwrap()
+        .sha;
     let show = |path: &str, r: &str| f.remote_git(&["show", &format!("{r}:{path}")]);
 
     assert_eq!(
@@ -449,7 +449,8 @@ async fn commit_files_branch_is_a_normal_pr_head_and_open_pull_request_with_no_s
             vec![CommitFile::new("y.txt", "y\n")],
         ))
         .await
-        .unwrap();
+        .unwrap()
+        .sha;
     let pr = f
         .host
         .open_pull_request(&PullRequestInput {
@@ -487,7 +488,8 @@ async fn commit_files_can_base_the_commit_on_a_sha_and_keeps_multi_line_content_
             vec![CommitFile::new("z.txt", content)],
         ))
         .await
-        .unwrap();
+        .unwrap()
+        .sha;
     assert_eq!(
         git_raw(&f.remote.remote_dir, &["show", &format!("{sha}:z.txt")]),
         content

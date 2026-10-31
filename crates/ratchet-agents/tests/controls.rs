@@ -1,5 +1,9 @@
 mod common;
 
+use ratchet_core::ports::{
+    AgentAdapter, AgentEvent, AgentEventType, ArtifactStore, CancellationToken, PortError,
+    PortResult, RemoteCommandResult, RunnerControl, RunnerHandle, RunnerInbox, RunnerMessage,
+};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -9,18 +13,14 @@ use common::{
     AutoOptions, FakeCompute, MemoryStore, auto_verdicts, base_config, base_config_with,
     make_sandbox_branches,
 };
-use ratchet_agents::domain::{
-    AgentAdapter, AgentEvent, AgentEventType, ArtifactStore, ControlError, RemoteCommandResult,
-    RunnerControl, RunnerHandle, RunnerMessage, StoreError,
-};
+
 use ratchet_agents::testing::{FakeProcessSpec, FakeSpawner};
 use ratchet_agents::{
     AcceleratedClock, AgentScript, ArtifactEventSink, ArtifactInbox, AwsCliArtifactStore,
-    EventSinkOptions, FsArtifactStore, LocalRunnerControl, LocalRunnerControlOptions,
-    RunnerStopReason, ScriptStep, ScriptedAgent, SsmRunnerControl, SsmRunnerControlOptions,
-    config_key, event_key, inbox_key, read_events, runner_prefix, seq_of,
+    EventSinkOptions, LocalRunnerControl, LocalRunnerControlOptions, RunnerStopReason, ScriptStep,
+    ScriptedAgent, SsmRunnerControl, SsmRunnerControlOptions, config_key, event_key, inbox_key,
+    read_events, runner_prefix, seq_of,
 };
-use tokio_util::sync::CancellationToken;
 
 fn handle() -> RunnerHandle {
     RunnerHandle {
@@ -138,13 +138,13 @@ async fn ssm_send_writes_numbered_inbox_objects_continuing_after_existing_ones()
     control
         .send(
             &handle(),
-            RunnerMessage::User {
+            &RunnerMessage::User {
                 text: "hello".into(),
             },
         )
         .await
         .unwrap();
-    control.send(&handle(), RunnerMessage::Stop).await.unwrap();
+    control.send(&handle(), &RunnerMessage::Stop).await.unwrap();
     let keys: Vec<String> = store
         .keys()
         .into_iter()
@@ -268,17 +268,23 @@ async fn ssm_round_trip_with_the_runner_side_classes_sink_to_poll_and_send_to_ar
         .with_clock(Arc::new(AcceleratedClock::new(1000.0)))
         .with_poll_interval(Duration::from_millis(5));
     control
-        .send(&handle(), RunnerMessage::User { text: "a".into() })
+        .send(&handle(), &RunnerMessage::User { text: "a".into() })
         .await
         .unwrap();
-    control.send(&handle(), RunnerMessage::Pause).await.unwrap();
+    control
+        .send(&handle(), &RunnerMessage::Pause)
+        .await
+        .unwrap();
     let never = CancellationToken::new();
-    use ratchet_agents::domain::RunnerInbox;
+
     assert_eq!(
-        inbox.next(&never).await,
+        inbox.next(Some(&never)).await.unwrap(),
         Some(RunnerMessage::User { text: "a".into() })
     );
-    assert_eq!(inbox.next(&never).await, Some(RunnerMessage::Pause));
+    assert_eq!(
+        inbox.next(Some(&never)).await.unwrap(),
+        Some(RunnerMessage::Pause)
+    );
     let cancel = CancellationToken::new();
     let control = Arc::new(control);
     let waiting = {
@@ -288,17 +294,17 @@ async fn ssm_round_trip_with_the_runner_side_classes_sink_to_poll_and_send_to_ar
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_millis(30)).await;
                 control
-                    .send(&handle(), RunnerMessage::Resume)
+                    .send(&handle(), &RunnerMessage::Resume)
                     .await
                     .unwrap();
             })
         };
-        let m = inbox.next(&cancel).await;
+        let m = inbox.next(Some(&cancel)).await.unwrap();
         sender.await.unwrap();
         m
     };
     assert_eq!(waiting, Some(RunnerMessage::Resume));
-    let idle = async { inbox.next(&cancel).await };
+    let idle = async { inbox.next(Some(&cancel)).await.unwrap() };
     cancel.cancel();
     assert_eq!(idle.await, None);
 }
@@ -311,21 +317,21 @@ struct FlakyStore {
 
 #[async_trait]
 impl ArtifactStore for FlakyStore {
-    async fn put(&self, key: &str, body: &[u8]) -> Result<(), StoreError> {
+    async fn put(&self, key: &str, body: &[u8]) -> PortResult<()> {
         let first = {
             let mut n = self.puts.lock().unwrap();
             *n += 1;
             *n == 1
         };
         if first {
-            return Err(StoreError("S3 503".into()));
+            return Err(PortError::failed("S3 503"));
         }
         self.inner.put(key, body).await
     }
-    async fn get(&self, key: &str) -> Result<Option<String>, StoreError> {
+    async fn get(&self, key: &str) -> PortResult<Option<String>> {
         self.inner.get(key).await
     }
-    async fn list(&self, prefix: &str) -> Result<Vec<String>, StoreError> {
+    async fn list(&self, prefix: &str) -> PortResult<Vec<String>> {
         self.inner.list(prefix).await
     }
 }
@@ -427,34 +433,6 @@ async fn aws_cli_store_list_returns_empty_when_the_prefix_is_empty_aws_prints_nu
     );
 }
 
-#[tokio::test]
-async fn fs_store_behaves_like_s3_for_put_get_list_by_prefix() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = FsArtifactStore::new(dir.path());
-    store
-        .put("artifacts/o/a/events/00000001.jsonl", b"x")
-        .await
-        .unwrap();
-    store
-        .put("artifacts/o/a/inbox/00000001.json", b"y")
-        .await
-        .unwrap();
-    assert_eq!(
-        store
-            .get("artifacts/o/a/events/00000001.jsonl")
-            .await
-            .unwrap()
-            .as_deref(),
-        Some("x")
-    );
-    assert_eq!(store.get("nope").await.unwrap(), None);
-    assert_eq!(
-        store.list("artifacts/o/a/events/").await.unwrap(),
-        ["artifacts/o/a/events/00000001.jsonl"]
-    );
-    assert_eq!(store.list("artifacts/").await.unwrap().len(), 2);
-}
-
 // ---------------------------------------------------------------- LocalRunnerControl
 
 fn local_control(
@@ -543,7 +521,7 @@ async fn local_control_runs_agents_in_separate_clones_with_an_in_memory_inbox_an
         auto_verdicts(
             move |m| {
                 let (control, h) = (control.clone(), h.clone());
-                tokio::spawn(async move { control.send(&h, m).await.unwrap() });
+                tokio::spawn(async move { control.send(&h, &m).await.unwrap() });
             },
             AutoOptions::default(),
         )
@@ -586,7 +564,7 @@ async fn local_control_runs_agents_in_separate_clones_with_an_in_memory_inbox_an
     // cursors never re-deliver
     assert_eq!(
         seen.iter()
-            .filter(|e| e.kind == AgentEventType::Commit)
+            .filter(|e| e.event_type == AgentEventType::Commit)
             .count(),
         2
     );
@@ -640,13 +618,13 @@ async fn local_control_stop_ends_a_running_agent_promptly() {
         control.result(&h).await.unwrap().reason,
         RunnerStopReason::Stopped
     );
-    let unknown: ControlError = control
+    let unknown: PortError = control
         .send(
             &RunnerHandle {
                 agent_id: "zzz".into(),
                 ..h.clone()
             },
-            RunnerMessage::Pause,
+            &RunnerMessage::Pause,
         )
         .await
         .unwrap_err();

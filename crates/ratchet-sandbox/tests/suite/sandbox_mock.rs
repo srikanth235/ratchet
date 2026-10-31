@@ -2,12 +2,13 @@
 
 use std::sync::Arc;
 
-use ratchet_sandbox::ports::SandboxProvider;
+use ratchet_core::ports::PortError;
+use ratchet_core::ports::SandboxProvider;
+use ratchet_core::ports::{PlanAction, SandboxInput};
 use ratchet_sandbox::sandbox::tofu::SharedRoles;
 use ratchet_sandbox::sandbox::{
     MockSandboxProvider, MockSandboxProviderOptions, SANDBOX_RESOURCES,
 };
-use ratchet_sandbox::{Error, PlanAction, SandboxInput};
 
 fn input() -> SandboxInput {
     SandboxInput {
@@ -84,7 +85,7 @@ async fn destroy_honours_the_teardown_guard_like_the_real_provider() {
     p.apply(&input()).await.unwrap();
     assert!(matches!(
         p.destroy(&input()).await.unwrap_err(),
-        Error::TeardownBlocked(_)
+        PortError::TeardownBlocked(_)
     ));
     assert!(p.outputs("sim").await.unwrap().is_some());
     roles.set(vec![]);
@@ -126,4 +127,19 @@ async fn records_the_calls_it_receives_in_order() {
     p.apply(&input()).await.unwrap();
     p.destroy(&input()).await.unwrap();
     assert_eq!(p.calls(), ["plan:sim", "apply:sim", "destroy:sim"]);
+}
+
+#[tokio::test]
+async fn is_usable_as_the_core_sandbox_provider_port_object_and_its_outputs_are_the_core_type() {
+    let port: Arc<dyn SandboxProvider> = Arc::new(MockSandboxProvider::default());
+    let out = port.apply(&input()).await.unwrap();
+    assert_eq!(out.region, "us-east-1");
+    assert!(out.deps_identity.is_some());
+    // the outputs are core's: they survive the ledger's JSON column unchanged
+    let json = serde_json::to_value(&out).unwrap();
+    assert_eq!(
+        serde_json::from_value::<ratchet_core::ports::SandboxOutputs>(json).unwrap(),
+        out
+    );
+    assert_eq!(port.outputs("sim").await.unwrap(), Some(out));
 }

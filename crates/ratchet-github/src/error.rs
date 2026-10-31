@@ -16,11 +16,25 @@ pub enum Error {
         status: Option<u16>,
         message: String,
     },
-    /// The host does not implement this optional operation.
-    #[error("{0}")]
-    Unsupported(String),
+    /// A port call failed in a collaborator (the clock, say).
+    #[error(transparent)]
+    Port(#[from] ratchet_core::ports::PortError),
     #[error("{0}")]
     Io(#[from] std::io::Error),
+}
+
+/// The message is kept verbatim: the engine shows it to the user.
+impl From<Error> for ratchet_core::ports::PortError {
+    fn from(e: Error) -> Self {
+        match e {
+            Error::Port(p) => p,
+            Error::Http {
+                status: Some(status),
+                message,
+            } => ratchet_core::ports::PortError::Http { status, message },
+            other => ratchet_core::ports::PortError::Failed(other.to_string()),
+        }
+    }
 }
 
 impl Error {

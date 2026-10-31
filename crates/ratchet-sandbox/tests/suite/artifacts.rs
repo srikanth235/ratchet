@@ -5,8 +5,8 @@ use aws_sdk_s3::operation::put_object::{PutObjectInput, PutObjectOutput};
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{Object, ServerSideEncryption};
 use aws_smithy_mocks::{RuleMode, mock, mock_client};
+use ratchet_core::ports::ArtifactStore;
 use ratchet_sandbox::artifacts::{FsArtifactStore, S3ArtifactStore};
-use ratchet_sandbox::ports::ArtifactStore;
 
 fn store(client: aws_sdk_s3::Client) -> S3ArtifactStore {
     S3ArtifactStore::new(client, "b").with_prefix("artifacts/")
@@ -237,4 +237,32 @@ async fn fs_readers_see_the_old_or_the_new_object_never_a_partial_one() {
         assert!(v == old || v == new, "partial object of {} bytes", v.len());
     }
     writer.await.unwrap();
+}
+
+#[tokio::test]
+async fn fs_store_behaves_like_s3_for_put_get_list_by_prefix_under_the_runner_layout() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = FsArtifactStore::new(dir.path());
+    store
+        .put("artifacts/o/a/events/00000001.jsonl", b"x")
+        .await
+        .unwrap();
+    store
+        .put("artifacts/o/a/inbox/00000001.json", b"y")
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .get("artifacts/o/a/events/00000001.jsonl")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("x")
+    );
+    assert_eq!(store.get("nope").await.unwrap(), None);
+    assert_eq!(
+        store.list("artifacts/o/a/events/").await.unwrap(),
+        ["artifacts/o/a/events/00000001.jsonl"]
+    );
+    assert_eq!(store.list("artifacts/").await.unwrap().len(), 2);
 }

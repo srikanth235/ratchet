@@ -20,6 +20,8 @@ base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
 futures = "0.3"
 libc = "0.2"
+ratchet-core = { path = "../ratchet-core" }
+ratchet-sandbox = { path = "../ratchet-sandbox" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"

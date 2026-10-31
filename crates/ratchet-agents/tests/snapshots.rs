@@ -3,18 +3,20 @@
 
 mod common;
 
+use ratchet_core::enums::CandidateVerdict;
+use ratchet_core::ports::{RunnerControl, RunnerHandle};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use common::{FakeCompute, MemoryStore, base_config_with, fixture};
-use ratchet_agents::domain::{CandidateVerdict, RunnerControl, RunnerHandle};
+
 use ratchet_agents::{
     ClaudeStreamParser, CodexStreamParser, ContextInput, DetectOptions, HistoryEntry, ResumeInput,
     SsmRunnerControl, SsmRunnerControlOptions, build_context, build_initial_prompt,
     build_resume_message, detect_harnesses,
 };
 
-fn config() -> ratchet_agents::RunnerConfig {
+fn config() -> ratchet_core::ports::RunnerConfig {
     base_config_with("/nowhere.git", |c| {
         c["deadlineAt"] = 13_500_000.into();
         c["budgetUsd"] = 20.into();

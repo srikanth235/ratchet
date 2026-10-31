@@ -11,8 +11,8 @@ use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::ServerSideEncryption;
 
 use crate::error::{Error, Result, sdk};
-use crate::ports::ArtifactStore;
 use crate::util::json_str;
+use ratchet_core::ports::{ArtifactStore, PortResult};
 
 fn assert_key(key: &str) -> Result<()> {
     if key.is_empty()
@@ -59,7 +59,7 @@ impl S3ArtifactStore {
 
 #[async_trait]
 impl ArtifactStore for S3ArtifactStore {
-    async fn put(&self, key: &str, body: &[u8]) -> Result<()> {
+    async fn put(&self, key: &str, body: &[u8]) -> PortResult<()> {
         assert_key(key)?;
         self.client
             .put_object()
@@ -73,7 +73,7 @@ impl ArtifactStore for S3ArtifactStore {
         Ok(())
     }
 
-    async fn get(&self, key: &str) -> Result<Option<String>> {
+    async fn get(&self, key: &str) -> PortResult<Option<String>> {
         assert_key(key)?;
         match self
             .client
@@ -98,13 +98,13 @@ impl ArtifactStore for S3ArtifactStore {
                 if missing || e.code() == "NoSuchKey" {
                     Ok(None)
                 } else {
-                    Err(e)
+                    Err(e.into())
                 }
             }
         }
     }
 
-    async fn list(&self, prefix: &str) -> Result<Vec<String>> {
+    async fn list(&self, prefix: &str) -> PortResult<Vec<String>> {
         let mut keys = vec![];
         let mut token: Option<String> = None;
         loop {
@@ -173,7 +173,7 @@ impl FsArtifactStore {
 
 #[async_trait]
 impl ArtifactStore for FsArtifactStore {
-    async fn put(&self, key: &str, body: &[u8]) -> Result<()> {
+    async fn put(&self, key: &str, body: &[u8]) -> PortResult<()> {
         let p = self.path(key)?;
         let tmp_dir = self.root.join(FS_TMP);
         let parent = p.parent().unwrap_or(&self.root).to_path_buf();
@@ -196,7 +196,7 @@ impl ArtifactStore for FsArtifactStore {
         Ok(())
     }
 
-    async fn get(&self, key: &str) -> Result<Option<String>> {
+    async fn get(&self, key: &str) -> PortResult<Option<String>> {
         match tokio::fs::read(self.path(key)?).await {
             Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).into_owned())),
             Err(e)
@@ -211,7 +211,7 @@ impl ArtifactStore for FsArtifactStore {
         }
     }
 
-    async fn list(&self, prefix: &str) -> Result<Vec<String>> {
+    async fn list(&self, prefix: &str) -> PortResult<Vec<String>> {
         let mut out = vec![];
         // Iterative walk; an unreadable directory is skipped, like the TS `try { readdir } catch { return }`.
         let mut stack: Vec<(PathBuf, String)> = vec![(self.root.clone(), String::new())];

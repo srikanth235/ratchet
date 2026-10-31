@@ -11,12 +11,12 @@ use regex::Regex;
 use serde::Deserialize;
 use tokio::sync::OnceCell;
 
-use crate::domain::{PullRequestInput, PullRequestUrl};
 use crate::error::{Error, Result};
 use crate::git::{
     BaseGitHostOptions, CommandGitRunner, Git, GitBackend, GitHostCore, GitRunOptions, GitRunner,
 };
 use crate::http::{DEFAULT_API_URL, authed, default_client, error_message, send, trim_base};
+use ratchet_core::ports::{PullRequestInput, PullRequestRef};
 
 #[derive(Clone)]
 pub struct GitHubGitHostOptions {
@@ -136,7 +136,7 @@ impl GitHubBackend {
         format!("{}/repos/{}/{}/pulls", self.api_url, self.owner, self.name)
     }
 
-    async fn create(&self, input: &PullRequestInput) -> Result<PullRequestUrl> {
+    async fn create(&self, input: &PullRequestInput) -> Result<PullRequestRef> {
         let req = self
             .http
             .post(self.pulls_url())
@@ -153,7 +153,7 @@ impl GitHubBackend {
             .json()
             .await
             .map_err(|e| Error::http(Some(status.as_u16()), format!("unreadable answer: {e}")))?;
-        Ok(PullRequestUrl { url: pr.html_url })
+        Ok(PullRequestRef { url: pr.html_url })
     }
 
     async fn find_open(&self, input: &PullRequestInput) -> Result<Option<Pr>> {
@@ -177,7 +177,7 @@ impl GitHubBackend {
         Ok(list.into_iter().next())
     }
 
-    async fn update(&self, number: u64, input: &PullRequestInput) -> Result<PullRequestUrl> {
+    async fn update(&self, number: u64, input: &PullRequestInput) -> Result<PullRequestRef> {
         let req = self
             .http
             .patch(format!("{}/{number}", self.pulls_url()))
@@ -194,7 +194,7 @@ impl GitHubBackend {
             .json()
             .await
             .map_err(|e| Error::http(Some(status.as_u16()), format!("unreadable answer: {e}")))?;
-        Ok(PullRequestUrl { url: pr.html_url })
+        Ok(PullRequestRef { url: pr.html_url })
     }
 }
 
@@ -263,7 +263,7 @@ impl GitBackend for GitHubBackend {
         Ok(())
     }
 
-    async fn create_pull_request(&self, input: &PullRequestInput) -> Result<PullRequestUrl> {
+    async fn create_pull_request(&self, input: &PullRequestInput) -> Result<PullRequestRef> {
         match self.create(input).await {
             Ok(pr) => Ok(pr),
             Err(err) if err.status() == Some(422) => {

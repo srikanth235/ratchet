@@ -3,25 +3,26 @@
 //! prompt, agent turn, commit (`Ratchet-Candidate: true`), push, wait for the verdict, sync to the ratchet best, resume the agent
 //! with the verdict, repeat until stop / deadline / budget / idle.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use ratchet_core::enums::CandidateVerdict;
+use ratchet_core::ports::{
+    AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
+    CancellationToken, Clock, PortError, PortResult, Preflight, RunnerConfig, RunnerInbox,
+    RunnerMessage, SharedEventSink,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
-use tokio_util::sync::CancellationToken;
 
 use crate::context::{
     ContextInput, HistoryEntry, ResumeInput, build_context, build_initial_prompt,
     build_resume_message,
-};
-use crate::domain::{
-    AgentAdapter, AgentError, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
-    CandidateVerdict, Clock, RunnerConfig, RunnerInbox, RunnerMessage,
 };
 use crate::git::{Git, SharedGit, exec_git, has_candidate_trailer, with_candidate_trailer};
 
@@ -94,16 +95,18 @@ pub struct LoopTuning {
     pub estimate_cost: Option<CostEstimator>,
     pub model: Option<String>,
     pub max_turns: Option<u32>,
-    pub agent_env: Option<HashMap<String, String>>,
+    pub agent_env: Option<BTreeMap<String, String>>,
 }
 
+/// What [`run_runner_loop`] needs: the wiring of the TypeScript `RunnerLoopOptions` plus the loop's tuning (the TS
+/// `RunnerLoopDeps`).
 pub struct RunnerLoopOptions {
     pub config: RunnerConfig,
     pub adapter: Arc<dyn AgentAdapter>,
     /// A git clone of `config.repo_url` checked out on `config.branch`, with push access.
     pub workdir: PathBuf,
     pub inbox: Arc<dyn RunnerInbox>,
-    pub emit: Arc<dyn Fn(AgentEvent) + Send + Sync>,
+    pub emit: SharedEventSink,
     pub clock: Arc<dyn Clock>,
     /// External abort: ends the loop as `aborted`.
     pub signal: Option<CancellationToken>,
@@ -190,7 +193,7 @@ struct Core {
     workdir: PathBuf,
     git: Git,
     clock: Arc<dyn Clock>,
-    emit_fn: Arc<dyn Fn(AgentEvent) + Send + Sync>,
+    emit_fn: SharedEventSink,
     ctl: CancellationToken,
     reason: Mutex<Option<RunnerStopReason>>,
     mailbox: Arc<Mailbox>,
@@ -225,7 +228,7 @@ fn first_line(s: &str, max: usize) -> String {
         .collect()
 }
 
-fn describe(err: &AgentError) -> String {
+fn describe(err: &PortError) -> String {
     err.to_string()
 }
 
@@ -299,12 +302,12 @@ impl Core {
     fn on_agent_event(&self, e: AgentEvent) {
         {
             let mut shared = self.shared.lock().unwrap();
-            if e.kind == AgentEventType::Message
+            if e.event_type == AgentEventType::Message
                 && let Some(text) = e.text.as_ref().filter(|t| !t.is_empty())
             {
                 shared.last_message = text.clone();
             }
-            if let (AgentEventType::Usage, Some(usage)) = (e.kind, e.usage.as_ref()) {
+            if let (AgentEventType::Usage, Some(usage)) = (e.event_type, e.usage.as_ref()) {
                 shared.spend_usd += usage
                     .cost_usd
                     .or_else(|| self.tuning.estimate_cost.as_ref().map(|f| f(usage)))
@@ -406,7 +409,10 @@ impl Core {
                 return true;
             }
             last = res.stderr.trim().to_string();
-            self.clock.sleep(delay * 2u32.pow(i), &self.ctl).await;
+            let _ = self
+                .clock
+                .sleep((delay * 2u32.pow(i)).as_millis() as u64, Some(&self.ctl))
+                .await;
         }
         self.emit(
             AgentEventType::Error,
@@ -556,11 +562,17 @@ impl Core {
 async fn pump(core: Arc<Core>, inbox: Arc<dyn RunnerInbox>) {
     let cancel = core.mailbox.cancel.clone();
     while !cancel.is_cancelled() {
-        let Some(message) = inbox.next(&cancel).await else {
-            return;
-        };
-        core.apply(message);
-        core.mailbox.bump();
+        match inbox.next(Some(&cancel)).await {
+            Ok(Some(message)) => {
+                core.apply(message);
+                core.mailbox.bump();
+            }
+            Ok(None) => return,
+            Err(err) => {
+                tracing::warn!(%err, "reading the inbox failed; retrying");
+                let _ = core.clock.sleep(1000, Some(&cancel)).await;
+            }
+        }
     }
 }
 
@@ -668,9 +680,7 @@ pub async fn run_runner_loop(opts: RunnerLoopOptions) -> RunnerLoopResult {
         tokio::spawn(async move {
             while !core.ctl.is_cancelled() && core.clock.now() < core.config.deadline_at {
                 let wait = (core.config.deadline_at - core.clock.now()).max(1) as u64;
-                core.clock
-                    .sleep(Duration::from_millis(wait), &core.ctl)
-                    .await;
+                let _ = core.clock.sleep(wait, Some(&core.ctl)).await;
             }
             if !core.ctl.is_cancelled() {
                 core.halt(RunnerStopReason::Deadline);
@@ -767,7 +777,10 @@ async fn body(
         .map_err(g)?;
     let mut known: HashSet<String> = HashSet::from([base_head]);
 
-    let preflight = adapter.preflight().await;
+    let preflight = adapter.preflight().await.unwrap_or_else(|e| Preflight {
+        ok: false,
+        problems: vec![e.to_string()],
+    });
     if !preflight.ok {
         core.emit(
             AgentEventType::Error,
@@ -802,7 +815,7 @@ async fn body(
         local.turns += 1;
         let context_text = core.write_context(local, local.turns).await?;
         let spec = AgentSpec {
-            workdir: core.workdir.clone(),
+            workdir: core.workdir.to_string_lossy().into_owned(),
             prompt: String::new(),
             model: core.tuning.model.clone().filter(|m| !m.is_empty()),
             max_turns: core.tuning.max_turns.filter(|t| *t > 0),
@@ -810,7 +823,7 @@ async fn body(
         };
 
         // -- agent turn
-        let turn_result: Result<(), AgentError> = if let Some(s) = session.as_mut() {
+        let turn_result: PortResult<()> = if let Some(s) = session.as_mut() {
             core.status(
                 "agent turn started",
                 Some(json!({"turn": local.turns, "resumed": true})),
@@ -829,7 +842,7 @@ async fn body(
                 no_change,
             });
             adapter
-                .resume(s, &spec, &message, &callback, &core.ctl)
+                .resume(s, &spec, &message, &callback, Some(&core.ctl))
                 .await
         } else {
             core.status(
@@ -840,7 +853,7 @@ async fn body(
                 prompt: build_initial_prompt(config, &context_text),
                 ..spec
             };
-            match adapter.start(&start_spec, &callback, &core.ctl).await {
+            match adapter.start(&start_spec, &callback, Some(&core.ctl)).await {
                 Ok(s) => {
                     session = Some(s);
                     Ok(())
@@ -851,12 +864,7 @@ async fn body(
         match turn_result {
             Ok(()) => failures = 0,
             Err(err) => {
-                if err.is_aborted() || core.ctl.is_cancelled() {
-                    if let AgentError::Aborted { session: Some(s) } = err
-                        && session.is_none()
-                    {
-                        session = Some(s);
-                    }
+                if err.is_cancelled() || core.ctl.is_cancelled() {
                     break;
                 }
                 failures += 1;
@@ -870,7 +878,10 @@ async fn body(
                     core.set_reason(RunnerStopReason::Failed);
                     break;
                 }
-                core.clock.sleep(retry_delay, &core.ctl).await;
+                let _ = core
+                    .clock
+                    .sleep(retry_delay.as_millis() as u64, Some(&core.ctl))
+                    .await;
                 // retry as a resume if we have a session, else restart; tell the agent what happened
                 notes = vec![format!(
                     "Your previous turn crashed ({text}). Check the tree for half-finished edits and continue."
@@ -979,6 +990,5 @@ async fn body(
             break;
         }
     }
-    let _ = session;
     Ok(())
 }

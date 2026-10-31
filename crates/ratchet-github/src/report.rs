@@ -3,41 +3,41 @@
 //! The TS version read the ledger directly. Here the caller (the engine, once `ratchet-ledger` exists) gathers a plain
 //! [`ReportInput`] from the ledger and this module only formats it, so the report is a pure function with no SQLite.
 
-use serde::{Deserialize, Serialize};
+use serde::ser::SerializeMap;
+use serde::{Serialize, Serializer};
 
-use crate::domain::{AgentKind, BenchStats, CandidateVerdict, Direction, gain_percent};
 use crate::error::{Error, Result};
-use crate::numfmt::{num, ser_num, ser_opt_num, to_fixed};
+use crate::numfmt::{js_number, num, ser_num, ser_opt_num, to_fixed};
 use crate::squash::{SquashPlan, SquashPlanInput, SquashWin, build_squash_plan, subject_of};
+use ratchet_core::enums::{
+    AgentKind, CandidateVerdict, Direction, OptimizationStatus, SpendCategory,
+};
+use ratchet_core::ids::{AgentId, CandidateId, OptimizationId};
+use ratchet_core::{BenchStats, gain_percent};
 
-// TODO(core): `SpendCategory` and the ledger row shapes below belong to `ratchet-core` / `ratchet-ledger`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SpendCategory {
-    AgentRunner,
-    Experiment,
-    BenchRunner,
-    StorageEgress,
-    Tokens,
+// ---- stats ------------------------------------------------------------------
+
+/// `value`, then the other statistics in the order the evaluator reported them.
+fn stat_entries(stats: &BenchStats) -> impl Iterator<Item = (&str, f64)> {
+    std::iter::once(("value", stats.value)).chain(stats.extra.iter().map(|(k, v)| (k.as_str(), *v)))
 }
 
-impl SpendCategory {
-    pub const ALL: [SpendCategory; 5] = [
-        SpendCategory::AgentRunner,
-        SpendCategory::Experiment,
-        SpendCategory::BenchRunner,
-        SpendCategory::StorageEgress,
-        SpendCategory::Tokens,
-    ];
+/// A report's `stats` object: JS number formatting (`412`, not `412.0`), insertion order.
+fn ser_stats<S: Serializer>(stats: &BenchStats, s: S) -> std::result::Result<S::Ok, S::Error> {
+    let mut m = s.serialize_map(Some(1 + stats.extra.len()))?;
+    for (k, v) in stat_entries(stats) {
+        m.serialize_entry(k, &js_number(v))?;
+    }
+    m.end()
+}
 
-    pub fn as_str(self) -> &'static str {
-        match self {
-            SpendCategory::AgentRunner => "agent_runner",
-            SpendCategory::Experiment => "experiment",
-            SpendCategory::BenchRunner => "bench_runner",
-            SpendCategory::StorageEgress => "storage_egress",
-            SpendCategory::Tokens => "tokens",
-        }
+fn ser_opt_stats<S: Serializer>(
+    stats: &Option<BenchStats>,
+    s: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    match stats {
+        Some(st) => ser_stats(st, s),
+        None => s.serialize_none(),
     }
 }
 
@@ -45,13 +45,13 @@ impl SpendCategory {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct OptimizationInfo {
-    pub id: String,
+    pub id: OptimizationId,
     pub name: Option<String>,
     pub repo: String,
     pub base_ref: String,
     pub metric: String,
     pub direction: Direction,
-    pub status: String,
+    pub status: OptimizationStatus,
     /// `bench.run` from the optimization's `ratchet.yaml`, when it parses (the caller owns config parsing).
     pub bench_run: Option<String>,
 }
@@ -65,8 +65,8 @@ pub struct BaselineInfo {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CandidateInfo {
-    pub id: String,
-    pub agent_id: String,
+    pub id: CandidateId,
+    pub agent_id: AgentId,
     pub agent_branch: String,
     pub message: String,
     pub verdict: CandidateVerdict,
@@ -79,8 +79,8 @@ pub struct CandidateInfo {
 /// One move of the ratchet (a verified win), oldest first.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RatchetMove {
-    pub candidate_id: String,
-    pub agent_id: String,
+    pub candidate_id: CandidateId,
+    pub agent_id: AgentId,
     pub agent_kind: AgentKind,
     pub sha: String,
     pub from_value: f64,
@@ -91,14 +91,14 @@ pub struct RatchetMove {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentInfo {
-    pub id: String,
+    pub id: AgentId,
     pub kind: AgentKind,
     pub branch: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpendEvent {
-    pub agent_id: Option<String>,
+    pub agent_id: Option<AgentId>,
     pub category: SpendCategory,
     pub usd: f64,
     pub estimated: bool,
@@ -127,8 +127,8 @@ pub struct ReportInput {
 #[serde(rename_all = "camelCase")]
 pub struct ReportWin {
     pub index: usize,
-    pub candidate_id: String,
-    pub agent_id: String,
+    pub candidate_id: CandidateId,
+    pub agent_id: AgentId,
     pub agent_kind: AgentKind,
     pub branch: String,
     pub sha: String,
@@ -151,7 +151,7 @@ pub struct ReportWin {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReportAgent {
-    pub agent_id: String,
+    pub agent_id: AgentId,
     pub kind: AgentKind,
     pub branch: String,
     pub candidates: usize,
@@ -167,6 +167,7 @@ pub struct ReportBaseline {
     pub value: f64,
     #[serde(serialize_with = "ser_num")]
     pub noise_floor: f64,
+    #[serde(serialize_with = "ser_stats")]
     pub stats: BenchStats,
 }
 
@@ -174,6 +175,7 @@ pub struct ReportBaseline {
 pub struct ReportBest {
     #[serde(serialize_with = "ser_num")]
     pub value: f64,
+    #[serde(serialize_with = "ser_opt_stats")]
     pub stats: Option<BenchStats>,
     pub sha: Option<String>,
 }
@@ -243,13 +245,13 @@ pub struct Reproduction {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResultReportData {
-    pub optimization_id: String,
+    pub optimization_id: OptimizationId,
     pub name: Option<String>,
     pub repo: String,
     pub base_ref: String,
     pub metric: String,
     pub direction: Direction,
-    pub status: String,
+    pub status: OptimizationStatus,
     pub baseline: Option<ReportBaseline>,
     pub best: ReportBest,
     #[serde(serialize_with = "ser_opt_num")]
@@ -284,7 +286,7 @@ pub fn build_result_report(input: &ReportInput) -> Result<ResultReport> {
             .spend_events
             .iter()
             .filter(|e| {
-                e.agent_id.as_deref() == Some(agent_id)
+                e.agent_id.as_ref().map(AgentId::as_str) == Some(agent_id)
                     && after.is_none_or(|a| e.at > a)
                     && e.at <= up_to
             })
@@ -305,11 +307,11 @@ pub fn build_result_report(input: &ReportInput) -> Result<ResultReport> {
                 ))
             })?;
         let cost_usd = agent_cost(
-            &h.agent_id,
+            h.agent_id.as_str(),
             last_win_at.get(h.agent_id.as_str()).copied(),
             h.at,
         );
-        last_win_at.insert(&h.agent_id, h.at);
+        last_win_at.insert(h.agent_id.as_str(), h.at);
         wins.push(ReportWin {
             index: i + 1,
             candidate_id: h.candidate_id.clone(),
@@ -376,7 +378,7 @@ pub fn build_result_report(input: &ReportInput) -> Result<ResultReport> {
             spend_usd: input
                 .spend_events
                 .iter()
-                .filter(|e| e.agent_id.as_deref() == Some(a.id.as_str()))
+                .filter(|e| e.agent_id.as_ref() == Some(&a.id))
                 .map(|e| e.usd)
                 .sum(),
         })
@@ -412,7 +414,7 @@ pub fn build_result_report(input: &ReportInput) -> Result<ResultReport> {
         base_ref: opt.base_ref.clone(),
         metric: opt.metric.clone(),
         direction: opt.direction,
-        status: opt.status.clone(),
+        status: opt.status,
         baseline: baseline.map(|b| ReportBaseline {
             value: b.value,
             noise_floor: b.noise_floor,
@@ -524,7 +526,7 @@ pub fn render_report_markdown(d: &ResultReportData) -> String {
     let mut out: Vec<String> = Vec::new();
     out.push(format!(
         "# Ratchet result: {}",
-        d.name.as_deref().unwrap_or(&d.optimization_id)
+        d.name.as_deref().unwrap_or(d.optimization_id.as_str())
     ));
     out.push(String::new());
     if let Some(b) = &d.baseline {
@@ -559,12 +561,8 @@ pub fn render_report_markdown(d: &ResultReportData) -> String {
     if let Some(b) = &d.baseline {
         out.push("## Percentiles".into());
         out.push(String::new());
-        let mut keys: Vec<&String> = Vec::new();
-        for k in b
-            .stats
-            .keys()
-            .chain(d.best.stats.iter().flat_map(|s| s.keys()))
-        {
+        let mut keys: Vec<&str> = Vec::new();
+        for (k, _) in stat_entries(&b.stats).chain(d.best.stats.iter().flat_map(stat_entries)) {
             if !keys.contains(&k) {
                 keys.push(k);
             }
@@ -575,18 +573,18 @@ pub fn render_report_markdown(d: &ResultReportData) -> String {
             .iter()
             .map(|k| {
                 let from = b.stats.get(k);
-                let to =
-                    d.best
-                        .stats
-                        .as_ref()
-                        .and_then(|s| s.get(k))
-                        .or(if k.as_str() == "value" {
-                            Some(d.best.value)
-                        } else {
-                            None
-                        });
+                let to = d
+                    .best
+                    .stats
+                    .as_ref()
+                    .and_then(|s| s.get(k))
+                    .or(if *k == "value" {
+                        Some(d.best.value)
+                    } else {
+                        None
+                    });
                 vec![
-                    if k.as_str() == "value" {
+                    if *k == "value" {
                         format!("value ({})", d.metric)
                     } else {
                         k.to_string()

@@ -4,13 +4,16 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use ratchet_sandbox::domain::{
-    AgentIdentity, BenchLaunchSpec, BenchPurpose, InstanceInfo, InstanceRole, InstanceState,
+use ratchet_core::enums::InstanceRole;
+use ratchet_core::ids::{AgentId, OptimizationId};
+use ratchet_core::ports::CloudCompute;
+use ratchet_core::ports::mock::ManualClock;
+use ratchet_core::ports::{
+    AgentIdentity, BenchLaunchPurpose, BenchLaunchSpec, InstanceInfo, InstanceState, PortResult,
     RemoteCommand, RemoteCommandResult, RunnerLaunchSpec, SecretRef,
 };
-use ratchet_sandbox::ports::Compute;
 use ratchet_sandbox::reaper::{ReapReason, Reaper, ReaperOptions, ReaperPolicy};
-use ratchet_sandbox::{Error, ManualClock, MockCloudCompute, Result};
+use ratchet_sandbox::{Error, MockCloudCompute};
 
 const HOUR: i64 = 3_600_000;
 
@@ -42,39 +45,55 @@ struct Spy {
 }
 
 #[async_trait]
-impl Compute for Spy {
-    async fn create_agent_identity(&self, o: &str, a: &str) -> Result<AgentIdentity> {
-        self.inner.create_agent_identity(o, a).await
+impl CloudCompute for Spy {
+    async fn create_agent_identity(
+        &self,
+        o: &OptimizationId,
+        a: &AgentId,
+    ) -> PortResult<AgentIdentity> {
+        self.inner
+            .create_agent_identity(&OptimizationId::from(o), &AgentId::from(a))
+            .await
     }
-    async fn revoke_agent_identity(&self, i: &AgentIdentity) -> Result<()> {
+    async fn revoke_agent_identity(&self, i: &AgentIdentity) -> PortResult<()> {
         self.inner.revoke_agent_identity(i).await
     }
-    async fn delete_agent_identity(&self, i: &AgentIdentity) -> Result<()> {
+    async fn delete_agent_identity(&self, i: &AgentIdentity) -> PortResult<()> {
         self.inner.delete_agent_identity(i).await
     }
-    async fn put_secret(&self, o: &str, a: &str, n: &str, v: &str) -> Result<SecretRef> {
-        self.inner.put_secret(o, a, n, v).await
+    async fn put_secret(
+        &self,
+        o: &OptimizationId,
+        a: &AgentId,
+        n: &str,
+        v: &str,
+    ) -> PortResult<SecretRef> {
+        self.inner
+            .put_secret(&OptimizationId::from(o), &AgentId::from(a), n, v)
+            .await
     }
-    async fn delete_secrets(&self, o: &str, a: &str) -> Result<()> {
-        self.inner.delete_secrets(o, a).await
+    async fn delete_secrets(&self, o: &OptimizationId, a: &AgentId) -> PortResult<()> {
+        self.inner
+            .delete_secrets(&OptimizationId::from(o), &AgentId::from(a))
+            .await
     }
-    async fn launch_runner(&self, s: &RunnerLaunchSpec) -> Result<InstanceInfo> {
+    async fn launch_runner(&self, s: &RunnerLaunchSpec) -> PortResult<InstanceInfo> {
         self.inner.launch_runner(s).await
     }
-    async fn launch_bench_instance(&self, s: &BenchLaunchSpec) -> Result<InstanceInfo> {
+    async fn launch_bench_instance(&self, s: &BenchLaunchSpec) -> PortResult<InstanceInfo> {
         self.inner.launch_bench_instance(s).await
     }
-    async fn terminate(&self, ids: &[String]) -> Result<()> {
+    async fn terminate(&self, ids: &[String]) -> PortResult<()> {
         *self.terminate_calls.lock().unwrap() += 1;
         if let Some(msg) = self.fail_terminate {
-            return Err(Error::aws(msg, msg));
+            return Err(Error::aws(msg, msg).into());
         }
         self.inner.terminate(ids).await
     }
-    async fn list_tagged(&self, o: Option<&str>) -> Result<Vec<InstanceInfo>> {
+    async fn list_tagged(&self, o: Option<&OptimizationId>) -> PortResult<Vec<InstanceInfo>> {
         self.inner.list_tagged(o).await
     }
-    async fn run_command(&self, i: &str, c: &RemoteCommand) -> Result<RemoteCommandResult> {
+    async fn run_command(&self, i: &str, c: &RemoteCommand) -> PortResult<RemoteCommandResult> {
         self.inner.run_command(i, c).await
     }
 }
@@ -131,7 +150,7 @@ fn bench_spec(opt: &str) -> BenchLaunchSpec {
         optimization_id: opt.into(),
         instance_type: "c7i.2xlarge".into(),
         image_ref: "a".into(),
-        purpose: BenchPurpose::Bench,
+        purpose: BenchLaunchPurpose::Bench,
     }
 }
 
@@ -148,7 +167,7 @@ async fn terminates_instances_past_max_lifetime_and_leaves_young_ones() {
         (
             t.instance_id.as_str(),
             t.optimization_id.as_str(),
-            t.agent_id.as_deref(),
+            t.agent_id.as_ref().map(AgentId::as_str),
             t.role,
             t.reason,
             t.age_ms
@@ -286,12 +305,16 @@ async fn enforces_max_instances_per_agent_keeps_oldest_kills_newest_reports_offe
 #[tokio::test]
 async fn quota_ignores_runners_and_bench_no_quota_configured_means_no_enforcement() {
     let r = setup(Some(1), false, None);
-    let id = r.cloud.create_agent_identity("o1", "a1").await.unwrap();
+    let id = r
+        .cloud
+        .create_agent_identity(&OptimizationId::from("o1"), &AgentId::from("a1"))
+        .await
+        .unwrap();
     r.cloud
         .launch_runner(&RunnerLaunchSpec {
             optimization_id: "o1".into(),
             agent_id: "a1".into(),
-            kind: ratchet_sandbox::AgentKind::Mock,
+            kind: ratchet_core::enums::AgentKind::Mock,
             instance_type: "c7i.large".into(),
             image_ref: "a".into(),
             identity: id,
@@ -327,7 +350,11 @@ async fn skips_instances_already_shutting_down_scopes_to_one_optimization_when_a
     let a = r.cloud.simulate_experiment("o1", "a1", "c7i.large");
     let b = r.cloud.simulate_experiment("o2", "a1", "c7i.large");
     r.clock.advance(3 * HOUR);
-    let rep = r.reaper.reap(Some("o1")).await.unwrap();
+    let rep = r
+        .reaper
+        .reap(Some(&OptimizationId::from("o1")))
+        .await
+        .unwrap();
     assert_eq!(
         rep.terminated
             .iter()
