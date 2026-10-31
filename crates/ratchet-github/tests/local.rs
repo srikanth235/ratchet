@@ -119,7 +119,8 @@ async fn checkout_materializes_a_sha_without_git_dir_or_repo_side_effects() {
         std::fs::read_to_string(dir2.join("src/a.txt")).unwrap(),
         "two\n"
     );
-    assert!(!f.remote_git(&["worktree", "list"]).contains("co"));
+    // Only the main worktree: the temp path itself may contain "co" by chance.
+    assert_eq!(f.remote_git(&["worktree", "list"]).lines().count(), 1);
 }
 
 #[tokio::test]

@@ -258,15 +258,20 @@ async fn the_improvement_is_valued_from_the_ledger_columns() {
     assert!((v.usd_per_year - 51.0 * 1200.0).abs() < 1e-6);
     let ros = v.return_on_spend.unwrap();
     assert!((ros - v.usd_per_year / d.summary.spend_usd).abs() < 1e-6);
-    // a run without a value model, or without an improvement, has no value
-    assert!(
-        sim.get_optimization("opt_demo_ingest")
-            .await
-            .unwrap()
-            .summary
-            .value
-            .is_none()
+    // 41.2 -> 58.9 k/s at $400 per k/s per year
+    let ingest = sim
+        .get_optimization("opt_demo_ingest")
+        .await
+        .unwrap()
+        .summary
+        .value
+        .unwrap();
+    assert_eq!(
+        (ingest.usd_per_unit, ingest.unit.as_deref()),
+        (400.0, Some("k/s"))
     );
+    assert!((ingest.usd_per_year - 17.7 * 400.0).abs() < 1e-6);
+    // a run without a value model, or without an improvement, has no value
     assert!(
         sim.get_optimization("opt_demo_web")
             .await

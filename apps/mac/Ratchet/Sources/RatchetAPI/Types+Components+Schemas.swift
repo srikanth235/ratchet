@@ -80,55 +80,180 @@ extension Components {
                 case tone
             }
         }
-        /// - Remark: Generated from `#/components/schemas/AgentConnectorInfo`.
-        public struct AgentConnectorInfo: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/AgentConnectorInfo/agent`.
-            public var agent: Components.Schemas.AgentKind
-            /// - Remark: Generated from `#/components/schemas/AgentConnectorInfo/credential`.
-            public var credential: Components.Schemas.AgentCredential
-            /// Last characters of an API key (`····4f2a`).
-            ///
-            /// - Remark: Generated from `#/components/schemas/AgentConnectorInfo/keyHint`.
-            public var keyHint: Swift.String?
-            /// Where this connector can run agents: a login runs on this Mac, a key also in the cloud.
-            ///
-            /// - Remark: Generated from `#/components/schemas/AgentConnectorInfo/runsIn`.
-            public var runsIn: [Components.Schemas.AgentsWhere]
-            /// CLI version for a login connector.
-            ///
-            /// - Remark: Generated from `#/components/schemas/AgentConnectorInfo/version`.
-            public var version: Swift.String?
-            /// Creates a new `AgentConnectorInfo`.
-            ///
-            /// - Parameters:
-            ///   - agent:
-            ///   - credential:
-            ///   - keyHint: Last characters of an API key (`····4f2a`).
-            ///   - runsIn: Where this connector can run agents: a login runs on this Mac, a key also in the cloud.
-            ///   - version: CLI version for a login connector.
-            public init(
-                agent: Components.Schemas.AgentKind,
-                credential: Components.Schemas.AgentCredential,
-                keyHint: Swift.String? = nil,
-                runsIn: [Components.Schemas.AgentsWhere],
-                version: Swift.String? = nil
-            ) {
-                self.agent = agent
-                self.credential = credential
-                self.keyHint = keyHint
-                self.runsIn = runsIn
-                self.version = version
+        /// `POST /v1/connectors/agents`: adopt a detected CLI login (one that was removed earlier) or store an API key.
+        ///
+        /// - Remark: Generated from `#/components/schemas/AddAgentConnectorInput`.
+        @frozen public enum AddAgentConnectorInput: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/AddAgentConnectorInput/case1`.
+            public struct Case1Payload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/AddAgentConnectorInput/case1/agent`.
+                public var agent: Components.Schemas.ConnectorAgent
+                /// - Remark: Generated from `#/components/schemas/AddAgentConnectorInput/case1/source`.
+                @frozen public enum SourcePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case login = "login"
+                }
+                /// - Remark: Generated from `#/components/schemas/AddAgentConnectorInput/case1/source`.
+                public var source: Components.Schemas.AddAgentConnectorInput.Case1Payload.SourcePayload
+                /// Creates a new `Case1Payload`.
+                ///
+                /// - Parameters:
+                ///   - agent:
+                ///   - source:
+                public init(
+                    agent: Components.Schemas.ConnectorAgent,
+                    source: Components.Schemas.AddAgentConnectorInput.Case1Payload.SourcePayload
+                ) {
+                    self.agent = agent
+                    self.source = source
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case agent
+                    case source
+                }
             }
-            public enum CodingKeys: String, CodingKey {
-                case agent
-                case credential
-                case keyHint
-                case runsIn
-                case version
+            /// - Remark: Generated from `#/components/schemas/AddAgentConnectorInput/case1`.
+            case case1(Components.Schemas.AddAgentConnectorInput.Case1Payload)
+            /// - Remark: Generated from `#/components/schemas/AddAgentConnectorInput/case2`.
+            public struct Case2Payload: Codable, Hashable, Sendable {
+                /// - Remark: Generated from `#/components/schemas/AddAgentConnectorInput/case2/agent`.
+                public var agent: Components.Schemas.ConnectorAgent
+                /// - Remark: Generated from `#/components/schemas/AddAgentConnectorInput/case2/apiKey`.
+                public var apiKey: Swift.String
+                /// - Remark: Generated from `#/components/schemas/AddAgentConnectorInput/case2/name`.
+                public var name: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/AddAgentConnectorInput/case2/source`.
+                @frozen public enum SourcePayload: String, Codable, Hashable, Sendable, CaseIterable {
+                    case apiKey = "api-key"
+                }
+                /// - Remark: Generated from `#/components/schemas/AddAgentConnectorInput/case2/source`.
+                public var source: Components.Schemas.AddAgentConnectorInput.Case2Payload.SourcePayload
+                /// Creates a new `Case2Payload`.
+                ///
+                /// - Parameters:
+                ///   - agent:
+                ///   - apiKey:
+                ///   - name:
+                ///   - source:
+                public init(
+                    agent: Components.Schemas.ConnectorAgent,
+                    apiKey: Swift.String,
+                    name: Swift.String? = nil,
+                    source: Components.Schemas.AddAgentConnectorInput.Case2Payload.SourcePayload
+                ) {
+                    self.agent = agent
+                    self.apiKey = apiKey
+                    self.name = name
+                    self.source = source
+                }
+                public enum CodingKeys: String, CodingKey {
+                    case agent
+                    case apiKey
+                    case name
+                    case source
+                }
+            }
+            /// - Remark: Generated from `#/components/schemas/AddAgentConnectorInput/case2`.
+            case case2(Components.Schemas.AddAgentConnectorInput.Case2Payload)
+            public init(from decoder: any Swift.Decoder) throws {
+                var errors: [any Swift.Error] = []
+                do {
+                    self = .case1(try .init(from: decoder))
+                    return
+                } catch {
+                    errors.append(error)
+                }
+                do {
+                    self = .case2(try .init(from: decoder))
+                    return
+                } catch {
+                    errors.append(error)
+                }
+                throw Swift.DecodingError.failedToDecodeOneOfSchema(
+                    type: Self.self,
+                    codingPath: decoder.codingPath,
+                    errors: errors
+                )
+            }
+            public func encode(to encoder: any Swift.Encoder) throws {
+                switch self {
+                case let .case1(value):
+                    try value.encode(to: encoder)
+                case let .case2(value):
+                    try value.encode(to: encoder)
+                }
             }
         }
-        /// - Remark: Generated from `#/components/schemas/AgentCredential`.
-        @frozen public enum AgentCredential: String, Codable, Hashable, Sendable, CaseIterable {
+        /// `POST /v1/connectors/aws`.
+        ///
+        /// - Remark: Generated from `#/components/schemas/AddAwsConnectorInput`.
+        public struct AddAwsConnectorInput: Codable, Hashable, Sendable {
+            /// USD per month; omit or `null` for no cap.
+            ///
+            /// - Remark: Generated from `#/components/schemas/AddAwsConnectorInput/monthlyCapUsd`.
+            public var monthlyCapUsd: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/AddAwsConnectorInput/name`.
+            public var name: Swift.String?
+            /// A profile from `~/.aws/config` or `~/.aws/credentials`.
+            ///
+            /// - Remark: Generated from `#/components/schemas/AddAwsConnectorInput/profile`.
+            public var profile: Swift.String
+            /// Default `us-east-1`.
+            ///
+            /// - Remark: Generated from `#/components/schemas/AddAwsConnectorInput/region`.
+            public var region: Swift.String?
+            /// Creates a new `AddAwsConnectorInput`.
+            ///
+            /// - Parameters:
+            ///   - monthlyCapUsd: USD per month; omit or `null` for no cap.
+            ///   - name:
+            ///   - profile: A profile from `~/.aws/config` or `~/.aws/credentials`.
+            ///   - region: Default `us-east-1`.
+            public init(
+                monthlyCapUsd: Swift.Double? = nil,
+                name: Swift.String? = nil,
+                profile: Swift.String,
+                region: Swift.String? = nil
+            ) {
+                self.monthlyCapUsd = monthlyCapUsd
+                self.name = name
+                self.profile = profile
+                self.region = region
+            }
+            public enum CodingKeys: String, CodingKey {
+                case monthlyCapUsd
+                case name
+                case profile
+                case region
+            }
+        }
+        /// `POST /v1/connectors/github`: a pasted personal access token or app installation token, checked against GitHub
+        /// before it is kept.
+        ///
+        /// - Remark: Generated from `#/components/schemas/AddGithubConnectorInput`.
+        public struct AddGithubConnectorInput: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/AddGithubConnectorInput/name`.
+            public var name: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/AddGithubConnectorInput/token`.
+            public var token: Swift.String
+            /// Creates a new `AddGithubConnectorInput`.
+            ///
+            /// - Parameters:
+            ///   - name:
+            ///   - token:
+            public init(
+                name: Swift.String? = nil,
+                token: Swift.String
+            ) {
+                self.name = name
+                self.token = token
+            }
+            public enum CodingKeys: String, CodingKey {
+                case name
+                case token
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/AgentConnectorSource`.
+        @frozen public enum AgentConnectorSource: String, Codable, Hashable, Sendable, CaseIterable {
             case login = "login"
             case apiKey = "api-key"
         }
@@ -204,29 +329,29 @@ extension Components {
                 case verdict
             }
         }
-        /// One agent choice on the New optimization step: a connector and where it runs.
+        /// One agent choice: a connector and where it runs.
         ///
         /// - Remark: Generated from `#/components/schemas/AgentSelection`.
         public struct AgentSelection: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/AgentSelection/connectorId`.
             public var connectorId: Swift.String
-            /// - Remark: Generated from `#/components/schemas/AgentSelection/runsIn`.
-            public var runsIn: Components.Schemas.AgentsWhere
+            /// - Remark: Generated from `#/components/schemas/AgentSelection/where`.
+            public var _where: Components.Schemas.AgentsWhere
             /// Creates a new `AgentSelection`.
             ///
             /// - Parameters:
             ///   - connectorId:
-            ///   - runsIn:
+            ///   - _where:
             public init(
                 connectorId: Swift.String,
-                runsIn: Components.Schemas.AgentsWhere
+                _where: Components.Schemas.AgentsWhere
             ) {
                 self.connectorId = connectorId
-                self.runsIn = runsIn
+                self._where = _where
             }
             public enum CodingKeys: String, CodingKey {
                 case connectorId
-                case runsIn
+                case _where = "where"
             }
         }
         /// - Remark: Generated from `#/components/schemas/AgentStats`.
@@ -858,7 +983,7 @@ extension Components {
             ///
             /// - Remark: Generated from `#/components/schemas/ApiEvent/case11`.
             case case11(Components.Schemas.ApiEvent.Case11Payload)
-            /// Provisional: a connector changed status (signed in, expired, removed).
+            /// A connector changed (the device flow finished, a probe changed its status, it was removed).
             ///
             /// - Remark: Generated from `#/components/schemas/ApiEvent/case12`.
             public struct Case12Payload: Codable, Hashable, Sendable {
@@ -893,7 +1018,7 @@ extension Components {
                     case _type = "type"
                 }
             }
-            /// Provisional: a connector changed status (signed in, expired, removed).
+            /// A connector changed (the device flow finished, a probe changed its status, it was removed).
             ///
             /// - Remark: Generated from `#/components/schemas/ApiEvent/case12`.
             case case12(Components.Schemas.ApiEvent.Case12Payload)
@@ -1047,64 +1172,13 @@ extension Components {
                 }
             }
         }
-        /// - Remark: Generated from `#/components/schemas/AwsConnectorAuth`.
-        @frozen public enum AwsConnectorAuth: String, Codable, Hashable, Sendable, CaseIterable {
+        /// - Remark: Generated from `#/components/schemas/AwsAuthStyle`.
+        @frozen public enum AwsAuthStyle: String, Codable, Hashable, Sendable, CaseIterable {
             case sso = "sso"
-            case profile = "profile"
             case role = "role"
-        }
-        /// - Remark: Generated from `#/components/schemas/AwsConnectorInfo`.
-        public struct AwsConnectorInfo: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/AwsConnectorInfo/accountId`.
-            public var accountId: Swift.String?
-            /// - Remark: Generated from `#/components/schemas/AwsConnectorInfo/auth`.
-            public var auth: Components.Schemas.AwsConnectorAuth
-            /// Monthly spend cap in USD, when the user set one.
-            ///
-            /// - Remark: Generated from `#/components/schemas/AwsConnectorInfo/capUsdPerMonth`.
-            public var capUsdPerMonth: Swift.Double?
-            /// Profile or SSO session name; `null` for a role.
-            ///
-            /// - Remark: Generated from `#/components/schemas/AwsConnectorInfo/profile`.
-            public var profile: Swift.String?
-            /// - Remark: Generated from `#/components/schemas/AwsConnectorInfo/region`.
-            public var region: Swift.String
-            /// What is left of the cap this month ("$412 left this month").
-            ///
-            /// - Remark: Generated from `#/components/schemas/AwsConnectorInfo/remainingUsdThisMonth`.
-            public var remainingUsdThisMonth: Swift.Double?
-            /// Creates a new `AwsConnectorInfo`.
-            ///
-            /// - Parameters:
-            ///   - accountId:
-            ///   - auth:
-            ///   - capUsdPerMonth: Monthly spend cap in USD, when the user set one.
-            ///   - profile: Profile or SSO session name; `null` for a role.
-            ///   - region:
-            ///   - remainingUsdThisMonth: What is left of the cap this month ("$412 left this month").
-            public init(
-                accountId: Swift.String? = nil,
-                auth: Components.Schemas.AwsConnectorAuth,
-                capUsdPerMonth: Swift.Double? = nil,
-                profile: Swift.String? = nil,
-                region: Swift.String,
-                remainingUsdThisMonth: Swift.Double? = nil
-            ) {
-                self.accountId = accountId
-                self.auth = auth
-                self.capUsdPerMonth = capUsdPerMonth
-                self.profile = profile
-                self.region = region
-                self.remainingUsdThisMonth = remainingUsdThisMonth
-            }
-            public enum CodingKeys: String, CodingKey {
-                case accountId
-                case auth
-                case capUsdPerMonth
-                case profile
-                case region
-                case remainingUsdThisMonth
-            }
+            case keys = "keys"
+            case process = "process"
+            case other = "other"
         }
         /// - Remark: Generated from `#/components/schemas/BenchPipelineVm`.
         public struct BenchPipelineVm: Codable, Hashable, Sendable {
@@ -1461,92 +1535,33 @@ extension Components {
                 case value
             }
         }
-        /// - Remark: Generated from `#/components/schemas/ConnectorKind`.
-        @frozen public enum ConnectorKind: String, Codable, Hashable, Sendable, CaseIterable {
-            case github = "github"
-            case aws = "aws"
-            case agent = "agent"
-        }
-        /// The connectors a run uses (step 2 of New optimization).
+        /// The two agent CLIs Ratchet drives.
         ///
-        /// - Remark: Generated from `#/components/schemas/ConnectorSelectionInput`.
-        public struct ConnectorSelectionInput: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/ConnectorSelectionInput/agents`.
-            public var agents: [Components.Schemas.AgentSelection]
-            /// - Remark: Generated from `#/components/schemas/ConnectorSelectionInput/awsConnectorId`.
-            public var awsConnectorId: Swift.String?
-            /// - Remark: Generated from `#/components/schemas/ConnectorSelectionInput/githubConnectorId`.
-            public var githubConnectorId: Swift.String?
-            /// Creates a new `ConnectorSelectionInput`.
-            ///
-            /// - Parameters:
-            ///   - agents:
-            ///   - awsConnectorId:
-            ///   - githubConnectorId:
-            public init(
-                agents: [Components.Schemas.AgentSelection],
-                awsConnectorId: Swift.String? = nil,
-                githubConnectorId: Swift.String? = nil
-            ) {
-                self.agents = agents
-                self.awsConnectorId = awsConnectorId
-                self.githubConnectorId = githubConnectorId
-            }
-            public enum CodingKeys: String, CodingKey {
-                case agents
-                case awsConnectorId
-                case githubConnectorId
-            }
+        /// - Remark: Generated from `#/components/schemas/ConnectorAgent`.
+        @frozen public enum ConnectorAgent: String, Codable, Hashable, Sendable, CaseIterable {
+            case claudeCode = "claude-code"
+            case codex = "codex"
         }
-        /// `GET /v1/connector-selections?repo=`: the remembered choice for a repo, or the defaults.
-        ///
-        /// - Remark: Generated from `#/components/schemas/ConnectorSelectionVm`.
-        public struct ConnectorSelectionVm: Codable, Hashable, Sendable {
-            /// True when the user chose it before for this repo ("Remembered for this repo"); false = the defaults.
-            ///
-            /// - Remark: Generated from `#/components/schemas/ConnectorSelectionVm/remembered`.
-            public var remembered: Swift.Bool
-            /// - Remark: Generated from `#/components/schemas/ConnectorSelectionVm/repo`.
-            public var repo: Swift.String
-            /// - Remark: Generated from `#/components/schemas/ConnectorSelectionVm/selection`.
-            public var selection: Components.Schemas.ConnectorSelectionInput
-            /// Creates a new `ConnectorSelectionVm`.
-            ///
-            /// - Parameters:
-            ///   - remembered: True when the user chose it before for this repo ("Remembered for this repo"); false = the defaults.
-            ///   - repo:
-            ///   - selection:
-            public init(
-                remembered: Swift.Bool,
-                repo: Swift.String,
-                selection: Components.Schemas.ConnectorSelectionInput
-            ) {
-                self.remembered = remembered
-                self.repo = repo
-                self.selection = selection
-            }
-            public enum CodingKeys: String, CodingKey {
-                case remembered
-                case repo
-                case selection
-            }
-        }
-        /// `connected` / `signed-in` / `valid` all read as green in the UI; the text says which.
+        /// - `connected`: a GitHub account / AWS profile / agent login that works
+        /// - `expired`: it worked once and needs signing in again (GitHub token revoked, `aws sso login` needed)
+        /// - `signed-out`: nothing to use (an agent CLI that is not signed in or not installed, a GitHub account without a token)
+        /// - `valid`: an API key the provider accepted
+        /// - `invalid`: an API key (or static AWS keys) the provider rejected
         ///
         /// - Remark: Generated from `#/components/schemas/ConnectorStatus`.
         @frozen public enum ConnectorStatus: String, Codable, Hashable, Sendable, CaseIterable {
             case connected = "connected"
             case expired = "expired"
             case signedOut = "signed-out"
+            case valid = "valid"
             case invalid = "invalid"
-            case unknown = "unknown"
         }
-        /// Result of "Test" / "Sign in" on a connector.
+        /// Result of "Test connection" on one connector.
         ///
         /// - Remark: Generated from `#/components/schemas/ConnectorTestVm`.
         public struct ConnectorTestVm: Codable, Hashable, Sendable {
             /// - Remark: Generated from `#/components/schemas/ConnectorTestVm/connector`.
-            public var connector: Components.Schemas.ConnectorVm
+            public var connector: Components.Schemas.ConnectorVm?
             /// One line; never contains a key or token.
             ///
             /// - Remark: Generated from `#/components/schemas/ConnectorTestVm/detail`.
@@ -1560,7 +1575,7 @@ extension Components {
             ///   - detail: One line; never contains a key or token.
             ///   - ok:
             public init(
-                connector: Components.Schemas.ConnectorVm,
+                connector: Components.Schemas.ConnectorVm? = nil,
                 detail: Swift.String,
                 ok: Swift.Bool
             ) {
@@ -1574,248 +1589,255 @@ extension Components {
                 case ok
             }
         }
-        /// One saved connector. Exactly one of `github` / `aws` / `agent` is set, matching `kind`.
+        /// One saved connector. `kind` says which of the three it is; the first fields are common.
         ///
         /// - Remark: Generated from `#/components/schemas/ConnectorVm`.
-        public struct ConnectorVm: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/ConnectorVm/agent`.
-            public var agent: Components.Schemas.AgentConnectorInfo?
-            /// - Remark: Generated from `#/components/schemas/ConnectorVm/aws`.
-            public var aws: Components.Schemas.AwsConnectorInfo?
-            /// Cost line on the New optimization step ("Free while this Mac is awake", "Billed to the key").
-            ///
-            /// - Remark: Generated from `#/components/schemas/ConnectorVm/costNote`.
-            public var costNote: Swift.String?
-            /// The grey line: "Personal · 42 repos", "SSO · us-east-1 · cap $500 / month".
-            ///
-            /// - Remark: Generated from `#/components/schemas/ConnectorVm/detail`.
-            public var detail: Swift.String
-            /// - Remark: Generated from `#/components/schemas/ConnectorVm/github`.
-            public var github: Components.Schemas.GithubConnectorInfo?
-            /// - Remark: Generated from `#/components/schemas/ConnectorVm/id`.
-            public var id: Swift.String
-            /// The default of its kind: preselected for new optimizations.
-            ///
-            /// - Remark: Generated from `#/components/schemas/ConnectorVm/isDefault`.
-            public var isDefault: Swift.Bool
-            /// - Remark: Generated from `#/components/schemas/ConnectorVm/kind`.
-            public var kind: Components.Schemas.ConnectorKind
-            /// "acme-prod", "Claude Code · your login".
-            ///
-            /// - Remark: Generated from `#/components/schemas/ConnectorVm/name`.
-            public var name: Swift.String
-            /// - Remark: Generated from `#/components/schemas/ConnectorVm/status`.
-            public var status: Components.Schemas.ConnectorStatus
-            /// "Connected", "Expired", "Signed out".
-            ///
-            /// - Remark: Generated from `#/components/schemas/ConnectorVm/statusText`.
-            public var statusText: Swift.String
-            /// Creates a new `ConnectorVm`.
-            ///
-            /// - Parameters:
-            ///   - agent:
-            ///   - aws:
-            ///   - costNote: Cost line on the New optimization step ("Free while this Mac is awake", "Billed to the key").
-            ///   - detail: The grey line: "Personal · 42 repos", "SSO · us-east-1 · cap $500 / month".
-            ///   - github:
-            ///   - id:
-            ///   - isDefault: The default of its kind: preselected for new optimizations.
-            ///   - kind:
-            ///   - name: "acme-prod", "Claude Code · your login".
-            ///   - status:
-            ///   - statusText: "Connected", "Expired", "Signed out".
-            public init(
-                agent: Components.Schemas.AgentConnectorInfo? = nil,
-                aws: Components.Schemas.AwsConnectorInfo? = nil,
-                costNote: Swift.String? = nil,
-                detail: Swift.String,
-                github: Components.Schemas.GithubConnectorInfo? = nil,
-                id: Swift.String,
-                isDefault: Swift.Bool,
-                kind: Components.Schemas.ConnectorKind,
-                name: Swift.String,
-                status: Components.Schemas.ConnectorStatus,
-                statusText: Swift.String
-            ) {
-                self.agent = agent
-                self.aws = aws
-                self.costNote = costNote
-                self.detail = detail
-                self.github = github
-                self.id = id
-                self.isDefault = isDefault
-                self.kind = kind
-                self.name = name
-                self.status = status
-                self.statusText = statusText
-            }
-            public enum CodingKeys: String, CodingKey {
-                case agent
-                case aws
-                case costNote
-                case detail
-                case github
-                case id
-                case isDefault
-                case kind
-                case name
-                case status
-                case statusText
-            }
-        }
-        /// `POST /v1/connectors`: what the "Add connector" sheet sends.
-        ///
-        /// - Remark: Generated from `#/components/schemas/CreateConnectorInput`.
-        @frozen public enum CreateConnectorInput: Codable, Hashable, Sendable {
-            /// Starts the device flow (or stores a pasted token) and saves the account.
-            ///
-            /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case1`.
+        @frozen public enum ConnectorVm: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ConnectorVm/case1`.
             public struct Case1Payload: Codable, Hashable, Sendable {
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case1/kind`.
+                /// One muted line under the name. Backticks mark a command to show in monospace.
+                ///
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case1/detail`.
+                public var detail: Swift.String
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case1/id`.
+                public var id: Swift.String
+                /// The default of its kind (one per kind).
+                ///
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case1/isDefault`.
+                public var isDefault: Swift.Bool
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case1/kind`.
                 @frozen public enum KindPayload: String, Codable, Hashable, Sendable, CaseIterable {
                     case github = "github"
                 }
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case1/kind`.
-                public var kind: Components.Schemas.CreateConnectorInput.Case1Payload.KindPayload
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case1/name`.
-                public var name: Swift.String?
-                /// A pasted personal access token (Advanced). Without it the device flow starts.
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case1/kind`.
+                public var kind: Components.Schemas.ConnectorVm.Case1Payload.KindPayload
+                /// The account's login, `null` until it is known.
                 ///
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case1/token`.
-                public var token: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case1/login`.
+                public var login: Swift.String?
+                /// What the user sees and can rename ("srikanth235").
+                ///
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case1/name`.
+                public var name: Swift.String
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case1/source`.
+                public var source: Components.Schemas.GithubConnectorSource
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case1/status`.
+                public var status: Components.Schemas.ConnectorStatus
                 /// Creates a new `Case1Payload`.
                 ///
                 /// - Parameters:
+                ///   - detail: One muted line under the name. Backticks mark a command to show in monospace.
+                ///   - id:
+                ///   - isDefault: The default of its kind (one per kind).
                 ///   - kind:
-                ///   - name:
-                ///   - token: A pasted personal access token (Advanced). Without it the device flow starts.
+                ///   - login: The account's login, `null` until it is known.
+                ///   - name: What the user sees and can rename ("srikanth235").
+                ///   - source:
+                ///   - status:
                 public init(
-                    kind: Components.Schemas.CreateConnectorInput.Case1Payload.KindPayload,
-                    name: Swift.String? = nil,
-                    token: Swift.String? = nil
+                    detail: Swift.String,
+                    id: Swift.String,
+                    isDefault: Swift.Bool,
+                    kind: Components.Schemas.ConnectorVm.Case1Payload.KindPayload,
+                    login: Swift.String? = nil,
+                    name: Swift.String,
+                    source: Components.Schemas.GithubConnectorSource,
+                    status: Components.Schemas.ConnectorStatus
                 ) {
+                    self.detail = detail
+                    self.id = id
+                    self.isDefault = isDefault
                     self.kind = kind
+                    self.login = login
                     self.name = name
-                    self.token = token
+                    self.source = source
+                    self.status = status
                 }
                 public enum CodingKeys: String, CodingKey {
+                    case detail
+                    case id
+                    case isDefault
                     case kind
+                    case login
                     case name
-                    case token
+                    case source
+                    case status
                 }
             }
-            /// Starts the device flow (or stores a pasted token) and saves the account.
-            ///
-            /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case1`.
-            case case1(Components.Schemas.CreateConnectorInput.Case1Payload)
-            /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case2`.
+            /// - Remark: Generated from `#/components/schemas/ConnectorVm/case1`.
+            case case1(Components.Schemas.ConnectorVm.Case1Payload)
+            /// - Remark: Generated from `#/components/schemas/ConnectorVm/case2`.
             public struct Case2Payload: Codable, Hashable, Sendable {
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case2/auth`.
-                public var auth: Components.Schemas.AwsConnectorAuth
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case2/capUsdPerMonth`.
-                public var capUsdPerMonth: Swift.Double?
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case2/kind`.
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case2/auth`.
+                public var auth: Components.Schemas.AwsAuthStyle
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case2/detail`.
+                public var detail: Swift.String
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case2/id`.
+                public var id: Swift.String
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case2/isDefault`.
+                public var isDefault: Swift.Bool
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case2/kind`.
                 @frozen public enum KindPayload: String, Codable, Hashable, Sendable, CaseIterable {
                     case aws = "aws"
                 }
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case2/kind`.
-                public var kind: Components.Schemas.CreateConnectorInput.Case2Payload.KindPayload
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case2/name`.
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case2/kind`.
+                public var kind: Components.Schemas.ConnectorVm.Case2Payload.KindPayload
+                /// Optional monthly spend cap in USD.
+                ///
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case2/monthlyCapUsd`.
+                public var monthlyCapUsd: Swift.Double?
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case2/name`.
                 public var name: Swift.String
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case2/profile`.
-                public var profile: Swift.String?
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case2/region`.
-                public var region: Swift.String?
+                /// Profile name in `~/.aws/config` (names only; credentials stay where AWS keeps them).
+                ///
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case2/profile`.
+                public var profile: Swift.String
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case2/region`.
+                public var region: Swift.String
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case2/status`.
+                public var status: Components.Schemas.ConnectorStatus
                 /// Creates a new `Case2Payload`.
                 ///
                 /// - Parameters:
                 ///   - auth:
-                ///   - capUsdPerMonth:
+                ///   - detail:
+                ///   - id:
+                ///   - isDefault:
                 ///   - kind:
+                ///   - monthlyCapUsd: Optional monthly spend cap in USD.
                 ///   - name:
-                ///   - profile:
+                ///   - profile: Profile name in `~/.aws/config` (names only; credentials stay where AWS keeps them).
                 ///   - region:
+                ///   - status:
                 public init(
-                    auth: Components.Schemas.AwsConnectorAuth,
-                    capUsdPerMonth: Swift.Double? = nil,
-                    kind: Components.Schemas.CreateConnectorInput.Case2Payload.KindPayload,
+                    auth: Components.Schemas.AwsAuthStyle,
+                    detail: Swift.String,
+                    id: Swift.String,
+                    isDefault: Swift.Bool,
+                    kind: Components.Schemas.ConnectorVm.Case2Payload.KindPayload,
+                    monthlyCapUsd: Swift.Double? = nil,
                     name: Swift.String,
-                    profile: Swift.String? = nil,
-                    region: Swift.String? = nil
+                    profile: Swift.String,
+                    region: Swift.String,
+                    status: Components.Schemas.ConnectorStatus
                 ) {
                     self.auth = auth
-                    self.capUsdPerMonth = capUsdPerMonth
+                    self.detail = detail
+                    self.id = id
+                    self.isDefault = isDefault
                     self.kind = kind
+                    self.monthlyCapUsd = monthlyCapUsd
                     self.name = name
                     self.profile = profile
                     self.region = region
+                    self.status = status
                 }
                 public enum CodingKeys: String, CodingKey {
                     case auth
-                    case capUsdPerMonth
+                    case detail
+                    case id
+                    case isDefault
                     case kind
+                    case monthlyCapUsd
                     case name
                     case profile
                     case region
+                    case status
                 }
             }
-            /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case2`.
-            case case2(Components.Schemas.CreateConnectorInput.Case2Payload)
-            /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case3`.
+            /// - Remark: Generated from `#/components/schemas/ConnectorVm/case2`.
+            case case2(Components.Schemas.ConnectorVm.Case2Payload)
+            /// - Remark: Generated from `#/components/schemas/ConnectorVm/case3`.
             public struct Case3Payload: Codable, Hashable, Sendable {
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case3/agent`.
-                public var agent: Components.Schemas.AgentKind
-                /// The API key, for `credential: api-key`.
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case3/agent`.
+                public var agent: Components.Schemas.ConnectorAgent
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case3/detail`.
+                public var detail: Swift.String
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case3/id`.
+                public var id: Swift.String
+                /// For agents: the one used when a run does not choose.
                 ///
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case3/apiKey`.
-                public var apiKey: Swift.String?
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case3/credential`.
-                public var credential: Components.Schemas.AgentCredential
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case3/kind`.
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case3/isDefault`.
+                public var isDefault: Swift.Bool
+                /// Last characters of a stored key, e.g. `····4f2a`. Never the key.
+                ///
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case3/keyHint`.
+                public var keyHint: Swift.String?
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case3/kind`.
                 @frozen public enum KindPayload: String, Codable, Hashable, Sendable, CaseIterable {
                     case agent = "agent"
                 }
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case3/kind`.
-                public var kind: Components.Schemas.CreateConnectorInput.Case3Payload.KindPayload
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case3/name`.
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case3/kind`.
+                public var kind: Components.Schemas.ConnectorVm.Case3Payload.KindPayload
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case3/name`.
                 public var name: Swift.String
-                /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case3/runsIn`.
-                public var runsIn: [Components.Schemas.AgentsWhere]?
+                /// `login` runs on this Mac only; `api-key` can run here or on cloud runners.
+                ///
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case3/runsOn`.
+                public var runsOn: [Components.Schemas.AgentsWhere]
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case3/source`.
+                public var source: Components.Schemas.AgentConnectorSource
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case3/status`.
+                public var status: Components.Schemas.ConnectorStatus
+                /// Detected CLI version (login) or `null`.
+                ///
+                /// - Remark: Generated from `#/components/schemas/ConnectorVm/case3/version`.
+                public var version: Swift.String?
                 /// Creates a new `Case3Payload`.
                 ///
                 /// - Parameters:
                 ///   - agent:
-                ///   - apiKey: The API key, for `credential: api-key`.
-                ///   - credential:
+                ///   - detail:
+                ///   - id:
+                ///   - isDefault: For agents: the one used when a run does not choose.
+                ///   - keyHint: Last characters of a stored key, e.g. `····4f2a`. Never the key.
                 ///   - kind:
                 ///   - name:
-                ///   - runsIn:
+                ///   - runsOn: `login` runs on this Mac only; `api-key` can run here or on cloud runners.
+                ///   - source:
+                ///   - status:
+                ///   - version: Detected CLI version (login) or `null`.
                 public init(
-                    agent: Components.Schemas.AgentKind,
-                    apiKey: Swift.String? = nil,
-                    credential: Components.Schemas.AgentCredential,
-                    kind: Components.Schemas.CreateConnectorInput.Case3Payload.KindPayload,
+                    agent: Components.Schemas.ConnectorAgent,
+                    detail: Swift.String,
+                    id: Swift.String,
+                    isDefault: Swift.Bool,
+                    keyHint: Swift.String? = nil,
+                    kind: Components.Schemas.ConnectorVm.Case3Payload.KindPayload,
                     name: Swift.String,
-                    runsIn: [Components.Schemas.AgentsWhere]? = nil
+                    runsOn: [Components.Schemas.AgentsWhere],
+                    source: Components.Schemas.AgentConnectorSource,
+                    status: Components.Schemas.ConnectorStatus,
+                    version: Swift.String? = nil
                 ) {
                     self.agent = agent
-                    self.apiKey = apiKey
-                    self.credential = credential
+                    self.detail = detail
+                    self.id = id
+                    self.isDefault = isDefault
+                    self.keyHint = keyHint
                     self.kind = kind
                     self.name = name
-                    self.runsIn = runsIn
+                    self.runsOn = runsOn
+                    self.source = source
+                    self.status = status
+                    self.version = version
                 }
                 public enum CodingKeys: String, CodingKey {
                     case agent
-                    case apiKey
-                    case credential
+                    case detail
+                    case id
+                    case isDefault
+                    case keyHint
                     case kind
                     case name
-                    case runsIn
+                    case runsOn
+                    case source
+                    case status
+                    case version
                 }
             }
-            /// - Remark: Generated from `#/components/schemas/CreateConnectorInput/case3`.
-            case case3(Components.Schemas.CreateConnectorInput.Case3Payload)
+            /// - Remark: Generated from `#/components/schemas/ConnectorVm/case3`.
+            case case3(Components.Schemas.ConnectorVm.Case3Payload)
             public init(from decoder: any Swift.Decoder) throws {
                 var errors: [any Swift.Error] = []
                 do {
@@ -1851,6 +1873,47 @@ extension Components {
                 case let .case3(value):
                     try value.encode(to: encoder)
                 }
+            }
+        }
+        /// Everything the Connectors screen shows.
+        ///
+        /// - Remark: Generated from `#/components/schemas/ConnectorsVm`.
+        public struct ConnectorsVm: Codable, Hashable, Sendable {
+            /// True when a real OAuth client id is configured for "Sign in with GitHub".
+            ///
+            /// - Remark: Generated from `#/components/schemas/ConnectorsVm/clientIdConfigured`.
+            public var clientIdConfigured: Swift.Bool
+            /// - Remark: Generated from `#/components/schemas/ConnectorsVm/connectors`.
+            public var connectors: [Components.Schemas.ConnectorVm]
+            /// False when the keychain is unavailable: tokens and keys cannot be stored (the environment is still honoured).
+            ///
+            /// - Remark: Generated from `#/components/schemas/ConnectorsVm/encryptionAvailable`.
+            public var encryptionAvailable: Swift.Bool
+            /// - Remark: Generated from `#/components/schemas/ConnectorsVm/githubFlow`.
+            public var githubFlow: Components.Schemas.GithubFlowVm?
+            /// Creates a new `ConnectorsVm`.
+            ///
+            /// - Parameters:
+            ///   - clientIdConfigured: True when a real OAuth client id is configured for "Sign in with GitHub".
+            ///   - connectors:
+            ///   - encryptionAvailable: False when the keychain is unavailable: tokens and keys cannot be stored (the environment is still honoured).
+            ///   - githubFlow:
+            public init(
+                clientIdConfigured: Swift.Bool,
+                connectors: [Components.Schemas.ConnectorVm],
+                encryptionAvailable: Swift.Bool,
+                githubFlow: Components.Schemas.GithubFlowVm? = nil
+            ) {
+                self.clientIdConfigured = clientIdConfigured
+                self.connectors = connectors
+                self.encryptionAvailable = encryptionAvailable
+                self.githubFlow = githubFlow
+            }
+            public enum CodingKeys: String, CodingKey {
+                case clientIdConfigured
+                case connectors
+                case encryptionAvailable
+                case githubFlow
             }
         }
         /// `POST /v1/environment-drafts`.
@@ -1908,8 +1971,8 @@ extension Components {
             public var baseRef: Swift.String?
             /// - Remark: Generated from `#/components/schemas/CreateOptimizationInput/budgetUsd`.
             public var budgetUsd: Swift.Double
-            /// - Remark: Generated from `#/components/schemas/CreateOptimizationInput/connectors`.
-            public var connectors: Components.Schemas.ConnectorSelectionInput?
+            /// - Remark: Generated from `#/components/schemas/CreateOptimizationInput/connections`.
+            public var connections: Components.Schemas.RepoConnections?
             /// - Remark: Generated from `#/components/schemas/CreateOptimizationInput/demo`.
             public var demo: Components.Schemas.DemoId?
             /// Provisional (environment drafts): the approved draft whose environment this run uses.
@@ -1933,7 +1996,7 @@ extension Components {
             ///   - agentsWhere:
             ///   - baseRef:
             ///   - budgetUsd:
-            ///   - connectors:
+            ///   - connections:
             ///   - demo:
             ///   - environmentDraftId: Provisional (environment drafts): the approved draft whose environment this run uses.
             ///   - name:
@@ -1945,7 +2008,7 @@ extension Components {
                 agentsWhere: Components.Schemas.AgentsWhere? = nil,
                 baseRef: Swift.String? = nil,
                 budgetUsd: Swift.Double,
-                connectors: Components.Schemas.ConnectorSelectionInput? = nil,
+                connections: Components.Schemas.RepoConnections? = nil,
                 demo: Components.Schemas.DemoId? = nil,
                 environmentDraftId: Swift.String? = nil,
                 name: Swift.String? = nil,
@@ -1957,7 +2020,7 @@ extension Components {
                 self.agentsWhere = agentsWhere
                 self.baseRef = baseRef
                 self.budgetUsd = budgetUsd
-                self.connectors = connectors
+                self.connections = connections
                 self.demo = demo
                 self.environmentDraftId = environmentDraftId
                 self.name = name
@@ -1970,7 +2033,7 @@ extension Components {
                 case agentsWhere
                 case baseRef
                 case budgetUsd
-                case connectors
+                case connections
                 case demo
                 case environmentDraftId
                 case name
@@ -2203,6 +2266,38 @@ extension Components {
                 case agent
                 case costUsd
                 case durationS
+            }
+        }
+        /// What a run would use right now: the saved choice where there is one, else the defaults. `null` = nothing
+        /// connected of that kind.
+        ///
+        /// - Remark: Generated from `#/components/schemas/EffectiveConnections`.
+        public struct EffectiveConnections: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/EffectiveConnections/agents`.
+            public var agents: [Components.Schemas.AgentSelection]
+            /// - Remark: Generated from `#/components/schemas/EffectiveConnections/aws`.
+            public var aws: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/EffectiveConnections/github`.
+            public var github: Swift.String?
+            /// Creates a new `EffectiveConnections`.
+            ///
+            /// - Parameters:
+            ///   - agents:
+            ///   - aws:
+            ///   - github:
+            public init(
+                agents: [Components.Schemas.AgentSelection],
+                aws: Swift.String? = nil,
+                github: Swift.String? = nil
+            ) {
+                self.agents = agents
+                self.aws = aws
+                self.github = github
+            }
+            public enum CodingKeys: String, CodingKey {
+                case agents
+                case aws
+                case github
             }
         }
         /// Which engine answers.
@@ -2780,53 +2875,84 @@ extension Components {
                 case path
             }
         }
-        /// - Remark: Generated from `#/components/schemas/GithubAccountKind`.
-        @frozen public enum GithubAccountKind: String, Codable, Hashable, Sendable, CaseIterable {
-            case personal = "personal"
-            case organization = "organization"
-            case app = "app"
+        /// - Remark: Generated from `#/components/schemas/GithubConnectorSource`.
+        @frozen public enum GithubConnectorSource: String, Codable, Hashable, Sendable, CaseIterable {
+            case device = "device"
+            case token = "token"
+            case env = "env"
         }
-        /// - Remark: Generated from `#/components/schemas/GithubConnectorInfo`.
-        public struct GithubConnectorInfo: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/GithubConnectorInfo/accountKind`.
-            public var accountKind: Components.Schemas.GithubAccountKind
-            /// - Remark: Generated from `#/components/schemas/GithubConnectorInfo/login`.
-            public var login: Swift.String
-            /// - Remark: Generated from `#/components/schemas/GithubConnectorInfo/repoCount`.
-            public var repoCount: Swift.Int32?
-            /// Creates a new `GithubConnectorInfo`.
+        /// - Remark: Generated from `#/components/schemas/GithubFlowState`.
+        @frozen public enum GithubFlowState: String, Codable, Hashable, Sendable, CaseIterable {
+            case pending = "pending"
+            case expired = "expired"
+            case denied = "denied"
+            case error = "error"
+        }
+        /// - Remark: Generated from `#/components/schemas/GithubFlowVm`.
+        public struct GithubFlowVm: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/GithubFlowVm/expiresAt`.
+            public var expiresAt: Swift.Int64
+            /// - Remark: Generated from `#/components/schemas/GithubFlowVm/message`.
+            public var message: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/GithubFlowVm/state`.
+            public var state: Components.Schemas.GithubFlowState
+            /// Shown to the user, who types it at `verificationUri`.
+            ///
+            /// - Remark: Generated from `#/components/schemas/GithubFlowVm/userCode`.
+            public var userCode: Swift.String
+            /// - Remark: Generated from `#/components/schemas/GithubFlowVm/verificationUri`.
+            public var verificationUri: Swift.String
+            /// Creates a new `GithubFlowVm`.
             ///
             /// - Parameters:
-            ///   - accountKind:
-            ///   - login:
-            ///   - repoCount:
+            ///   - expiresAt:
+            ///   - message:
+            ///   - state:
+            ///   - userCode: Shown to the user, who types it at `verificationUri`.
+            ///   - verificationUri:
             public init(
-                accountKind: Components.Schemas.GithubAccountKind,
-                login: Swift.String,
-                repoCount: Swift.Int32? = nil
+                expiresAt: Swift.Int64,
+                message: Swift.String? = nil,
+                state: Components.Schemas.GithubFlowState,
+                userCode: Swift.String,
+                verificationUri: Swift.String
             ) {
-                self.accountKind = accountKind
-                self.login = login
-                self.repoCount = repoCount
+                self.expiresAt = expiresAt
+                self.message = message
+                self.state = state
+                self.userCode = userCode
+                self.verificationUri = verificationUri
             }
             public enum CodingKeys: String, CodingKey {
-                case accountKind
-                case login
-                case repoCount
+                case expiresAt
+                case message
+                case state
+                case userCode
+                case verificationUri
             }
         }
         /// - Remark: Generated from `#/components/schemas/InspectRepoInput`.
         public struct InspectRepoInput: Codable, Hashable, Sendable {
+            /// Read the repo with this GitHub connector (default: the default one).
+            ///
+            /// - Remark: Generated from `#/components/schemas/InspectRepoInput/connectorId`.
+            public var connectorId: Swift.String?
             /// - Remark: Generated from `#/components/schemas/InspectRepoInput/source`.
             public var source: Components.Schemas.RepoSource
             /// Creates a new `InspectRepoInput`.
             ///
             /// - Parameters:
+            ///   - connectorId: Read the repo with this GitHub connector (default: the default one).
             ///   - source:
-            public init(source: Components.Schemas.RepoSource) {
+            public init(
+                connectorId: Swift.String? = nil,
+                source: Components.Schemas.RepoSource
+            ) {
+                self.connectorId = connectorId
                 self.source = source
             }
             public enum CodingKeys: String, CodingKey {
+                case connectorId
                 case source
             }
         }
@@ -3003,84 +3129,6 @@ extension Components {
         @frozen public enum Mode: String, Codable, Hashable, Sendable, CaseIterable {
             case live = "live"
             case simulation = "simulation"
-        }
-        /// One item of "Needs you". The button opens `optimizationId` (or the draft / connector) in the app.
-        ///
-        /// - Remark: Generated from `#/components/schemas/NeedsYouItem`.
-        public struct NeedsYouItem: Codable, Hashable, Sendable {
-            /// The button: "Review", "Open PR".
-            ///
-            /// - Remark: Generated from `#/components/schemas/NeedsYouItem/actionLabel`.
-            public var actionLabel: Swift.String
-            /// - Remark: Generated from `#/components/schemas/NeedsYouItem/connectorId`.
-            public var connectorId: Swift.String?
-            /// - Remark: Generated from `#/components/schemas/NeedsYouItem/environmentDraftId`.
-            public var environmentDraftId: Swift.String?
-            /// - Remark: Generated from `#/components/schemas/NeedsYouItem/id`.
-            public var id: Swift.String
-            /// - Remark: Generated from `#/components/schemas/NeedsYouItem/kind`.
-            public var kind: Components.Schemas.NeedsYouKind
-            /// - Remark: Generated from `#/components/schemas/NeedsYouItem/optimizationId`.
-            public var optimizationId: Swift.String?
-            /// - Remark: Generated from `#/components/schemas/NeedsYouItem/subtitle`.
-            public var subtitle: Swift.String
-            /// - Remark: Generated from `#/components/schemas/NeedsYouItem/title`.
-            public var title: Swift.String
-            /// For `merge-wins`: the pull request to open.
-            ///
-            /// - Remark: Generated from `#/components/schemas/NeedsYouItem/url`.
-            public var url: Swift.String?
-            /// Creates a new `NeedsYouItem`.
-            ///
-            /// - Parameters:
-            ///   - actionLabel: The button: "Review", "Open PR".
-            ///   - connectorId:
-            ///   - environmentDraftId:
-            ///   - id:
-            ///   - kind:
-            ///   - optimizationId:
-            ///   - subtitle:
-            ///   - title:
-            ///   - url: For `merge-wins`: the pull request to open.
-            public init(
-                actionLabel: Swift.String,
-                connectorId: Swift.String? = nil,
-                environmentDraftId: Swift.String? = nil,
-                id: Swift.String,
-                kind: Components.Schemas.NeedsYouKind,
-                optimizationId: Swift.String? = nil,
-                subtitle: Swift.String,
-                title: Swift.String,
-                url: Swift.String? = nil
-            ) {
-                self.actionLabel = actionLabel
-                self.connectorId = connectorId
-                self.environmentDraftId = environmentDraftId
-                self.id = id
-                self.kind = kind
-                self.optimizationId = optimizationId
-                self.subtitle = subtitle
-                self.title = title
-                self.url = url
-            }
-            public enum CodingKeys: String, CodingKey {
-                case actionLabel
-                case connectorId
-                case environmentDraftId
-                case id
-                case kind
-                case optimizationId
-                case subtitle
-                case title
-                case url
-            }
-        }
-        /// - Remark: Generated from `#/components/schemas/NeedsYouKind`.
-        @frozen public enum NeedsYouKind: String, Codable, Hashable, Sendable, CaseIterable {
-            case approveEnvironment = "approve-environment"
-            case mergeWins = "merge-wins"
-            case signIn = "sign-in"
-            case budgetLimit = "budget-limit"
         }
         /// - Remark: Generated from `#/components/schemas/NoticeLevel`.
         @frozen public enum NoticeLevel: String, Codable, Hashable, Sendable, CaseIterable {
@@ -3445,167 +3493,417 @@ extension Components {
                 case range
             }
         }
+        /// `lower` = a smaller metric is better.
+        ///
+        /// - Remark: Generated from `#/components/schemas/OverviewDirection`.
+        @frozen public enum OverviewDirection: String, Codable, Hashable, Sendable, CaseIterable {
+            case lower = "lower"
+            case higher = "higher"
+        }
+        /// - Remark: Generated from `#/components/schemas/OverviewNeed`.
+        public struct OverviewNeed: Codable, Hashable, Sendable {
+            /// Button label.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewNeed/action`.
+            public var action: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OverviewNeed/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OverviewNeed/kind`.
+            public var kind: Components.Schemas.OverviewNeedKind
+            /// - Remark: Generated from `#/components/schemas/OverviewNeed/optimizationId`.
+            public var optimizationId: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OverviewNeed/sub`.
+            public var sub: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OverviewNeed/title`.
+            public var title: Swift.String
+            /// Creates a new `OverviewNeed`.
+            ///
+            /// - Parameters:
+            ///   - action: Button label.
+            ///   - id:
+            ///   - kind:
+            ///   - optimizationId:
+            ///   - sub:
+            ///   - title:
+            public init(
+                action: Swift.String,
+                id: Swift.String,
+                kind: Components.Schemas.OverviewNeedKind,
+                optimizationId: Swift.String,
+                sub: Swift.String,
+                title: Swift.String
+            ) {
+                self.action = action
+                self.id = id
+                self.kind = kind
+                self.optimizationId = optimizationId
+                self.sub = sub
+                self.title = title
+            }
+            public enum CodingKeys: String, CodingKey {
+                case action
+                case id
+                case kind
+                case optimizationId
+                case sub
+                case title
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/OverviewNeedKind`.
+        @frozen public enum OverviewNeedKind: String, Codable, Hashable, Sendable, CaseIterable {
+            case ship = "ship"
+            case failed = "failed"
+        }
+        /// Window the Overview covers. `all` = everything in the ledger.
+        ///
         /// - Remark: Generated from `#/components/schemas/OverviewRange`.
         @frozen public enum OverviewRange: String, Codable, Hashable, Sendable, CaseIterable {
             case _30d = "30d"
             case _90d = "90d"
             case all = "all"
         }
+        /// Yearly value per $1 spent, and days until the spend is earned back.
+        ///
+        /// - Remark: Generated from `#/components/schemas/OverviewReturn`.
+        public struct OverviewReturn: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OverviewReturn/paybackDays`.
+            public var paybackDays: Swift.Double
+            /// - Remark: Generated from `#/components/schemas/OverviewReturn/ratio`.
+            public var ratio: Swift.Double
+            /// Creates a new `OverviewReturn`.
+            ///
+            /// - Parameters:
+            ///   - paybackDays:
+            ///   - ratio:
+            public init(
+                paybackDays: Swift.Double,
+                ratio: Swift.Double
+            ) {
+                self.paybackDays = paybackDays
+                self.ratio = ratio
+            }
+            public enum CodingKeys: String, CodingKey {
+                case paybackDays
+                case ratio
+            }
+        }
         /// - Remark: Generated from `#/components/schemas/OverviewRow`.
         public struct OverviewRow: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/baseline`.
+            public var baseline: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/best`.
+            public var best: Swift.Double?
             /// - Remark: Generated from `#/components/schemas/OverviewRow/budgetUsd`.
-            public var budgetUsd: Swift.Double?
+            public var budgetUsd: Swift.Double
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/direction`.
+            public var direction: Components.Schemas.OverviewDirection
+            /// Signed gain vs baseline in percent (positive = better); `null` without a baseline.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/gainPct`.
+            public var gainPct: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/id`.
+            public var id: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/live`.
+            public var live: Swift.Bool
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/metric`.
+            public var metric: Swift.String
             /// - Remark: Generated from `#/components/schemas/OverviewRow/name`.
             public var name: Swift.String
-            /// - Remark: Generated from `#/components/schemas/OverviewRow/optimizationId`.
-            public var optimizationId: Swift.String
+            /// Seconds left of the time limit while running, else `null`.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/remainingS`.
+            public var remainingS: Swift.Int64?
             /// - Remark: Generated from `#/components/schemas/OverviewRow/repo`.
             public var repo: Swift.String
-            /// Signed percent change of the metric, positive = better.
+            /// Spend in the range (lifetime when the range is `all`).
             ///
-            /// - Remark: Generated from `#/components/schemas/OverviewRow/resultPct`.
-            public var resultPct: Swift.Double?
-            /// "412 -> 288 ms"
-            ///
-            /// - Remark: Generated from `#/components/schemas/OverviewRow/resultText`.
-            public var resultText: Swift.String
             /// - Remark: Generated from `#/components/schemas/OverviewRow/spentUsd`.
             public var spentUsd: Swift.Double
-            /// - Remark: Generated from `#/components/schemas/OverviewRow/state`.
-            public var state: Components.Schemas.OverviewState
-            /// Under the state: "1 h 12 m left".
+            /// Ledger status as the pills use it (`pr-open` once a pull request exists).
             ///
-            /// - Remark: Generated from `#/components/schemas/OverviewRow/stateNote`.
-            public var stateNote: Swift.String?
-            /// "Running", "Waiting on you", "Merged", "Done", "No win".
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/status`.
+            public var status: Components.Schemas.UiStatus
+            /// The status word shown next to the dot ("Running", "Waiting on you", "No win").
             ///
-            /// - Remark: Generated from `#/components/schemas/OverviewRow/stateText`.
-            public var stateText: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/statusLabel`.
+            public var statusLabel: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/tone`.
+            public var tone: Components.Schemas.StatusTone
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/unit`.
+            public var unit: Swift.String
+            /// Value of the wins in the range, USD per year; `null` without a value model.
+            ///
             /// - Remark: Generated from `#/components/schemas/OverviewRow/valueUsdPerYear`.
             public var valueUsdPerYear: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/verifiedWins`.
+            public var verifiedWins: Swift.Int64
             /// Creates a new `OverviewRow`.
             ///
             /// - Parameters:
+            ///   - baseline:
+            ///   - best:
             ///   - budgetUsd:
+            ///   - direction:
+            ///   - gainPct: Signed gain vs baseline in percent (positive = better); `null` without a baseline.
+            ///   - id:
+            ///   - live:
+            ///   - metric:
             ///   - name:
-            ///   - optimizationId:
+            ///   - remainingS: Seconds left of the time limit while running, else `null`.
             ///   - repo:
-            ///   - resultPct: Signed percent change of the metric, positive = better.
-            ///   - resultText: "412 -> 288 ms"
-            ///   - spentUsd:
-            ///   - state:
-            ///   - stateNote: Under the state: "1 h 12 m left".
-            ///   - stateText: "Running", "Waiting on you", "Merged", "Done", "No win".
-            ///   - valueUsdPerYear:
+            ///   - spentUsd: Spend in the range (lifetime when the range is `all`).
+            ///   - status: Ledger status as the pills use it (`pr-open` once a pull request exists).
+            ///   - statusLabel: The status word shown next to the dot ("Running", "Waiting on you", "No win").
+            ///   - tone:
+            ///   - unit:
+            ///   - valueUsdPerYear: Value of the wins in the range, USD per year; `null` without a value model.
+            ///   - verifiedWins:
             public init(
-                budgetUsd: Swift.Double? = nil,
+                baseline: Swift.Double? = nil,
+                best: Swift.Double? = nil,
+                budgetUsd: Swift.Double,
+                direction: Components.Schemas.OverviewDirection,
+                gainPct: Swift.Double? = nil,
+                id: Swift.String,
+                live: Swift.Bool,
+                metric: Swift.String,
                 name: Swift.String,
-                optimizationId: Swift.String,
+                remainingS: Swift.Int64? = nil,
                 repo: Swift.String,
-                resultPct: Swift.Double? = nil,
-                resultText: Swift.String,
                 spentUsd: Swift.Double,
-                state: Components.Schemas.OverviewState,
-                stateNote: Swift.String? = nil,
-                stateText: Swift.String,
-                valueUsdPerYear: Swift.Double? = nil
+                status: Components.Schemas.UiStatus,
+                statusLabel: Swift.String,
+                tone: Components.Schemas.StatusTone,
+                unit: Swift.String,
+                valueUsdPerYear: Swift.Double? = nil,
+                verifiedWins: Swift.Int64
+            ) {
+                self.baseline = baseline
+                self.best = best
+                self.budgetUsd = budgetUsd
+                self.direction = direction
+                self.gainPct = gainPct
+                self.id = id
+                self.live = live
+                self.metric = metric
+                self.name = name
+                self.remainingS = remainingS
+                self.repo = repo
+                self.spentUsd = spentUsd
+                self.status = status
+                self.statusLabel = statusLabel
+                self.tone = tone
+                self.unit = unit
+                self.valueUsdPerYear = valueUsdPerYear
+                self.verifiedWins = verifiedWins
+            }
+            public enum CodingKeys: String, CodingKey {
+                case baseline
+                case best
+                case budgetUsd
+                case direction
+                case gainPct
+                case id
+                case live
+                case metric
+                case name
+                case remainingS
+                case repo
+                case spentUsd
+                case status
+                case statusLabel
+                case tone
+                case unit
+                case valueUsdPerYear
+                case verifiedWins
+            }
+        }
+        /// - Remark: Generated from `#/components/schemas/OverviewSpent`.
+        public struct OverviewSpent: Codable, Hashable, Sendable {
+            /// Budget of the optimizations listed in `rows`.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewSpent/budgetUsd`.
+            public var budgetUsd: Swift.Double
+            /// - Remark: Generated from `#/components/schemas/OverviewSpent/optimizations`.
+            public var optimizations: Swift.Int64
+            /// - Remark: Generated from `#/components/schemas/OverviewSpent/usd`.
+            public var usd: Swift.Double
+            /// Creates a new `OverviewSpent`.
+            ///
+            /// - Parameters:
+            ///   - budgetUsd: Budget of the optimizations listed in `rows`.
+            ///   - optimizations:
+            ///   - usd:
+            public init(
+                budgetUsd: Swift.Double,
+                optimizations: Swift.Int64,
+                usd: Swift.Double
             ) {
                 self.budgetUsd = budgetUsd
-                self.name = name
-                self.optimizationId = optimizationId
-                self.repo = repo
-                self.resultPct = resultPct
-                self.resultText = resultText
-                self.spentUsd = spentUsd
-                self.state = state
-                self.stateNote = stateNote
-                self.stateText = stateText
-                self.valueUsdPerYear = valueUsdPerYear
+                self.optimizations = optimizations
+                self.usd = usd
             }
             public enum CodingKeys: String, CodingKey {
                 case budgetUsd
-                case name
-                case optimizationId
-                case repo
-                case resultPct
-                case resultText
-                case spentUsd
-                case state
-                case stateNote
-                case stateText
-                case valueUsdPerYear
+                case optimizations
+                case usd
             }
         }
-        /// The state dot of an Overview row.
-        ///
-        /// - Remark: Generated from `#/components/schemas/OverviewState`.
-        @frozen public enum OverviewState: String, Codable, Hashable, Sendable, CaseIterable {
-            case running = "running"
-            case waitingOnYou = "waiting-on-you"
-            case merged = "merged"
-            case done = "done"
-            case noWin = "no-win"
-            case draft = "draft"
-            case stopped = "stopped"
-            case failed = "failed"
+        /// - Remark: Generated from `#/components/schemas/OverviewValue`.
+        public struct OverviewValue: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OverviewValue/basis`.
+            public var basis: Components.Schemas.ValueBasis
+            /// - Remark: Generated from `#/components/schemas/OverviewValue/usdPerYear`.
+            public var usdPerYear: Swift.Double
+            /// - Remark: Generated from `#/components/schemas/OverviewValue/wins`.
+            public var wins: Swift.Int64
+            /// Creates a new `OverviewValue`.
+            ///
+            /// - Parameters:
+            ///   - basis:
+            ///   - usdPerYear:
+            ///   - wins:
+            public init(
+                basis: Components.Schemas.ValueBasis,
+                usdPerYear: Swift.Double,
+                wins: Swift.Int64
+            ) {
+                self.basis = basis
+                self.usdPerYear = usdPerYear
+                self.wins = wins
+            }
+            public enum CodingKeys: String, CodingKey {
+                case basis
+                case usdPerYear
+                case wins
+            }
         }
         /// - Remark: Generated from `#/components/schemas/OverviewVm`.
         public struct OverviewVm: Codable, Hashable, Sendable {
+            /// The ledger has no optimization at all (the Overview shows one calm empty state).
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewVm/empty`.
+            public var empty: Swift.Bool
+            /// The window, epoch ms. `from` is the first activity for `all`.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewVm/from`.
+            public var from: Swift.Int64
             /// - Remark: Generated from `#/components/schemas/OverviewVm/needsYou`.
-            public var needsYou: [Components.Schemas.NeedsYouItem]
+            public var needsYou: [Components.Schemas.OverviewNeed]
             /// - Remark: Generated from `#/components/schemas/OverviewVm/range`.
             public var range: Components.Schemas.OverviewRange
             /// - Remark: Generated from `#/components/schemas/OverviewVm/returnOnSpend`.
-            public var returnOnSpend: Components.Schemas.ReturnHero
+            public var returnOnSpend: Components.Schemas.OverviewReturn?
+            /// Optimizations with activity in the range (drafts created in it included), newest first.
+            ///
             /// - Remark: Generated from `#/components/schemas/OverviewVm/rows`.
             public var rows: [Components.Schemas.OverviewRow]
-            /// - Remark: Generated from `#/components/schemas/OverviewVm/sandbox`.
-            public var sandbox: Components.Schemas.SandboxChip
             /// - Remark: Generated from `#/components/schemas/OverviewVm/spent`.
-            public var spent: Components.Schemas.SpentHero
-            /// - Remark: Generated from `#/components/schemas/OverviewVm/staircase`.
-            public var staircase: Components.Schemas.Staircase
-            /// - Remark: Generated from `#/components/schemas/OverviewVm/valueLockedIn`.
-            public var valueLockedIn: Components.Schemas.ValueHero
+            public var spent: Components.Schemas.OverviewSpent
+            /// - Remark: Generated from `#/components/schemas/OverviewVm/to`.
+            public var to: Swift.Int64
+            /// - Remark: Generated from `#/components/schemas/OverviewVm/value`.
+            public var value: Components.Schemas.OverviewValue?
+            /// Staircase of cumulative value, oldest first; empty without a value model or wins in the range.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewVm/wins`.
+            public var wins: [Components.Schemas.OverviewWin]
             /// Creates a new `OverviewVm`.
             ///
             /// - Parameters:
+            ///   - empty: The ledger has no optimization at all (the Overview shows one calm empty state).
+            ///   - from: The window, epoch ms. `from` is the first activity for `all`.
             ///   - needsYou:
             ///   - range:
             ///   - returnOnSpend:
-            ///   - rows:
-            ///   - sandbox:
+            ///   - rows: Optimizations with activity in the range (drafts created in it included), newest first.
             ///   - spent:
-            ///   - staircase:
-            ///   - valueLockedIn:
+            ///   - to:
+            ///   - value:
+            ///   - wins: Staircase of cumulative value, oldest first; empty without a value model or wins in the range.
             public init(
-                needsYou: [Components.Schemas.NeedsYouItem],
+                empty: Swift.Bool,
+                from: Swift.Int64,
+                needsYou: [Components.Schemas.OverviewNeed],
                 range: Components.Schemas.OverviewRange,
-                returnOnSpend: Components.Schemas.ReturnHero,
+                returnOnSpend: Components.Schemas.OverviewReturn? = nil,
                 rows: [Components.Schemas.OverviewRow],
-                sandbox: Components.Schemas.SandboxChip,
-                spent: Components.Schemas.SpentHero,
-                staircase: Components.Schemas.Staircase,
-                valueLockedIn: Components.Schemas.ValueHero
+                spent: Components.Schemas.OverviewSpent,
+                to: Swift.Int64,
+                value: Components.Schemas.OverviewValue? = nil,
+                wins: [Components.Schemas.OverviewWin]
             ) {
+                self.empty = empty
+                self.from = from
                 self.needsYou = needsYou
                 self.range = range
                 self.returnOnSpend = returnOnSpend
                 self.rows = rows
-                self.sandbox = sandbox
                 self.spent = spent
-                self.staircase = staircase
-                self.valueLockedIn = valueLockedIn
+                self.to = to
+                self.value = value
+                self.wins = wins
             }
             public enum CodingKeys: String, CodingKey {
+                case empty
+                case from
                 case needsYou
                 case range
                 case returnOnSpend
                 case rows
-                case sandbox
                 case spent
-                case staircase
-                case valueLockedIn
+                case to
+                case value
+                case wins
+            }
+        }
+        /// One step of the "value locked in" staircase: a verified win with a value model.
+        ///
+        /// - Remark: Generated from `#/components/schemas/OverviewWin`.
+        public struct OverviewWin: Codable, Hashable, Sendable {
+            /// When the ratchet moved (epoch ms).
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewWin/at`.
+            public var at: Swift.Int64
+            /// Cumulative value locked in after this win, USD per year.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewWin/cumulativeUsdPerYear`.
+            public var cumulativeUsdPerYear: Swift.Double
+            /// - Remark: Generated from `#/components/schemas/OverviewWin/optimization`.
+            public var optimization: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OverviewWin/optimizationId`.
+            public var optimizationId: Swift.String
+            /// What this win added, USD per year.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewWin/usdPerYear`.
+            public var usdPerYear: Swift.Double
+            /// Creates a new `OverviewWin`.
+            ///
+            /// - Parameters:
+            ///   - at: When the ratchet moved (epoch ms).
+            ///   - cumulativeUsdPerYear: Cumulative value locked in after this win, USD per year.
+            ///   - optimization:
+            ///   - optimizationId:
+            ///   - usdPerYear: What this win added, USD per year.
+            public init(
+                at: Swift.Int64,
+                cumulativeUsdPerYear: Swift.Double,
+                optimization: Swift.String,
+                optimizationId: Swift.String,
+                usdPerYear: Swift.Double
+            ) {
+                self.at = at
+                self.cumulativeUsdPerYear = cumulativeUsdPerYear
+                self.optimization = optimization
+                self.optimizationId = optimizationId
+                self.usdPerYear = usdPerYear
+            }
+            public enum CodingKeys: String, CodingKey {
+                case at
+                case cumulativeUsdPerYear
+                case optimization
+                case optimizationId
+                case usdPerYear
             }
         }
         /// - Remark: Generated from `#/components/schemas/PipelineCandidate`.
@@ -3886,6 +4184,70 @@ extension Components {
             case idle = "idle"
             case manual = "manual"
         }
+        /// What one repo's runs use: one GitHub account, one AWS profile, and one connector per agent with where it runs.
+        ///
+        /// - Remark: Generated from `#/components/schemas/RepoConnections`.
+        public struct RepoConnections: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/RepoConnections/agents`.
+            public var agents: [Components.Schemas.AgentSelection]
+            /// - Remark: Generated from `#/components/schemas/RepoConnections/aws`.
+            public var aws: Swift.String
+            /// - Remark: Generated from `#/components/schemas/RepoConnections/github`.
+            public var github: Swift.String
+            /// Creates a new `RepoConnections`.
+            ///
+            /// - Parameters:
+            ///   - agents:
+            ///   - aws:
+            ///   - github:
+            public init(
+                agents: [Components.Schemas.AgentSelection],
+                aws: Swift.String,
+                github: Swift.String
+            ) {
+                self.agents = agents
+                self.aws = aws
+                self.github = github
+            }
+            public enum CodingKeys: String, CodingKey {
+                case agents
+                case aws
+                case github
+            }
+        }
+        /// `GET /v1/connector-selections?repo=`.
+        ///
+        /// - Remark: Generated from `#/components/schemas/RepoConnectionsVm`.
+        public struct RepoConnectionsVm: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/RepoConnectionsVm/effective`.
+            public var effective: Components.Schemas.EffectiveConnections
+            /// `owner/name`, lower-cased: the key the selection is remembered under.
+            ///
+            /// - Remark: Generated from `#/components/schemas/RepoConnectionsVm/repo`.
+            public var repo: Swift.String
+            /// - Remark: Generated from `#/components/schemas/RepoConnectionsVm/saved`.
+            public var saved: Components.Schemas.RepoConnections?
+            /// Creates a new `RepoConnectionsVm`.
+            ///
+            /// - Parameters:
+            ///   - effective:
+            ///   - repo: `owner/name`, lower-cased: the key the selection is remembered under.
+            ///   - saved:
+            public init(
+                effective: Components.Schemas.EffectiveConnections,
+                repo: Swift.String,
+                saved: Components.Schemas.RepoConnections? = nil
+            ) {
+                self.effective = effective
+                self.repo = repo
+                self.saved = saved
+            }
+            public enum CodingKeys: String, CodingKey {
+                case effective
+                case repo
+                case saved
+            }
+        }
         /// What step 1 learned about the chosen repo (read from the default branch, never typed).
         ///
         /// - Remark: Generated from `#/components/schemas/RepoInspectVm`.
@@ -4089,39 +4451,6 @@ extension Components {
                 case pushedAt
             }
         }
-        /// "Return 84x: yearly value for every $1 spent, paid back in 4 days".
-        ///
-        /// - Remark: Generated from `#/components/schemas/ReturnHero`.
-        public struct ReturnHero: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/ReturnHero/note`.
-            public var note: Swift.String
-            /// - Remark: Generated from `#/components/schemas/ReturnHero/paybackDays`.
-            public var paybackDays: Swift.Double?
-            /// `null` when nothing was spent.
-            ///
-            /// - Remark: Generated from `#/components/schemas/ReturnHero/ratio`.
-            public var ratio: Swift.Double?
-            /// Creates a new `ReturnHero`.
-            ///
-            /// - Parameters:
-            ///   - note:
-            ///   - paybackDays:
-            ///   - ratio: `null` when nothing was spent.
-            public init(
-                note: Swift.String,
-                paybackDays: Swift.Double? = nil,
-                ratio: Swift.Double? = nil
-            ) {
-                self.note = note
-                self.paybackDays = paybackDays
-                self.ratio = ratio
-            }
-            public enum CodingKeys: String, CodingKey {
-                case note
-                case paybackDays
-                case ratio
-            }
-        }
         /// `POST /v1/environment-drafts/{id}/revisions`: "Ask for a change", or "Use a smaller setup".
         ///
         /// - Remark: Generated from `#/components/schemas/ReviseEnvironmentDraftInput`.
@@ -4149,43 +4478,6 @@ extension Components {
                 case scope
             }
         }
-        /// The sandbox line at the bottom of the sidebar ("Sandbox on · acme-prod, $1.20 so far · off at 15:40").
-        ///
-        /// - Remark: Generated from `#/components/schemas/SandboxChip`.
-        public struct SandboxChip: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/SandboxChip/name`.
-            public var name: Swift.String?
-            /// - Remark: Generated from `#/components/schemas/SandboxChip/offAt`.
-            public var offAt: Swift.Int64?
-            /// - Remark: Generated from `#/components/schemas/SandboxChip/on`.
-            public var on: Swift.Bool
-            /// - Remark: Generated from `#/components/schemas/SandboxChip/spentUsd`.
-            public var spentUsd: Swift.Double
-            /// Creates a new `SandboxChip`.
-            ///
-            /// - Parameters:
-            ///   - name:
-            ///   - offAt:
-            ///   - on:
-            ///   - spentUsd:
-            public init(
-                name: Swift.String? = nil,
-                offAt: Swift.Int64? = nil,
-                on: Swift.Bool,
-                spentUsd: Swift.Double
-            ) {
-                self.name = name
-                self.offAt = offAt
-                self.on = on
-                self.spentUsd = spentUsd
-            }
-            public enum CodingKeys: String, CodingKey {
-                case name
-                case offAt
-                case on
-                case spentUsd
-            }
-        }
         /// `creating` -> `ready` -> (`idle` while no run is active) -> `destroying` -> `destroyed`; `failed` when a step
         /// failed.
         ///
@@ -4200,20 +4492,20 @@ extension Components {
         }
         /// `PUT /v1/connector-selections`: remember the choice for a repo.
         ///
-        /// - Remark: Generated from `#/components/schemas/SaveConnectorSelectionInput`.
-        public struct SaveConnectorSelectionInput: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/SaveConnectorSelectionInput/repo`.
+        /// - Remark: Generated from `#/components/schemas/SaveRepoConnectionsInput`.
+        public struct SaveRepoConnectionsInput: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/SaveRepoConnectionsInput/repo`.
             public var repo: Swift.String
-            /// - Remark: Generated from `#/components/schemas/SaveConnectorSelectionInput/selection`.
-            public var selection: Components.Schemas.ConnectorSelectionInput
-            /// Creates a new `SaveConnectorSelectionInput`.
+            /// - Remark: Generated from `#/components/schemas/SaveRepoConnectionsInput/selection`.
+            public var selection: Components.Schemas.RepoConnections
+            /// Creates a new `SaveRepoConnectionsInput`.
             ///
             /// - Parameters:
             ///   - repo:
             ///   - selection:
             public init(
                 repo: Swift.String,
-                selection: Components.Schemas.ConnectorSelectionInput
+                selection: Components.Schemas.RepoConnections
             ) {
                 self.repo = repo
                 self.selection = selection
@@ -4254,49 +4546,6 @@ extension Components {
                 case name
             }
         }
-        /// "Spent $184 of $500 across AWS and agent keys".
-        ///
-        /// - Remark: Generated from `#/components/schemas/SpentHero`.
-        public struct SpentHero: Codable, Hashable, Sendable {
-            /// The total monthly caps of the connected AWS accounts and keys, when any is set.
-            ///
-            /// - Remark: Generated from `#/components/schemas/SpentHero/capUsd`.
-            public var capUsd: Swift.Double?
-            /// 0..=1, for the thin bar; `null` without a cap.
-            ///
-            /// - Remark: Generated from `#/components/schemas/SpentHero/fractionOfCap`.
-            public var fractionOfCap: Swift.Double?
-            /// "across AWS and agent keys"
-            ///
-            /// - Remark: Generated from `#/components/schemas/SpentHero/note`.
-            public var note: Swift.String
-            /// - Remark: Generated from `#/components/schemas/SpentHero/usd`.
-            public var usd: Swift.Double
-            /// Creates a new `SpentHero`.
-            ///
-            /// - Parameters:
-            ///   - capUsd: The total monthly caps of the connected AWS accounts and keys, when any is set.
-            ///   - fractionOfCap: 0..=1, for the thin bar; `null` without a cap.
-            ///   - note: "across AWS and agent keys"
-            ///   - usd:
-            public init(
-                capUsd: Swift.Double? = nil,
-                fractionOfCap: Swift.Double? = nil,
-                note: Swift.String,
-                usd: Swift.Double
-            ) {
-                self.capUsd = capUsd
-                self.fractionOfCap = fractionOfCap
-                self.note = note
-                self.usd = usd
-            }
-            public enum CodingKeys: String, CodingKey {
-                case capUsd
-                case fractionOfCap
-                case note
-                case usd
-            }
-        }
         /// - Remark: Generated from `#/components/schemas/StageId`.
         @frozen public enum StageId: String, Codable, Hashable, Sendable, CaseIterable {
             case checkout = "checkout"
@@ -4312,71 +4561,34 @@ extension Components {
             case idle = "idle"
             case failed = "failed"
         }
-        /// - Remark: Generated from `#/components/schemas/Staircase`.
-        public struct Staircase: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/Staircase/from`.
-            public var from: Swift.Int64
-            /// - Remark: Generated from `#/components/schemas/Staircase/points`.
-            public var points: [Components.Schemas.StaircasePoint]
-            /// - Remark: Generated from `#/components/schemas/Staircase/to`.
-            public var to: Swift.Int64
-            /// Creates a new `Staircase`.
+        /// `POST /v1/connectors/github/sign-in`: start the device flow for a new account, or sign `connectorId` in again.
+        ///
+        /// - Remark: Generated from `#/components/schemas/StartGithubSignInInput`.
+        public struct StartGithubSignInInput: Codable, Hashable, Sendable {
+            /// Re-sign-in: store the new token on this connector (default: a new one, or the one with the same login).
+            ///
+            /// - Remark: Generated from `#/components/schemas/StartGithubSignInInput/connectorId`.
+            public var connectorId: Swift.String?
+            /// Creates a new `StartGithubSignInInput`.
             ///
             /// - Parameters:
-            ///   - from:
-            ///   - points:
-            ///   - to:
-            public init(
-                from: Swift.Int64,
-                points: [Components.Schemas.StaircasePoint],
-                to: Swift.Int64
-            ) {
-                self.from = from
-                self.points = points
-                self.to = to
+            ///   - connectorId: Re-sign-in: store the new token on this connector (default: a new one, or the one with the same login).
+            public init(connectorId: Swift.String? = nil) {
+                self.connectorId = connectorId
             }
             public enum CodingKeys: String, CodingKey {
-                case from
-                case points
-                case to
+                case connectorId
             }
         }
-        /// One verified win on the staircase. `usdPerYear` is cumulative after this win.
+        /// Dot colour of a status word: brass (running), amber (waiting on you), mint (done), grey (nothing), rose (failed).
         ///
-        /// - Remark: Generated from `#/components/schemas/StaircasePoint`.
-        public struct StaircasePoint: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/StaircasePoint/at`.
-            public var at: Swift.Int64
-            /// - Remark: Generated from `#/components/schemas/StaircasePoint/optimizationId`.
-            public var optimizationId: Swift.String
-            /// - Remark: Generated from `#/components/schemas/StaircasePoint/optimizationName`.
-            public var optimizationName: Swift.String
-            /// - Remark: Generated from `#/components/schemas/StaircasePoint/usdPerYear`.
-            public var usdPerYear: Swift.Double
-            /// Creates a new `StaircasePoint`.
-            ///
-            /// - Parameters:
-            ///   - at:
-            ///   - optimizationId:
-            ///   - optimizationName:
-            ///   - usdPerYear:
-            public init(
-                at: Swift.Int64,
-                optimizationId: Swift.String,
-                optimizationName: Swift.String,
-                usdPerYear: Swift.Double
-            ) {
-                self.at = at
-                self.optimizationId = optimizationId
-                self.optimizationName = optimizationName
-                self.usdPerYear = usdPerYear
-            }
-            public enum CodingKeys: String, CodingKey {
-                case at
-                case optimizationId
-                case optimizationName
-                case usdPerYear
-            }
+        /// - Remark: Generated from `#/components/schemas/StatusTone`.
+        @frozen public enum StatusTone: String, Codable, Hashable, Sendable, CaseIterable {
+            case run = "run"
+            case wait = "wait"
+            case ok = "ok"
+            case off = "off"
+            case bad = "bad"
         }
         /// - Remark: Generated from `#/components/schemas/StepPoint`.
         public struct StepPoint: Codable, Hashable, Sendable {
@@ -4677,47 +4889,37 @@ extension Components {
             case failed = "failed"
             case prOpen = "pr-open"
         }
-        /// `PATCH /v1/connectors/{id}`: rename, change the cap, make default.
+        /// `PATCH /v1/connectors/{id}`: rename; AWS: region and monthly cap.
         ///
         /// - Remark: Generated from `#/components/schemas/UpdateConnectorInput`.
         public struct UpdateConnectorInput: Codable, Hashable, Sendable {
-            /// Replace the stored API key.
+            /// AWS only; `null` removes the cap, absent leaves it alone.
             ///
-            /// - Remark: Generated from `#/components/schemas/UpdateConnectorInput/apiKey`.
-            public var apiKey: Swift.String?
-            /// - Remark: Generated from `#/components/schemas/UpdateConnectorInput/capUsdPerMonth`.
-            public var capUsdPerMonth: Swift.Double?
-            /// - Remark: Generated from `#/components/schemas/UpdateConnectorInput/isDefault`.
-            public var isDefault: Swift.Bool?
+            /// - Remark: Generated from `#/components/schemas/UpdateConnectorInput/monthlyCapUsd`.
+            public var monthlyCapUsd: Swift.Double?
             /// - Remark: Generated from `#/components/schemas/UpdateConnectorInput/name`.
             public var name: Swift.String?
+            /// AWS only.
+            ///
             /// - Remark: Generated from `#/components/schemas/UpdateConnectorInput/region`.
             public var region: Swift.String?
             /// Creates a new `UpdateConnectorInput`.
             ///
             /// - Parameters:
-            ///   - apiKey: Replace the stored API key.
-            ///   - capUsdPerMonth:
-            ///   - isDefault:
+            ///   - monthlyCapUsd: AWS only; `null` removes the cap, absent leaves it alone.
             ///   - name:
-            ///   - region:
+            ///   - region: AWS only.
             public init(
-                apiKey: Swift.String? = nil,
-                capUsdPerMonth: Swift.Double? = nil,
-                isDefault: Swift.Bool? = nil,
+                monthlyCapUsd: Swift.Double? = nil,
                 name: Swift.String? = nil,
                 region: Swift.String? = nil
             ) {
-                self.apiKey = apiKey
-                self.capUsdPerMonth = capUsdPerMonth
-                self.isDefault = isDefault
+                self.monthlyCapUsd = monthlyCapUsd
                 self.name = name
                 self.region = region
             }
             public enum CodingKeys: String, CodingKey {
-                case apiKey
-                case capUsdPerMonth
-                case isDefault
+                case monthlyCapUsd
                 case name
                 case region
             }
@@ -4728,43 +4930,6 @@ extension Components {
         @frozen public enum ValueBasis: String, Codable, Hashable, Sendable, CaseIterable {
             case estimated = "estimated"
             case measured = "measured"
-        }
-        /// "Value locked in $15.4k / yr from 9 verified wins (estimated)".
-        ///
-        /// - Remark: Generated from `#/components/schemas/ValueHero`.
-        public struct ValueHero: Codable, Hashable, Sendable {
-            /// - Remark: Generated from `#/components/schemas/ValueHero/basis`.
-            public var basis: Components.Schemas.ValueBasis
-            /// - Remark: Generated from `#/components/schemas/ValueHero/note`.
-            public var note: Swift.String
-            /// - Remark: Generated from `#/components/schemas/ValueHero/usdPerYear`.
-            public var usdPerYear: Swift.Double
-            /// - Remark: Generated from `#/components/schemas/ValueHero/wins`.
-            public var wins: Swift.Int64
-            /// Creates a new `ValueHero`.
-            ///
-            /// - Parameters:
-            ///   - basis:
-            ///   - note:
-            ///   - usdPerYear:
-            ///   - wins:
-            public init(
-                basis: Components.Schemas.ValueBasis,
-                note: Swift.String,
-                usdPerYear: Swift.Double,
-                wins: Swift.Int64
-            ) {
-                self.basis = basis
-                self.note = note
-                self.usdPerYear = usdPerYear
-                self.wins = wins
-            }
-            public enum CodingKeys: String, CodingKey {
-                case basis
-                case note
-                case usdPerYear
-                case wins
-            }
         }
         /// The period a value-model amount is quoted for.
         ///

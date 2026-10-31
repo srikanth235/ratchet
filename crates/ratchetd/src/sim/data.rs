@@ -40,7 +40,21 @@ agent:
 "#;
 
 /// The demo config with another objective name / metric / direction, and optionally without the value model.
-pub fn demo_config_yaml(name: &str, metric: &str, direction: &str, valued: bool) -> String {
+/// The `objective.value` block of a seeded config.
+#[derive(Debug, Clone, Copy)]
+pub enum SeedValue {
+    /// The demo config's own model (USD per ms of p95).
+    Default,
+    /// No value model.
+    None,
+    /// A model of its own: USD per metric unit per year.
+    Own {
+        usd_per_unit: f64,
+        unit: &'static str,
+    },
+}
+
+pub fn demo_config_yaml(name: &str, metric: &str, direction: &str, value: SeedValue) -> String {
     let mut out = Vec::new();
     let mut skipping_value = false;
     for line in DEFAULT_CONFIG_YAML.lines() {
@@ -56,8 +70,15 @@ pub fn demo_config_yaml(name: &str, metric: &str, direction: &str, valued: bool)
             out.push(format!("  metric: {}", yaml_scalar(metric)));
         } else if line.starts_with("  direction:") {
             out.push(format!("  direction: {direction}"));
-        } else if line.starts_with("  value:") && !valued {
+        } else if line.starts_with("  value:") && !matches!(value, SeedValue::Default) {
             skipping_value = true;
+            if let SeedValue::Own { usd_per_unit, unit } = value {
+                out.push("  value:".to_owned());
+                out.push(format!("    usd_per_unit: {usd_per_unit}"));
+                out.push("    period: year".to_owned());
+                out.push("    basis: estimated".to_owned());
+                out.push(format!("    unit: {unit}"));
+            }
         } else {
             out.push(line.to_owned());
         }
@@ -167,12 +188,12 @@ mod tests {
 
     #[test]
     fn demo_config_variants_parse() {
-        for valued in [true, false] {
+        for (value, valued) in [(SeedValue::Default, true), (SeedValue::None, false)] {
             let y = demo_config_yaml(
                 "Ingest throughput",
                 "throughput.events_per_s",
                 "maximize",
-                valued,
+                value,
             );
             let c = ratchet_core::parse_config(&y).unwrap_or_else(|e| panic!("{e:?}\n{y}"));
             assert_eq!(c.objective.value.is_some(), valued);

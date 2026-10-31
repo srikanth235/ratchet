@@ -11,9 +11,13 @@ import type { components, operations } from './api.js';
 import type { AssertAll, ByType, Expect, Patch, Same, Sends, Within } from './helpers.js';
 import type {
   ActivityItem,
+  AddAgentConnectorInput,
+  AddAwsConnectorInput,
+  AddGithubConnectorInput,
   AgentEventsPage,
   AgentEventVM,
   AgentRecentEval,
+  AgentSelection,
   AgentVM,
   AwsProfilesVM,
   AwsProfileVM,
@@ -22,6 +26,9 @@ import type {
   CompareRow,
   ConfigSummary,
   ConnectionResultVM,
+  ConnectorsVM,
+  ConnectorTestVM,
+  ConnectorVM,
   CreateOptimizationInput,
   DiffFileVM,
   DiffLine,
@@ -39,6 +46,10 @@ import type {
   Optimization,
   OptimizationDetail,
   OptimizationsSnapshot,
+  OverviewNeed,
+  OverviewRow,
+  OverviewVM,
+  OverviewWin,
   PipelineStage,
   PreflightInput,
   PreflightItem,
@@ -47,6 +58,8 @@ import type {
   RatchetApi,
   RatchetPoint,
   RatchetSeries,
+  RepoConnections,
+  RepoConnectionsVM,
   RepoInspectVM,
   RepoSourceInput,
   RepoVM,
@@ -55,8 +68,10 @@ import type {
   SpanRow,
   SpendLine,
   SpendVM,
+  StartGithubSignInInput,
   TeardownReceiptVM,
   TemplateVM,
+  UpdateConnectorInput,
   ValidateConfigResult,
   ValueVM,
   WinningChangeVM,
@@ -156,6 +171,19 @@ type ViewModelsTable = {
   // environments, receipts
   EnvironmentVM: Same<EnvironmentVM, S['EnvironmentVm']>;
   EnvironmentsVM: Same<EnvironmentsVM, S['EnvironmentsVm']>;
+  // overview (D6 for the row status)
+  OverviewWin: Same<OverviewWin, S['OverviewWin']>;
+  OverviewNeed: Same<OverviewNeed, S['OverviewNeed']>;
+  OverviewRow: Same<Omit<OverviewRow, 'status'>, Omit<S['OverviewRow'], 'status'>>;
+  OverviewVM: Same<Omit<OverviewVM, 'rows'>, Omit<S['OverviewVm'], 'rows'>>;
+  OverviewVMRows: Same<Omit<OverviewRow, 'status'>[], Omit<S['OverviewVm']['rows'][number], 'status'>[]>;
+  // connectors (D15: `ConnectorVM` is a union tagged by `kind`)
+  ConnectorVM: Same<ConnectorVM, S['ConnectorVm']>;
+  ConnectorsVM: Same<ConnectorsVM, S['ConnectorsVm']>;
+  ConnectorTestVM: Same<ConnectorTestVM, S['ConnectorTestVm']>;
+  AgentSelection: Same<AgentSelection, S['AgentSelection']>;
+  RepoConnections: Same<RepoConnections, S['RepoConnections']>;
+  RepoConnectionsVM: Same<RepoConnectionsVM, S['RepoConnectionsVm']>;
 };
 export type ViewModels = Expect<AssertAll<ViewModelsTable>>;
 
@@ -167,6 +195,7 @@ type StatusRowsTable = {
   SnapshotRowStatus: Within<S['OptimizationsSnapshot']['optimizations'][number]['status'], Optimization['status']>;
   OptimizationRowStatus: Within<S['OptimizationVm']['status'], Optimization['status']>;
   DetailSummary: Within<S['OptimizationDetail']['summary']['status'], OptimizationDetail['summary']['status']>;
+  OverviewRowStatus: Within<S['OverviewRow']['status'], OverviewRow['status']>;
 };
 export type StatusRows = Expect<AssertAll<StatusRowsTable>>;
 
@@ -205,19 +234,26 @@ export type Events = Expect<AssertAll<EventsTable>>;
 // ---------------------------------------------------------------------------------------------------------------
 // 3. Request bodies and query parameters (what the TypeScript client sends must be accepted).
 
-/** D10. Fields of features the desktop app does not have (or has not got yet) that the daemon already accepts. */
-type CreateOptimizationExtra = 'connectors' | 'environmentDraftId';
-/** D14. TypeScript-only fields of the connectors feature (provisional, see PENDING): `connections` (the wire form is `connectors`) and the `repo` of a preflight. */
-type CreateOptimizationTsOnly = 'connections';
-type PreflightTsOnly = 'repo';
+/** D10. Fields of features the desktop app does not have yet that the daemon already accepts (environment drafts). */
+type CreateOptimizationExtra = 'environmentDraftId';
 /** D11. Template parameters the desktop app does not offer: the starting direction, metric and value. */
 type ProposeTemplateExtra = 'direction' | 'metric' | 'valueUsd';
 
 type Arg<M extends keyof RatchetApi, I extends number> = Parameters<RatchetApi[M]>[I & keyof Parameters<RatchetApi[M]>];
 
 type RequestsTable = {
-  CreateOptimizationInput: Sends<Omit<CreateOptimizationInput, CreateOptimizationTsOnly>, S['CreateOptimizationInput'], CreateOptimizationExtra>;
-  PreflightInput: Sends<Omit<PreflightInput, PreflightTsOnly>, S['PreflightInput']>;
+  CreateOptimizationInput: Sends<CreateOptimizationInput, S['CreateOptimizationInput'], CreateOptimizationExtra>;
+  PreflightInput: Sends<PreflightInput, S['PreflightInput']>;
+  AddGithubConnectorInput: Sends<AddGithubConnectorInput, S['AddGithubConnectorInput']>;
+  StartGithubSignInInput: Sends<StartGithubSignInInput, S['StartGithubSignInInput']>;
+  AddAwsConnectorInput: Sends<AddAwsConnectorInput, S['AddAwsConnectorInput']>;
+  UpdateConnectorInput: Sends<UpdateConnectorInput, S['UpdateConnectorInput']>;
+  // D16: a union; each member is sent as the matching member of the wire union
+  AddAgentConnectorInputLogin: Sends<Extract<AddAgentConnectorInput, { source: 'login' }>, Extract<S['AddAgentConnectorInput'], { source: 'login' }>>;
+  AddAgentConnectorInputApiKey: Sends<Extract<AddAgentConnectorInput, { source: 'api-key' }>, Extract<S['AddAgentConnectorInput'], { source: 'api-key' }>>;
+  AddAgentConnectorInputIsAccepted: Within<AddAgentConnectorInput, S['AddAgentConnectorInput']>;
+  SaveRepoConnectionsInput: Same<{ repo: Arg<'saveRepoConnections', 0>; selection: Arg<'saveRepoConnections', 1> }, Body<'saveConnectorSelection'>>;
+  InspectRepoConnector: Sends<{ source: Arg<'inspectRepo', 0>; connectorId?: Arg<'inspectRepo', 1> }, Body<'inspectRepo'>>;
   ProposeTemplateInput: Sends<ProposeTemplateInput, S['ProposeTemplateInput'], ProposeTemplateExtra>;
   LiveSettingsInput: Sends<LiveSettingsInput, S['LiveSettingsInput']>;
   RepoSourceInput: Same<RepoSourceInput, S['RepoSource']>;
@@ -238,6 +274,9 @@ type RequestsTable = {
   agentEventsCursor: Same<Opt<Arg<'agentEvents', 1>>, Opt<Query<'listAgentEvents'>['cursor']>>;
   agentEventsLimit: Same<Opt<Arg<'agentEvents', 2>>, Opt<Query<'listAgentEvents'>['limit']>>;
   listReposQuery: Same<Opt<Arg<'listRepos', 0>>, Opt<Query<'listRepos'>['query']>>;
+  listReposConnectorId: Same<Opt<Arg<'listRepos', 1>>, Opt<Query<'listRepos'>['connectorId']>>;
+  overviewRange: Same<Opt<Arg<'overview', 0>>, Opt<Query<'getOverview'>['range']>>;
+  getRepoConnectionsRepo: Same<Arg<'getRepoConnections', 0>, Query<'getConnectorSelection'>['repo']>;
 };
 export type Requests = Expect<AssertAll<RequestsTable>>;
 
@@ -279,6 +318,21 @@ type OperationsTable = {
   clearSecret: Same<SettingsWire, Reply<'clearSecret'>>;
   saveLiveSettings: Same<SettingsWire, Reply<'saveAdvancedSettings'>>;
   testConnection: Same<Returns<'testConnection'>, Reply<'testConnection'>>;
+  overview: Same<Omit<Returns<'overview'>, 'rows'>, Omit<Reply<'getOverview'>, 'rows'>>;
+  overviewRows: Same<Omit<Returns<'overview'>['rows'][number], 'status'>[], Omit<Reply<'getOverview'>['rows'][number], 'status'>[]>;
+  listConnectors: Same<Returns<'listConnectors'>, Reply<'listConnectors'>>;
+  refreshConnectors: Same<Returns<'refreshConnectors'>, Reply<'refreshConnectors'>>;
+  addGithubConnector: Same<Returns<'addGithubConnector'>, Reply<'addGithubConnector'>>;
+  startGithubConnectorSignIn: Same<Returns<'startGithubConnectorSignIn'>, Reply<'startGithubConnectorSignIn'>>;
+  cancelGithubConnectorSignIn: Same<Returns<'cancelGithubConnectorSignIn'>, Reply<'cancelGithubConnectorSignIn'>>;
+  addAwsConnector: Same<Returns<'addAwsConnector'>, Reply<'addAwsConnector'>>;
+  addAgentConnector: Same<Returns<'addAgentConnector'>, Reply<'addAgentConnector'>>;
+  updateConnector: Same<Returns<'updateConnector'>, Reply<'updateConnector'>>;
+  removeConnector: Same<Returns<'removeConnector'>, Reply<'removeConnector'>>;
+  setDefaultConnector: Same<Returns<'setDefaultConnector'>, Reply<'setDefaultConnector'>>;
+  testConnector: Same<Returns<'testConnector'>, Reply<'testConnector'>>;
+  getRepoConnections: Same<Returns<'getRepoConnections'>, Reply<'getConnectorSelection'>>;
+  saveRepoConnections: Same<Returns<'saveRepoConnections'>, Reply<'saveConnectorSelection'>>;
 };
 export type Operations = Expect<AssertAll<OperationsTable>>;
 
@@ -288,14 +342,8 @@ export type Operations = Expect<AssertAll<OperationsTable>>;
 //    S['EnvironmentDraftVm'] and their inputs.
 
 export const PENDING = {
-  // TODO(claude/ts-overview-shell): OverviewVM <-> S['OverviewVm'] (+ NeedsYouItem, OverviewRow, hero cards, staircase)
-  overview: 'pending',
-  // TODO(claude/ts-connectors): ConnectorVM <-> S['ConnectorVm'], CreateConnectorInput, UpdateConnectorInput, ConnectorTestVm
-  connectors: 'pending',
-  // TODO(claude/ts-connectors): ConnectorSelectionVM <-> S['ConnectorSelectionVm'], SaveConnectorSelectionInput
-  connectorSelections: 'pending',
   // TODO(claude/ts-dynamic-env): EnvironmentDraftVM <-> S['EnvironmentDraftVm'], CreateEnvironmentDraftInput,
-  // ReviseEnvironmentDraftInput, EnvFilesVm, plus the `environment-draft` and `connector` events
+  // ReviseEnvironmentDraftInput, EnvFilesVm, plus the `environment-draft` event
   environmentDrafts: 'pending',
 } as const;
 

@@ -559,3 +559,50 @@ async fn sign_in_end_to_end_against_the_fake_server() {
     );
     server.close().await;
 }
+
+/// A store that wants the connector id (the connector store re-signs-in a specific account).
+#[derive(Default)]
+struct ConnectorStoreSpy {
+    saved: Mutex<Vec<(String, String, Option<String>)>>,
+}
+
+impl AccountStore for ConnectorStoreSpy {
+    fn set_token(&self, _: &str) {
+        unreachable!("save is overridden")
+    }
+    fn set_account(&self, _: &str, _: &str) {
+        unreachable!("save is overridden")
+    }
+    fn save(&self, token: &str, login: &str, connector_id: Option<&str>) {
+        self.saved.lock().unwrap().push((
+            token.into(),
+            login.into(),
+            connector_id.map(str::to_owned),
+        ));
+    }
+}
+
+#[tokio::test]
+async fn sign_in_for_a_connector_hands_its_id_to_the_store() {
+    let api = Arc::new(MockGithubApi::new());
+    api.with(|s| {
+        s.polls = [DevicePoll::Ok {
+            token: "gho_REFRESHEDTOKENREFRESHED123456".into(),
+        }]
+        .into();
+    });
+    let store = Arc::new(ConnectorStoreSpy::default());
+    let mut deps = SignInDeps::new(api, store.clone());
+    deps.clock = TestClock::instant();
+    let flow = GithubSignIn::new(deps);
+    flow.start_for(Some("github-1".into())).await.unwrap();
+    wait_until("sign-in", || !store.saved.lock().unwrap().is_empty()).await;
+    assert_eq!(
+        *store.saved.lock().unwrap(),
+        [(
+            "gho_REFRESHEDTOKENREFRESHED123456".to_string(),
+            "octocat".to_string(),
+            Some("github-1".to_string())
+        )]
+    );
+}

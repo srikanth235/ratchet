@@ -1,12 +1,16 @@
-//! Overview (PROVISIONAL): spent / value locked in / return, the value staircase, "needs you", the table.
+//! Overview: what was spent, what the verified wins are worth, and what is waiting on the user, over a range.
 //!
-//! Shapes come from `design/v02/1-overview.png` and `design/v02.html`. The TypeScript feature is still in flight
-//! on another branch; these types may change before it lands (routes are tagged `overview (provisional)`).
+//! The shapes are `packages/desktop/src/shared/overview.ts` (`OverviewVM` and its parts), one to one. Everything is
+//! computed from the ledger (`crate::views::overview`); value uses the same model as the Result screen, so the
+//! staircase, the hero number and the table's Value column always add up.
 
 use ratchet_core::enums::ValueBasis;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use super::vm::UiStatus;
+
+/// Window the Overview covers. `all` = everything in the ledger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
 pub enum OverviewRange {
     #[serde(rename = "30d")]
@@ -25,150 +29,138 @@ pub struct OverviewQuery {
     pub range: Option<OverviewRange>,
 }
 
-/// "Spent $184 of $500 across AWS and agent keys".
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SpentHero {
-    pub usd: f64,
-    /// The total monthly caps of the connected AWS accounts and keys, when any is set.
-    #[schema(required = true)]
-    pub cap_usd: Option<f64>,
-    /// 0..=1, for the thin bar; `null` without a cap.
-    #[schema(required = true)]
-    pub fraction_of_cap: Option<f64>,
-    /// "across AWS and agent keys"
-    pub note: String,
+/// Dot colour of a status word: brass (running), amber (waiting on you), mint (done), grey (nothing), rose (failed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum StatusTone {
+    Run,
+    Wait,
+    Ok,
+    Off,
+    Bad,
 }
 
-/// "Value locked in $15.4k / yr from 9 verified wins (estimated)".
+/// One step of the "value locked in" staircase: a verified win with a value model.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ValueHero {
-    pub usd_per_year: f64,
-    pub wins: i64,
-    pub basis: ValueBasis,
-    pub note: String,
-}
-
-/// "Return 84x: yearly value for every $1 spent, paid back in 4 days".
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct ReturnHero {
-    /// `null` when nothing was spent.
-    #[schema(required = true)]
-    pub ratio: Option<f64>,
-    #[schema(required = true)]
-    pub payback_days: Option<f64>,
-    pub note: String,
-}
-
-/// One verified win on the staircase. `usdPerYear` is cumulative after this win.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct StaircasePoint {
+pub struct OverviewWin {
+    /// When the ratchet moved (epoch ms).
     pub at: i64,
+    /// Cumulative value locked in after this win, USD per year.
+    pub cumulative_usd_per_year: f64,
+    /// What this win added, USD per year.
     pub usd_per_year: f64,
     pub optimization_id: String,
-    pub optimization_name: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct Staircase {
-    pub from: i64,
-    pub to: i64,
-    pub points: Vec<StaircasePoint>,
+    pub optimization: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "kebab-case")]
-pub enum NeedsYouKind {
-    ApproveEnvironment,
-    MergeWins,
-    SignIn,
-    BudgetLimit,
+#[serde(rename_all = "lowercase")]
+pub enum OverviewNeedKind {
+    /// Verified wins that have no pull request yet.
+    Ship,
+    /// The run failed.
+    Failed,
 }
 
-/// One item of "Needs you". The button opens `optimizationId` (or the draft / connector) in the app.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct NeedsYouItem {
+pub struct OverviewNeed {
     pub id: String,
-    pub kind: NeedsYouKind,
+    pub kind: OverviewNeedKind,
+    pub optimization_id: String,
     pub title: String,
-    pub subtitle: String,
-    /// The button: "Review", "Open PR".
-    pub action_label: String,
-    #[schema(required = true)]
-    pub optimization_id: Option<String>,
-    #[schema(required = true)]
-    pub environment_draft_id: Option<String>,
-    #[schema(required = true)]
-    pub connector_id: Option<String>,
-    /// For `merge-wins`: the pull request to open.
-    #[schema(required = true)]
-    pub url: Option<String>,
+    pub sub: String,
+    /// Button label.
+    pub action: String,
 }
 
-/// The state dot of an Overview row.
+/// `lower` = a smaller metric is better.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "kebab-case")]
-pub enum OverviewState {
-    Running,
-    WaitingOnYou,
-    Merged,
-    Done,
-    NoWin,
-    Draft,
-    Stopped,
-    Failed,
+#[serde(rename_all = "lowercase")]
+pub enum OverviewDirection {
+    Lower,
+    Higher,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OverviewRow {
-    pub optimization_id: String,
+    pub id: String,
     pub name: String,
     pub repo: String,
-    pub state: OverviewState,
-    /// "Running", "Waiting on you", "Merged", "Done", "No win".
-    pub state_text: String,
-    /// Under the state: "1 h 12 m left".
+    /// Ledger status as the pills use it (`pr-open` once a pull request exists).
+    pub status: UiStatus,
+    /// The status word shown next to the dot ("Running", "Waiting on you", "No win").
+    pub status_label: String,
+    pub tone: StatusTone,
+    /// Seconds left of the time limit while running, else `null`.
     #[schema(required = true)]
-    pub state_note: Option<String>,
-    /// Signed percent change of the metric, positive = better.
+    pub remaining_s: Option<i64>,
+    pub metric: String,
+    pub unit: String,
+    pub direction: OverviewDirection,
     #[schema(required = true)]
-    pub result_pct: Option<f64>,
-    /// "412 -> 288 ms"
-    pub result_text: String,
+    pub baseline: Option<f64>,
+    #[schema(required = true)]
+    pub best: Option<f64>,
+    /// Signed gain vs baseline in percent (positive = better); `null` without a baseline.
+    #[schema(required = true)]
+    pub gain_pct: Option<f64>,
+    pub verified_wins: i64,
+    /// Spend in the range (lifetime when the range is `all`).
     pub spent_usd: f64,
-    #[schema(required = true)]
-    pub budget_usd: Option<f64>,
+    pub budget_usd: f64,
+    pub live: bool,
+    /// Value of the wins in the range, USD per year; `null` without a value model.
     #[schema(required = true)]
     pub value_usd_per_year: Option<f64>,
 }
 
-/// The sandbox line at the bottom of the sidebar ("Sandbox on · acme-prod, $1.20 so far · off at 15:40").
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct SandboxChip {
-    pub on: bool,
-    #[schema(required = true)]
-    pub name: Option<String>,
-    pub spent_usd: f64,
-    #[schema(required = true)]
-    pub off_at: Option<i64>,
+pub struct OverviewSpent {
+    pub usd: f64,
+    /// Budget of the optimizations listed in `rows`.
+    pub budget_usd: f64,
+    pub optimizations: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OverviewValue {
+    pub usd_per_year: f64,
+    pub wins: i64,
+    pub basis: ValueBasis,
+}
+
+/// Yearly value per $1 spent, and days until the spend is earned back.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OverviewReturn {
+    pub ratio: f64,
+    pub payback_days: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OverviewVm {
     pub range: OverviewRange,
-    pub spent: SpentHero,
-    pub value_locked_in: ValueHero,
-    pub return_on_spend: ReturnHero,
-    pub staircase: Staircase,
-    pub needs_you: Vec<NeedsYouItem>,
+    /// The window, epoch ms. `from` is the first activity for `all`.
+    pub from: i64,
+    pub to: i64,
+    /// The ledger has no optimization at all (the Overview shows one calm empty state).
+    pub empty: bool,
+    pub spent: OverviewSpent,
+    /// `null` when no optimization has a value model ("Set a value").
+    #[schema(required = true)]
+    pub value: Option<OverviewValue>,
+    /// `null` without value or spend.
+    #[schema(required = true)]
+    pub return_on_spend: Option<OverviewReturn>,
+    /// Staircase of cumulative value, oldest first; empty without a value model or wins in the range.
+    pub wins: Vec<OverviewWin>,
+    pub needs_you: Vec<OverviewNeed>,
+    /// Optimizations with activity in the range (drafts created in it included), newest first.
     pub rows: Vec<OverviewRow>,
-    pub sandbox: SandboxChip,
 }

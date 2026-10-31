@@ -21,7 +21,7 @@ fn demo_input(budget: f64, plateau: u32) -> CreateOptimizationInput {
         budget_usd: budget,
         time_limit_seconds: 3600,
         plateau_evals: plateau,
-        connectors: None,
+        connections: None,
         environment_draft_id: None,
     }
 }
@@ -501,6 +501,7 @@ async fn settings_connections_and_preflight_tell_the_truth() {
         agents,
         agents_where: w,
         source: src,
+        repo: None,
     };
     use ratchet_core::AgentKind::{ClaudeCode, Codex};
     use ratchet_core::AgentsWhere::{Cloud, Local};
@@ -562,192 +563,260 @@ async fn settings_connections_and_preflight_tell_the_truth() {
     ));
 }
 
+fn id_of(v: &ConnectorsVm, name: &str) -> String {
+    v.connectors
+        .iter()
+        .find(|c| c.name() == name)
+        .unwrap_or_else(|| panic!("no connector named {name}"))
+        .id()
+        .to_owned()
+}
+
 #[tokio::test]
 async fn connectors_keep_their_invariants() {
     let sim = SimService::manual().await.unwrap();
     let all = sim.list_connectors().await.unwrap();
+    assert!(all.encryption_available && all.client_id_configured && all.github_flow.is_none());
+    // the accounts of design/v02/2-connectors.png: two GitHub, three AWS, the Claude Code login and a team key
+    let kinds: Vec<_> = all.connectors.iter().map(ConnectorVm::kind).collect();
+    assert_eq!(
+        kinds,
+        [
+            ConnectorKind::Github,
+            ConnectorKind::Github,
+            ConnectorKind::Aws,
+            ConnectorKind::Aws,
+            ConnectorKind::Aws,
+            ConnectorKind::Agent,
+            ConnectorKind::Agent
+        ]
+    );
     for kind in [
         ConnectorKind::Github,
         ConnectorKind::Aws,
         ConnectorKind::Agent,
     ] {
         assert_eq!(
-            all.iter()
-                .filter(|c| c.kind == kind && c.is_default)
+            all.connectors
+                .iter()
+                .filter(|c| c.kind() == kind && c.is_default())
                 .count(),
             1,
             "one default per kind"
         );
     }
-    assert!(all.iter().all(|c| match c.kind {
-        ConnectorKind::Github => c.github.is_some() && c.aws.is_none() && c.agent.is_none(),
-        ConnectorKind::Aws => c.aws.is_some() && c.github.is_none() && c.agent.is_none(),
-        ConnectorKind::Agent => c.agent.is_some() && c.github.is_none() && c.aws.is_none(),
-    }));
-    // no secret value anywhere
-    let created = sim
-        .create_connector(CreateConnectorInput::Agent {
-            name: "Claude Code \u{00b7} ci key".into(),
-            agent: ratchet_core::AgentKind::ClaudeCode,
-            credential: AgentCredential::ApiKey,
-            api_key: Some("sk-ant-abcdefgh12345678".into()),
-            runs_in: None,
-        })
-        .await
+    // the staging SSO session has expired (the scripted probe), everything else works
+    let staging = all
+        .connectors
+        .iter()
+        .find(|c| c.name() == "acme-staging")
         .unwrap();
+    assert_eq!(staging.status(), ConnectorStatus::Expired);
     assert_eq!(
-        created.agent.as_ref().unwrap().key_hint.as_deref(),
-        Some("\u{00b7}\u{00b7}\u{00b7}\u{00b7}5678")
+        all.connectors
+            .iter()
+            .filter(|c| c.status() == ConnectorStatus::Expired)
+            .count(),
+        1
     );
-    assert!(!serde_json::to_string(&created).unwrap().contains("sk-ant"));
+    // no secret value anywhere
+    let json = serde_json::to_string(&all).unwrap();
     assert!(
-        !created.is_default,
-        "the first of a kind is the default, later ones are not"
+        !json.contains("SIMULATED") && !json.contains("sk-ant"),
+        "{json}"
     );
-    // making another the default moves the flag, deleting the default promotes another
-    let upd = sim
+}
+
+#[tokio::test]
+async fn connectors_can_be_added_renamed_defaulted_tested_and_removed() {
+    let sim = SimService::manual().await.unwrap();
+    let key = AddAgentConnectorInput::ApiKey {
+        agent: ConnectorAgent::Codex,
+        api_key: "sk-proj-abcdefghijklmnop1234".into(),
+        name: Some("Codex \u{00b7} ci key".into()),
+    };
+    let v = sim.add_agent_connector(key).await.unwrap();
+    let id = id_of(&v, "Codex \u{00b7} ci key");
+    let c = v.connectors.iter().find(|c| c.id() == id).unwrap();
+    match c {
+        ConnectorVm::Agent {
+            key_hint, runs_on, ..
+        } => {
+            assert_eq!(
+                key_hint.as_deref(),
+                Some("\u{00b7}\u{00b7}\u{00b7}\u{00b7}1234")
+            );
+            assert_eq!(runs_on.len(), 2, "a key also runs in the cloud");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        !serde_json::to_string(&v)
+            .unwrap()
+            .contains("abcdefghijklmnop")
+    );
+    assert!(
+        !c.is_default(),
+        "the first key is not the default of a kind that already has one"
+    );
+    // making another the default moves the flag, removing the default promotes another
+    let v = sim.set_default_connector(&id).await.unwrap();
+    let agent_defaults = |v: &ConnectorsVm| {
+        v.connectors
+            .iter()
+            .filter(|c| c.kind() == ConnectorKind::Agent && c.is_default())
+            .map(|c| c.id().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(agent_defaults(&v), std::slice::from_ref(&id));
+    let v = sim.remove_connector(&id).await.unwrap();
+    assert_eq!(agent_defaults(&v).len(), 1, "another one was promoted");
+    // rename, and the cap of an AWS profile
+    let prod = id_of(&v, "acme-prod");
+    let v = sim
         .update_connector(
-            &created.id,
+            &prod,
             UpdateConnectorInput {
-                is_default: Some(true),
+                name: Some("Acme production".into()),
+                monthly_cap_usd: Some(None),
                 ..Default::default()
             },
         )
         .await
         .unwrap();
-    assert!(upd.is_default);
-    let defaults = sim
-        .list_connectors()
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|c| c.kind == ConnectorKind::Agent && c.is_default)
-        .count();
-    assert_eq!(defaults, 1);
-    sim.delete_connector(&created.id).await.unwrap();
-    let defaults = sim
-        .list_connectors()
-        .await
-        .unwrap()
-        .into_iter()
-        .filter(|c| c.kind == ConnectorKind::Agent && c.is_default)
-        .count();
-    assert_eq!(defaults, 1, "another one was promoted");
+    assert!(v.connectors.iter().any(|c| matches!(c,
+        ConnectorVm::Aws { name, monthly_cap_usd: None, .. } if name == "Acme production")));
+    // the staging session is expired; testing it again keeps it so, with the hint to sign in
+    let staging = id_of(&v, "acme-staging");
+    let t = sim.test_connector(&staging).await.unwrap();
+    assert!(
+        !t.ok && t.detail.contains("aws sso login --profile acme-staging"),
+        "{}",
+        t.detail
+    );
+    assert_eq!(t.connector.unwrap().status(), ConnectorStatus::Expired);
     // validation
+    let e = sim
+        .add_aws_connector(AddAwsConnectorInput {
+            profile: "acme-prod".into(),
+            region: None,
+            monthly_cap_usd: None,
+            name: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("already connected"), "{e}");
+    let e = sim
+        .add_aws_connector(AddAwsConnectorInput {
+            profile: "nope".into(),
+            region: None,
+            monthly_cap_usd: None,
+            name: None,
+        })
+        .await
+        .unwrap_err();
+    assert!(e.to_string().contains("not in ~/.aws"), "{e}");
     assert!(matches!(
-        sim.create_connector(CreateConnectorInput::Aws {
-            name: "x".into(),
-            auth: AwsConnectorAuth::Sso,
-            profile: None,
-            region: Some("mars".into()),
-            cap_usd_per_month: None
-        })
-        .await,
-        Err(ServiceError::InvalidFields { .. })
+        sim.remove_connector("ghost").await,
+        Err(ServiceError::NotFound(_))
     ));
-    assert!(matches!(
-        sim.create_connector(CreateConnectorInput::Agent {
-            name: "x".into(),
-            agent: ratchet_core::AgentKind::Codex,
-            credential: AgentCredential::ApiKey,
-            api_key: None,
-            runs_in: None
-        })
-        .await,
-        Err(ServiceError::InvalidFields { .. })
-    ));
-    // a selection can only name connectors of the right kind that can do the job
-    let bad = sim
-        .save_connector_selection(SaveConnectorSelectionInput {
-            repo: "acme/x".into(),
-            selection: ConnectorSelectionInput {
-                github_connector_id: Some("conn_aws_prod".into()),
-                aws_connector_id: Some("conn_aws_staging".into()),
-                agents: vec![AgentSelection {
-                    connector_id: "conn_agent_cc_login".into(),
-                    runs_in: ratchet_core::AgentsWhere::Cloud,
-                }],
-            },
-        })
-        .await;
-    match bad {
-        Err(ServiceError::InvalidFields { fields, .. }) => {
-            let paths: Vec<&str> = fields.iter().map(|f| f.path.as_str()).collect();
-            assert_eq!(
-                paths,
-                [
-                    "selection.githubConnectorId",
-                    "selection.awsConnectorId",
-                    "selection.agents[0].runsIn"
-                ]
-            );
-        }
-        other => panic!("{other:?}"),
-    }
 }
 
 #[tokio::test]
-async fn overview_numbers_add_up() {
+async fn a_selection_can_only_name_connectors_that_can_do_the_job() {
     let sim = SimService::manual().await.unwrap();
-    let ov = sim.overview(OverviewRange::Days90).await.unwrap();
-    let all = sim.list_optimizations(KpiRange::Days90).await.unwrap();
-    let valued: f64 = all
-        .optimizations
-        .iter()
-        .filter_map(|o| o.value.as_ref().map(|v| v.usd_per_year))
-        .sum();
-    // the staircase ends where the sum of the per-run values ends
-    let last = ov.staircase.points.last().unwrap();
-    assert!((last.usd_per_year - ov.value_locked_in.usd_per_year).abs() < 1e-6);
-    assert!(
-        (ov.value_locked_in.usd_per_year - valued).abs() < 1e-6,
-        "{} vs {valued}",
-        ov.value_locked_in.usd_per_year
+    let v = sim.list_connectors().await.unwrap();
+    let (gh, aws, login) = (
+        id_of(&v, "srikanth235"),
+        id_of(&v, "acme-prod"),
+        id_of(&v, "Claude Code \u{00b7} your login"),
     );
+    let sel = |github: &str, aws: &str, id: &str, where_| RepoConnections {
+        github: github.into(),
+        aws: aws.into(),
+        agents: vec![AgentSelection {
+            connector_id: id.into(),
+            where_,
+        }],
+    };
+    let cloud = ratchet_core::enums::AgentsWhere::Cloud;
+    let local = ratchet_core::enums::AgentsWhere::Local;
+    for (bad, what) in [
+        (sel(&aws, &aws, &login, local), "GitHub account"),
+        (sel(&gh, &gh, &login, local), "AWS"),
+        (sel(&gh, &aws, &login, cloud), "cannot run in the cloud"),
+    ] {
+        let e = sim.save_repo_connections("acme/x", bad).await.unwrap_err();
+        assert!(matches!(e, ServiceError::Invalid(_)), "{e:?}");
+        assert!(e.to_string().contains(what), "{e}");
+    }
     assert!(
-        ov.staircase
-            .points
-            .windows(2)
-            .all(|w| w[1].usd_per_year >= w[0].usd_per_year && w[1].at >= w[0].at)
+        sim.repo_connections("acme/x")
+            .await
+            .unwrap()
+            .saved
+            .is_none()
     );
+    let ok = sim
+        .save_repo_connections("Acme/X", sel(&gh, &aws, &login, local))
+        .await
+        .unwrap();
+    assert_eq!(ok.repo, "acme/x");
+    assert!(ok.saved.is_some());
+    // creating an optimization with connections remembers them and lets them decide the agents
+    let mut input = demo_input(20.0, 25);
+    input.demo = None;
+    input.repo_url = "acme/y".into();
+    input.agents = vec![ratchet_core::AgentKind::Codex];
+    input.connections = Some(sel(&gh, &aws, &login, local));
+    sim.create_optimization(input).await.unwrap();
+    let remembered = sim.repo_connections("acme/y").await.unwrap();
+    assert_eq!(remembered.saved.unwrap().github, gh);
+}
+
+#[tokio::test]
+async fn the_simulated_device_flow_adds_an_account_when_approved() {
+    let sim = SimService::manual().await.unwrap();
+    let started = sim
+        .start_github_connector_sign_in(StartGithubSignInInput::default())
+        .await
+        .unwrap();
+    let flow = started.github_flow.unwrap();
     assert_eq!(
-        ov.value_locked_in.wins, 5,
-        "the five wins of the search run have a value model"
+        (flow.state, flow.user_code.as_str()),
+        (GithubFlowState::Pending, "WDJB-MJHT")
     );
-    let total_spend: f64 = all.optimizations.iter().map(|o| o.spend_usd).sum();
-    assert!((ov.spent.usd - total_spend).abs() < 0.01);
-    assert_eq!(ov.spent.cap_usd, Some(500.0));
-    assert!(ov.return_on_spend.ratio.unwrap() > 1.0);
-    assert!(ov.needs_you.iter().any(|n| n.kind == NeedsYouKind::SignIn));
-    assert!(
-        ov.needs_you
+    let cancelled = sim.cancel_github_connector_sign_in().await.unwrap();
+    assert!(cancelled.github_flow.is_none());
+    sim.start_github_connector_sign_in(StartGithubSignInInput::default())
+        .await
+        .unwrap();
+    let mut events = sim.subscribe();
+    sim.complete_github_flow();
+    // the poller looks again within a second
+    let mut done = false;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        if sim.list_connectors().await.unwrap().github_flow.is_none() {
+            done = true;
+            break;
+        }
+    }
+    assert!(done, "the flow ended");
+    let list = sim.list_connectors().await.unwrap();
+    assert_eq!(
+        list.connectors
             .iter()
-            .any(|n| n.kind == NeedsYouKind::MergeWins),
-        "finished runs with wins wait for a PR"
+            .filter(|c| c.kind() == ConnectorKind::Github)
+            .count(),
+        2,
+        "the same account signing in again replaces its token"
     );
-    let row = ov
-        .rows
-        .iter()
-        .find(|r| r.optimization_id == "opt_demo_search")
-        .unwrap();
-    assert_eq!(row.state, OverviewState::Running);
-    assert!(row.state_note.as_deref().unwrap().ends_with("left"));
-    assert_eq!(row.result_text, "182 \u{2192} 131 ms");
-    let web = ov
-        .rows
-        .iter()
-        .find(|r| r.optimization_id == "opt_demo_web")
-        .unwrap();
-    assert_eq!(web.state, OverviewState::Draft);
-    // the all-time window keeps the six-week-old win
-    let month = sim.overview(OverviewRange::Days30).await.unwrap();
-    assert!(
-        month.spent.usd < ov.spent.usd,
-        "the six-week-old run is outside 30 days"
-    );
-    let all_time = sim.overview(OverviewRange::All).await.unwrap();
-    assert!(all_time.spent.usd >= ov.spent.usd);
-    assert!(ov.sandbox.on && ov.sandbox.name.is_some());
+    let mut saw_github = false;
+    while let Ok(e) = events.try_recv() {
+        saw_github |= e == ApiEvent::Github { signed_in: true };
+    }
+    assert!(saw_github);
 }
 
 #[tokio::test]
@@ -948,18 +1017,24 @@ async fn repos_and_inspection() {
     )
     .unwrap();
     let r = sim
-        .inspect_repo(RepoSource::Local {
-            path: dir.path().display().to_string(),
-        })
+        .inspect_repo(
+            RepoSource::Local {
+                path: dir.path().display().to_string(),
+            },
+            None,
+        )
         .await
         .unwrap();
     assert!(r.problem.is_none() && r.config.is_some() && r.templates.is_empty());
     // not a git repository
     let plain = tempfile::tempdir().unwrap();
     let r = sim
-        .inspect_repo(RepoSource::Local {
-            path: plain.path().display().to_string(),
-        })
+        .inspect_repo(
+            RepoSource::Local {
+                path: plain.path().display().to_string(),
+            },
+            None,
+        )
         .await
         .unwrap();
     assert!(r.problem.unwrap().contains("not a git repository"));
@@ -968,9 +1043,12 @@ async fn repos_and_inspection() {
         "nothing is offered for a folder that cannot be used"
     );
     let r = sim
-        .inspect_repo(RepoSource::Local {
-            path: "/definitely/not/here".into(),
-        })
+        .inspect_repo(
+            RepoSource::Local {
+                path: "/definitely/not/here".into(),
+            },
+            None,
+        )
         .await
         .unwrap();
     assert!(r.problem.unwrap().contains("not a folder"));
@@ -978,23 +1056,32 @@ async fn repos_and_inspection() {
     std::fs::write(plain.path().join("ratchet.yaml"), "version: 0\n").unwrap();
     std::fs::create_dir(plain.path().join(".git")).unwrap();
     let r = sim
-        .inspect_repo(RepoSource::Local {
-            path: plain.path().display().to_string(),
-        })
+        .inspect_repo(
+            RepoSource::Local {
+                path: plain.path().display().to_string(),
+            },
+            None,
+        )
         .await
         .unwrap();
     assert!(r.config.is_none() && !r.errors.is_empty());
     assert!(matches!(
-        sim.inspect_repo(RepoSource::Github {
-            repo: "acme/unknown".into()
-        })
+        sim.inspect_repo(
+            RepoSource::Github {
+                repo: "acme/unknown".into()
+            },
+            None,
+        )
         .await,
         Err(ServiceError::NotFound(_))
     ));
     assert!(matches!(
-        sim.inspect_repo(RepoSource::Github {
-            repo: "no slash".into()
-        })
+        sim.inspect_repo(
+            RepoSource::Github {
+                repo: "no slash".into()
+            },
+            None,
+        )
         .await,
         Err(ServiceError::InvalidFields { .. })
     ));

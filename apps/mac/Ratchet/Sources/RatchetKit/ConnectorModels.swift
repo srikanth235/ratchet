@@ -85,11 +85,14 @@ public struct ConnectionSelection: Codable, Hashable, Sendable {
     public var awsID: String?
     /// Agent connector id to where it runs.
     public var agents: [String: Placement]
+    /// The GitHub account of the repo; nil: the default one.
+    public var githubID: String?
 
-    public init(repoID: String, awsID: String? = nil, agents: [String: Placement] = [:]) {
+    public init(repoID: String, awsID: String? = nil, agents: [String: Placement] = [:], githubID: String? = nil) {
         self.repoID = repoID
         self.awsID = awsID
         self.agents = agents
+        self.githubID = githubID
     }
 }
 

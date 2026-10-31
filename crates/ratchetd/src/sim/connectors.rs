@@ -1,639 +1,259 @@
-//! Connectors of the simulation (PROVISIONAL API): saved GitHub / AWS / agent accounts and the per-repo selection.
+//! Connectors of the simulation: the real [`ConnectorStore`] over an in-memory secret store, scripted probes and a pretend
+//! GitHub, seeded with the accounts of `design/v02/2-connectors.png`. Everything the Connectors screen does works (add,
+//! rename, default, remove, test, the device flow, the choice remembered per repo); nothing leaves the process.
 
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
-use ratchet_core::enums::{AgentKind, AgentsWhere};
+use async_trait::async_trait;
+use ratchet_agents::detect::{HarnessAuth, HarnessInfo, HarnessKind};
+use ratchet_connectors::secrets::{MemorySecretStore, SecretStore};
+use ratchet_connectors::{
+    AddAgentConnectorInput, AddAwsConnectorInput, AwsAuthStyle, AwsProfile, AwsProfileList,
+    ConnectorAgent, ConnectorDeps, ConnectorProbe, ConnectorStore, HarnessSource, UpsertGithub,
+};
+use ratchet_core::ports::Clock;
+use ratchet_github::{
+    DeviceCode, DevicePoll, Error as GithubError, GithubApi, GithubUser, Repo,
+    Result as GithubResult,
+};
 
-use super::Inner;
-use crate::api::*;
-use crate::service::{ServiceError, ServiceResult};
+use super::SimOptions;
+use crate::api::ApiEvent;
+use crate::connectors_hub::{ConnectorsHub, HubOptions};
 
-#[derive(Debug, Default)]
-pub struct ConnectorsState {
-    pub items: Vec<ConnectorVm>,
-    pub selections: HashMap<String, ConnectorSelectionInput>,
-    next: u32,
+pub const SIM_LOGIN: &str = "srikanth235";
+const SIM_TOKEN: &str = "gho_SIMULATEDDEMOTOKEN000000001";
+const SIM_ORG_TOKEN: &str = "ghp_SIMULATEDORGTOKEN000000000000000000";
+
+/// A pretend GitHub: the device flow is approved after `approve_after` (never when `None`) or when
+/// [`SimGithub::approve`] is called; the signed-in account is `srikanth235`.
+pub struct SimGithub {
+    started: std::sync::Mutex<Option<Instant>>,
+    approve_after: Option<Duration>,
+    approved: AtomicBool,
 }
 
-fn base(id: &str, kind: ConnectorKind, name: &str, detail: &str) -> ConnectorVm {
-    ConnectorVm {
-        id: id.into(),
-        kind,
-        name: name.into(),
-        detail: detail.into(),
-        status: ConnectorStatus::Connected,
-        status_text: "Connected".into(),
-        is_default: false,
-        cost_note: None,
-        github: None,
-        aws: None,
-        agent: None,
-    }
-}
-
-impl ConnectorsState {
-    /// The accounts of `design/v02/2-connectors.png`.
-    pub fn demo() -> Self {
-        let mut gh_personal = base(
-            "conn_gh_personal",
-            ConnectorKind::Github,
-            "srikanth235",
-            "Personal \u{00b7} 42 repos",
-        );
-        gh_personal.is_default = true;
-        gh_personal.github = Some(GithubConnectorInfo {
-            login: "srikanth235".into(),
-            account_kind: GithubAccountKind::Personal,
-            repo_count: Some(42),
-        });
-        let mut gh_org = base(
-            "conn_gh_acme",
-            ConnectorKind::Github,
-            "acme-org",
-            "GitHub App \u{00b7} 18 repos",
-        );
-        gh_org.github = Some(GithubConnectorInfo {
-            login: "acme-org".into(),
-            account_kind: GithubAccountKind::App,
-            repo_count: Some(18),
-        });
-
-        let mut aws_prod = base(
-            "conn_aws_prod",
-            ConnectorKind::Aws,
-            "acme-prod",
-            "SSO \u{00b7} us-east-1 \u{00b7} cap $500 / month",
-        );
-        aws_prod.is_default = true;
-        aws_prod.aws = Some(AwsConnectorInfo {
-            auth: AwsConnectorAuth::Sso,
-            profile: Some("acme-prod".into()),
-            region: "us-east-1".into(),
-            account_id: Some("111122223333".into()),
-            cap_usd_per_month: Some(500.0),
-            remaining_usd_this_month: Some(412.0),
-        });
-        aws_prod.cost_note = Some("$412 left this month".into());
-        let mut aws_dev = base(
-            "conn_aws_dev",
-            ConnectorKind::Aws,
-            "personal-dev",
-            "~/.aws profile \u{00b7} us-west-2 \u{00b7} cap $100 / month",
-        );
-        aws_dev.aws = Some(AwsConnectorInfo {
-            auth: AwsConnectorAuth::Profile,
-            profile: Some("personal-dev".into()),
-            region: "us-west-2".into(),
-            account_id: Some("444455556666".into()),
-            cap_usd_per_month: Some(100.0),
-            remaining_usd_this_month: Some(96.0),
-        });
-        aws_dev.cost_note = Some("$96 left this month".into());
-        let mut aws_stg = base(
-            "conn_aws_staging",
-            ConnectorKind::Aws,
-            "acme-staging",
-            "SSO \u{00b7} eu-west-1",
-        );
-        aws_stg.status = ConnectorStatus::Expired;
-        aws_stg.status_text = "Expired".into();
-        aws_stg.cost_note = Some("Expired".into());
-        aws_stg.aws = Some(AwsConnectorInfo {
-            auth: AwsConnectorAuth::Sso,
-            profile: Some("acme-staging".into()),
-            region: "eu-west-1".into(),
-            account_id: Some("777788889999".into()),
-            cap_usd_per_month: None,
-            remaining_usd_this_month: None,
-        });
-
-        let mut cc_login = base(
-            "conn_agent_cc_login",
-            ConnectorKind::Agent,
-            "Claude Code \u{00b7} your login",
-            "Found on this Mac \u{00b7} v2.1.314",
-        );
-        cc_login.is_default = true;
-        cc_login.status_text = "Signed in".into();
-        cc_login.cost_note = Some("Free while this Mac is awake".into());
-        cc_login.agent = Some(AgentConnectorInfo {
-            agent: AgentKind::ClaudeCode,
-            credential: AgentCredential::Login,
-            version: Some("2.1.314".into()),
-            key_hint: None,
-            runs_in: vec![AgentsWhere::Local],
-        });
-        let mut cc_key = base(
-            "conn_agent_cc_key",
-            ConnectorKind::Agent,
-            "Claude Code \u{00b7} team key",
-            "API key \u{00b7}\u{00b7}\u{00b7}\u{00b7}4f2a \u{00b7} also runs in the cloud",
-        );
-        cc_key.status_text = "Valid".into();
-        cc_key.cost_note = Some("Billed to the key".into());
-        cc_key.agent = Some(AgentConnectorInfo {
-            agent: AgentKind::ClaudeCode,
-            credential: AgentCredential::ApiKey,
-            version: None,
-            key_hint: Some("\u{00b7}\u{00b7}\u{00b7}\u{00b7}4f2a".into()),
-            runs_in: vec![AgentsWhere::Cloud, AgentsWhere::Local],
-        });
-        let mut codex = base(
-            "conn_agent_codex_login",
-            ConnectorKind::Agent,
-            "Codex \u{00b7} your login",
-            "Found on this Mac \u{00b7} v0.166 \u{00b7} run codex login",
-        );
-        codex.status = ConnectorStatus::SignedOut;
-        codex.status_text = "Signed out".into();
-        codex.cost_note = Some("Signed out".into());
-        codex.agent = Some(AgentConnectorInfo {
-            agent: AgentKind::Codex,
-            credential: AgentCredential::Login,
-            version: Some("0.166.0".into()),
-            key_hint: None,
-            runs_in: vec![AgentsWhere::Local],
-        });
-
+impl SimGithub {
+    pub fn new(approve_after: Option<Duration>) -> Self {
         Self {
-            items: vec![
-                gh_personal,
-                gh_org,
-                aws_prod,
-                aws_dev,
-                aws_stg,
-                cc_login,
-                cc_key,
-                codex,
-            ],
-            selections: HashMap::new(),
-            next: 0,
+            started: std::sync::Mutex::new(None),
+            approve_after,
+            approved: AtomicBool::new(false),
         }
     }
 
-    fn next_id(&mut self) -> String {
-        self.next += 1;
-        format!("conn_new_{}", self.next)
+    /// The user approved the code in the browser.
+    pub fn approve(&self) {
+        self.approved.store(true, Ordering::SeqCst);
     }
 }
 
-fn status_text(s: ConnectorStatus, kind: ConnectorKind) -> &'static str {
-    match (s, kind) {
-        (ConnectorStatus::Connected, ConnectorKind::Agent) => "Signed in",
-        (ConnectorStatus::Connected, _) => "Connected",
-        (ConnectorStatus::Expired, _) => "Expired",
-        (ConnectorStatus::SignedOut, _) => "Signed out",
-        (ConnectorStatus::Invalid, _) => "Invalid",
-        (ConnectorStatus::Unknown, _) => "Not tested",
+#[async_trait]
+impl GithubApi for SimGithub {
+    fn client_id_configured(&self) -> bool {
+        true
+    }
+
+    async fn device_start(&self) -> GithubResult<DeviceCode> {
+        *self.started.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+        self.approved.store(false, Ordering::SeqCst);
+        Ok(DeviceCode {
+            device_code: "sim-device-code".into(),
+            user_code: "WDJB-MJHT".into(),
+            verification_uri: "https://github.com/login/device".into(),
+            expires_in: 900,
+            interval: 1,
+        })
+    }
+
+    async fn device_poll(&self, _device_code: &str) -> GithubResult<DevicePoll> {
+        let started = *self.started.lock().unwrap_or_else(|e| e.into_inner());
+        let due = match (started, self.approve_after) {
+            (Some(at), Some(after)) => at.elapsed() >= after,
+            _ => false,
+        };
+        if due || self.approved.load(Ordering::SeqCst) {
+            Ok(DevicePoll::Ok {
+                token: SIM_TOKEN.into(),
+            })
+        } else {
+            Ok(DevicePoll::Pending)
+        }
+    }
+
+    async fn user(&self, token: &str) -> GithubResult<GithubUser> {
+        // the seeded organisation token belongs to the organisation, every other token to the demo user
+        Ok(GithubUser {
+            login: if token == SIM_ORG_TOKEN {
+                "acme-org".into()
+            } else {
+                SIM_LOGIN.into()
+            },
+        })
+    }
+
+    async fn repos(&self, _token: &str, _query: Option<&str>) -> GithubResult<Vec<Repo>> {
+        Ok(Vec::new())
+    }
+
+    async fn repo(&self, _token: &str, full_name: &str) -> GithubResult<Repo> {
+        Err(GithubError::http(
+            Some(404),
+            format!("{full_name}: not found, or the account cannot see it (404)."),
+        ))
+    }
+
+    async fn file(&self, _: &str, _: &str, _: &str, _: &str) -> GithubResult<Option<String>> {
+        Ok(None)
+    }
+
+    async fn branches(&self, _token: &str, _full_name: &str) -> GithubResult<Vec<String>> {
+        Ok(vec!["main".into()])
     }
 }
 
-fn invalid(path: &str, message: &str) -> ServiceError {
-    ServiceError::InvalidFields {
-        message: message.into(),
-        fields: vec![FieldError::new(path, message)],
+/// Probes that answer like the screenshots: the staging SSO session has expired, everything else works.
+struct SimProbe;
+
+#[async_trait]
+impl ConnectorProbe for SimProbe {
+    async fn aws(&self, _region: &str, profile: &str) -> (bool, String) {
+        if profile == "acme-staging" {
+            (false, "The SSO session has expired".into())
+        } else {
+            (true, "signed in to account 111122223333".into())
+        }
+    }
+
+    async fn anthropic(&self, _api_key: &str) -> (bool, String) {
+        (true, "Anthropic accepted the key".into())
+    }
+
+    async fn openai(&self, _api_key: &str) -> (bool, String) {
+        (true, "OpenAI accepted the key".into())
     }
 }
 
-fn aws_detail(a: &AwsConnectorInfo) -> String {
-    let auth = match a.auth {
-        AwsConnectorAuth::Sso => "SSO",
-        AwsConnectorAuth::Profile => "~/.aws profile",
-        AwsConnectorAuth::Role => "CloudFormation role",
+/// Claude Code is installed and signed in; Codex is not installed.
+struct SimHarnesses;
+
+#[async_trait]
+impl HarnessSource for SimHarnesses {
+    async fn get(&self) -> Vec<HarnessInfo> {
+        vec![
+            HarnessInfo {
+                kind: HarnessKind::ClaudeCode,
+                installed: true,
+                version: Some("2.1.314".into()),
+                path: Some("/usr/local/bin/claude".into()),
+                auth: HarnessAuth::SignedIn,
+                hint: "signed in".into(),
+            },
+            HarnessInfo {
+                kind: HarnessKind::Codex,
+                installed: false,
+                version: None,
+                path: None,
+                auth: HarnessAuth::SignedOut,
+                hint: "Install Codex: npm i -g @openai/codex".into(),
+            },
+        ]
+    }
+
+    async fn refresh(&self) -> Vec<HarnessInfo> {
+        self.get().await
+    }
+}
+
+fn profiles() -> AwsProfileList {
+    let p = |name: &str, kind| AwsProfile {
+        name: name.into(),
+        kind,
     };
-    match a.cap_usd_per_month {
-        Some(c) => format!("{auth} \u{00b7} {} \u{00b7} cap ${c:.0} / month", a.region),
-        None => format!("{auth} \u{00b7} {}", a.region),
+    AwsProfileList {
+        profiles: vec![
+            p("acme-prod", AwsAuthStyle::Sso),
+            p("acme-staging", AwsAuthStyle::Sso),
+            p("personal-dev", AwsAuthStyle::Keys),
+        ],
+        files_found: true,
     }
 }
 
-impl Inner {
-    pub(crate) fn list_connectors(&self) -> Vec<ConnectorVm> {
-        self.st().connectors.items.clone()
+/// The hub of the simulation, seeded when `seed` is set. Returns the pretend GitHub too (tests approve its device flow).
+pub(super) async fn build_hub(
+    opts: &SimOptions,
+    clock: Arc<dyn Clock>,
+    emit: Arc<dyn Fn(ApiEvent) + Send + Sync>,
+    seed: bool,
+) -> (ConnectorsHub, Arc<SimGithub>) {
+    let approve_after = (opts.auto_run && opts.github_flow_ms > 0)
+        .then(|| Duration::from_millis(opts.github_flow_ms));
+    let github = Arc::new(SimGithub::new(approve_after));
+    let secrets: Arc<dyn SecretStore> = Arc::new(MemorySecretStore::new());
+    let lister: ratchet_connectors::AwsProfileLister = Arc::new(profiles);
+    let store = Arc::new(ConnectorStore::new(
+        None,
+        secrets,
+        HashMap::new(),
+        ConnectorDeps {
+            github: Some(github.clone()),
+            harnesses: Some(Arc::new(SimHarnesses)),
+            aws_profiles: Some(lister.clone()),
+            probe: Some(Arc::new(SimProbe)),
+            legacy: None,
+            clock: Some(clock.clone()),
+        },
+    ));
+    if seed {
+        seed_demo(&store).await;
     }
+    let hub = ConnectorsHub::new(HubOptions {
+        store,
+        github: Some(github.clone()),
+        aws_profiles: lister,
+        open_external: None,
+        clock,
+        invalidate: Arc::new(|| {}),
+        emit,
+    });
+    (hub, github)
+}
 
-    pub(crate) fn get_connector(&self, id: &str) -> ServiceResult<ConnectorVm> {
-        self.st()
-            .connectors
-            .items
-            .iter()
-            .find(|c| c.id == id)
-            .cloned()
-            .ok_or_else(|| ServiceError::not_found("connector", id))
-    }
-
-    pub(crate) fn create_connector(
-        &self,
-        input: CreateConnectorInput,
-    ) -> ServiceResult<ConnectorVm> {
-        let mut st = self.st();
-        let id = st.connectors.next_id();
-        let first_of_kind =
-            |st: &super::State, k: ConnectorKind| !st.connectors.items.iter().any(|c| c.kind == k);
-        let vm = match input {
-            CreateConnectorInput::Github { name, token } => {
-                if let Some(t) = &token
-                    && let Some(p) =
-                        crate::api::validate::validate_secret_format(SecretName::GithubToken, t)
-                {
-                    return Err(invalid("token", &p));
-                }
-                let login = name.unwrap_or_else(|| "new-account".into());
-                let mut c = base(
-                    &id,
-                    ConnectorKind::Github,
-                    &login,
-                    "Personal \u{00b7} 0 repos",
-                );
-                c.github = Some(GithubConnectorInfo {
-                    login,
-                    account_kind: GithubAccountKind::Personal,
-                    repo_count: None,
-                });
-                if token.is_none() {
-                    c.status = ConnectorStatus::Unknown;
-                    c.status_text = "Not tested".into();
-                }
-                c
-            }
-            CreateConnectorInput::Aws {
-                name,
-                auth,
-                profile,
-                region,
-                cap_usd_per_month,
-            } => {
-                if name.trim().is_empty() {
-                    return Err(invalid("name", "name is required"));
-                }
-                if let Some(cap) = cap_usd_per_month
-                    && !(cap.is_finite() && cap > 0.0)
-                {
-                    return Err(invalid("capUsdPerMonth", "must be a positive number"));
-                }
-                let region = region.unwrap_or_else(|| DEFAULT_AWS_REGION.into());
-                if !crate::api::validate::region_ok(&region) {
-                    return Err(invalid(
-                        "region",
-                        "Use a region id such as us-east-1 or eu-west-2",
-                    ));
-                }
-                let info = AwsConnectorInfo {
-                    auth,
-                    profile,
-                    region,
-                    account_id: None,
-                    cap_usd_per_month,
-                    remaining_usd_this_month: cap_usd_per_month,
-                };
-                let mut c = base(&id, ConnectorKind::Aws, name.trim(), &aws_detail(&info));
-                c.cost_note = info
-                    .remaining_usd_this_month
-                    .map(|r| format!("${r:.0} left this month"));
-                c.aws = Some(info);
-                c
-            }
-            CreateConnectorInput::Agent {
-                name,
-                agent,
-                credential,
-                api_key,
-                runs_in,
-            } => {
-                if name.trim().is_empty() {
-                    return Err(invalid("name", "name is required"));
-                }
-                let key_hint = match (&credential, &api_key) {
-                    (AgentCredential::ApiKey, None) => {
-                        return Err(invalid("apiKey", "an API key is required"));
-                    }
-                    (AgentCredential::ApiKey, Some(k)) => {
-                        let secret = if agent == AgentKind::Codex {
-                            SecretName::OpenaiApiKey
-                        } else {
-                            SecretName::AnthropicApiKey
-                        };
-                        if let Some(p) = crate::api::validate::validate_secret_format(secret, k) {
-                            return Err(invalid("apiKey", &p));
-                        }
-                        Some(format!(
-                            "\u{00b7}\u{00b7}\u{00b7}\u{00b7}{}",
-                            &k[k.len().saturating_sub(4)..]
-                        ))
-                    }
-                    _ => None,
-                };
-                let runs_in = runs_in.unwrap_or_else(|| {
-                    if credential == AgentCredential::ApiKey {
-                        vec![AgentsWhere::Cloud, AgentsWhere::Local]
-                    } else {
-                        vec![AgentsWhere::Local]
-                    }
-                });
-                let mut c = base(
-                    &id,
-                    ConnectorKind::Agent,
-                    name.trim(),
-                    &key_hint
-                        .as_ref()
-                        .map_or("Found on this Mac".to_owned(), |h| format!("API key {h}")),
-                );
-                c.status_text = if key_hint.is_some() {
-                    "Valid".into()
-                } else {
-                    "Signed in".into()
-                };
-                c.cost_note = Some(if key_hint.is_some() {
-                    "Billed to the key".into()
-                } else {
-                    "Free while this Mac is awake".into()
-                });
-                c.agent = Some(AgentConnectorInfo {
-                    agent,
-                    credential,
-                    version: None,
-                    key_hint,
-                    runs_in,
-                });
-                c
-            }
-        };
-        let mut vm = vm;
-        vm.is_default = first_of_kind(&st, vm.kind);
-        st.connectors.items.push(vm.clone());
-        drop(st);
-        self.emit(ApiEvent::Connector {
-            connector_id: vm.id.clone(),
-            status: Some(vm.status),
-        });
-        Ok(vm)
-    }
-
-    pub(crate) fn update_connector(
-        &self,
-        id: &str,
-        input: UpdateConnectorInput,
-    ) -> ServiceResult<ConnectorVm> {
-        let mut st = self.st();
-        let items = &mut st.connectors.items;
-        let idx = items
-            .iter()
-            .position(|c| c.id == id)
-            .ok_or_else(|| ServiceError::not_found("connector", id))?;
-        if let Some(name) = &input.name {
-            if name.trim().is_empty() {
-                return Err(invalid("name", "name must not be empty"));
-            }
-            items[idx].name = name.trim().to_owned();
-        }
-        if let Some(cap) = input.cap_usd_per_month {
-            if !(cap.is_finite() && cap > 0.0) {
-                return Err(invalid("capUsdPerMonth", "must be a positive number"));
-            }
-            let Some(aws) = items[idx].aws.as_mut() else {
-                return Err(invalid("capUsdPerMonth", "only AWS connectors have a cap"));
-            };
-            aws.cap_usd_per_month = Some(cap);
-            aws.remaining_usd_this_month = Some(cap);
-            items[idx].detail = aws_detail(aws);
-            items[idx].cost_note = Some(format!("${cap:.0} left this month"));
-        }
-        if let Some(region) = &input.region {
-            if !crate::api::validate::region_ok(region) {
-                return Err(invalid(
-                    "region",
-                    "Use a region id such as us-east-1 or eu-west-2",
-                ));
-            }
-            let Some(aws) = items[idx].aws.as_mut() else {
-                return Err(invalid("region", "only AWS connectors have a region"));
-            };
-            aws.region.clone_from(region);
-            items[idx].detail = aws_detail(aws);
-        }
-        if let Some(key) = &input.api_key {
-            let Some(agent) = items[idx].agent.as_mut() else {
-                return Err(invalid("apiKey", "only agent connectors have an API key"));
-            };
-            let secret = if agent.agent == AgentKind::Codex {
-                SecretName::OpenaiApiKey
-            } else {
-                SecretName::AnthropicApiKey
-            };
-            if let Some(p) = crate::api::validate::validate_secret_format(secret, key) {
-                return Err(invalid("apiKey", &p));
-            }
-            agent.credential = AgentCredential::ApiKey;
-            agent.key_hint = Some(format!(
-                "\u{00b7}\u{00b7}\u{00b7}\u{00b7}{}",
-                &key[key.len().saturating_sub(4)..]
-            ));
-        }
-        if input.is_default == Some(true) {
-            let kind = items[idx].kind;
-            for c in items.iter_mut().filter(|c| c.kind == kind) {
-                c.is_default = false;
-            }
-            items[idx].is_default = true;
-        } else if input.is_default == Some(false) {
-            items[idx].is_default = false;
-        }
-        Ok(items[idx].clone())
-    }
-
-    pub(crate) fn delete_connector(&self, id: &str) -> ServiceResult<()> {
-        let mut st = self.st();
-        let items = &mut st.connectors.items;
-        let idx = items
-            .iter()
-            .position(|c| c.id == id)
-            .ok_or_else(|| ServiceError::not_found("connector", id))?;
-        let removed = items.remove(idx);
-        if removed.is_default
-            && let Some(next) = items.iter_mut().find(|c| c.kind == removed.kind)
-        {
-            next.is_default = true;
-        }
-        for sel in st.connectors.selections.values_mut() {
-            if sel.github_connector_id.as_deref() == Some(id) {
-                sel.github_connector_id = None;
-            }
-            if sel.aws_connector_id.as_deref() == Some(id) {
-                sel.aws_connector_id = None;
-            }
-            sel.agents.retain(|a| a.connector_id != id);
-        }
-        drop(st);
-        self.emit(ApiEvent::Connector {
-            connector_id: id.to_owned(),
-            status: None,
-        });
+/// The accounts of `design/v02/2-connectors.png`.
+async fn seed_demo(store: &Arc<ConnectorStore>) {
+    let aws = |profile: &str, region: &str, cap: Option<f64>| AddAwsConnectorInput {
+        profile: profile.into(),
+        region: Some(region.into()),
+        monthly_cap_usd: cap,
+        name: None,
+    };
+    let seeded = (|| -> ratchet_connectors::Result<()> {
+        store.upsert_github(UpsertGithub::new(SIM_LOGIN, SIM_TOKEN, true))?;
+        store.upsert_github(UpsertGithub::new("acme-org", SIM_ORG_TOKEN, false))?;
+        store.add_aws(aws("acme-prod", "us-east-1", Some(500.0)), false)?;
+        store.add_aws(aws("personal-dev", "us-west-2", Some(100.0)), false)?;
+        store.add_aws(aws("acme-staging", "eu-west-1", None), false)?;
         Ok(())
+    })();
+    if let Err(e) = seeded {
+        tracing::warn!("cannot seed the simulated connectors: {e}");
+        return;
     }
-
-    /// "Test" / "Sign in": an expired or signed-out connector comes back as connected.
-    pub(crate) fn test_connector(&self, id: &str) -> ServiceResult<ConnectorTestVm> {
-        let mut st = self.st();
-        let c = st
-            .connectors
-            .items
-            .iter_mut()
-            .find(|c| c.id == id)
-            .ok_or_else(|| ServiceError::not_found("connector", id))?;
-        let was = c.status;
-        c.status = ConnectorStatus::Connected;
-        c.status_text = status_text(c.status, c.kind).into();
-        if matches!(c.kind, ConnectorKind::Aws) {
-            c.cost_note = c
-                .aws
-                .as_ref()
-                .and_then(|a| a.remaining_usd_this_month)
-                .map(|r| format!("${r:.0} left this month"))
-                .or(Some("Connected".into()));
-        } else if c.kind == ConnectorKind::Agent {
-            c.cost_note = Some(match c.agent.as_ref().map(|a| a.credential) {
-                Some(AgentCredential::ApiKey) => "Billed to the key".into(),
-                _ => "Free while this Mac is awake".into(),
-            });
-        }
-        let vm = c.clone();
-        drop(st);
-        if was != ConnectorStatus::Connected {
-            self.emit(ApiEvent::Connector {
-                connector_id: id.to_owned(),
-                status: Some(vm.status),
-            });
-        }
-        Ok(ConnectorTestVm {
-            ok: true,
-            detail: if was == ConnectorStatus::Connected {
-                "simulated: still connected".into()
-            } else {
-                "simulated: signed in again".into()
+    let _ = store
+        .add_agent(
+            AddAgentConnectorInput::ApiKey {
+                agent: ConnectorAgent::ClaudeCode,
+                api_key: "sk-ant-api03-SIMULATEDTEAMKEY0001".into(),
+                name: Some("Claude Code · team key".into()),
             },
-            connector: vm,
-        })
-    }
-
-    fn default_selection(items: &[ConnectorVm]) -> ConnectorSelectionInput {
-        let default_of = |k: ConnectorKind| {
-            items
-                .iter()
-                .find(|c| c.kind == k && c.is_default && c.status == ConnectorStatus::Connected)
-                .map(|c| c.id.clone())
-        };
-        ConnectorSelectionInput {
-            github_connector_id: default_of(ConnectorKind::Github),
-            aws_connector_id: default_of(ConnectorKind::Aws),
-            agents: items
-                .iter()
-                .filter(|c| {
-                    c.kind == ConnectorKind::Agent
-                        && c.is_default
-                        && c.status == ConnectorStatus::Connected
-                })
-                .map(|c| AgentSelection {
-                    connector_id: c.id.clone(),
-                    runs_in: c
-                        .agent
-                        .as_ref()
-                        .and_then(|a| a.runs_in.first().copied())
-                        .unwrap_or(AgentsWhere::Local),
-                })
-                .collect(),
-        }
-    }
-
-    pub(crate) fn connector_selection(&self, repo: &str) -> ServiceResult<ConnectorSelectionVm> {
-        if repo.trim().is_empty() {
-            return Err(invalid("repo", "repo is required"));
-        }
-        let st = self.st();
-        Ok(match st.connectors.selections.get(repo) {
-            Some(s) => ConnectorSelectionVm {
-                repo: repo.into(),
-                selection: s.clone(),
-                remembered: true,
-            },
-            None => ConnectorSelectionVm {
-                repo: repo.into(),
-                selection: Inner::default_selection(&st.connectors.items),
-                remembered: false,
-            },
-        })
-    }
-
-    pub(crate) fn save_connector_selection(
-        &self,
-        input: SaveConnectorSelectionInput,
-    ) -> ServiceResult<ConnectorSelectionVm> {
-        if input.repo.trim().is_empty() {
-            return Err(invalid("repo", "repo is required"));
-        }
-        let mut st = self.st();
-        let find = |id: &str, kind: ConnectorKind| {
-            st.connectors
-                .items
-                .iter()
-                .find(|c| c.id == id && c.kind == kind)
-        };
-        let mut fields = Vec::new();
-        if let Some(id) = &input.selection.github_connector_id
-            && find(id, ConnectorKind::Github).is_none()
-        {
-            fields.push(FieldError::new(
-                "selection.githubConnectorId",
-                "not a GitHub connector",
-            ));
-        }
-        if let Some(id) = &input.selection.aws_connector_id {
-            match find(id, ConnectorKind::Aws) {
-                None => fields.push(FieldError::new(
-                    "selection.awsConnectorId",
-                    "not an AWS connector",
-                )),
-                Some(c) if c.status == ConnectorStatus::Expired => {
-                    fields.push(FieldError::new(
-                        "selection.awsConnectorId",
-                        "this AWS connector has expired; sign in again",
-                    ));
-                }
-                Some(_) => {}
-            }
-        }
-        for (i, a) in input.selection.agents.iter().enumerate() {
-            match find(&a.connector_id, ConnectorKind::Agent) {
-                None => fields.push(FieldError::new(
-                    format!("selection.agents[{i}].connectorId"),
-                    "not an agent connector",
-                )),
-                Some(c)
-                    if !c
-                        .agent
-                        .as_ref()
-                        .is_some_and(|x| x.runs_in.contains(&a.runs_in)) =>
-                {
-                    fields.push(FieldError::new(
-                        format!("selection.agents[{i}].runsIn"),
-                        "this connector cannot run there",
-                    ));
-                }
-                Some(_) => {}
-            }
-        }
-        if !fields.is_empty() {
-            return Err(ServiceError::InvalidFields {
-                message: "the connector selection is invalid".into(),
-                fields,
-            });
-        }
-        st.connectors
-            .selections
-            .insert(input.repo.clone(), input.selection.clone());
-        Ok(ConnectorSelectionVm {
-            repo: input.repo,
-            selection: input.selection,
-            remembered: true,
-        })
-    }
+            false,
+        )
+        .await;
+    // detect the CLI logins, then let the scripted probes set the statuses (the staging SSO session has expired)
+    let _ = store.list().await;
+    store.refresh().await;
 }

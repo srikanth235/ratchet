@@ -114,8 +114,8 @@ struct DaemonClientTests {
     @Test func theOverviewComesFromTheDaemon() async throws {
         let daemon = daemonWithData()
         let overview = try await make(daemon).overview(range: .days90)
-        #expect(overview.budgetUSD == 500)
-        #expect(overview.needsYou.count == 3)
+        #expect(overview.budgetUSD == 280)
+        #expect(overview.needsYou.count == 2)
         #expect(daemon.requests.first { $0.key == "GET /v1/overview" } != nil)
     }
 
@@ -139,7 +139,7 @@ struct DaemonClientTests {
     @Test func connectorActionsAlsoFallBack() async throws {
         let daemon = daemonWithData()
         daemon.route("GET /v1/connectors", 501, unsupported)
-        daemon.route("POST /v1/connectors", 501, unsupported)
+        daemon.route("POST /v1/connectors/github/sign-in", 501, unsupported)
         let client = make(daemon)
         let added = try await client.addConnector(NewConnector(kind: .github, name: "octo"))
         #expect(added.name == "octo")
@@ -204,8 +204,8 @@ struct DaemonClientTests {
         #expect(store.lastError == nil)
         #expect(store.isLoaded)
         #expect(store.optimizations.count == 4)
-        #expect(store.needsYouCount == 3)
-        #expect(store.connectors.count == 8)
+        #expect(store.needsYouCount == 2)
+        #expect(store.connectors.count == 7)
         #expect(store.sandbox.isOn)
         #expect(store.benchmarks.count == 3)
         #expect(store.repos.isEmpty)
@@ -277,8 +277,8 @@ struct DaemonClientTests {
         daemon.route("GET /v1/connectors", 200, Fixtures.connectors)
         daemon.route("POST /v1/optimizations", 201, #"{"id":"opt_demo_search"}"#)
         daemon.route("POST /v1/optimizations/opt_demo_search/start", 204)
-        var selection = ConnectionSelection(repoID: "acme/demo", awsID: "conn_aws_prod")
-        selection.agents["conn_agent_cc_login"] = .local
+        var selection = ConnectionSelection(repoID: "acme/demo", awsID: "aws-2fc2aa59")
+        selection.agents["agent-claude-code-login"] = .local
         let request = StartRequest(
             repoID: "acme/demo", branch: "main", goal: " Make search faster ", templateID: "demo-search",
             draftID: "mock-draft", selection: selection, budgetUSD: 40, timeLimitHours: 2)
@@ -368,7 +368,7 @@ struct DaemonClientTests {
             if case .optimizationUpdated = event { updates += 1 }
             if updates == 2 { break }
         }
-        #expect(events.contains { if case .needsYouChanged(let items) = $0 { items.count == 3 } else { false } })
+        #expect(events.contains { if case .needsYouChanged(let items) = $0 { items.count == 2 } else { false } })
         #expect(events.contains { if case .agentUpdated(let id, _) = $0 { id == "opt_demo_search" } else { false } })
         let connections = daemon.requests.filter { $0.key == "GET /v1/events" }
         #expect(connections.count >= 2)

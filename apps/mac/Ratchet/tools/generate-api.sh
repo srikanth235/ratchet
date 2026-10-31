@@ -3,16 +3,17 @@
 # The output is committed: the build never runs the generator (no build plugin, no swift-syntax compile in CI).
 # Run it whenever api/openapi.yaml changes (`cargo run -p ratchetd -- openapi` writes that file), then commit the result.
 #
-# One preparation step: utoipa writes an optional field as `oneOf: [{type: 'null'}, {$ref: X}]`, which the generator
-# skips with a warning (the field would be missing from the Swift type). The field is never `required`, and a generated
-# optional decodes JSON null as nil, so the script replaces that pair by the plain `$ref`.
+# One preparation step (tools/openapi-for-swift.py): utoipa writes an optional field as `oneOf: [{type: 'null'}, {$ref: X}]`,
+# which the generator skips with a warning (the field would be missing from the Swift type). The script replaces that pair by the
+# plain `$ref` and takes the field out of `required`, so the generated property is an optional that decodes both a missing key
+# and JSON null (a non-optional one would fail to decode a `null` the daemon always sends).
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 spec="$here/../../../api/openapi.yaml"
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-perl -0pe 's/^( *)oneOf:\n\1- type: .null.\n\1- (\$ref: [^\n]+)\n(?:\1  [a-z][^\n]*\n)*/$1$2\n/mg' "$spec" > "$work/openapi.yaml"
+python3 "$here/tools/openapi-for-swift.py" < "$spec" > "$work/openapi.yaml"
 if grep -q "^ *- type: 'null'" "$work/openapi.yaml"; then
   echo "warning: a nullable oneOf is left in the spec; the generator will skip that field"
 fi

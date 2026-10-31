@@ -586,7 +586,7 @@ public enum Operations {
             }
         }
     }
-    /// The remembered connector choice for a repo, or the defaults.
+    /// The choice remembered for a repo, and what a run on it would use now (saved choice, else the defaults).
     ///
     /// - Remark: HTTP `GET /v1/connector-selections`.
     /// - Remark: Generated from `#/paths//v1/connector-selections/get(getConnectorSelection)`.
@@ -638,12 +638,12 @@ public enum Operations {
                 /// - Remark: Generated from `#/paths/v1/connector-selections/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
                     /// - Remark: Generated from `#/paths/v1/connector-selections/GET/responses/200/content/application\/json`.
-                    case json(Components.Schemas.ConnectorSelectionVm)
+                    case json(Components.Schemas.RepoConnectionsVm)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Components.Schemas.ConnectorSelectionVm {
+                    public var json: Components.Schemas.RepoConnectionsVm {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -781,7 +781,8 @@ public enum Operations {
             }
         }
     }
-    /// Remember the connector choice for a repo ("Remembered for this repo").
+    /// Check and remember the choice for a repo. 400 when it cannot run: an unknown id, a login in the cloud, two
+    /// connectors for one agent, no agent.
     ///
     /// - Remark: HTTP `PUT /v1/connector-selections`.
     /// - Remark: Generated from `#/paths//v1/connector-selections/put(saveConnectorSelection)`.
@@ -803,7 +804,7 @@ public enum Operations {
             /// - Remark: Generated from `#/paths/v1/connector-selections/PUT/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
                 /// - Remark: Generated from `#/paths/v1/connector-selections/PUT/requestBody/content/application\/json`.
-                case json(Components.Schemas.SaveConnectorSelectionInput)
+                case json(Components.Schemas.SaveRepoConnectionsInput)
             }
             public var body: Operations.SaveConnectorSelection.Input.Body
             /// Creates a new `Input`.
@@ -824,12 +825,12 @@ public enum Operations {
                 /// - Remark: Generated from `#/paths/v1/connector-selections/PUT/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
                     /// - Remark: Generated from `#/paths/v1/connector-selections/PUT/responses/200/content/application\/json`.
-                    case json(Components.Schemas.ConnectorSelectionVm)
+                    case json(Components.Schemas.RepoConnectionsVm)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Components.Schemas.ConnectorSelectionVm {
+                    public var json: Components.Schemas.RepoConnectionsVm {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -967,7 +968,7 @@ public enum Operations {
             }
         }
     }
-    /// Every saved connector: GitHub accounts, AWS accounts, agents.
+    /// Every connector (detected CLI logins included), the device flow in progress and the keychain state.
     ///
     /// - Remark: HTTP `GET /v1/connectors`.
     /// - Remark: Generated from `#/paths//v1/connectors/get(listConnectors)`.
@@ -999,12 +1000,12 @@ public enum Operations {
                 /// - Remark: Generated from `#/paths/v1/connectors/GET/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
                     /// - Remark: Generated from `#/paths/v1/connectors/GET/responses/200/content/application\/json`.
-                    case json([Components.Schemas.ConnectorVm])
+                    case json(Components.Schemas.ConnectorsVm)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: [Components.Schemas.ConnectorVm] {
+                    public var json: Components.Schemas.ConnectorsVm {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -1119,55 +1120,56 @@ public enum Operations {
             }
         }
     }
-    /// Add a connector. Secrets in the body go to the keychain and are never returned.
+    /// A detected CLI login (one that was removed) or a pasted API key. The key goes to the keychain and is never
+    /// returned.
     ///
-    /// - Remark: HTTP `POST /v1/connectors`.
-    /// - Remark: Generated from `#/paths//v1/connectors/post(createConnector)`.
-    public enum CreateConnector {
-        public static let id: Swift.String = "createConnector"
+    /// - Remark: HTTP `POST /v1/connectors/agents`.
+    /// - Remark: Generated from `#/paths//v1/connectors/agents/post(addAgentConnector)`.
+    public enum AddAgentConnector {
+        public static let id: Swift.String = "addAgentConnector"
         public struct Input: Sendable, Hashable {
-            /// - Remark: Generated from `#/paths/v1/connectors/POST/header`.
+            /// - Remark: Generated from `#/paths/v1/connectors/agents/POST/header`.
             public struct Headers: Sendable, Hashable {
-                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.CreateConnector.AcceptableContentType>]
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.AddAgentConnector.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
                 ///   - accept:
-                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.CreateConnector.AcceptableContentType>] = .defaultValues()) {
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.AddAgentConnector.AcceptableContentType>] = .defaultValues()) {
                     self.accept = accept
                 }
             }
-            public var headers: Operations.CreateConnector.Input.Headers
-            /// - Remark: Generated from `#/paths/v1/connectors/POST/requestBody`.
+            public var headers: Operations.AddAgentConnector.Input.Headers
+            /// - Remark: Generated from `#/paths/v1/connectors/agents/POST/requestBody`.
             @frozen public enum Body: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/v1/connectors/POST/requestBody/content/application\/json`.
-                case json(Components.Schemas.CreateConnectorInput)
+                /// - Remark: Generated from `#/paths/v1/connectors/agents/POST/requestBody/content/application\/json`.
+                case json(Components.Schemas.AddAgentConnectorInput)
             }
-            public var body: Operations.CreateConnector.Input.Body
+            public var body: Operations.AddAgentConnector.Input.Body
             /// Creates a new `Input`.
             ///
             /// - Parameters:
             ///   - headers:
             ///   - body:
             public init(
-                headers: Operations.CreateConnector.Input.Headers = .init(),
-                body: Operations.CreateConnector.Input.Body
+                headers: Operations.AddAgentConnector.Input.Headers = .init(),
+                body: Operations.AddAgentConnector.Input.Body
             ) {
                 self.headers = headers
                 self.body = body
             }
         }
         @frozen public enum Output: Sendable, Hashable {
-            public struct Created: Sendable, Hashable {
-                /// - Remark: Generated from `#/paths/v1/connectors/POST/responses/201/content`.
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/connectors/agents/POST/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
-                    /// - Remark: Generated from `#/paths/v1/connectors/POST/responses/201/content/application\/json`.
-                    case json(Components.Schemas.ConnectorVm)
+                    /// - Remark: Generated from `#/paths/v1/connectors/agents/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.ConnectorsVm)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Components.Schemas.ConnectorVm {
+                    public var json: Components.Schemas.ConnectorsVm {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -1177,33 +1179,33 @@ public enum Operations {
                     }
                 }
                 /// Received HTTP response body
-                public var body: Operations.CreateConnector.Output.Created.Body
-                /// Creates a new `Created`.
+                public var body: Operations.AddAgentConnector.Output.Ok.Body
+                /// Creates a new `Ok`.
                 ///
                 /// - Parameters:
                 ///   - body: Received HTTP response body
-                public init(body: Operations.CreateConnector.Output.Created.Body) {
+                public init(body: Operations.AddAgentConnector.Output.Ok.Body) {
                     self.body = body
                 }
             }
             /// OK
             ///
-            /// - Remark: Generated from `#/paths//v1/connectors/post(createConnector)/responses/201`.
+            /// - Remark: Generated from `#/paths//v1/connectors/agents/post(addAgentConnector)/responses/200`.
             ///
-            /// HTTP response code: `201 created`.
-            case created(Operations.CreateConnector.Output.Created)
-            /// The associated value of the enum case if `self` is `.created`.
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.AddAgentConnector.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
             ///
-            /// - Throws: An error if `self` is not `.created`.
-            /// - SeeAlso: `.created`.
-            public var created: Operations.CreateConnector.Output.Created {
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.AddAgentConnector.Output.Ok {
                 get throws {
                     switch self {
-                    case let .created(response):
+                    case let .ok(response):
                         return response
                     default:
                         try throwUnexpectedResponseStatus(
-                            expectedStatus: "created",
+                            expectedStatus: "ok",
                             response: self
                         )
                     }
@@ -1211,7 +1213,7 @@ public enum Operations {
             }
             /// The request is malformed or a field is invalid (see `fields`).
             ///
-            /// - Remark: Generated from `#/paths//v1/connectors/post(createConnector)/responses/400`.
+            /// - Remark: Generated from `#/paths//v1/connectors/agents/post(addAgentConnector)/responses/400`.
             ///
             /// HTTP response code: `400 badRequest`.
             case badRequest(Components.Responses.BadRequest)
@@ -1234,7 +1236,7 @@ public enum Operations {
             }
             /// Missing or wrong bearer token.
             ///
-            /// - Remark: Generated from `#/paths//v1/connectors/post(createConnector)/responses/401`.
+            /// - Remark: Generated from `#/paths//v1/connectors/agents/post(addAgentConnector)/responses/401`.
             ///
             /// HTTP response code: `401 unauthorized`.
             case unauthorized(Components.Responses.Unauthorized)
@@ -1257,7 +1259,7 @@ public enum Operations {
             }
             /// Any other failure; `code` says which.
             ///
-            /// - Remark: Generated from `#/paths//v1/connectors/post(createConnector)/responses/default`.
+            /// - Remark: Generated from `#/paths//v1/connectors/agents/post(addAgentConnector)/responses/default`.
             ///
             /// HTTP response code: `default`.
             case `default`(statusCode: Swift.Int, Components.Responses.Failure)
@@ -1305,7 +1307,871 @@ public enum Operations {
             }
         }
     }
-    /// Rename, change the cap or region, replace the key, make default.
+    /// Connect an AWS profile from `~/.aws` with a region and an optional monthly cap.
+    ///
+    /// - Remark: HTTP `POST /v1/connectors/aws`.
+    /// - Remark: Generated from `#/paths//v1/connectors/aws/post(addAwsConnector)`.
+    public enum AddAwsConnector {
+        public static let id: Swift.String = "addAwsConnector"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/v1/connectors/aws/POST/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.AddAwsConnector.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.AddAwsConnector.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.AddAwsConnector.Input.Headers
+            /// - Remark: Generated from `#/paths/v1/connectors/aws/POST/requestBody`.
+            @frozen public enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/connectors/aws/POST/requestBody/content/application\/json`.
+                case json(Components.Schemas.AddAwsConnectorInput)
+            }
+            public var body: Operations.AddAwsConnector.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            ///   - body:
+            public init(
+                headers: Operations.AddAwsConnector.Input.Headers = .init(),
+                body: Operations.AddAwsConnector.Input.Body
+            ) {
+                self.headers = headers
+                self.body = body
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/connectors/aws/POST/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/v1/connectors/aws/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.ConnectorsVm)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ConnectorsVm {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.AddAwsConnector.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.AddAwsConnector.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// OK
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/aws/post(addAwsConnector)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.AddAwsConnector.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.AddAwsConnector.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// The request is malformed or a field is invalid (see `fields`).
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/aws/post(addAwsConnector)/responses/400`.
+            ///
+            /// HTTP response code: `400 badRequest`.
+            case badRequest(Components.Responses.BadRequest)
+            /// The associated value of the enum case if `self` is `.badRequest`.
+            ///
+            /// - Throws: An error if `self` is not `.badRequest`.
+            /// - SeeAlso: `.badRequest`.
+            public var badRequest: Components.Responses.BadRequest {
+                get throws {
+                    switch self {
+                    case let .badRequest(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "badRequest",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Missing or wrong bearer token.
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/aws/post(addAwsConnector)/responses/401`.
+            ///
+            /// HTTP response code: `401 unauthorized`.
+            case unauthorized(Components.Responses.Unauthorized)
+            /// The associated value of the enum case if `self` is `.unauthorized`.
+            ///
+            /// - Throws: An error if `self` is not `.unauthorized`.
+            /// - SeeAlso: `.unauthorized`.
+            public var unauthorized: Components.Responses.Unauthorized {
+                get throws {
+                    switch self {
+                    case let .unauthorized(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unauthorized",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Any other failure; `code` says which.
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/aws/post(addAwsConnector)/responses/default`.
+            ///
+            /// HTTP response code: `default`.
+            case `default`(statusCode: Swift.Int, Components.Responses.Failure)
+            /// The associated value of the enum case if `self` is `.`default``.
+            ///
+            /// - Throws: An error if `self` is not `.`default``.
+            /// - SeeAlso: `.`default``.
+            public var `default`: Components.Responses.Failure {
+                get throws {
+                    switch self {
+                    case let .`default`(_, response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "default",
+                            response: self
+                        )
+                    }
+                }
+            }
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// A pasted GitHub token (personal access token or app token), checked against GitHub before it is kept. The token
+    /// goes to the keychain and is never returned.
+    ///
+    /// - Remark: HTTP `POST /v1/connectors/github`.
+    /// - Remark: Generated from `#/paths//v1/connectors/github/post(addGithubConnector)`.
+    public enum AddGithubConnector {
+        public static let id: Swift.String = "addGithubConnector"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/v1/connectors/github/POST/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.AddGithubConnector.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.AddGithubConnector.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.AddGithubConnector.Input.Headers
+            /// - Remark: Generated from `#/paths/v1/connectors/github/POST/requestBody`.
+            @frozen public enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/connectors/github/POST/requestBody/content/application\/json`.
+                case json(Components.Schemas.AddGithubConnectorInput)
+            }
+            public var body: Operations.AddGithubConnector.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            ///   - body:
+            public init(
+                headers: Operations.AddGithubConnector.Input.Headers = .init(),
+                body: Operations.AddGithubConnector.Input.Body
+            ) {
+                self.headers = headers
+                self.body = body
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/connectors/github/POST/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/v1/connectors/github/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.ConnectorsVm)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ConnectorsVm {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.AddGithubConnector.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.AddGithubConnector.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// OK
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/github/post(addGithubConnector)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.AddGithubConnector.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.AddGithubConnector.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// The request is malformed or a field is invalid (see `fields`).
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/github/post(addGithubConnector)/responses/400`.
+            ///
+            /// HTTP response code: `400 badRequest`.
+            case badRequest(Components.Responses.BadRequest)
+            /// The associated value of the enum case if `self` is `.badRequest`.
+            ///
+            /// - Throws: An error if `self` is not `.badRequest`.
+            /// - SeeAlso: `.badRequest`.
+            public var badRequest: Components.Responses.BadRequest {
+                get throws {
+                    switch self {
+                    case let .badRequest(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "badRequest",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Missing or wrong bearer token.
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/github/post(addGithubConnector)/responses/401`.
+            ///
+            /// HTTP response code: `401 unauthorized`.
+            case unauthorized(Components.Responses.Unauthorized)
+            /// The associated value of the enum case if `self` is `.unauthorized`.
+            ///
+            /// - Throws: An error if `self` is not `.unauthorized`.
+            /// - SeeAlso: `.unauthorized`.
+            public var unauthorized: Components.Responses.Unauthorized {
+                get throws {
+                    switch self {
+                    case let .unauthorized(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unauthorized",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Any other failure; `code` says which.
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/github/post(addGithubConnector)/responses/default`.
+            ///
+            /// HTTP response code: `default`.
+            case `default`(statusCode: Swift.Int, Components.Responses.Failure)
+            /// The associated value of the enum case if `self` is `.`default``.
+            ///
+            /// - Throws: An error if `self` is not `.`default``.
+            /// - SeeAlso: `.`default``.
+            public var `default`: Components.Responses.Failure {
+                get throws {
+                    switch self {
+                    case let .`default`(_, response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "default",
+                            response: self
+                        )
+                    }
+                }
+            }
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Start the device flow for a new account, or `connectorId` to sign it in again. `githubFlow` in the answer carries
+    /// the code to show; the daemon polls and stores the token.
+    ///
+    /// - Remark: HTTP `POST /v1/connectors/github/sign-in`.
+    /// - Remark: Generated from `#/paths//v1/connectors/github/sign-in/post(startGithubConnectorSignIn)`.
+    public enum StartGithubConnectorSignIn {
+        public static let id: Swift.String = "startGithubConnectorSignIn"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/v1/connectors/github/sign-in/POST/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.StartGithubConnectorSignIn.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.StartGithubConnectorSignIn.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.StartGithubConnectorSignIn.Input.Headers
+            /// - Remark: Generated from `#/paths/v1/connectors/github/sign-in/POST/requestBody`.
+            @frozen public enum Body: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/connectors/github/sign-in/POST/requestBody/content/application\/json`.
+                case json(Components.Schemas.StartGithubSignInInput)
+            }
+            public var body: Operations.StartGithubConnectorSignIn.Input.Body
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            ///   - body:
+            public init(
+                headers: Operations.StartGithubConnectorSignIn.Input.Headers = .init(),
+                body: Operations.StartGithubConnectorSignIn.Input.Body
+            ) {
+                self.headers = headers
+                self.body = body
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/connectors/github/sign-in/POST/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/v1/connectors/github/sign-in/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.ConnectorsVm)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ConnectorsVm {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.StartGithubConnectorSignIn.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.StartGithubConnectorSignIn.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// OK
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/github/sign-in/post(startGithubConnectorSignIn)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.StartGithubConnectorSignIn.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.StartGithubConnectorSignIn.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// The request is malformed or a field is invalid (see `fields`).
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/github/sign-in/post(startGithubConnectorSignIn)/responses/400`.
+            ///
+            /// HTTP response code: `400 badRequest`.
+            case badRequest(Components.Responses.BadRequest)
+            /// The associated value of the enum case if `self` is `.badRequest`.
+            ///
+            /// - Throws: An error if `self` is not `.badRequest`.
+            /// - SeeAlso: `.badRequest`.
+            public var badRequest: Components.Responses.BadRequest {
+                get throws {
+                    switch self {
+                    case let .badRequest(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "badRequest",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Missing or wrong bearer token.
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/github/sign-in/post(startGithubConnectorSignIn)/responses/401`.
+            ///
+            /// HTTP response code: `401 unauthorized`.
+            case unauthorized(Components.Responses.Unauthorized)
+            /// The associated value of the enum case if `self` is `.unauthorized`.
+            ///
+            /// - Throws: An error if `self` is not `.unauthorized`.
+            /// - SeeAlso: `.unauthorized`.
+            public var unauthorized: Components.Responses.Unauthorized {
+                get throws {
+                    switch self {
+                    case let .unauthorized(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unauthorized",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Any other failure; `code` says which.
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/github/sign-in/post(startGithubConnectorSignIn)/responses/default`.
+            ///
+            /// HTTP response code: `default`.
+            case `default`(statusCode: Swift.Int, Components.Responses.Failure)
+            /// The associated value of the enum case if `self` is `.`default``.
+            ///
+            /// - Throws: An error if `self` is not `.`default``.
+            /// - SeeAlso: `.`default``.
+            public var `default`: Components.Responses.Failure {
+                get throws {
+                    switch self {
+                    case let .`default`(_, response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "default",
+                            response: self
+                        )
+                    }
+                }
+            }
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Stop the device flow in progress.
+    ///
+    /// - Remark: HTTP `DELETE /v1/connectors/github/sign-in`.
+    /// - Remark: Generated from `#/paths//v1/connectors/github/sign-in/delete(cancelGithubConnectorSignIn)`.
+    public enum CancelGithubConnectorSignIn {
+        public static let id: Swift.String = "cancelGithubConnectorSignIn"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/v1/connectors/github/sign-in/DELETE/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.CancelGithubConnectorSignIn.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.CancelGithubConnectorSignIn.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.CancelGithubConnectorSignIn.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            public init(headers: Operations.CancelGithubConnectorSignIn.Input.Headers = .init()) {
+                self.headers = headers
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/connectors/github/sign-in/DELETE/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/v1/connectors/github/sign-in/DELETE/responses/200/content/application\/json`.
+                    case json(Components.Schemas.ConnectorsVm)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ConnectorsVm {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.CancelGithubConnectorSignIn.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.CancelGithubConnectorSignIn.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// OK
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/github/sign-in/delete(cancelGithubConnectorSignIn)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.CancelGithubConnectorSignIn.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.CancelGithubConnectorSignIn.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Missing or wrong bearer token.
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/github/sign-in/delete(cancelGithubConnectorSignIn)/responses/401`.
+            ///
+            /// HTTP response code: `401 unauthorized`.
+            case unauthorized(Components.Responses.Unauthorized)
+            /// The associated value of the enum case if `self` is `.unauthorized`.
+            ///
+            /// - Throws: An error if `self` is not `.unauthorized`.
+            /// - SeeAlso: `.unauthorized`.
+            public var unauthorized: Components.Responses.Unauthorized {
+                get throws {
+                    switch self {
+                    case let .unauthorized(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unauthorized",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Any other failure; `code` says which.
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/github/sign-in/delete(cancelGithubConnectorSignIn)/responses/default`.
+            ///
+            /// HTTP response code: `default`.
+            case `default`(statusCode: Swift.Int, Components.Responses.Failure)
+            /// The associated value of the enum case if `self` is `.`default``.
+            ///
+            /// - Throws: An error if `self` is not `.`default``.
+            /// - SeeAlso: `.`default``.
+            public var `default`: Components.Responses.Failure {
+                get throws {
+                    switch self {
+                    case let .`default`(_, response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "default",
+                            response: self
+                        )
+                    }
+                }
+            }
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Check every connector with its provider (and probe the machine for agent CLIs again), then list.
+    ///
+    /// - Remark: HTTP `POST /v1/connectors/refresh`.
+    /// - Remark: Generated from `#/paths//v1/connectors/refresh/post(refreshConnectors)`.
+    public enum RefreshConnectors {
+        public static let id: Swift.String = "refreshConnectors"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/v1/connectors/refresh/POST/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.RefreshConnectors.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.RefreshConnectors.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.RefreshConnectors.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - headers:
+            public init(headers: Operations.RefreshConnectors.Input.Headers = .init()) {
+                self.headers = headers
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/connectors/refresh/POST/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/v1/connectors/refresh/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.ConnectorsVm)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ConnectorsVm {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.RefreshConnectors.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.RefreshConnectors.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// OK
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/refresh/post(refreshConnectors)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.RefreshConnectors.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.RefreshConnectors.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Missing or wrong bearer token.
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/refresh/post(refreshConnectors)/responses/401`.
+            ///
+            /// HTTP response code: `401 unauthorized`.
+            case unauthorized(Components.Responses.Unauthorized)
+            /// The associated value of the enum case if `self` is `.unauthorized`.
+            ///
+            /// - Throws: An error if `self` is not `.unauthorized`.
+            /// - SeeAlso: `.unauthorized`.
+            public var unauthorized: Components.Responses.Unauthorized {
+                get throws {
+                    switch self {
+                    case let .unauthorized(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unauthorized",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Any other failure; `code` says which.
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/refresh/post(refreshConnectors)/responses/default`.
+            ///
+            /// HTTP response code: `default`.
+            case `default`(statusCode: Swift.Int, Components.Responses.Failure)
+            /// The associated value of the enum case if `self` is `.`default``.
+            ///
+            /// - Throws: An error if `self` is not `.`default``.
+            /// - SeeAlso: `.`default``.
+            public var `default`: Components.Responses.Failure {
+                get throws {
+                    switch self {
+                    case let .`default`(_, response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "default",
+                            response: self
+                        )
+                    }
+                }
+            }
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// Rename; AWS: region and monthly cap (`null` removes the cap).
     ///
     /// - Remark: HTTP `PATCH /v1/connectors/{id}`.
     /// - Remark: Generated from `#/paths//v1/connectors/{id}/patch(updateConnector)`.
@@ -1366,12 +2232,12 @@ public enum Operations {
                 /// - Remark: Generated from `#/paths/v1/connectors/{id}/PATCH/responses/200/content`.
                 @frozen public enum Body: Sendable, Hashable {
                     /// - Remark: Generated from `#/paths/v1/connectors/{id}/PATCH/responses/200/content/application\/json`.
-                    case json(Components.Schemas.ConnectorVm)
+                    case json(Components.Schemas.ConnectorsVm)
                     /// The associated value of the enum case if `self` is `.json`.
                     ///
                     /// - Throws: An error if `self` is not `.json`.
                     /// - SeeAlso: `.json`.
-                    public var json: Components.Schemas.ConnectorVm {
+                    public var json: Components.Schemas.ConnectorsVm {
                         get throws {
                             switch self {
                             case let .json(body):
@@ -1535,9 +2401,9 @@ public enum Operations {
     /// Remove a connector and forget its secret. Optimizations already running keep what they have.
     ///
     /// - Remark: HTTP `DELETE /v1/connectors/{id}`.
-    /// - Remark: Generated from `#/paths//v1/connectors/{id}/delete(deleteConnector)`.
-    public enum DeleteConnector {
-        public static let id: Swift.String = "deleteConnector"
+    /// - Remark: Generated from `#/paths//v1/connectors/{id}/delete(removeConnector)`.
+    public enum RemoveConnector {
+        public static let id: Swift.String = "removeConnector"
         public struct Input: Sendable, Hashable {
             /// - Remark: Generated from `#/paths/v1/connectors/{id}/DELETE/path`.
             public struct Path: Sendable, Hashable {
@@ -1553,63 +2419,79 @@ public enum Operations {
                     self.id = id
                 }
             }
-            public var path: Operations.DeleteConnector.Input.Path
+            public var path: Operations.RemoveConnector.Input.Path
             /// - Remark: Generated from `#/paths/v1/connectors/{id}/DELETE/header`.
             public struct Headers: Sendable, Hashable {
-                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.DeleteConnector.AcceptableContentType>]
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.RemoveConnector.AcceptableContentType>]
                 /// Creates a new `Headers`.
                 ///
                 /// - Parameters:
                 ///   - accept:
-                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.DeleteConnector.AcceptableContentType>] = .defaultValues()) {
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.RemoveConnector.AcceptableContentType>] = .defaultValues()) {
                     self.accept = accept
                 }
             }
-            public var headers: Operations.DeleteConnector.Input.Headers
+            public var headers: Operations.RemoveConnector.Input.Headers
             /// Creates a new `Input`.
             ///
             /// - Parameters:
             ///   - path:
             ///   - headers:
             public init(
-                path: Operations.DeleteConnector.Input.Path,
-                headers: Operations.DeleteConnector.Input.Headers = .init()
+                path: Operations.RemoveConnector.Input.Path,
+                headers: Operations.RemoveConnector.Input.Headers = .init()
             ) {
                 self.path = path
                 self.headers = headers
             }
         }
         @frozen public enum Output: Sendable, Hashable {
-            public struct NoContent: Sendable, Hashable {
-                /// Creates a new `NoContent`.
-                public init() {}
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/connectors/{id}/DELETE/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/v1/connectors/{id}/DELETE/responses/200/content/application\/json`.
+                    case json(Components.Schemas.ConnectorsVm)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ConnectorsVm {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.RemoveConnector.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.RemoveConnector.Output.Ok.Body) {
+                    self.body = body
+                }
             }
-            /// Removed
+            /// OK
             ///
-            /// - Remark: Generated from `#/paths//v1/connectors/{id}/delete(deleteConnector)/responses/204`.
+            /// - Remark: Generated from `#/paths//v1/connectors/{id}/delete(removeConnector)/responses/200`.
             ///
-            /// HTTP response code: `204 noContent`.
-            case noContent(Operations.DeleteConnector.Output.NoContent)
-            /// Removed
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.RemoveConnector.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
             ///
-            /// - Remark: Generated from `#/paths//v1/connectors/{id}/delete(deleteConnector)/responses/204`.
-            ///
-            /// HTTP response code: `204 noContent`.
-            public static var noContent: Self {
-                .noContent(.init())
-            }
-            /// The associated value of the enum case if `self` is `.noContent`.
-            ///
-            /// - Throws: An error if `self` is not `.noContent`.
-            /// - SeeAlso: `.noContent`.
-            public var noContent: Operations.DeleteConnector.Output.NoContent {
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.RemoveConnector.Output.Ok {
                 get throws {
                     switch self {
-                    case let .noContent(response):
+                    case let .ok(response):
                         return response
                     default:
                         try throwUnexpectedResponseStatus(
-                            expectedStatus: "noContent",
+                            expectedStatus: "ok",
                             response: self
                         )
                     }
@@ -1617,7 +2499,7 @@ public enum Operations {
             }
             /// Missing or wrong bearer token.
             ///
-            /// - Remark: Generated from `#/paths//v1/connectors/{id}/delete(deleteConnector)/responses/401`.
+            /// - Remark: Generated from `#/paths//v1/connectors/{id}/delete(removeConnector)/responses/401`.
             ///
             /// HTTP response code: `401 unauthorized`.
             case unauthorized(Components.Responses.Unauthorized)
@@ -1640,7 +2522,7 @@ public enum Operations {
             }
             /// No such resource.
             ///
-            /// - Remark: Generated from `#/paths//v1/connectors/{id}/delete(deleteConnector)/responses/404`.
+            /// - Remark: Generated from `#/paths//v1/connectors/{id}/delete(removeConnector)/responses/404`.
             ///
             /// HTTP response code: `404 notFound`.
             case notFound(Components.Responses.NotFound)
@@ -1663,7 +2545,7 @@ public enum Operations {
             }
             /// Any other failure; `code` says which.
             ///
-            /// - Remark: Generated from `#/paths//v1/connectors/{id}/delete(deleteConnector)/responses/default`.
+            /// - Remark: Generated from `#/paths//v1/connectors/{id}/delete(removeConnector)/responses/default`.
             ///
             /// HTTP response code: `default`.
             case `default`(statusCode: Swift.Int, Components.Responses.Failure)
@@ -1711,7 +2593,202 @@ public enum Operations {
             }
         }
     }
-    /// "Test" / "Sign in": probe the account and refresh its status.
+    /// Make this connector the default of its kind.
+    ///
+    /// - Remark: HTTP `POST /v1/connectors/{id}/default`.
+    /// - Remark: Generated from `#/paths//v1/connectors/{id}/default/post(setDefaultConnector)`.
+    public enum SetDefaultConnector {
+        public static let id: Swift.String = "setDefaultConnector"
+        public struct Input: Sendable, Hashable {
+            /// - Remark: Generated from `#/paths/v1/connectors/{id}/default/POST/path`.
+            public struct Path: Sendable, Hashable {
+                /// Connector id
+                ///
+                /// - Remark: Generated from `#/paths/v1/connectors/{id}/default/POST/path/id`.
+                public var id: Swift.String
+                /// Creates a new `Path`.
+                ///
+                /// - Parameters:
+                ///   - id: Connector id
+                public init(id: Swift.String) {
+                    self.id = id
+                }
+            }
+            public var path: Operations.SetDefaultConnector.Input.Path
+            /// - Remark: Generated from `#/paths/v1/connectors/{id}/default/POST/header`.
+            public struct Headers: Sendable, Hashable {
+                public var accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.SetDefaultConnector.AcceptableContentType>]
+                /// Creates a new `Headers`.
+                ///
+                /// - Parameters:
+                ///   - accept:
+                public init(accept: [OpenAPIRuntime.AcceptHeaderContentType<Operations.SetDefaultConnector.AcceptableContentType>] = .defaultValues()) {
+                    self.accept = accept
+                }
+            }
+            public var headers: Operations.SetDefaultConnector.Input.Headers
+            /// Creates a new `Input`.
+            ///
+            /// - Parameters:
+            ///   - path:
+            ///   - headers:
+            public init(
+                path: Operations.SetDefaultConnector.Input.Path,
+                headers: Operations.SetDefaultConnector.Input.Headers = .init()
+            ) {
+                self.path = path
+                self.headers = headers
+            }
+        }
+        @frozen public enum Output: Sendable, Hashable {
+            public struct Ok: Sendable, Hashable {
+                /// - Remark: Generated from `#/paths/v1/connectors/{id}/default/POST/responses/200/content`.
+                @frozen public enum Body: Sendable, Hashable {
+                    /// - Remark: Generated from `#/paths/v1/connectors/{id}/default/POST/responses/200/content/application\/json`.
+                    case json(Components.Schemas.ConnectorsVm)
+                    /// The associated value of the enum case if `self` is `.json`.
+                    ///
+                    /// - Throws: An error if `self` is not `.json`.
+                    /// - SeeAlso: `.json`.
+                    public var json: Components.Schemas.ConnectorsVm {
+                        get throws {
+                            switch self {
+                            case let .json(body):
+                                return body
+                            }
+                        }
+                    }
+                }
+                /// Received HTTP response body
+                public var body: Operations.SetDefaultConnector.Output.Ok.Body
+                /// Creates a new `Ok`.
+                ///
+                /// - Parameters:
+                ///   - body: Received HTTP response body
+                public init(body: Operations.SetDefaultConnector.Output.Ok.Body) {
+                    self.body = body
+                }
+            }
+            /// OK
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/{id}/default/post(setDefaultConnector)/responses/200`.
+            ///
+            /// HTTP response code: `200 ok`.
+            case ok(Operations.SetDefaultConnector.Output.Ok)
+            /// The associated value of the enum case if `self` is `.ok`.
+            ///
+            /// - Throws: An error if `self` is not `.ok`.
+            /// - SeeAlso: `.ok`.
+            public var ok: Operations.SetDefaultConnector.Output.Ok {
+                get throws {
+                    switch self {
+                    case let .ok(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "ok",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Missing or wrong bearer token.
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/{id}/default/post(setDefaultConnector)/responses/401`.
+            ///
+            /// HTTP response code: `401 unauthorized`.
+            case unauthorized(Components.Responses.Unauthorized)
+            /// The associated value of the enum case if `self` is `.unauthorized`.
+            ///
+            /// - Throws: An error if `self` is not `.unauthorized`.
+            /// - SeeAlso: `.unauthorized`.
+            public var unauthorized: Components.Responses.Unauthorized {
+                get throws {
+                    switch self {
+                    case let .unauthorized(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "unauthorized",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// No such resource.
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/{id}/default/post(setDefaultConnector)/responses/404`.
+            ///
+            /// HTTP response code: `404 notFound`.
+            case notFound(Components.Responses.NotFound)
+            /// The associated value of the enum case if `self` is `.notFound`.
+            ///
+            /// - Throws: An error if `self` is not `.notFound`.
+            /// - SeeAlso: `.notFound`.
+            public var notFound: Components.Responses.NotFound {
+                get throws {
+                    switch self {
+                    case let .notFound(response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "notFound",
+                            response: self
+                        )
+                    }
+                }
+            }
+            /// Any other failure; `code` says which.
+            ///
+            /// - Remark: Generated from `#/paths//v1/connectors/{id}/default/post(setDefaultConnector)/responses/default`.
+            ///
+            /// HTTP response code: `default`.
+            case `default`(statusCode: Swift.Int, Components.Responses.Failure)
+            /// The associated value of the enum case if `self` is `.`default``.
+            ///
+            /// - Throws: An error if `self` is not `.`default``.
+            /// - SeeAlso: `.`default``.
+            public var `default`: Components.Responses.Failure {
+                get throws {
+                    switch self {
+                    case let .`default`(_, response):
+                        return response
+                    default:
+                        try throwUnexpectedResponseStatus(
+                            expectedStatus: "default",
+                            response: self
+                        )
+                    }
+                }
+            }
+        }
+        @frozen public enum AcceptableContentType: AcceptableProtocol {
+            case json
+            case other(Swift.String)
+            public init?(rawValue: Swift.String) {
+                switch rawValue.lowercased() {
+                case "application/json":
+                    self = .json
+                default:
+                    self = .other(rawValue)
+                }
+            }
+            public var rawValue: Swift.String {
+                switch self {
+                case let .other(string):
+                    return string
+                case .json:
+                    return "application/json"
+                }
+            }
+            public static var allCases: [Self] {
+                [
+                    .json
+                ]
+            }
+        }
+    }
+    /// "Test connection": probe the account with its provider and remember the status.
     ///
     /// - Remark: HTTP `POST /v1/connectors/{id}/test`.
     /// - Remark: Generated from `#/paths//v1/connectors/{id}/test/post(testConnector)`.
@@ -3343,12 +4420,21 @@ public enum Operations {
                 ///
                 /// - Remark: Generated from `#/paths/v1/github/repos/GET/query/query`.
                 public var query: Swift.String?
+                /// List with this GitHub connector (default: the default one).
+                ///
+                /// - Remark: Generated from `#/paths/v1/github/repos/GET/query/connectorId`.
+                public var connectorId: Swift.String?
                 /// Creates a new `Query`.
                 ///
                 /// - Parameters:
                 ///   - query: Substring of `owner/name`.
-                public init(query: Swift.String? = nil) {
+                ///   - connectorId: List with this GitHub connector (default: the default one).
+                public init(
+                    query: Swift.String? = nil,
+                    connectorId: Swift.String? = nil
+                ) {
                     self.query = query
+                    self.connectorId = connectorId
                 }
             }
             public var query: Operations.ListRepos.Input.Query
@@ -5168,7 +6254,7 @@ public enum Operations {
             }
         }
     }
-    /// Overview: spent, value locked in, return, the value staircase, what needs you, the table. PROVISIONAL.
+    /// Overview: spent, value locked in, return, the value staircase, what needs you, the table.
     ///
     /// - Remark: HTTP `GET /v1/overview`.
     /// - Remark: Generated from `#/paths//v1/overview/get(getOverview)`.

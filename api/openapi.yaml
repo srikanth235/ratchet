@@ -229,8 +229,8 @@ paths:
   /v1/connector-selections:
     get:
       tags:
-      - connectors (provisional)
-      summary: The remembered connector choice for a repo, or the defaults.
+      - connectors
+      summary: The choice remembered for a repo, and what a run on it would use now (saved choice, else the defaults).
       operationId: getConnectorSelection
       parameters:
       - name: repo
@@ -245,7 +245,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConnectorSelectionVm'
+                $ref: '#/components/schemas/RepoConnectionsVm'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -254,14 +254,16 @@ paths:
           $ref: '#/components/responses/Failure'
     put:
       tags:
-      - connectors (provisional)
-      summary: Remember the connector choice for a repo ("Remembered for this repo").
+      - connectors
+      summary: |-
+        Check and remember the choice for a repo. 400 when it cannot run: an unknown id, a login in the cloud, two
+        connectors for one agent, no agent.
       operationId: saveConnectorSelection
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SaveConnectorSelectionInput'
+              $ref: '#/components/schemas/SaveRepoConnectionsInput'
         required: true
       responses:
         '200':
@@ -269,7 +271,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConnectorSelectionVm'
+                $ref: '#/components/schemas/RepoConnectionsVm'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -279,8 +281,8 @@ paths:
   /v1/connectors:
     get:
       tags:
-      - connectors (provisional)
-      summary: 'Every saved connector: GitHub accounts, AWS accounts, agents.'
+      - connectors
+      summary: Every connector (detected CLI logins included), the device flow in progress and the keychain state.
       operationId: listConnectors
       responses:
         '200':
@@ -288,43 +290,157 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ConnectorVm'
+                $ref: '#/components/schemas/ConnectorsVm'
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
           $ref: '#/components/responses/Failure'
+  /v1/connectors/agents:
     post:
       tags:
-      - connectors (provisional)
-      summary: Add a connector. Secrets in the body go to the keychain and are never returned.
-      operationId: createConnector
+      - connectors
+      summary: |-
+        A detected CLI login (one that was removed) or a pasted API key. The key goes to the keychain and is never
+        returned.
+      operationId: addAgentConnector
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateConnectorInput'
+              $ref: '#/components/schemas/AddAgentConnectorInput'
         required: true
       responses:
-        '201':
+        '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConnectorVm'
+                $ref: '#/components/schemas/ConnectorsVm'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
           $ref: '#/components/responses/Failure'
-  /v1/connectors/{id}:
-    get:
+  /v1/connectors/aws:
+    post:
       tags:
-      - connectors (provisional)
-      summary: One connector.
-      operationId: getConnector
+      - connectors
+      summary: Connect an AWS profile from `~/.aws` with a region and an optional monthly cap.
+      operationId: addAwsConnector
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddAwsConnectorInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connectors/github:
+    post:
+      tags:
+      - connectors
+      summary: |-
+        A pasted GitHub token (personal access token or app token), checked against GitHub before it is kept. The token
+        goes to the keychain and is never returned.
+      operationId: addGithubConnector
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddGithubConnectorInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connectors/github/sign-in:
+    post:
+      tags:
+      - connectors
+      summary: |-
+        Start the device flow for a new account, or `connectorId` to sign it in again. `githubFlow` in the answer carries
+        the code to show; the daemon polls and stores the token.
+      operationId: startGithubConnectorSignIn
+      requestBody:
+        description: Optional; an empty body starts a new account.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartGithubSignInInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+    delete:
+      tags:
+      - connectors
+      summary: Stop the device flow in progress.
+      operationId: cancelGithubConnectorSignIn
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connectors/refresh:
+    post:
+      tags:
+      - connectors
+      summary: Check every connector with its provider (and probe the machine for agent CLIs again), then list.
+      operationId: refreshConnectors
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connectors/{id}:
+    delete:
+      tags:
+      - connectors
+      summary: Remove a connector and forget its secret. Optimizations already running keep what they have.
+      operationId: removeConnector
       parameters:
       - name: id
         in: path
@@ -338,28 +454,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConnectorVm'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        default:
-          $ref: '#/components/responses/Failure'
-    delete:
-      tags:
-      - connectors (provisional)
-      summary: Remove a connector and forget its secret. Optimizations already running keep what they have.
-      operationId: deleteConnector
-      parameters:
-      - name: id
-        in: path
-        description: Connector id
-        required: true
-        schema:
-          type: string
-      responses:
-        '204':
-          description: Removed
+                $ref: '#/components/schemas/ConnectorsVm'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -368,8 +463,8 @@ paths:
           $ref: '#/components/responses/Failure'
     patch:
       tags:
-      - connectors (provisional)
-      summary: Rename, change the cap or region, replace the key, make default.
+      - connectors
+      summary: 'Rename; AWS: region and monthly cap (`null` removes the cap).'
       operationId: updateConnector
       parameters:
       - name: id
@@ -390,9 +485,35 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConnectorVm'
+                $ref: '#/components/schemas/ConnectorsVm'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connectors/{id}/default:
+    post:
+      tags:
+      - connectors
+      summary: Make this connector the default of its kind.
+      operationId: setDefaultConnector
+      parameters:
+      - name: id
+        in: path
+        description: Connector id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -402,8 +523,8 @@ paths:
   /v1/connectors/{id}/test:
     post:
       tags:
-      - connectors (provisional)
-      summary: '"Test" / "Sign in": probe the account and refresh its status.'
+      - connectors
+      summary: '"Test connection": probe the account with its provider and remember the status.'
       operationId: testConnector
       parameters:
       - name: id
@@ -686,6 +807,12 @@ paths:
       - name: query
         in: query
         description: Substring of `owner/name`.
+        required: false
+        schema:
+          type: string
+      - name: connectorId
+        in: query
+        description: 'List with this GitHub connector (default: the default one).'
         required: false
         schema:
           type: string
@@ -1207,8 +1334,8 @@ paths:
   /v1/overview:
     get:
       tags:
-      - overview (provisional)
-      summary: 'Overview: spent, value locked in, return, the value staircase, what needs you, the table. PROVISIONAL.'
+      - overview
+      summary: 'Overview: spent, value locked in, return, the value staircase, what needs you, the table.'
       operationId: getOverview
       parameters:
       - name: range
@@ -1546,6 +1673,76 @@ components:
           type: string
         tone:
           $ref: '#/components/schemas/ActivityTone'
+    AddAgentConnectorInput:
+      oneOf:
+      - type: object
+        required:
+        - agent
+        - source
+        properties:
+          agent:
+            $ref: '#/components/schemas/ConnectorAgent'
+          source:
+            type: string
+            enum:
+            - login
+      - type: object
+        required:
+        - agent
+        - apiKey
+        - source
+        properties:
+          agent:
+            $ref: '#/components/schemas/ConnectorAgent'
+          apiKey:
+            type: string
+          name:
+            type:
+            - string
+            - 'null'
+          source:
+            type: string
+            enum:
+            - api-key
+      description: '`POST /v1/connectors/agents`: adopt a detected CLI login (one that was removed earlier) or store an API key.'
+    AddAwsConnectorInput:
+      type: object
+      description: '`POST /v1/connectors/aws`.'
+      required:
+      - profile
+      properties:
+        monthlyCapUsd:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: USD per month; omit or `null` for no cap.
+        name:
+          type:
+          - string
+          - 'null'
+        profile:
+          type: string
+          description: A profile from `~/.aws/config` or `~/.aws/credentials`.
+        region:
+          type:
+          - string
+          - 'null'
+          description: Default `us-east-1`.
+    AddGithubConnectorInput:
+      type: object
+      description: |-
+        `POST /v1/connectors/github`: a pasted personal access token or app installation token, checked against GitHub
+        before it is kept.
+      required:
+      - token
+      properties:
+        name:
+          type:
+          - string
+          - 'null'
+        token:
+          type: string
     AdvancedDefaults:
       type: object
       description: What empty `tofuBinary` / `moduleDir` resolve to.
@@ -1568,35 +1765,7 @@ components:
           $ref: '#/components/schemas/AdvancedDefaults'
         values:
           $ref: '#/components/schemas/LiveSettings'
-    AgentConnectorInfo:
-      type: object
-      required:
-      - agent
-      - credential
-      - version
-      - keyHint
-      - runsIn
-      properties:
-        agent:
-          $ref: '#/components/schemas/AgentKind'
-        credential:
-          $ref: '#/components/schemas/AgentCredential'
-        keyHint:
-          type:
-          - string
-          - 'null'
-          description: Last characters of an API key (`····4f2a`).
-        runsIn:
-          type: array
-          items:
-            $ref: '#/components/schemas/AgentsWhere'
-          description: 'Where this connector can run agents: a login runs on this Mac, a key also in the cloud.'
-        version:
-          type:
-          - string
-          - 'null'
-          description: CLI version for a login connector.
-    AgentCredential:
+    AgentConnectorSource:
       type: string
       enum:
       - login
@@ -1656,14 +1825,14 @@ components:
           $ref: '#/components/schemas/CandidateVerdict'
     AgentSelection:
       type: object
-      description: 'One agent choice on the New optimization step: a connector and where it runs.'
+      description: 'One agent choice: a connector and where it runs.'
       required:
       - connectorId
-      - runsIn
+      - where
       properties:
         connectorId:
           type: string
-        runsIn:
+        where:
           $ref: '#/components/schemas/AgentsWhere'
     AgentStats:
       type: object
@@ -1962,7 +2131,7 @@ components:
             enum:
             - environment-draft
       - type: object
-        description: 'Provisional: a connector changed status (signed in, expired, removed).'
+        description: A connector changed (the device flow finished, a probe changed its status, it was removed).
         required:
         - connectorId
         - status
@@ -1997,47 +2166,14 @@ components:
       enum:
       - profile
       - sso
-    AwsConnectorAuth:
+    AwsAuthStyle:
       type: string
       enum:
       - sso
-      - profile
       - role
-    AwsConnectorInfo:
-      type: object
-      required:
-      - auth
-      - profile
-      - region
-      - accountId
-      - capUsdPerMonth
-      - remainingUsdThisMonth
-      properties:
-        accountId:
-          type:
-          - string
-          - 'null'
-        auth:
-          $ref: '#/components/schemas/AwsConnectorAuth'
-        capUsdPerMonth:
-          type:
-          - number
-          - 'null'
-          format: double
-          description: Monthly spend cap in USD, when the user set one.
-        profile:
-          type:
-          - string
-          - 'null'
-          description: Profile or SSO session name; `null` for a role.
-        region:
-          type: string
-        remainingUsdThisMonth:
-          type:
-          - number
-          - 'null'
-          format: double
-          description: What is left of the cap this month ("$412 left this month").
+      - keys
+      - process
+      - other
     AwsProfileKind:
       type: string
       enum:
@@ -2427,120 +2563,194 @@ components:
       - github
       - anthropic
       - openai
-    ConnectorKind:
+    ConnectorAgent:
       type: string
+      description: The two agent CLIs Ratchet drives.
       enum:
-      - github
-      - aws
-      - agent
-    ConnectorSelectionInput:
-      type: object
-      description: The connectors a run uses (step 2 of New optimization).
-      required:
-      - agents
-      properties:
-        agents:
-          type: array
-          items:
-            $ref: '#/components/schemas/AgentSelection'
-        awsConnectorId:
-          type:
-          - string
-          - 'null'
-        githubConnectorId:
-          type:
-          - string
-          - 'null'
-    ConnectorSelectionVm:
-      type: object
-      description: '`GET /v1/connector-selections?repo=`: the remembered choice for a repo, or the defaults.'
-      required:
-      - repo
-      - selection
-      - remembered
-      properties:
-        remembered:
-          type: boolean
-          description: True when the user chose it before for this repo ("Remembered for this repo"); false = the defaults.
-        repo:
-          type: string
-        selection:
-          $ref: '#/components/schemas/ConnectorSelectionInput'
+      - claude-code
+      - codex
     ConnectorStatus:
       type: string
-      description: '`connected` / `signed-in` / `valid` all read as green in the UI; the text says which.'
+      description: |-
+        - `connected`: a GitHub account / AWS profile / agent login that works
+        - `expired`: it worked once and needs signing in again (GitHub token revoked, `aws sso login` needed)
+        - `signed-out`: nothing to use (an agent CLI that is not signed in or not installed, a GitHub account without a token)
+        - `valid`: an API key the provider accepted
+        - `invalid`: an API key (or static AWS keys) the provider rejected
       enum:
       - connected
       - expired
       - signed-out
+      - valid
       - invalid
-      - unknown
     ConnectorTestVm:
       type: object
-      description: Result of "Test" / "Sign in" on a connector.
+      description: Result of "Test connection" on one connector.
       required:
-      - connector
       - ok
       - detail
+      - connector
       properties:
         connector:
-          $ref: '#/components/schemas/ConnectorVm'
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ConnectorVm'
+            description: The connector with its fresh status (`null` if it no longer exists).
         detail:
           type: string
           description: One line; never contains a key or token.
         ok:
           type: boolean
     ConnectorVm:
+      oneOf:
+      - type: object
+        required:
+        - id
+        - name
+        - detail
+        - status
+        - isDefault
+        - login
+        - source
+        - kind
+        properties:
+          detail:
+            type: string
+            description: One muted line under the name. Backticks mark a command to show in monospace.
+          id:
+            type: string
+          isDefault:
+            type: boolean
+            description: The default of its kind (one per kind).
+          kind:
+            type: string
+            enum:
+            - github
+          login:
+            type:
+            - string
+            - 'null'
+            description: The account's login, `null` until it is known.
+          name:
+            type: string
+            description: What the user sees and can rename ("srikanth235").
+          source:
+            $ref: '#/components/schemas/GithubConnectorSource'
+          status:
+            $ref: '#/components/schemas/ConnectorStatus'
+      - type: object
+        required:
+        - id
+        - name
+        - detail
+        - status
+        - isDefault
+        - profile
+        - region
+        - auth
+        - monthlyCapUsd
+        - kind
+        properties:
+          auth:
+            $ref: '#/components/schemas/AwsAuthStyle'
+          detail:
+            type: string
+          id:
+            type: string
+          isDefault:
+            type: boolean
+          kind:
+            type: string
+            enum:
+            - aws
+          monthlyCapUsd:
+            type:
+            - number
+            - 'null'
+            format: double
+            description: Optional monthly spend cap in USD.
+          name:
+            type: string
+          profile:
+            type: string
+            description: Profile name in `~/.aws/config` (names only; credentials stay where AWS keeps them).
+          region:
+            type: string
+          status:
+            $ref: '#/components/schemas/ConnectorStatus'
+      - type: object
+        required:
+        - id
+        - name
+        - detail
+        - status
+        - isDefault
+        - agent
+        - source
+        - runsOn
+        - version
+        - keyHint
+        - kind
+        properties:
+          agent:
+            $ref: '#/components/schemas/ConnectorAgent'
+          detail:
+            type: string
+          id:
+            type: string
+          isDefault:
+            type: boolean
+            description: 'For agents: the one used when a run does not choose.'
+          keyHint:
+            type:
+            - string
+            - 'null'
+            description: Last characters of a stored key, e.g. `····4f2a`. Never the key.
+          kind:
+            type: string
+            enum:
+            - agent
+          name:
+            type: string
+          runsOn:
+            type: array
+            items:
+              $ref: '#/components/schemas/AgentsWhere'
+            description: '`login` runs on this Mac only; `api-key` can run here or on cloud runners.'
+          source:
+            $ref: '#/components/schemas/AgentConnectorSource'
+          status:
+            $ref: '#/components/schemas/ConnectorStatus'
+          version:
+            type:
+            - string
+            - 'null'
+            description: Detected CLI version (login) or `null`.
+      description: One saved connector. `kind` says which of the three it is; the first fields are common.
+    ConnectorsVm:
       type: object
-      description: One saved connector. Exactly one of `github` / `aws` / `agent` is set, matching `kind`.
+      description: Everything the Connectors screen shows.
       required:
-      - id
-      - kind
-      - name
-      - detail
-      - status
-      - statusText
-      - isDefault
-      - costNote
-      - github
-      - aws
-      - agent
+      - connectors
+      - githubFlow
+      - encryptionAvailable
+      - clientIdConfigured
       properties:
-        agent:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/AgentConnectorInfo'
-        aws:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/AwsConnectorInfo'
-        costNote:
-          type:
-          - string
-          - 'null'
-          description: Cost line on the New optimization step ("Free while this Mac is awake", "Billed to the key").
-        detail:
-          type: string
-          description: 'The grey line: "Personal · 42 repos", "SSO · us-east-1 · cap $500 / month".'
-        github:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/GithubConnectorInfo'
-        id:
-          type: string
-        isDefault:
+        clientIdConfigured:
           type: boolean
-          description: 'The default of its kind: preselected for new optimizations.'
-        kind:
-          $ref: '#/components/schemas/ConnectorKind'
-        name:
-          type: string
-          description: '"acme-prod", "Claude Code · your login".'
-        status:
-          $ref: '#/components/schemas/ConnectorStatus'
-        statusText:
-          type: string
-          description: '"Connected", "Expired", "Signed out".'
+          description: True when a real OAuth client id is configured for "Sign in with GitHub".
+        connectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorVm'
+        encryptionAvailable:
+          type: boolean
+          description: 'False when the keychain is unavailable: tokens and keys cannot be stored (the environment is still honoured).'
+        githubFlow:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/GithubFlowVm'
+            description: The GitHub device flow in progress (or just ended), for the code to show.
     CostReconcileLine:
       type: object
       description: One category of a reconcile run.
@@ -2609,82 +2819,6 @@ components:
       - reconciled
       - unchanged
       - pending
-    CreateConnectorInput:
-      oneOf:
-      - type: object
-        description: Starts the device flow (or stores a pasted token) and saves the account.
-        required:
-        - kind
-        properties:
-          kind:
-            type: string
-            enum:
-            - github
-          name:
-            type:
-            - string
-            - 'null'
-          token:
-            type:
-            - string
-            - 'null'
-            description: A pasted personal access token (Advanced). Without it the device flow starts.
-      - type: object
-        required:
-        - name
-        - auth
-        - kind
-        properties:
-          auth:
-            $ref: '#/components/schemas/AwsConnectorAuth'
-          capUsdPerMonth:
-            type:
-            - number
-            - 'null'
-            format: double
-          kind:
-            type: string
-            enum:
-            - aws
-          name:
-            type: string
-          profile:
-            type:
-            - string
-            - 'null'
-          region:
-            type:
-            - string
-            - 'null'
-      - type: object
-        required:
-        - name
-        - agent
-        - credential
-        - kind
-        properties:
-          agent:
-            $ref: '#/components/schemas/AgentKind'
-          apiKey:
-            type:
-            - string
-            - 'null'
-            description: 'The API key, for `credential: api-key`.'
-          credential:
-            $ref: '#/components/schemas/AgentCredential'
-          kind:
-            type: string
-            enum:
-            - agent
-          name:
-            type: string
-          runsIn:
-            type:
-            - array
-            - 'null'
-            items:
-              $ref: '#/components/schemas/AgentsWhere'
-      description: '`POST /v1/connectors`: what the "Add connector" sheet sends.'
     CreateEnvironmentDraftInput:
       type: object
       description: '`POST /v1/environment-drafts`.'
@@ -2730,11 +2864,14 @@ components:
         budgetUsd:
           type: number
           format: double
-        connectors:
+        connections:
           oneOf:
           - type: 'null'
-          - $ref: '#/components/schemas/ConnectorSelectionInput'
-            description: 'Provisional (connectors): which saved connectors this run uses.'
+          - $ref: '#/components/schemas/RepoConnections'
+            description: |-
+              The connectors this run uses (GitHub account, AWS profile, each agent and where it runs). Remembered for the
+              repo. Without it the repo's remembered choice is used, else the defaults. When given, `agents` and
+              `agentsWhere` follow it.
         demo:
           oneOf:
           - type: 'null'
@@ -2893,6 +3030,28 @@ components:
           type: integer
           format: int32
           minimum: 0
+    EffectiveConnections:
+      type: object
+      description: |-
+        What a run would use right now: the saved choice where there is one, else the defaults. `null` = nothing
+        connected of that kind.
+      required:
+      - github
+      - aws
+      - agents
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentSelection'
+        aws:
+          type:
+          - string
+          - 'null'
+        github:
+          type:
+          - string
+          - 'null'
     EffectiveProtected:
       type: object
       required:
@@ -3307,29 +3466,12 @@ components:
           type: string
         path:
           type: string
-    GithubAccountKind:
+    GithubConnectorSource:
       type: string
       enum:
-      - personal
-      - organization
-      - app
-    GithubConnectorInfo:
-      type: object
-      required:
-      - login
-      - accountKind
-      - repoCount
-      properties:
-        accountKind:
-          $ref: '#/components/schemas/GithubAccountKind'
-        login:
-          type: string
-        repoCount:
-          type:
-          - integer
-          - 'null'
-          format: int32
-          minimum: 0
+      - device
+      - token
+      - env
     GithubFlowState:
       type: string
       enum:
@@ -3439,6 +3581,11 @@ components:
       required:
       - source
       properties:
+        connectorId:
+          type:
+          - string
+          - 'null'
+          description: 'Read the repo with this GitHub connector (default: the default one).'
         source:
           $ref: '#/components/schemas/RepoSource'
     Kpi:
@@ -3599,55 +3746,6 @@ components:
       enum:
       - live
       - simulation
-    NeedsYouItem:
-      type: object
-      description: One item of "Needs you". The button opens `optimizationId` (or the draft / connector) in the app.
-      required:
-      - id
-      - kind
-      - title
-      - subtitle
-      - actionLabel
-      - optimizationId
-      - environmentDraftId
-      - connectorId
-      - url
-      properties:
-        actionLabel:
-          type: string
-          description: 'The button: "Review", "Open PR".'
-        connectorId:
-          type:
-          - string
-          - 'null'
-        environmentDraftId:
-          type:
-          - string
-          - 'null'
-        id:
-          type: string
-        kind:
-          $ref: '#/components/schemas/NeedsYouKind'
-        optimizationId:
-          type:
-          - string
-          - 'null'
-        subtitle:
-          type: string
-        title:
-          type: string
-        url:
-          type:
-          - string
-          - 'null'
-          description: 'For `merge-wins`: the pull request to open.'
-    NeedsYouKind:
-      type: string
-      enum:
-      - approve-environment
-      - merge-wins
-      - sign-in
-      - budget-limit
     NoticeLevel:
       type: string
       enum:
@@ -3896,109 +3994,252 @@ components:
             $ref: '#/components/schemas/OptimizationVm'
         range:
           $ref: '#/components/schemas/KpiRange'
+    OverviewDirection:
+      type: string
+      description: '`lower` = a smaller metric is better.'
+      enum:
+      - lower
+      - higher
+    OverviewNeed:
+      type: object
+      required:
+      - id
+      - kind
+      - optimizationId
+      - title
+      - sub
+      - action
+      properties:
+        action:
+          type: string
+          description: Button label.
+        id:
+          type: string
+        kind:
+          $ref: '#/components/schemas/OverviewNeedKind'
+        optimizationId:
+          type: string
+        sub:
+          type: string
+        title:
+          type: string
+    OverviewNeedKind:
+      type: string
+      enum:
+      - ship
+      - failed
     OverviewRange:
       type: string
+      description: Window the Overview covers. `all` = everything in the ledger.
       enum:
       - 30d
       - 90d
       - all
+    OverviewReturn:
+      type: object
+      description: Yearly value per $1 spent, and days until the spend is earned back.
+      required:
+      - ratio
+      - paybackDays
+      properties:
+        paybackDays:
+          type: number
+          format: double
+        ratio:
+          type: number
+          format: double
     OverviewRow:
       type: object
       required:
-      - optimizationId
+      - id
       - name
       - repo
-      - state
-      - stateText
-      - stateNote
-      - resultPct
-      - resultText
+      - status
+      - statusLabel
+      - tone
+      - remainingS
+      - metric
+      - unit
+      - direction
+      - baseline
+      - best
+      - gainPct
+      - verifiedWins
       - spentUsd
       - budgetUsd
+      - live
       - valueUsdPerYear
       properties:
-        budgetUsd:
+        baseline:
           type:
           - number
           - 'null'
           format: double
+        best:
+          type:
+          - number
+          - 'null'
+          format: double
+        budgetUsd:
+          type: number
+          format: double
+        direction:
+          $ref: '#/components/schemas/OverviewDirection'
+        gainPct:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: Signed gain vs baseline in percent (positive = better); `null` without a baseline.
+        id:
+          type: string
+        live:
+          type: boolean
+        metric:
+          type: string
         name:
           type: string
-        optimizationId:
-          type: string
+        remainingS:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: Seconds left of the time limit while running, else `null`.
         repo:
           type: string
-        resultPct:
-          type:
-          - number
-          - 'null'
-          format: double
-          description: Signed percent change of the metric, positive = better.
-        resultText:
-          type: string
-          description: '"412 -> 288 ms"'
         spentUsd:
           type: number
           format: double
-        state:
-          $ref: '#/components/schemas/OverviewState'
-        stateNote:
-          type:
-          - string
-          - 'null'
-          description: 'Under the state: "1 h 12 m left".'
-        stateText:
+          description: Spend in the range (lifetime when the range is `all`).
+        status:
+          $ref: '#/components/schemas/UiStatus'
+          description: Ledger status as the pills use it (`pr-open` once a pull request exists).
+        statusLabel:
           type: string
-          description: '"Running", "Waiting on you", "Merged", "Done", "No win".'
+          description: The status word shown next to the dot ("Running", "Waiting on you", "No win").
+        tone:
+          $ref: '#/components/schemas/StatusTone'
+        unit:
+          type: string
         valueUsdPerYear:
           type:
           - number
           - 'null'
           format: double
-    OverviewState:
-      type: string
-      description: The state dot of an Overview row.
-      enum:
-      - running
-      - waiting-on-you
-      - merged
-      - done
-      - no-win
-      - draft
-      - stopped
-      - failed
+          description: Value of the wins in the range, USD per year; `null` without a value model.
+        verifiedWins:
+          type: integer
+          format: int64
+    OverviewSpent:
+      type: object
+      required:
+      - usd
+      - budgetUsd
+      - optimizations
+      properties:
+        budgetUsd:
+          type: number
+          format: double
+          description: Budget of the optimizations listed in `rows`.
+        optimizations:
+          type: integer
+          format: int64
+        usd:
+          type: number
+          format: double
+    OverviewValue:
+      type: object
+      required:
+      - usdPerYear
+      - wins
+      - basis
+      properties:
+        basis:
+          $ref: '#/components/schemas/ValueBasis'
+        usdPerYear:
+          type: number
+          format: double
+        wins:
+          type: integer
+          format: int64
     OverviewVm:
       type: object
       required:
       - range
+      - from
+      - to
+      - empty
       - spent
-      - valueLockedIn
+      - value
       - returnOnSpend
-      - staircase
+      - wins
       - needsYou
       - rows
-      - sandbox
       properties:
+        empty:
+          type: boolean
+          description: The ledger has no optimization at all (the Overview shows one calm empty state).
+        from:
+          type: integer
+          format: int64
+          description: The window, epoch ms. `from` is the first activity for `all`.
         needsYou:
           type: array
           items:
-            $ref: '#/components/schemas/NeedsYouItem'
+            $ref: '#/components/schemas/OverviewNeed'
         range:
           $ref: '#/components/schemas/OverviewRange'
         returnOnSpend:
-          $ref: '#/components/schemas/ReturnHero'
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/OverviewReturn'
+            description: '`null` without value or spend.'
         rows:
           type: array
           items:
             $ref: '#/components/schemas/OverviewRow'
-        sandbox:
-          $ref: '#/components/schemas/SandboxChip'
+          description: Optimizations with activity in the range (drafts created in it included), newest first.
         spent:
-          $ref: '#/components/schemas/SpentHero'
-        staircase:
-          $ref: '#/components/schemas/Staircase'
-        valueLockedIn:
-          $ref: '#/components/schemas/ValueHero'
+          $ref: '#/components/schemas/OverviewSpent'
+        to:
+          type: integer
+          format: int64
+        value:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/OverviewValue'
+            description: '`null` when no optimization has a value model ("Set a value").'
+        wins:
+          type: array
+          items:
+            $ref: '#/components/schemas/OverviewWin'
+          description: Staircase of cumulative value, oldest first; empty without a value model or wins in the range.
+    OverviewWin:
+      type: object
+      description: 'One step of the "value locked in" staircase: a verified win with a value model.'
+      required:
+      - at
+      - cumulativeUsdPerYear
+      - usdPerYear
+      - optimizationId
+      - optimization
+      properties:
+        at:
+          type: integer
+          format: int64
+          description: When the ratchet moved (epoch ms).
+        cumulativeUsdPerYear:
+          type: number
+          format: double
+          description: Cumulative value locked in after this win, USD per year.
+        optimization:
+          type: string
+        optimizationId:
+          type: string
+        usdPerYear:
+          type: number
+          format: double
+          description: What this win added, USD per year.
     PipelineCandidate:
       type: object
       required:
@@ -4041,6 +4282,11 @@ components:
             $ref: '#/components/schemas/AgentKind'
         agentsWhere:
           $ref: '#/components/schemas/AgentsWhere'
+        repo:
+          type:
+          - string
+          - 'null'
+          description: '`owner/name`: check the connectors remembered for this repo instead of the defaults.'
         source:
           $ref: '#/components/schemas/PreflightSource'
     PreflightItem:
@@ -4282,6 +4528,40 @@ components:
       enum:
       - idle
       - manual
+    RepoConnections:
+      type: object
+      description: 'What one repo''s runs use: one GitHub account, one AWS profile, and one connector per agent with where it runs.'
+      required:
+      - github
+      - aws
+      - agents
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentSelection'
+        aws:
+          type: string
+        github:
+          type: string
+    RepoConnectionsVm:
+      type: object
+      description: '`GET /v1/connector-selections?repo=`.'
+      required:
+      - repo
+      - saved
+      - effective
+      properties:
+        effective:
+          $ref: '#/components/schemas/EffectiveConnections'
+        repo:
+          type: string
+          description: '`owner/name`, lower-cased: the key the selection is remembered under.'
+        saved:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/RepoConnections'
+            description: What was saved for this repo last time (only entries that still exist); `null` if nothing usable was saved.
     RepoInspectVm:
       type: object
       description: What step 1 learned about the chosen repo (read from the default branch, never typed).
@@ -4388,27 +4668,6 @@ components:
           type: string
         markdown:
           type: string
-    ReturnHero:
-      type: object
-      description: '"Return 84x: yearly value for every $1 spent, paid back in 4 days".'
-      required:
-      - ratio
-      - paybackDays
-      - note
-      properties:
-        note:
-          type: string
-        paybackDays:
-          type:
-          - number
-          - 'null'
-          format: double
-        ratio:
-          type:
-          - number
-          - 'null'
-          format: double
-          description: '`null` when nothing was spent.'
     ReviseEnvironmentDraftInput:
       type: object
       description: '`POST /v1/environment-drafts/{id}/revisions`: "Ask for a change", or "Use a smaller setup".'
@@ -4422,29 +4681,6 @@ components:
           oneOf:
           - type: 'null'
           - $ref: '#/components/schemas/EnvScope'
-    SandboxChip:
-      type: object
-      description: The sandbox line at the bottom of the sidebar ("Sandbox on · acme-prod, $1.20 so far · off at 15:40").
-      required:
-      - on
-      - name
-      - spentUsd
-      - offAt
-      properties:
-        name:
-          type:
-          - string
-          - 'null'
-        offAt:
-          type:
-          - integer
-          - 'null'
-          format: int64
-        on:
-          type: boolean
-        spentUsd:
-          type: number
-          format: double
     SandboxPhase:
       type: string
       description: |-
@@ -4457,7 +4693,7 @@ components:
       - destroying
       - destroyed
       - failed
-    SaveConnectorSelectionInput:
+    SaveRepoConnectionsInput:
       type: object
       description: '`PUT /v1/connector-selections`: remember the choice for a repo.'
       required:
@@ -4467,7 +4703,7 @@ components:
         repo:
           type: string
         selection:
-          $ref: '#/components/schemas/ConnectorSelectionInput'
+          $ref: '#/components/schemas/RepoConnections'
     SecretName:
       type: string
       enum:
@@ -4635,33 +4871,6 @@ components:
         total:
           type: number
           format: double
-    SpentHero:
-      type: object
-      description: '"Spent $184 of $500 across AWS and agent keys".'
-      required:
-      - usd
-      - capUsd
-      - fractionOfCap
-      - note
-      properties:
-        capUsd:
-          type:
-          - number
-          - 'null'
-          format: double
-          description: The total monthly caps of the connected AWS accounts and keys, when any is set.
-        fractionOfCap:
-          type:
-          - number
-          - 'null'
-          format: double
-          description: 0..=1, for the thin bar; `null` without a cap.
-        note:
-          type: string
-          description: '"across AWS and agent keys"'
-        usd:
-          type: number
-          format: double
     StageId:
       type: string
       enum:
@@ -4677,42 +4886,24 @@ components:
       - active
       - idle
       - failed
-    Staircase:
+    StartGithubSignInInput:
       type: object
-      required:
-      - from
-      - to
-      - points
+      description: '`POST /v1/connectors/github/sign-in`: start the device flow for a new account, or sign `connectorId` in again.'
       properties:
-        from:
-          type: integer
-          format: int64
-        points:
-          type: array
-          items:
-            $ref: '#/components/schemas/StaircasePoint'
-        to:
-          type: integer
-          format: int64
-    StaircasePoint:
-      type: object
-      description: One verified win on the staircase. `usdPerYear` is cumulative after this win.
-      required:
-      - at
-      - usdPerYear
-      - optimizationId
-      - optimizationName
-      properties:
-        at:
-          type: integer
-          format: int64
-        optimizationId:
-          type: string
-        optimizationName:
-          type: string
-        usdPerYear:
-          type: number
-          format: double
+        connectorId:
+          type:
+          - string
+          - 'null'
+          description: 'Re-sign-in: store the new token on this connector (default: a new one, or the one with the same login).'
+    StatusTone:
+      type: string
+      description: 'Dot colour of a status word: brass (running), amber (waiting on you), mint (done), grey (nothing), rose (failed).'
+      enum:
+      - run
+      - wait
+      - ok
+      - off
+      - bad
     StepPoint:
       type: object
       required:
@@ -4909,22 +5100,14 @@ components:
       - pr-open
     UpdateConnectorInput:
       type: object
-      description: '`PATCH /v1/connectors/{id}`: rename, change the cap, make default.'
+      description: '`PATCH /v1/connectors/{id}`: rename; AWS: region and monthly cap.'
       properties:
-        apiKey:
-          type:
-          - string
-          - 'null'
-          description: Replace the stored API key.
-        capUsdPerMonth:
+        monthlyCapUsd:
           type:
           - number
           - 'null'
           format: double
-        isDefault:
-          type:
-          - boolean
-          - 'null'
+          description: AWS only; `null` removes the cap, absent leaves it alone.
         name:
           type:
           - string
@@ -4933,6 +5116,7 @@ components:
           type:
           - string
           - 'null'
+          description: AWS only.
     ValidateConfigInput:
       type: object
       required:
@@ -4965,25 +5149,6 @@ components:
       enum:
       - estimated
       - measured
-    ValueHero:
-      type: object
-      description: '"Value locked in $15.4k / yr from 9 verified wins (estimated)".'
-      required:
-      - usdPerYear
-      - wins
-      - basis
-      - note
-      properties:
-        basis:
-          $ref: '#/components/schemas/ValueBasis'
-        note:
-          type: string
-        usdPerYear:
-          type: number
-          format: double
-        wins:
-          type: integer
-          format: int64
     ValuePeriod:
       type: string
       description: The period a value-model amount is quoted for.
@@ -5142,9 +5307,9 @@ tags:
   description: Evaluator templates (Benchmarks).
 - name: environments
   description: 'Sandboxes: what is running, end now, receipts.'
-- name: overview (provisional)
-  description: 'PROVISIONAL. Overview: spent, value locked in, return, needs you.'
-- name: connectors (provisional)
-  description: PROVISIONAL. Saved GitHub / AWS / agent connectors and per-repo selection.
+- name: overview
+  description: 'Overview: spent, value locked in, return, the value staircase, needs you, the table.'
+- name: connectors
+  description: Saved GitHub accounts, AWS profiles and agent credentials, and the choice remembered per repo.
 - name: environment drafts (provisional)
   description: 'PROVISIONAL. Dynamic environment drafts: draft, revise, approve.'

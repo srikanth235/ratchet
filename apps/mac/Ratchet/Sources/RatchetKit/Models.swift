@@ -301,6 +301,8 @@ public enum NeedsYouKind: String, Codable, Sendable {
     case signIn
     /// A budget that ran out; opens the optimization.
     case budgetLimit
+    /// A run that failed; opens the optimization.
+    case runFailed
 }
 
 public struct NeedsYouItem: Identifiable, Codable, Hashable, Sendable {

@@ -93,6 +93,18 @@ impl HarnessCache {
     }
 }
 
+/// The connector store reads the detected CLIs through the same cache.
+#[async_trait]
+impl ratchet_connectors::HarnessSource for HarnessCache {
+    async fn get(&self) -> Vec<HarnessInfo> {
+        HarnessCache::get(self).await.harnesses
+    }
+
+    async fn refresh(&self) -> Vec<HarnessInfo> {
+        HarnessCache::refresh(self).await.harnesses
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};

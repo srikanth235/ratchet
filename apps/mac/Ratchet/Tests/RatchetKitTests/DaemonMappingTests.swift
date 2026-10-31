@@ -95,58 +95,96 @@ struct DaemonMappingTests {
 
     @Test func theOverviewKeepsItsNumbersAndItsStaircase() throws {
         let vm = try decode(VM.OverviewVm.self, Fixtures.overview)
-        let overview = DaemonMapping.overview(vm, budgetUSD: 123)
+        let overview = DaemonMapping.overview(vm)
         #expect(overview.range == .days90)
         #expect(overview.spentUSD == vm.spent.usd)
-        #expect(overview.budgetUSD == 500)  // the cap of the daemon, not the fallback
-        #expect(overview.valueLockedPerYearUSD == vm.valueLockedIn.usdPerYear)
-        #expect(overview.winsCount == Int(vm.valueLockedIn.wins))
+        #expect(overview.budgetUSD == vm.spent.budgetUsd)  // the budgets of the optimizations in the table
+        #expect(overview.valueLockedPerYearUSD == vm.value?.usdPerYear)
+        #expect(overview.winsCount == Int(vm.value?.wins ?? -1))
         // start + one point per win + end; the ends have no win
-        #expect(overview.series.count == vm.staircase.points.count + 2)
+        #expect(overview.series.count == vm.wins.count + 2)
         #expect(overview.series.first?.win == nil && overview.series.last?.win == nil)
         #expect(overview.series.dropFirst().dropLast().allSatisfy { $0.win != nil })
         #expect(overview.series == overview.series.sorted { $0.date < $1.date })
-        #expect(overview.series.last?.valuePerYearUSD == vm.staircase.points.last?.usdPerYear)
-        #expect(overview.needsYou.map(\.kind) == [.mergeWins, .mergeWins, .signIn])
+        // the staircase starts at nothing and ends where the hero number ends
+        #expect(overview.series.first?.valuePerYearUSD == 0)
+        #expect(overview.series.last?.valuePerYearUSD == vm.wins.last?.cumulativeUsdPerYear)
+        #expect(overview.series.last?.valuePerYearUSD == vm.value?.usdPerYear)
+        #expect(overview.needsYou.map(\.kind) == [.mergeWins, .mergeWins])
         #expect(overview.needsYou[0].optimizationID == "opt_demo_ingest")
-        #expect(overview.needsYou[2].optimizationID == "")
-        #expect(overview.needsYou[0].actionTitle == "Open PR")
+        #expect(overview.needsYou[0].title == "Open a pull request for 2 verified wins")
+        #expect(overview.needsYou[0].actionTitle == "Review")
         #expect(overview.returnMultiple != nil)
     }
 
-    @Test func withoutACapTheBudgetsAddUp() throws {
+    @Test func withoutAValueModelThereIsNoValueAndNoStaircase() throws {
         var vm = try decode(VM.OverviewVm.self, Fixtures.overview)
-        vm.spent.capUsd = nil
-        #expect(DaemonMapping.overview(vm, budgetUSD: 123).budgetUSD == 123)
+        vm.value = nil
+        vm.returnOnSpend = nil
+        vm.wins = []
+        let overview = DaemonMapping.overview(vm)
+        #expect(overview.valueLockedPerYearUSD == 0)
+        #expect(overview.winsCount == 0)
+        #expect(overview.series.map(\.valuePerYearUSD) == [0, 0])
+        #expect(overview.spentUSD == vm.spent.usd)
+    }
+
+    @Test func aFailedRunIsSomethingThatNeedsYou() throws {
+        var vm = try decode(VM.OverviewVm.self, Fixtures.overview)
+        vm.needsYou = [
+            VM.OverviewNeed(
+                action: "View", id: "failed:opt_x", kind: .failed, optimizationId: "opt_x", sub: "Checkout latency",
+                title: "A run failed")
+        ]
+        let item = try #require(DaemonMapping.overview(vm).needsYou.first)
+        #expect(item.kind == .runFailed)
+        #expect(item.optimizationID == "opt_x")
+        #expect(item.actionTitle == "View")
     }
 
     @Test func connectorsKeepTheirStatesAndCaps() throws {
-        let list = try decode([VM.ConnectorVm].self, Fixtures.connectors).map(DaemonMapping.connector)
-        func connector(_ id: String) throws -> Connector { try #require(list.first { $0.id == id }) }
-        #expect(try connector("conn_gh_personal").state == .connected)
-        #expect(try connector("conn_gh_personal").isDefault)
-        let prod = try connector("conn_aws_prod")
+        let vm = try decode(VM.ConnectorsVm.self, Fixtures.connectors)
+        #expect(vm.encryptionAvailable)
+        #expect(vm.githubFlow == nil)  // a null the daemon always sends decodes as nil
+        let list = vm.connectors.map(DaemonMapping.connector)
+        #expect(list.count == 7)
+        func connector(_ name: String) throws -> Connector { try #require(list.first { $0.name == name }) }
+        #expect(try connector("srikanth235").state == .connected)
+        #expect(try connector("srikanth235").isDefault)
+        #expect(try connector("acme-org").isDefault == false)
+        let prod = try connector("acme-prod")
+        #expect(prod.kind == .aws)
         #expect(prod.state == .valid)
         #expect(prod.monthlyCapUSD == 500)
-        #expect(prod.usedThisMonthUSD == 88)
-        #expect(prod.leftThisMonthUSD == 412)
-        #expect(try connector("conn_aws_staging").state == .expired)
-        #expect(try connector("conn_agent_cc_login").state == .signedIn)
-        #expect(try connector("conn_agent_cc_login").canRunInCloud == false)
-        #expect(try connector("conn_agent_cc_key").canRunInCloud)
-        #expect(try connector("conn_agent_codex_login").state == .signedOut)
+        #expect(prod.detail.contains("cap $500"))
+        #expect(try connector("personal-dev").monthlyCapUSD == 100)
+        #expect(try connector("acme-staging").state == .expired)
+        #expect(try connector("acme-staging").monthlyCapUSD == nil)
+        let login = try connector("Claude Code · your login")
+        #expect(login.id == "agent-claude-code-login")
+        #expect(login.state == .signedIn)
+        #expect(login.canRunInCloud == false)
+        #expect(try connector("Claude Code · team key").canRunInCloud)
+        #expect(try connector("Claude Code · team key").state == .valid)
     }
 
     @Test func aSelectionGoesBothWays() throws {
-        let vm = try decode(VM.ConnectorSelectionVm.self, Fixtures.selection)
-        let selection = DaemonMapping.selection(vm)
+        let vm = try decode(VM.RepoConnectionsVm.self, Fixtures.selection)
+        let selection = try #require(DaemonMapping.selection(vm))
         #expect(selection.repoID == "acme/shop-api")
-        #expect(selection.awsID == "conn_aws_prod")
-        #expect(selection.agents == ["conn_agent_cc_login": .local])
-        let input = DaemonMapping.selectionInput(selection)
-        #expect(input.awsConnectorId == "conn_aws_prod")
-        #expect(input.agents.map(\.connectorId) == ["conn_agent_cc_login"])
-        #expect(input.agents.first?.runsIn == .local)
+        #expect(selection.awsID == vm.saved?.aws)
+        #expect(selection.githubID == vm.saved?.github)
+        #expect(selection.agents == ["agent-claude-code-login": .local])
+        let input = DaemonMapping.repoConnections(selection, github: "gh", aws: "aws")
+        #expect(input.github == "gh" && input.aws == "aws")
+        #expect(input.agents.map(\.connectorId) == ["agent-claude-code-login"])
+        #expect(input.agents.first?._where == .local)
+    }
+
+    @Test func nothingSavedIsNoSelection() throws {
+        var vm = try decode(VM.RepoConnectionsVm.self, Fixtures.selection)
+        vm.saved = nil
+        #expect(DaemonMapping.selection(vm) == nil)
     }
 
     @Test func anEnvironmentDraftReadsLikeTheMock() throws {

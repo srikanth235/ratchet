@@ -16,7 +16,7 @@ use ratchet_ledger::{
 };
 use serde_json::json;
 
-use super::data::{demo_config_yaml, simulated_stats};
+use super::data::{SeedValue, demo_config_yaml, simulated_stats};
 use super::new_optimization_input;
 use crate::service::{ServiceError, ServiceResult};
 use crate::views::format::{MIN_MS, round_to};
@@ -60,8 +60,8 @@ struct Spec {
     ended_ago: Option<i64>,
     spend_usd: f64,
     budget_usd: f64,
-    /// Keep the demo config's `objective.value` (USD per ms of p95): only meaningful for the search demo.
-    valued: bool,
+    /// The config's `objective.value`: the demo model (USD per ms of p95) only makes sense for the search demo.
+    value: SeedValue,
     candidates: Vec<Cand>,
 }
 
@@ -103,7 +103,7 @@ fn specs() -> Vec<Spec> {
             ended_ago: None,
             spend_usd: 42.6,
             budget_usd: 120.0,
-            valued: true,
+            value: SeedValue::Default,
             candidates: vec![
                 c(
                     14,
@@ -221,7 +221,10 @@ fn specs() -> Vec<Spec> {
             ended_ago: Some(120),
             spend_usd: 61.2,
             budget_usd: 100.0,
-            valued: false,
+            value: SeedValue::Own {
+                usd_per_unit: 400.0,
+                unit: "k/s",
+            },
             candidates: vec![
                 c(
                     90,
@@ -268,7 +271,10 @@ fn specs() -> Vec<Spec> {
             ended_ago: Some(40 * 24 * 60),
             spend_usd: 38.9,
             budget_usd: 60.0,
-            valued: false,
+            value: SeedValue::Own {
+                usd_per_unit: 3000.0,
+                unit: "s",
+            },
             candidates: vec![c(
                 120,
                 1,
@@ -294,7 +300,7 @@ fn specs() -> Vec<Spec> {
             ended_ago: None,
             spend_usd: 0.0,
             budget_usd: 50.0,
-            valued: false,
+            value: SeedValue::None,
             candidates: vec![],
         },
     ]
@@ -331,7 +337,7 @@ pub async fn seed_demo(ledger: &Ledger, now: i64) -> ServiceResult<()> {
 
 async fn seed_one(ledger: &Ledger, spec: &Spec, now: i64) -> ServiceResult<()> {
     let started = now - spec.started_ago * MIN_MS;
-    let yaml = demo_config_yaml(spec.name, spec.metric, spec.direction.as_str(), spec.valued);
+    let yaml = demo_config_yaml(spec.name, spec.metric, spec.direction.as_str(), spec.value);
     let cfg = parse_config(&yaml).map_err(|e| {
         ServiceError::Internal(format!("seed config for {} is invalid: {e:?}", spec.id))
     })?;

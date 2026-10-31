@@ -30,13 +30,17 @@ How identity is checked, beyond the ported cases:
   log line (`event`) so a log view can append without refetching.
 - **Money and time** are as before (USD floats, epoch ms); `metricOptions` order follows the `BTreeMap` of the stats
   (alphabetical, percentiles sorted by number) where the TypeScript followed JSON insertion order.
-- **Provisional groups** (connectors, overview, environment drafts) have no TypeScript to port yet. Their shapes come
-  from `design/v02.html` / `design/v02/*.png` and `docs/SIMPLIFIED_MODEL.md`; the tags say `(provisional)`.
+- **Overview and connectors** are the TypeScript spec now (`shared/overview.ts`, `shared/connectors.ts`), one to one; see
+  `api/CONTRACT.md`. The wire types of connectors are `ratchet-connectors::model`, re-exported by `ratchetd::api`. **Environment
+  drafts** are the one provisional group left: no TypeScript to port yet, shapes from `design/v02.html` /
+  `design/v02/*.png` and `docs/SIMPLIFIED_MODEL.md`; the tags say `(provisional)`.
 - **Secrets** are not stored by the simulation (only whether one is set). `RealService` (`ratchetd serve --mode real`, the default)
   keeps them in a `ratchet_engine::desktop::SecretStore`: the macOS Keychain, or with `--secrets-file` a 0600 file; without either
   `PUT /v1/settings/secrets/{name}` answers 409. The per-boot API token keeps its file implementation.
-- **`RealService`** implements everything but the provisional groups (overview, connectors, environment drafts → 501 `unsupported`);
-  its tests are `tests/api/real_service.rs` (ports of `service.test.ts`), see `crates/ratchet-engine/PARITY.md`.
+- **`RealService`** implements everything but environment drafts (→ 501 `unsupported`). Connectors live in the connector store
+  (`ratchet-connectors`) and the single-account calls of the first Settings (`setAwsProfile`, `setSecret`, `githubSignIn`, ...)
+  work on top of them, as in `service.ts`; the first start migrates the old settings file's token, profile and keys into connectors.
+  Its tests are `tests/api/real_service.rs` (ports of `service.test.ts`), see `crates/ratchet-engine/PARITY.md`.
 
 ## Test mapping
 
@@ -130,6 +134,30 @@ integration binary `tests/api/main.rs` (module paths).
 | treats environment-provided credentials as configured | deferred to the real engine |
 | survives a corrupt settings file | deferred to the real engine (the simulation keeps no settings file) |
 | getSettings exposes only configured yes/no | `it::sim::settings_connections_and_preflight_tell_the_truth` |
+
+### `overview.test.ts` (12)
+
+`LedgerViews::overview` (`src/views/overview.rs`) is the port of `buildOverview`; the tests are `tests/api/overview.rs` (`it::overview::`),
+run on the seeded simulation ledger at the TS test's fixed `NOW` (2026-10-30T12:00Z).
+
+| TS case | Rust test |
+|---|---|
+| the numbers: sums spend and value over the range, and relates them (return per $1, payback in days) | `it::overview::sums_spend_and_value_over_the_range_and_relates_them` |
+| the numbers: filters by range: 90 days adds the older optimization, all time starts at the first activity | `it::overview::filters_by_range_90_days_adds_the_older_optimization_all_time_starts_at_the_first_activity` |
+| the numbers: the table adds up to the hero | `it::overview::the_table_adds_up_to_the_hero` |
+| the numbers: the staircase is the cumulative value of the wins in the range, oldest first, naming each optimization | `it::overview::the_staircase_is_the_cumulative_value_of_the_wins_in_the_range` |
+| the numbers: a row says what happened | `it::overview::a_row_says_what_happened` |
+| no value model: shows no value and no return when nothing has a value model, but still adds up the spend | `it::overview::shows_no_value_and_no_return_when_nothing_has_a_value_model` |
+| no value model: an empty ledger is all zeros and empty lists, over any range | `it::overview::an_empty_ledger_is_all_zeros_and_empty_lists_over_any_range` |
+| no value model: measured only when every contributing model is measured | `it::overview::measured_only_when_every_contributing_model_is_measured` |
+| needs you: lists finished runs with verified wins and no pull request, whatever the range | `it::overview::lists_finished_runs_with_verified_wins_and_no_pull_request` |
+| needs you: a pull request takes it off the list and the status reads "PR open" | `it::overview::a_pull_request_takes_it_off_the_list_and_the_status_reads_pr_open` |
+| needs you: a recent failed run asks for a look; an old one stops asking | `it::overview::a_recent_failed_run_asks_for_a_look_an_old_one_stops_asking` |
+| needs you: a finished run without a win reads "No win" and is not waiting on anyone | `it::overview::a_finished_run_without_a_win_reads_no_win_and_is_not_waiting_on_anyone` |
+
+The Rust seed (`src/sim/seed.rs`) now carries the TS seed's per-optimization value models (ingest: $400 per k/s, edge worker: $3,000 per s;
+the draft has none); before, only the search demo was valued, which made every Overview number differ from the TS test.
+Spend events are summed in `ORDER BY at, id` (the TS sums in table order); the difference is below the tests' tolerances.
 
 ### `dev-engine.test.ts` (12) and `seed.ts`
 

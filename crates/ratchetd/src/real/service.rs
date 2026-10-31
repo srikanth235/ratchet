@@ -2,8 +2,9 @@
 //! [`ratchet_engine::desktop::ProductEngine`].
 //!
 //! Reads come from the ledger through [`LedgerViews`]; commands go to the engine through the product router; settings and
-//! secrets live in [`SettingsStore`] (secret values stay in the daemon). The provisional groups (overview, connectors,
-//! environment drafts) are not supported yet and answer `501`.
+//! secrets live in [`SettingsStore`] / the connector store (secret values stay in the daemon). Connectors are the accounts
+//! a run uses; the single-account calls of the first Settings (`setAwsProfile`, `setSecret`, `githubSignIn`, ...) work on top of
+//! them. The provisional group (environment drafts) is not supported yet and answers `501`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,11 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use ratchet_agents::detect::{HarnessAuth as DetectAuth, HarnessInfo, HarnessKind as DetectKind};
+use ratchet_connectors::{
+    AwsProfile, AwsProfileLister as ConnectorProfiles, ConnectorAgent, ConnectorDeps,
+    ConnectorError, ConnectorKind, ConnectorProbe, ConnectorStore, GITHUB_ENV_ID, GithubStored,
+    RecordKind, SecretName as ConnectorSecret,
+};
 use ratchet_core::enums::{AgentKind, AgentsWhere, SandboxProviderKind, SandboxStatus};
 use ratchet_core::ids::OptimizationId;
 use ratchet_core::ports::mock::SystemClock;
@@ -24,7 +30,6 @@ use ratchet_engine::desktop::{
     HarnessCache, LiveAppConfig, LivePaths, LiveSettingsSource, LiveSnapshot, ProductEngine,
     ProductOptions, effective_paths,
 };
-use ratchet_github::signin::{AccountStore, FlowState, GithubSignIn, SignInDeps};
 use ratchet_github::{GithubApi, slug_of};
 use ratchet_ledger::{Ledger, LedgerOptions};
 use tokio::sync::broadcast;
@@ -34,14 +39,15 @@ use super::aws_profiles::{AwsProfileList, ListAwsProfilesOptions, list_aws_profi
 use super::mappers::{
     derived_phase, first_line, github_error, phase_vm, receipt_vm, service_error,
 };
-use super::settings::SettingsStore;
+use super::settings::{SettingsStore, env_for};
 use crate::api::validate::{validate_profile_name, validate_secret_format};
 use crate::api::*;
+use crate::connectors_hub::{ConnectorsHub, HubOptions, flow_vm};
 use crate::service::{AppService, ServiceError, ServiceResult};
 use crate::views::{LedgerViews, PrUrlLookup};
 
 const DEFAULT_IDLE_MINUTES: u32 = 30;
-const SIGN_IN_FIRST: &str = "Sign in with GitHub first (Settings).";
+const SIGN_IN_FIRST: &str = "Sign in with GitHub first (Connectors).";
 
 /// "Test connection" probes (the runtime's `ConnectionTester` in production).
 #[async_trait]
@@ -71,6 +77,47 @@ impl ConnectionProbe for ratchet_engine::runtime::ConnectionTester {
 pub type AwsProfileLister = Arc<dyn Fn() -> AwsProfileList + Send + Sync>;
 pub type OpenExternal = Arc<dyn Fn(&str) + Send + Sync>;
 
+/// The connector store's view of the "test connection" probes.
+struct ProbeAdapter(Arc<dyn ConnectionProbe>);
+
+#[async_trait]
+impl ConnectorProbe for ProbeAdapter {
+    async fn aws(&self, region: &str, profile: &str) -> (bool, String) {
+        self.0.aws(region, profile).await
+    }
+    async fn anthropic(&self, api_key: &str) -> (bool, String) {
+        self.0.anthropic(api_key).await
+    }
+    async fn openai(&self, api_key: &str) -> (bool, String) {
+        self.0.openai(api_key).await
+    }
+}
+
+/// The profiles in `~/.aws`, as the connector store reads them (names and sign-in styles).
+fn connector_profiles(lister: &AwsProfileLister) -> ConnectorProfiles {
+    let lister = lister.clone();
+    Arc::new(move || {
+        let l = lister();
+        ratchet_connectors::AwsProfileList {
+            profiles: l
+                .profiles
+                .iter()
+                .map(|p| AwsProfile {
+                    name: p.name.clone(),
+                    kind: match p.kind {
+                        AwsProfileKind::Sso => AwsAuthStyle::Sso,
+                        AwsProfileKind::Role => AwsAuthStyle::Role,
+                        AwsProfileKind::Keys => AwsAuthStyle::Keys,
+                        AwsProfileKind::Process => AwsAuthStyle::Process,
+                        AwsProfileKind::Other => AwsAuthStyle::Other,
+                    },
+                })
+                .collect(),
+            files_found: l.files_found,
+        }
+    })
+}
+
 pub struct RealServiceOptions {
     /// The ledger file; `None` = in memory.
     pub ledger_path: Option<PathBuf>,
@@ -93,6 +140,8 @@ pub struct RealServiceOptions {
     pub harnesses: Arc<HarnessCache>,
     /// The AWS profiles on this machine; default: parse `~/.aws`.
     pub aws_profiles: Option<AwsProfileLister>,
+    /// Where the connectors' metadata lives; default `connectors.json` next to the settings file (memory only without one).
+    pub connectors_file: Option<PathBuf>,
     pub connection_probe: Option<Arc<dyn ConnectionProbe>>,
     /// Idle window of the automatic environment, minutes (shown in Environments).
     pub idle_minutes: u32,
@@ -124,6 +173,7 @@ impl RealServiceOptions {
             open_external: None,
             harnesses: Arc::new(HarnessCache::default()),
             aws_profiles: None,
+            connectors_file: None,
             connection_probe: None,
             idle_minutes: DEFAULT_IDLE_MINUTES,
             sim_idle_ms: None,
@@ -135,12 +185,16 @@ impl RealServiceOptions {
     }
 }
 
-/// What the product router reads from the daemon's settings.
-struct SettingsSource(Arc<SettingsStore>);
+/// What the product router reads from the daemon: the live settings, and the connectors a run on a repo uses.
+struct SettingsSource {
+    settings: Arc<SettingsStore>,
+    connectors: Arc<ConnectorStore>,
+}
 
+#[async_trait]
 impl LiveSettingsSource for SettingsSource {
     fn live(&self) -> LiveSnapshot {
-        let l = self.0.live();
+        let l = self.settings.live();
         LiveSnapshot {
             aws_profile: l.aws_profile,
             aws_region: l.aws_region,
@@ -152,29 +206,25 @@ impl LiveSettingsSource for SettingsSource {
     }
 
     fn secret(&self, name: &str) -> Option<String> {
+        let name = match name {
+            "githubToken" => ConnectorSecret::GithubToken,
+            "anthropicApiKey" => ConnectorSecret::AnthropicApiKey,
+            "openaiApiKey" => ConnectorSecret::OpenaiApiKey,
+            _ => return None,
+        };
+        self.connectors.secret_value(name)
+    }
+
+    fn env_secret(&self, name: &str) -> Option<String> {
         name.parse::<SecretName>()
             .ok()
-            .and_then(|n| self.0.get_secret(n))
-    }
-}
-
-/// Where a successful device-flow sign-in lands.
-struct Accounts(Arc<SettingsStore>);
-
-impl AccountStore for Accounts {
-    fn set_token(&self, token: &str) {
-        if let Err(e) = self.0.set_secret(SecretName::GithubToken, token) {
-            tracing::warn!("cannot store the GitHub token: {e}");
-        }
+            .and_then(|n| env_for(n).iter().find_map(|k| self.settings.env().get(*k)))
+            .filter(|v| !v.is_empty())
+            .cloned()
     }
 
-    fn set_account(&self, login: &str, source: &str) {
-        let s = if source == "token" {
-            GithubSource::Token
-        } else {
-            GithubSource::Device
-        };
-        self.0.set_github_account(login, s);
+    async fn connections(&self, repo: Option<&str>) -> ratchet_connectors::ResolvedConnections {
+        self.connectors.resolve(repo).await
     }
 }
 
@@ -192,7 +242,9 @@ struct Inner {
     tx: broadcast::Sender<ApiEvent>,
     ledger_path: Option<String>,
     github: Option<Arc<dyn GithubApi>>,
-    signin: Option<GithubSignIn>,
+    /// The connectors group (and the GitHub device flow behind both Settings and Connectors).
+    hub: ConnectorsHub,
+    connectors: Arc<ConnectorStore>,
     /// The login of a token that came from the environment (no stored account): looked up once per token.
     env_login: Mutex<Option<(String, Option<String>)>>,
     /// Parsed ratchet.yaml (as JSON) of repos seen in step 1 (the region).
@@ -260,6 +312,29 @@ impl RealService {
         let (tx, _) = broadcast::channel(1024);
         let configs: Arc<Mutex<HashMap<String, serde_json::Value>>> = Arc::default();
 
+        let aws_profiles: AwsProfileLister = opts
+            .aws_profiles
+            .clone()
+            .unwrap_or_else(|| Arc::new(|| list_aws_profiles(&ListAwsProfilesOptions::from_env())));
+        let connectors = Arc::new(ConnectorStore::new(
+            opts.connectors_file
+                .clone()
+                .or_else(|| settings.sibling_file("connectors.json")),
+            settings.secret_store(),
+            settings.env().clone(),
+            ConnectorDeps {
+                github: opts.github.clone(),
+                harnesses: Some(opts.harnesses.clone()),
+                aws_profiles: Some(connector_profiles(&aws_profiles)),
+                probe: opts
+                    .connection_probe
+                    .clone()
+                    .map(|p| Arc::new(ProbeAdapter(p)) as Arc<dyn ConnectorProbe>),
+                legacy: Some(settings.clone()),
+                clock: Some(Arc::clone(&clock)),
+            },
+        ));
+
         let product = match opts.product.clone() {
             Some(p) => p,
             None => {
@@ -272,7 +347,10 @@ impl RealService {
                     clock: opts.clock.clone(),
                     create_simulation: opts.create_simulation.clone(),
                     live: Some(LiveAppConfig {
-                        settings: Arc::new(SettingsSource(settings.clone())),
+                        settings: Arc::new(SettingsSource {
+                            settings: settings.clone(),
+                            connectors: connectors.clone(),
+                        }),
                         state_root: opts.state_root.clone(),
                         defaults: opts.live_defaults.clone(),
                         harnesses: opts.harnesses.clone(),
@@ -286,42 +364,40 @@ impl RealService {
             }
         };
 
-        let inner = Arc::new_cyclic(|weak: &std::sync::Weak<Inner>| {
-            let signin = opts.github.as_ref().map(|api| {
-                let mut deps = SignInDeps::new(api.clone(), Arc::new(Accounts(settings.clone())));
-                deps.open_external = opts.open_external.clone();
-                deps.clock = Arc::clone(&clock);
-                let (w, p, tx2) = (weak.clone(), product.clone(), tx.clone());
-                deps.on_signed_in = Some(Arc::new(move || {
-                    p.invalidate();
-                    if let Some(i) = w.upgrade() {
-                        *lock(&i.env_login) = None;
-                    }
-                    let _ = tx2.send(ApiEvent::Github { signed_in: true });
-                }));
-                GithubSignIn::new(deps)
-            });
-            Inner {
-                ledger: ledger.clone(),
-                views,
-                product: product.clone(),
-                settings: settings.clone(),
-                tx: tx.clone(),
-                ledger_path: opts.ledger_path.as_ref().map(|p| p.display().to_string()),
+        let hub = {
+            let (p, tx2) = (product.clone(), tx.clone());
+            ConnectorsHub::new(HubOptions {
+                store: connectors.clone(),
                 github: opts.github.clone(),
-                signin,
-                env_login: Mutex::new(None),
-                configs,
-                phases: Mutex::default(),
-                live_defaults: opts.live_defaults.clone(),
-                harnesses: opts.harnesses.clone(),
-                aws_profiles: opts.aws_profiles.clone().unwrap_or_else(|| {
-                    Arc::new(|| list_aws_profiles(&ListAwsProfilesOptions::from_env()))
+                aws_profiles: connector_profiles(&aws_profiles),
+                open_external: opts.open_external.clone(),
+                clock: Arc::clone(&clock),
+                invalidate: Arc::new(move || p.invalidate()),
+                emit: Arc::new(move |e| {
+                    let _ = tx2.send(e);
                 }),
-                probe: opts.connection_probe.clone(),
-                idle_minutes: opts.idle_minutes,
-                pump: Mutex::new(None),
-            }
+            })
+        };
+
+        let inner = Arc::new(Inner {
+            ledger: ledger.clone(),
+            views,
+            product: product.clone(),
+            settings: settings.clone(),
+            tx: tx.clone(),
+            ledger_path: opts.ledger_path.as_ref().map(|p| p.display().to_string()),
+            github: opts.github.clone(),
+            hub,
+            connectors,
+            env_login: Mutex::new(None),
+            configs,
+            phases: Mutex::default(),
+            live_defaults: opts.live_defaults.clone(),
+            harnesses: opts.harnesses.clone(),
+            aws_profiles,
+            probe: opts.connection_probe.clone(),
+            idle_minutes: opts.idle_minutes,
+            pump: Mutex::new(None),
         });
 
         // engine events -> API events (and the sandbox phases the Environments screen shows)
@@ -375,11 +451,14 @@ impl RealService {
         &self.0.settings
     }
 
+    /// The saved connectors (tests read tokens and defaults through it; secrets never leave the daemon otherwise).
+    pub fn connector_store(&self) -> &Arc<ConnectorStore> {
+        &self.0.connectors
+    }
+
     /// Stop the sign-in poll and the runtimes. Idempotent.
     pub async fn shutdown(&self) {
-        if let Some(s) = &self.0.signin {
-            s.cancel();
-        }
+        self.0.hub.shutdown();
         self.0.product.dispose().await;
         if let Some(p) = lock(&self.0.pump).take() {
             p.abort();
@@ -400,14 +479,49 @@ impl Inner {
         effective_paths(&l.tofu_binary, &l.module_dir, &self.live_defaults)
     }
 
+    /// The default AWS connector: what the single-profile Settings used to hold.
+    fn default_aws(&self) -> Option<(String, String)> {
+        self.connectors
+            .default_of(ConnectorKind::Aws)
+            .and_then(|r| match r.kind {
+                RecordKind::Aws {
+                    profile, region, ..
+                } => Some((profile, region)),
+                _ => None,
+            })
+    }
+
+    fn aws_profile_name(&self) -> String {
+        self.default_aws().map(|a| a.0).unwrap_or_default()
+    }
+
+    fn aws_region_name(&self) -> String {
+        self.default_aws()
+            .map(|a| a.1)
+            .unwrap_or_else(|| self.settings.region())
+    }
+
+    fn secrets_present(&self) -> SecretsPresent {
+        SecretsPresent {
+            anthropic_api_key: self.connectors.has_secret(ConnectorSecret::AnthropicApiKey),
+            openai_api_key: self.connectors.has_secret(ConnectorSecret::OpenaiApiKey),
+            github_token: self.connectors.has_secret(ConnectorSecret::GithubToken),
+        }
+    }
+
     fn settings_vm(&self) -> SettingsVm {
         let paths = self.paths();
+        let (profile, region) = (self.aws_profile_name(), self.aws_region_name());
         SettingsVm {
-            aws_profile: self.settings.aws_profile(),
-            aws_region: self.settings.region(),
-            secrets: self.settings.secrets_present(),
+            aws_profile: profile.clone(),
+            aws_region: region.clone(),
+            secrets: self.secrets_present(),
             advanced: AdvancedSettingsVm {
-                values: self.settings.live(),
+                values: LiveSettings {
+                    aws_profile: profile,
+                    aws_region: region,
+                    ..self.settings.live()
+                },
                 defaults: AdvancedDefaults {
                     tofu_binary: paths.tofu_binary,
                     module_dir: paths.module_dir,
@@ -418,9 +532,16 @@ impl Inner {
         }
     }
 
-    fn need_token(&self) -> ServiceResult<String> {
-        self.settings
-            .get_secret(SecretName::GithubToken)
+    /// The token of a GitHub connector (default: the default one), or the environment's when none was named.
+    fn need_token(&self, connector_id: Option<&str>) -> ServiceResult<String> {
+        self.connectors
+            .github_token(connector_id)
+            .or_else(|| {
+                connector_id
+                    .is_none()
+                    .then(|| self.settings.env_secret(SecretName::GithubToken))
+                    .flatten()
+            })
             .ok_or_else(|| ServiceError::NotReady(SIGN_IN_FIRST.into()))
     }
 
@@ -430,29 +551,83 @@ impl Inner {
         })
     }
 
-    async fn github_status(&self) -> GithubStatusVm {
-        let token = self.settings.get_secret(SecretName::GithubToken);
-        let flow = self
-            .signin
-            .as_ref()
-            .and_then(GithubSignIn::current)
-            .map(|f| GithubFlowVm {
-                state: match f.state {
-                    FlowState::Pending => GithubFlowState::Pending,
-                    FlowState::Expired => GithubFlowState::Expired,
-                    FlowState::Denied => GithubFlowState::Denied,
-                    FlowState::Error => GithubFlowState::Error,
-                },
-                user_code: f.user_code,
-                verification_uri: f.verification_uri,
-                expires_at: f.expires_at,
-                message: f.message,
+    /// The single-account profile call of the first Settings: the profile becomes the default AWS connector (added when it is
+    /// new); an empty profile removes the default one.
+    fn set_profile(&self, profile: &str) -> ServiceResult<()> {
+        if profile.is_empty() {
+            if let Some(def) = self.connectors.default_of(ConnectorKind::Aws) {
+                self.connectors.remove(&def.id)?;
+            }
+            return Ok(());
+        }
+        let existing = self
+            .connectors
+            .snapshot()
+            .into_iter()
+            .find_map(|c| match c {
+                ConnectorVm::Aws { id, profile: p, .. } if p == profile => Some(id),
+                _ => None,
             });
+        match existing {
+            Some(id) => self.connectors.set_default(&id)?,
+            None => {
+                self.connectors.add_aws(
+                    AddAwsConnectorInput {
+                        profile: profile.to_owned(),
+                        region: Some(self.settings.region()),
+                        monthly_cap_usd: None,
+                        name: None,
+                    },
+                    true,
+                )?;
+            }
+        }
+        // The auth kind follows the chosen profile (SSO sessions need `aws sso login`).
+        let sso = (self.aws_profiles)()
+            .profiles
+            .iter()
+            .any(|p| p.name == profile && p.kind == AwsProfileKind::Sso);
+        self.settings.set_live(&LiveSettingsInput {
+            aws_auth: Some(if sso {
+                AwsAuthKind::Sso
+            } else {
+                AwsAuthKind::Profile
+            }),
+            ..Default::default()
+        })
+    }
+
+    /// Remove the stored API-key connectors of an agent (the single key of the first Settings is replaced or cleared).
+    fn remove_keys_of(&self, agent: ConnectorAgent) -> ServiceResult<()> {
+        for c in self.connectors.snapshot() {
+            if let ConnectorVm::Agent {
+                id,
+                agent: a,
+                source: AgentConnectorSource::ApiKey,
+                ..
+            } = c
+                && a == agent
+            {
+                self.connectors.remove(&id)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The default GitHub account, as the old single-account row showed it.
+    async fn github_status(&self) -> GithubStatusVm {
+        let rec = self.connectors.default_of(ConnectorKind::Github);
+        let token = self.connectors.github_token(None);
+        let flow = self
+            .hub
+            .signin()
+            .and_then(ratchet_github::signin::GithubSignIn::current)
+            .map(flow_vm);
         let client_id_configured = self
             .github
             .as_ref()
             .is_some_and(|g| g.client_id_configured());
-        let Some(token) = token else {
+        let (Some(token), Some(rec)) = (token, rec) else {
             return GithubStatusVm {
                 signed_in: false,
                 login: None,
@@ -461,8 +636,20 @@ impl Inner {
                 flow,
             };
         };
-        let mut login = Some(self.settings.github_login()).filter(|l| !l.is_empty());
-        let source = self.settings.github_source().unwrap_or(GithubSource::Env);
+        let (mut login, stored) = match &rec.kind {
+            RecordKind::Github { login, source } => {
+                (Some(login.clone()).filter(|l| !l.is_empty()), Some(*source))
+            }
+            _ => (None, None),
+        };
+        let source = if rec.id == GITHUB_ENV_ID {
+            GithubSource::Env
+        } else {
+            match stored {
+                Some(GithubStored::Token) => GithubSource::Token,
+                _ => GithubSource::Device,
+            }
+        };
         if login.is_none()
             && let Some(gh) = &self.github
         {
@@ -606,12 +793,12 @@ impl Inner {
     }
 
     async fn test_connection(&self, target: ConnectionTarget) -> ConnectionResultVm {
-        let l = self.settings.live();
+        let aws = self.default_aws();
         let need = |what: &str| (false, what.to_owned());
         let (mut ok, mut detail) = match target {
             ConnectionTarget::Github => match (
                 &self.github,
-                self.settings.get_secret(SecretName::GithubToken),
+                self.connectors.secret_value(ConnectorSecret::GithubToken),
             ) {
                 (None, _) => need("GitHub is not available in this build."),
                 (_, None) => need("Sign in with GitHub first."),
@@ -623,21 +810,21 @@ impl Inner {
             _ => match &self.probe {
                 None => need("Connection tests are not available in this build."),
                 Some(p) => match target {
-                    ConnectionTarget::Aws => {
-                        if l.aws_profile.is_empty() {
-                            need("Choose an AWS profile first.")
-                        } else {
-                            p.aws(&self.settings.region(), &l.aws_profile).await
-                        }
-                    }
+                    ConnectionTarget::Aws => match &aws {
+                        None => need("Choose an AWS profile first."),
+                        Some((profile, region)) => p.aws(region, profile).await,
+                    },
                     ConnectionTarget::Anthropic => {
-                        match self.settings.get_secret(SecretName::AnthropicApiKey) {
+                        match self
+                            .connectors
+                            .secret_value(ConnectorSecret::AnthropicApiKey)
+                        {
                             Some(k) => p.anthropic(&k).await,
                             None => need("Store an Anthropic API key first."),
                         }
                     }
                     ConnectionTarget::Openai => {
-                        match self.settings.get_secret(SecretName::OpenaiApiKey) {
+                        match self.connectors.secret_value(ConnectorSecret::OpenaiApiKey) {
                             Some(k) => p.openai(&k).await,
                             None => need("Store an OpenAI API key first."),
                         }
@@ -647,8 +834,12 @@ impl Inner {
             },
         };
         // Belt and braces: no stored secret value may ever leave in a message, whatever the tester returned.
-        for name in SecretName::ALL {
-            if let Some(v) = self.settings.get_secret(name)
+        for name in [
+            ConnectorSecret::AnthropicApiKey,
+            ConnectorSecret::OpenaiApiKey,
+            ConnectorSecret::GithubToken,
+        ] {
+            if let Some(v) = self.connectors.secret_value(name)
                 && v.chars().count() >= 4
             {
                 detail = detail.replace(&v, "***");
@@ -656,15 +847,14 @@ impl Inner {
         }
         if target == ConnectionTarget::Aws
             && !ok
-            && !l.aws_profile.is_empty()
+            && let Some((profile, _)) = &aws
             && (self.aws_profiles)()
                 .profiles
                 .iter()
-                .any(|p| p.name == l.aws_profile && p.kind == AwsProfileKind::Sso)
+                .any(|p| &p.name == profile && p.kind == AwsProfileKind::Sso)
         {
             detail.push_str(&format!(
-                " Run \"aws sso login --profile {}\" in a terminal, then test again.",
-                l.aws_profile
+                " Run \"aws sso login --profile {profile}\" in a terminal, then test again."
             ));
         }
         if detail.is_empty() {
@@ -690,38 +880,37 @@ impl Inner {
             )];
         }
         let mut items = Vec::new();
-        let gh = self.github_status().await;
-        items.push(if gh.signed_in {
-            item(
+        // The connectors this repo's runs use: its remembered choice, else the defaults.
+        let chosen = self.connectors.resolve(input.repo.as_deref()).await;
+        items.push(match &chosen.github {
+            Some(g) => item(
                 "github",
                 "GitHub",
                 PreflightState::Ok,
-                &gh.login
+                &g.login
+                    .as_ref()
                     .map_or("signed in".into(), |l| format!("signed in as {l}")),
-            )
-        } else {
-            item(
+            ),
+            None => item(
                 "github",
                 "Sign in with GitHub",
                 PreflightState::Fail,
                 "Ratchet pushes candidate branches and opens the pull request as you",
-            )
+            ),
         });
-        let profile = self.settings.aws_profile();
-        items.push(if profile.is_empty() {
-            item(
+        items.push(match &chosen.aws {
+            Some(a) => item(
+                "aws",
+                "AWS",
+                PreflightState::Ok,
+                &format!("{} \u{00b7} {}", a.profile, a.region),
+            ),
+            None => item(
                 "aws",
                 "Connect AWS",
                 PreflightState::Fail,
                 "the evaluator runs in a sandbox in your AWS account",
-            )
-        } else {
-            item(
-                "aws",
-                "AWS",
-                PreflightState::Ok,
-                &format!("{profile} \u{00b7} {}", self.settings.region()),
-            )
+            ),
         });
         let named = |k: AgentKind| {
             if k == AgentKind::Codex {
@@ -785,14 +974,20 @@ impl Inner {
                 };
                 let id = format!("key-{}", a.as_str());
                 let label = format!("{who} API key");
-                items.push(if self.settings.has_secret(name) {
+                let agent = match a {
+                    AgentKind::Codex => ConnectorAgent::Codex,
+                    _ => ConnectorAgent::ClaudeCode,
+                };
+                let has_key = chosen.cloud_keys.contains_key(&agent)
+                    || self.settings.env_secret(name).is_some();
+                items.push(if has_key {
                     item(&id, &label, PreflightState::Ok, "stored in the keychain")
                 } else {
                     item(
                         &id,
                         &label,
                         PreflightState::Fail,
-                        "cloud runners need an API key (Settings > Agents)",
+                        "cloud runners need an API key (Connectors)",
                     )
                 });
             }
@@ -909,8 +1104,26 @@ impl AppService for RealService {
                 fields: vec![FieldError::new("repoUrl", "use owner/name")],
             })?;
             let mut i = base;
+            // The connectors picked for this run become the repo's remembered choice, and the runtime for the repo is built
+            // from them; `agents` and `agentsWhere` follow them.
+            let mut agents_where = input.agents_where;
+            if let Some(c) = &input.connections {
+                self.0.connectors.save_repo_connections(&slug, c.clone())?;
+                agents_where = self.0.connectors.where_of(&c.agents)?.or(agents_where);
+                let mut kinds: Vec<AgentKind> = Vec::new();
+                for a in &c.agents {
+                    if let Some(ConnectorVm::Agent { agent, .. }) =
+                        self.0.connectors.vm_of(&a.connector_id)
+                        && !kinds.contains(&agent.kind())
+                    {
+                        kinds.push(agent.kind());
+                    }
+                }
+                i.agents = kinds;
+                self.0.product.invalidate();
+            }
             i.repo_url = slug;
-            i.agents_where = input.agents_where;
+            i.agents_where = agents_where;
             self.0.product.create_optimization(&i).await
         }
         .map_err(service_error)?;
@@ -1122,29 +1335,38 @@ impl AppService for RealService {
         if let Some(problem) = validate_profile_name(profile) {
             return Err(invalid_field("profile", problem));
         }
-        let profile = profile.trim().to_owned();
-        self.0.settings.set_aws_profile(&profile);
-        // The auth kind follows the chosen profile (SSO sessions need `aws sso login`).
-        if !profile.is_empty() {
-            let sso = (self.0.aws_profiles)()
-                .profiles
-                .iter()
-                .any(|p| p.name == profile && p.kind == AwsProfileKind::Sso);
-            self.0.settings.set_live(&LiveSettingsInput {
-                aws_auth: Some(if sso {
-                    AwsAuthKind::Sso
-                } else {
-                    AwsAuthKind::Profile
-                }),
-                ..Default::default()
-            })?;
-        }
+        self.0.set_profile(profile.trim())?;
         self.0.product.invalidate();
         Ok(self.0.settings_vm())
     }
 
     async fn save_advanced_settings(&self, input: LiveSettingsInput) -> ServiceResult<SettingsVm> {
-        self.0.settings.set_live(&input)?; // validates the whole batch first
+        let LiveSettingsInput { aws_profile, .. } = input.clone();
+        if let Some(p) = &aws_profile
+            && let Some(problem) = validate_profile_name(p)
+        {
+            return Err(invalid_field("awsProfile", problem));
+        }
+        let region = input.aws_region.clone();
+        // validates the whole batch first; the profile lives in the connectors
+        self.0.settings.set_live(&LiveSettingsInput {
+            aws_profile: None,
+            ..input
+        })?;
+        if let Some(p) = &aws_profile {
+            self.0.set_profile(p.trim())?;
+        }
+        if let Some(r) = region.as_deref().map(str::trim).filter(|r| !r.is_empty())
+            && let Some(def) = self.0.connectors.default_of(ConnectorKind::Aws)
+        {
+            self.0.connectors.update(
+                &def.id,
+                UpdateConnectorInput {
+                    region: Some(r.to_owned()),
+                    ..Default::default()
+                },
+            )?;
+        }
         self.0.product.invalidate();
         Ok(self.0.settings_vm())
     }
@@ -1153,22 +1375,37 @@ impl AppService for RealService {
         if let Some(problem) = validate_secret_format(name, value) {
             return Err(invalid_field("value", problem));
         }
-        if name == SecretName::GithubToken
-            && let Some(gh) = &self.0.github
-        {
-            // A pasted token (Advanced): prove it works and learn the account before keeping it.
-            let login = gh
-                .user(value)
-                .await
-                .map_err(|e| ServiceError::Upstream(e.to_string().replace(value, "***")))?
-                .login;
-            self.0.settings.set_secret(name, value)?;
+        if name == SecretName::GithubToken {
+            // A pasted token (Advanced): prove it works and learn the account before keeping it; it becomes the default
+            // GitHub account.
             self.0
-                .settings
-                .set_github_account(&login, GithubSource::Token);
+                .connectors
+                .add_github_token(value, None, true)
+                .await
+                .map_err(|e| match e {
+                    ConnectorError::Invalid(m) => ServiceError::Upstream(m),
+                    other => other.into(),
+                })?;
             *lock(&self.0.env_login) = None;
         } else {
-            self.0.settings.set_secret(name, value)?;
+            // The single key of the first Settings: replaces the agent's stored key connector (or adds one).
+            let agent = if name == SecretName::AnthropicApiKey {
+                ConnectorAgent::ClaudeCode
+            } else {
+                ConnectorAgent::Codex
+            };
+            self.0.remove_keys_of(agent)?;
+            self.0
+                .connectors
+                .add_agent(
+                    AddAgentConnectorInput::ApiKey {
+                        agent,
+                        api_key: value.to_owned(),
+                        name: None,
+                    },
+                    true,
+                )
+                .await?;
         }
         self.0.product.invalidate();
         if name == SecretName::GithubToken {
@@ -1178,9 +1415,19 @@ impl AppService for RealService {
     }
 
     async fn clear_secret(&self, name: SecretName) -> ServiceResult<SettingsVm> {
-        self.0.settings.clear_secret(name)?;
         if name == SecretName::GithubToken {
-            self.0.settings.clear_github_account();
+            if let Some(rec) = self.0.connectors.default_of(ConnectorKind::Github)
+                && rec.id != GITHUB_ENV_ID
+            {
+                self.0.connectors.remove(&rec.id)?;
+            }
+        } else {
+            let agent = if name == SecretName::AnthropicApiKey {
+                ConnectorAgent::ClaudeCode
+            } else {
+                ConnectorAgent::Codex
+            };
+            self.0.remove_keys_of(agent)?;
         }
         self.0.product.invalidate();
         if name == SecretName::GithubToken {
@@ -1200,27 +1447,30 @@ impl AppService for RealService {
     }
 
     async fn github_sign_in(&self) -> ServiceResult<GithubStatusVm> {
-        let signin = self.0.signin.as_ref().ok_or_else(|| {
-            ServiceError::Unsupported("GitHub is not available in this build.".into())
-        })?;
+        let signin = self.0.hub.need_signin()?;
         signin.start().await.map_err(github_error)?;
         Ok(self.0.github_status().await)
     }
 
     async fn github_sign_out(&self) -> ServiceResult<GithubStatusVm> {
-        if let Some(s) = &self.0.signin {
-            s.cancel();
+        self.0.hub.shutdown();
+        if let Some(rec) = self.0.connectors.default_of(ConnectorKind::Github)
+            && rec.id != GITHUB_ENV_ID
+        {
+            self.0.connectors.remove(&rec.id)?;
         }
-        self.0.settings.clear_secret(SecretName::GithubToken)?;
-        self.0.settings.clear_github_account();
         *lock(&self.0.env_login) = None;
         self.0.product.invalidate();
         let _ = self.0.tx.send(ApiEvent::Github { signed_in: false });
         Ok(self.0.github_status().await)
     }
 
-    async fn list_repos(&self, query: Option<String>) -> ServiceResult<Vec<RepoVm>> {
-        let token = self.0.need_token()?;
+    async fn list_repos(
+        &self,
+        query: Option<String>,
+        connector_id: Option<String>,
+    ) -> ServiceResult<Vec<RepoVm>> {
+        let token = self.0.need_token(connector_id.as_deref())?;
         let gh = self.0.need_github()?;
         Ok(gh
             .repos(&token, query.as_deref())
@@ -1237,10 +1487,14 @@ impl AppService for RealService {
             .collect())
     }
 
-    async fn inspect_repo(&self, source: RepoSource) -> ServiceResult<RepoInspectVm> {
+    async fn inspect_repo(
+        &self,
+        source: RepoSource,
+        connector_id: Option<String>,
+    ) -> ServiceResult<RepoInspectVm> {
         match &source {
             RepoSource::Github { repo } => {
-                let token = self.0.need_token()?;
+                let token = self.0.need_token(connector_id.as_deref())?;
                 let gh = self.0.need_github()?;
                 let i = ratchet_github::api::inspect_github_repo(gh.as_ref(), &token, repo)
                     .await
@@ -1273,8 +1527,8 @@ impl AppService for RealService {
         Ok(AwsProfilesVm {
             profiles: found.profiles,
             sso_sessions: found.sso_sessions,
-            selected: self.0.settings.aws_profile(),
-            region: self.0.settings.region(),
+            selected: self.0.aws_profile_name(),
+            region: self.0.aws_region_name(),
             default_region: DEFAULT_AWS_REGION.into(),
             files_found: found.files_found,
         })
@@ -1290,7 +1544,7 @@ impl AppService for RealService {
         &self,
         input: ProposeTemplateInput,
     ) -> ServiceResult<ProposeTemplateResult> {
-        self.0.need_token()?;
+        self.0.need_token(None)?;
         let slug = slug_of(&input.repo_url).ok_or_else(|| ServiceError::InvalidFields {
             message: format!(
                 "{} is not a GitHub repository (owner/name).",
@@ -1305,6 +1559,85 @@ impl AppService for RealService {
             .propose_template(&i)
             .await
             .map_err(service_error)
+    }
+
+    // ---- overview ----------------------------------------------------------------------------------------
+
+    async fn overview(&self, range: OverviewRange) -> ServiceResult<OverviewVm> {
+        self.0.views.overview(range).await
+    }
+
+    // ---- connectors --------------------------------------------------------------------------------------
+
+    async fn list_connectors(&self) -> ServiceResult<ConnectorsVm> {
+        Ok(self.0.hub.view().await)
+    }
+
+    async fn refresh_connectors(&self) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.refresh().await
+    }
+
+    async fn add_github_connector(
+        &self,
+        input: AddGithubConnectorInput,
+    ) -> ServiceResult<ConnectorsVm> {
+        let vm = self.0.hub.add_github(input).await?;
+        *lock(&self.0.env_login) = None;
+        Ok(vm)
+    }
+
+    async fn start_github_connector_sign_in(
+        &self,
+        input: StartGithubSignInInput,
+    ) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.start_sign_in(input).await
+    }
+
+    async fn cancel_github_connector_sign_in(&self) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.cancel_sign_in().await
+    }
+
+    async fn add_aws_connector(&self, input: AddAwsConnectorInput) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.add_aws(input).await
+    }
+
+    async fn add_agent_connector(
+        &self,
+        input: AddAgentConnectorInput,
+    ) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.add_agent(input).await
+    }
+
+    async fn update_connector(
+        &self,
+        id: &str,
+        input: UpdateConnectorInput,
+    ) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.update(id, input).await
+    }
+
+    async fn remove_connector(&self, id: &str) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.remove(id).await
+    }
+
+    async fn set_default_connector(&self, id: &str) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.set_default(id).await
+    }
+
+    async fn test_connector(&self, id: &str) -> ServiceResult<ConnectorTestVm> {
+        self.0.hub.test(id).await
+    }
+
+    async fn repo_connections(&self, repo: &str) -> ServiceResult<RepoConnectionsVm> {
+        self.0.hub.repo_connections(repo).await
+    }
+
+    async fn save_repo_connections(
+        &self,
+        repo: &str,
+        selection: RepoConnections,
+    ) -> ServiceResult<RepoConnectionsVm> {
+        self.0.hub.save_repo_connections(repo, selection).await
     }
 
     // ---- environments ------------------------------------------------------------------------------------

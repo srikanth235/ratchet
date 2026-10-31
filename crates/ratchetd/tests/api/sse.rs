@@ -242,11 +242,21 @@ async fn github_and_connector_events_are_published() {
     d.sim.complete_github_flow();
     let m = sse.until("github").await;
     assert_eq!(m.data["signedIn"], true);
+    let list = d.http.get("/v1/connectors").await.json();
+    let staging = list["connectors"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "acme-staging")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     d.http
-        .post("/v1/connectors/conn_aws_staging/test", json!(null))
+        .post(&format!("/v1/connectors/{staging}/test"), json!(null))
         .await;
     let m = sse.until("connector").await;
-    assert_eq!(m.data["connectorId"], "conn_aws_staging");
-    assert_eq!(m.data["status"], "connected");
+    assert_eq!(m.data["connectorId"], staging.as_str());
+    assert_eq!(m.data["status"], "expired");
     d.stop().await;
 }
