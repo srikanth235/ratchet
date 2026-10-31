@@ -4,11 +4,11 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use ratchet_core::NoiseFloorOptions;
 use ratchet_core::config::RatchetConfig;
 use ratchet_core::enums::{AgentKind, AgentsWhere};
 use ratchet_core::ids::OptimizationId;
 use ratchet_core::ports::SandboxInput;
-use ratchet_core::NoiseFloorOptions;
 use ratchet_ledger::Ledger;
 
 /// Where API keys come from (desktop: the OS keychain). Values go to `put_secret` and nowhere else.
@@ -17,7 +17,11 @@ pub type SecretSource = Arc<dyn Fn(AgentKind, &str) -> Option<String> + Send + S
 /// Builds the pull request body (`defaultReport` when none is configured).
 #[async_trait]
 pub trait ReportBuilder: Send + Sync {
-    async fn build(&self, ledger: &Ledger, optimization_id: &OptimizationId) -> Result<String, String>;
+    async fn build(
+        &self,
+        ledger: &Ledger,
+        optimization_id: &OptimizationId,
+    ) -> Result<String, String>;
 }
 
 /// What a custom sandbox-input hook is given.
@@ -180,7 +184,9 @@ pub fn resolve_settings(s: EngineSettings) -> ResolvedSettings {
         secret_names,
         tick_interval_ms: s.tick_interval_ms.unwrap_or(15_000),
         scratch_dir: s.scratch_dir,
-        runner_image_ref: s.runner_image_ref.unwrap_or_else(|| "ratchet-runner".into()),
+        runner_image_ref: s
+            .runner_image_ref
+            .unwrap_or_else(|| "ratchet-runner".into()),
         token_pricing: s.token_pricing.unwrap_or(DEFAULT_TOKEN_PRICING),
         warn_fraction: s.warn_fraction.unwrap_or(0.8),
         noise: s.noise,

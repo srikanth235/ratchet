@@ -134,7 +134,10 @@ impl Engine {
                     );
                     return Err(EngineError::new(
                         EngineErrorCode::SandboxUnavailable,
-                        format!("could not create the environment in {region}: {}", err.message),
+                        format!(
+                            "could not create the environment in {region}: {}",
+                            err.message
+                        ),
                     ));
                 }
                 // ours: destroyed automatically after the idle window
@@ -156,7 +159,12 @@ impl Engine {
         Ok(sandbox_id)
     }
 
-    fn sandbox_input_for(&self, sandbox_id: &str, region: &str, config: &RatchetConfig) -> SandboxInput {
+    fn sandbox_input_for(
+        &self,
+        sandbox_id: &str,
+        region: &str,
+        config: &RatchetConfig,
+    ) -> SandboxInput {
         if let Some(custom) = self.settings.sandbox.input.as_ref().and_then(|f| {
             f(&crate::settings::SandboxInputContext {
                 sandbox_id,
@@ -183,7 +191,10 @@ impl Engine {
             allowed_instance_types: types,
             max_instances_per_agent: 2,
             max_instance_lifetime_hours: 4.0,
-            tags: Some(BTreeMap::from([("ratchet:managed".to_owned(), "true".to_owned())])),
+            tags: Some(BTreeMap::from([(
+                "ratchet:managed".to_owned(),
+                "true".to_owned(),
+            )])),
         }
     }
 
@@ -245,7 +256,8 @@ impl Engine {
     }
 
     async fn auto_tick_one(&self, sandbox_id: &str) -> EngineResult<()> {
-        if !self.active_runs(sandbox_id).await?.is_empty() || !lock(&self.pending_starts).is_empty() {
+        if !self.active_runs(sandbox_id).await?.is_empty() || !lock(&self.pending_starts).is_empty()
+        {
             self.kv.delete(&k::sandbox_idle(sandbox_id)).await?;
             return Ok(());
         }
@@ -266,7 +278,12 @@ impl Engine {
         if self.clock.now() - since < self.settings.sandbox.idle_ms {
             return Ok(());
         }
-        if self.clock.now() < lock(&self.auto.retry_after).get(sandbox_id).copied().unwrap_or(0) {
+        if self.clock.now()
+            < lock(&self.auto.retry_after)
+                .get(sandbox_id)
+                .copied()
+                .unwrap_or(0)
+        {
             return Ok(());
         }
         if let Err(err) = self.destroy_auto(sandbox_id, TeardownTrigger::Idle).await {
@@ -297,7 +314,9 @@ impl Engine {
         trigger: TeardownTrigger,
     ) -> EngineResult<SandboxTeardownReceipt> {
         let Some(row) = self.ledger.get_sandbox(sandbox_id).await? else {
-            return Err(EngineError::not_found(format!("sandbox {sandbox_id} not found")));
+            return Err(EngineError::not_found(format!(
+                "sandbox {sandbox_id} not found"
+            )));
         };
         if row.status != SandboxStatus::Applied && row.status != SandboxStatus::Failed {
             return Err(EngineError::invalid_state(format!(
@@ -315,7 +334,11 @@ impl Engine {
                     if active_runs.is_empty() {
                         "a run that is starting".to_owned()
                     } else {
-                        active_runs.iter().map(|o| o.id.to_string()).collect::<Vec<_>>().join(", ")
+                        active_runs
+                            .iter()
+                            .map(|o| o.id.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     }
                 ),
             ));
@@ -372,7 +395,10 @@ impl Engine {
         let mut orphans: Vec<TeardownOrphan> = Vec::new();
         match self.ports.compute.list_tagged(None).await {
             Ok(all) => {
-                for i in all.into_iter().filter(|i| i.state != InstanceState::Terminated) {
+                for i in all
+                    .into_iter()
+                    .filter(|i| i.state != InstanceState::Terminated)
+                {
                     orphans.push(TeardownOrphan {
                         id: i.id,
                         role: json_str(&i.role),
@@ -445,9 +471,17 @@ impl Engine {
             removed: TeardownRemoved {
                 instances,
                 agent_identities: dedup(
-                    reports.iter().flat_map(|r| r.deleted_identities_for.clone()).collect(),
+                    reports
+                        .iter()
+                        .flat_map(|r| r.deleted_identities_for.clone())
+                        .collect(),
                 ),
-                secrets: dedup(reports.iter().flat_map(|r| r.deleted_secrets_for.clone()).collect()),
+                secrets: dedup(
+                    reports
+                        .iter()
+                        .flat_map(|r| r.deleted_secrets_for.clone())
+                        .collect(),
+                ),
                 resources: outputs.as_ref().map(resources_of).unwrap_or_default(),
             },
             nothing_running,
@@ -456,9 +490,13 @@ impl Engine {
             summary: String::new(),
         };
         receipt.summary = summarize(&receipt);
-        self.kv.set_json(&k::sandbox_receipt(sandbox_id), &receipt).await?;
+        self.kv
+            .set_json(&k::sandbox_receipt(sandbox_id), &receipt)
+            .await?;
         for o in &after {
-            self.kv.set_json(&k::opt_receipt(o.id.as_str()), &receipt).await?;
+            self.kv
+                .set_json(&k::opt_receipt(o.id.as_str()), &receipt)
+                .await?;
         }
         self.kv.delete(&k::sandbox_auto(sandbox_id)).await?;
         self.kv.delete(&k::sandbox_idle(sandbox_id)).await?;
@@ -490,19 +528,20 @@ impl Engine {
         self.ready().await;
         let row = self.ledger.get_sandbox(sandbox_id).await?;
         let auto = self.kv.has(&k::sandbox_auto(sandbox_id)).await?;
-        let applied = row.as_ref().is_some_and(|r| r.status == SandboxStatus::Applied);
+        let applied = row
+            .as_ref()
+            .is_some_and(|r| r.status == SandboxStatus::Applied);
         let active_runs = if applied {
             self.active_runs(sandbox_id).await?
         } else {
             vec![]
         };
         let instances_running = if applied {
-            self.ports
-                .compute
-                .list_tagged(None)
-                .await
-                .ok()
-                .map(|l| l.iter().filter(|i| i.state != InstanceState::Terminated).count() as u64)
+            self.ports.compute.list_tagged(None).await.ok().map(|l| {
+                l.iter()
+                    .filter(|i| i.state != InstanceState::Terminated)
+                    .count() as u64
+            })
         } else {
             Some(0)
         };
@@ -570,7 +609,11 @@ fn resources_of(o: &SandboxOutputs) -> Vec<String> {
 
 fn summarize(r: &SandboxTeardownReceipt) -> String {
     let usd = format!("${}", ratchet_core::numfmt::to_fixed(r.spend_usd, 2));
-    let runs = format!("{} run{}", r.runs.len(), if r.runs.len() == 1 { "" } else { "s" });
+    let runs = format!(
+        "{} run{}",
+        r.runs.len(),
+        if r.runs.len() == 1 { "" } else { "s" }
+    );
     let left = if r.nothing_running {
         "Nothing is left running.".to_owned()
     } else {

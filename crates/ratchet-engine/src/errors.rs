@@ -158,9 +158,11 @@ const MAX_ID_LEN: usize = 48;
 pub fn assert_valid_id(what: &str, id: &str) -> EngineResult<()> {
     let ok = !id.is_empty()
         && id.len() <= MAX_ID_LEN
-        && id
-            .split('-')
-            .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()));
+        && id.split('-').all(|p| {
+            !p.is_empty()
+                && p.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        });
     if ok {
         Ok(())
     } else {

@@ -33,8 +33,8 @@ use ratchet_core::sandbox::{
     SandboxLifecycleOptions,
 };
 use ratchet_core::{
-    Calibration, EffectiveProtected, NoiseFloorOptions, ProtectedConfigInput,
-    calibrate_baseline, effective_protected, median, noise_floor as compute_noise_floor,
+    Calibration, EffectiveProtected, NoiseFloorOptions, ProtectedConfigInput, calibrate_baseline,
+    effective_protected, median, noise_floor as compute_noise_floor,
 };
 use ratchet_ledger::{
     AddAgentInput, CreateOptimizationInput as LedgerCreate, Ledger, Patch, RecordBaselineInput,
@@ -159,8 +159,18 @@ impl SandboxBlockers for EngineBlockers {
         let mut reasons = Vec::new();
         for o in optimizations {
             let mut left = 0;
-            for a in self.ledger.list_agents(&o.id).await.map_err(|e| PortError::Failed(e.message))? {
-                if self.kv.has(&k::identity(a.id.as_str())).await.map_err(fail)? {
+            for a in self
+                .ledger
+                .list_agents(&o.id)
+                .await
+                .map_err(|e| PortError::Failed(e.message))?
+            {
+                if self
+                    .kv
+                    .has(&k::identity(a.id.as_str()))
+                    .await
+                    .map_err(fail)?
+                {
                     left += 1;
                 }
             }
@@ -182,7 +192,11 @@ impl SandboxBlockers for EngineBlockers {
                     reasons.push(format!(
                         "{} tagged instance(s) still alive ({})",
                         alive.len(),
-                        alive.iter().map(|i| i.id.as_str()).collect::<Vec<_>>().join(", ")
+                        alive
+                            .iter()
+                            .map(|i| i.id.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     ));
                 }
             }
@@ -407,7 +421,10 @@ impl Engine {
     }
 
     /// Lifecycle apply with the input remembered (so a later destroy runs with the same variables), also after a restart.
-    pub(crate) async fn apply_lifecycle(&self, input: &SandboxInput) -> EngineResult<SandboxOutputs> {
+    pub(crate) async fn apply_lifecycle(
+        &self,
+        input: &SandboxInput,
+    ) -> EngineResult<SandboxOutputs> {
         self.kv
             .set_json(&k::sandbox_input(&input.sandbox_id), input)
             .await?;
@@ -423,7 +440,10 @@ impl Engine {
 
     /// Live optimizations need an applied sandbox and are linked to it. In simulation an applied sandbox is linked
     /// when there is one, so the Environments screen and the ledger agree; otherwise the optimization stays unlinked.
-    async fn sandbox_for_new_optimization(&self, requested: Option<&str>) -> EngineResult<Option<String>> {
+    async fn sandbox_for_new_optimization(
+        &self,
+        requested: Option<&str>,
+    ) -> EngineResult<Option<String>> {
         if let Some(r) = requested {
             assert_valid_id("sandbox id", r)?;
         }
@@ -444,7 +464,10 @@ impl Engine {
     }
 
     /// Live mode only: an optimization may start only inside an applied sandbox.
-    pub(crate) async fn assert_sandbox_applied(&self, sandbox_id: Option<&str>) -> EngineResult<()> {
+    pub(crate) async fn assert_sandbox_applied(
+        &self,
+        sandbox_id: Option<&str>,
+    ) -> EngineResult<()> {
         if self.mode != Mode::Live {
             return Ok(());
         }
@@ -469,7 +492,10 @@ impl Engine {
 
     // ------------------------------------------------------------------ create_optimization
 
-    pub async fn create_optimization(&self, input: CreateOptimizationInput) -> EngineResult<String> {
+    pub async fn create_optimization(
+        &self,
+        input: CreateOptimizationInput,
+    ) -> EngineResult<String> {
         self.ready().await;
         self.validate_create_input(&input)?;
         let sandbox_id = self
@@ -488,7 +514,10 @@ impl Engine {
         }
 
         let git = self.git_for(&input.repo_url);
-        let config_path = input.config_path.clone().unwrap_or_else(|| "ratchet.yaml".into());
+        let config_path = input
+            .config_path
+            .clone()
+            .unwrap_or_else(|| "ratchet.yaml".into());
         let (config_yaml, _) = self
             .read_from_base(&*git, &input.base_ref, &config_path, None)
             .await?;
@@ -807,7 +836,10 @@ impl Engine {
         if self.kv.get_number(&k::deadline(id)).await?.is_none() {
             let limit = self.require_opt(id).await?.time_limit_s;
             self.kv
-                .set(&k::deadline(id), &(self.clock.now() + limit * 1000).to_string())
+                .set(
+                    &k::deadline(id),
+                    &(self.clock.now() + limit * 1000).to_string(),
+                )
                 .await?;
         }
         let brief = self.load_brief(id, &config).await?;
@@ -962,7 +994,10 @@ impl Engine {
     }
 
     /// `base_ref` resolved to a sha once and remembered, so baseline, confirm-baseline and diffs all use the same commit.
-    pub(crate) async fn base_sha(&self, opt: &ratchet_core::rows::Optimization) -> EngineResult<String> {
+    pub(crate) async fn base_sha(
+        &self,
+        opt: &ratchet_core::rows::Optimization,
+    ) -> EngineResult<String> {
         let key = k::base_sha(opt.id.as_str());
         if let Some(known) = self.kv.get(&key).await? {
             return Ok(known);
@@ -976,7 +1011,12 @@ impl Engine {
         let opt = self.require_opt(id).await?;
         let git = self.git_for(&opt.repo);
         let brief = self
-            .read_from_base(&*git, &opt.base_ref, "ratchet.yaml", Some(&config.agent.instructions))
+            .read_from_base(
+                &*git,
+                &opt.base_ref,
+                "ratchet.yaml",
+                Some(&config.agent.instructions),
+            )
             .await
             .ok()
             .and_then(|(_, b)| b);
@@ -1247,7 +1287,10 @@ impl Engine {
             match self.ports.compute.revoke_agent_identity(&identity).await {
                 Ok(()) => {
                     self.kv
-                        .set(&k::revoked(agent.id.as_str()), &self.clock.now().to_string())
+                        .set(
+                            &k::revoked(agent.id.as_str()),
+                            &self.clock.now().to_string(),
+                        )
                         .await?;
                 }
                 Err(err) => self.report_error(err, &format!("revoke {}", agent.id)), // retried by the reaper pass
@@ -1329,7 +1372,9 @@ impl Engine {
             .await
             .send(
                 &handle(&agent),
-                &ratchet_core::ports::RunnerMessage::User { text: text.to_owned() },
+                &ratchet_core::ports::RunnerMessage::User {
+                    text: text.to_owned(),
+                },
             )
             .await?;
         self.log_agent(
@@ -1423,7 +1468,10 @@ impl Engine {
         self.ready().await;
         self.require_opt(id).await?;
         let config = self.config(id).await?;
-        Ok(effective_protected(&ProtectedConfigInput::from(&*config), None))
+        Ok(effective_protected(
+            &ProtectedConfigInput::from(&*config),
+            None,
+        ))
     }
 
     // ------------------------------------------------------------------ helpers
@@ -1435,7 +1483,10 @@ impl Engine {
             .clone()
     }
 
-    pub(crate) async fn require_opt(&self, id: &str) -> EngineResult<ratchet_core::rows::Optimization> {
+    pub(crate) async fn require_opt(
+        &self,
+        id: &str,
+    ) -> EngineResult<ratchet_core::rows::Optimization> {
         self.ledger
             .get_optimization(&oid(id))
             .await?
@@ -1474,7 +1525,11 @@ impl Engine {
         }
     }
 
-    pub(crate) async fn set_status(&self, id: &str, status: OptimizationStatus) -> EngineResult<()> {
+    pub(crate) async fn set_status(
+        &self,
+        id: &str,
+        status: OptimizationStatus,
+    ) -> EngineResult<()> {
         self.ledger
             .set_optimization_status(&oid(id), status, Some(self.clock.now()))
             .await?;
@@ -1615,11 +1670,15 @@ impl EngineApi for Engine {
     }
 
     async fn pause_agent(&self, agent_id: &AgentId) -> PortResult<()> {
-        Engine::pause_agent(self, agent_id.as_str()).await.map_err(port)
+        Engine::pause_agent(self, agent_id.as_str())
+            .await
+            .map_err(port)
     }
 
     async fn resume_agent(&self, agent_id: &AgentId) -> PortResult<()> {
-        Engine::resume_agent(self, agent_id.as_str()).await.map_err(port)
+        Engine::resume_agent(self, agent_id.as_str())
+            .await
+            .map_err(port)
     }
 
     async fn message_agent(&self, agent_id: &AgentId, text: &str) -> PortResult<()> {
@@ -1632,7 +1691,9 @@ impl EngineApi for Engine {
         &self,
         id: &OptimizationId,
     ) -> PortResult<ratchet_core::ports::PullRequestRef> {
-        Engine::open_pull_request(self, id.as_str()).await.map_err(port)
+        Engine::open_pull_request(self, id.as_str())
+            .await
+            .map_err(port)
     }
 
     async fn teardown(&self, id: &OptimizationId) -> PortResult<()> {
@@ -1643,7 +1704,9 @@ impl EngineApi for Engine {
         &self,
         id: &OptimizationId,
     ) -> PortResult<ratchet_core::ports::CostReconcileReport> {
-        Engine::reconcile_costs(self, id.as_str()).await.map_err(port)
+        Engine::reconcile_costs(self, id.as_str())
+            .await
+            .map_err(port)
     }
 
     async fn calibration(&self, id: &OptimizationId) -> PortResult<Option<Calibration>> {
@@ -1651,7 +1714,9 @@ impl EngineApi for Engine {
     }
 
     async fn protected_paths(&self, id: &OptimizationId) -> PortResult<EffectiveProtected> {
-        Engine::protected_paths(self, id.as_str()).await.map_err(port)
+        Engine::protected_paths(self, id.as_str())
+            .await
+            .map_err(port)
     }
 
     async fn propose_template(
@@ -1674,7 +1739,9 @@ impl EngineApi for Engine {
     }
 
     async fn destroy_sandbox(&self, sandbox_id: &str) -> PortResult<()> {
-        Engine::destroy_sandbox(self, sandbox_id).await.map_err(port)
+        Engine::destroy_sandbox(self, sandbox_id)
+            .await
+            .map_err(port)
     }
 
     fn subscribe(&self) -> broadcast::Receiver<EngineEvent> {
@@ -1694,7 +1761,9 @@ impl EngineApi for Engine {
         &self,
         sandbox_id: &str,
     ) -> PortResult<ratchet_core::ports::SandboxActivity> {
-        Engine::sandbox_activity(self, sandbox_id).await.map_err(port)
+        Engine::sandbox_activity(self, sandbox_id)
+            .await
+            .map_err(port)
     }
 
     async fn end_sandbox(
@@ -1708,4 +1777,3 @@ impl EngineApi for Engine {
         Engine::run_active(self)
     }
 }
-

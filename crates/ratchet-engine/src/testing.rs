@@ -65,7 +65,11 @@ impl CallLog {
     }
 
     pub fn starting_with(&self, prefix: &str) -> Vec<String> {
-        lock(&self.0).iter().filter(|l| l.starts_with(prefix)).cloned().collect()
+        lock(&self.0)
+            .iter()
+            .filter(|l| l.starts_with(prefix))
+            .cloned()
+            .collect()
     }
 }
 
@@ -83,8 +87,11 @@ pub struct FakeCommit {
     pub files: Vec<String>,
 }
 
-pub type ListHook =
-    Arc<dyn Fn(String, Option<String>) -> BoxFut<Option<PortResult<Vec<CandidateCommit>>>> + Send + Sync>;
+pub type ListHook = Arc<
+    dyn Fn(String, Option<String>) -> BoxFut<Option<PortResult<Vec<CandidateCommit>>>>
+        + Send
+        + Sync,
+>;
 
 pub struct FakeGit {
     log: CallLog,
@@ -116,7 +123,12 @@ impl FakeGit {
             commits: Mutex::new(HashMap::new()),
             prs: Mutex::new(Vec::new()),
             fail_changed_files: Mutex::new(HashSet::new()),
-            files: Mutex::new(files.iter().map(|(a, b)| ((*a).to_owned(), (*b).to_owned())).collect()),
+            files: Mutex::new(
+                files
+                    .iter()
+                    .map(|(a, b)| ((*a).to_owned(), (*b).to_owned()))
+                    .collect(),
+            ),
             existing_branches: Mutex::new(HashSet::new()),
             files_committed: Mutex::new(Vec::new()),
             fail_commit_files: AtomicBool::new(false),
@@ -129,19 +141,27 @@ impl FakeGit {
 
     /// Script a candidate commit on `branch` (what the runner would push).
     pub fn push(&self, branch: &str, sha: &str, changed: &[&str]) {
-        self.push_with_message(branch, sha, changed, &format!("perf: {sha}\n\nRatchet-Candidate: true"));
+        self.push_with_message(
+            branch,
+            sha,
+            changed,
+            &format!("perf: {sha}\n\nRatchet-Candidate: true"),
+        );
     }
 
     pub fn push_with_message(&self, branch: &str, sha: &str, changed: &[&str], message: &str) {
-        lock(&self.commits).entry(branch.to_owned()).or_default().push(FakeCommit {
-            commit: CandidateCommit {
-                sha: sha.to_owned(),
-                branch: branch.to_owned(),
-                message: message.to_owned(),
-                committed_at: self.clock.now(),
-            },
-            files: changed.iter().map(|s| (*s).to_owned()).collect(),
-        });
+        lock(&self.commits)
+            .entry(branch.to_owned())
+            .or_default()
+            .push(FakeCommit {
+                commit: CandidateCommit {
+                    sha: sha.to_owned(),
+                    branch: branch.to_owned(),
+                    message: message.to_owned(),
+                    committed_at: self.clock.now(),
+                },
+                files: changed.iter().map(|s| (*s).to_owned()).collect(),
+            });
     }
 
     pub fn set_file(&self, path: &str, body: &str) {
@@ -186,7 +206,11 @@ impl GitHost for FakeGit {
         } else {
             since_sha.and_then(|s| list.iter().position(|c| c.commit.sha == s))
         };
-        Ok(list.into_iter().skip(idx.map_or(0, |i| i + 1)).map(|c| c.commit).collect())
+        Ok(list
+            .into_iter()
+            .skip(idx.map_or(0, |i| i + 1))
+            .map(|c| c.commit)
+            .collect())
     }
 
     async fn changed_files(&self, _base_ref: &str, sha: &str) -> PortResult<Vec<String>> {
@@ -256,7 +280,10 @@ impl GitHost for FakeGit {
         if self.fail_commit_files.load(Ordering::SeqCst)
             || !lock(&self.existing_branches).insert(input.branch.clone())
         {
-            return Err(PortError::failed(format!("branch {} already exists", input.branch)));
+            return Err(PortError::failed(format!(
+                "branch {} already exists",
+                input.branch
+            )));
         }
         let mut done = lock(&self.files_committed);
         let sha = format!("files-{}", done.len() + 1);
@@ -345,11 +372,11 @@ impl FakeBench {
 
     /// Hold every bench run until [`open_gate`](Self::open_gate) (or its cancellation).
     pub fn close_gate(&self) {
-        let _ = self.gate.send(true);
+        self.gate.send_replace(true);
     }
 
     pub fn open_gate(&self) {
-        let _ = self.gate.send(false);
+        self.gate.send_replace(false);
     }
 
     pub fn jobs(&self) -> Vec<BenchJob> {
@@ -386,7 +413,8 @@ impl BenchRunner for FakeBench {
         baseline: Option<&BaselineMetrics>,
         cancel: Option<&CancellationToken>,
     ) -> PortResult<BenchOutcome> {
-        self.log.push(format!("bench.{}:{}", phase_str(job.phase), job.sha));
+        self.log
+            .push(format!("bench.{}:{}", phase_str(job.phase), job.sha));
         lock(&self.jobs).push(job.clone());
         lock(&self.baseline_args).push(baseline.cloned());
         let aborted = || PortError::failed("aborted");
@@ -407,14 +435,18 @@ impl BenchRunner for FakeBench {
         }
         let key = format!("{}:{}", job.sha, phase_str(job.phase));
         let Some(s) = lock(&self.script).get(&key).cloned() else {
-            return Err(PortError::failed(format!("no scripted bench result for {key}")));
+            return Err(PortError::failed(format!(
+                "no scripted bench result for {key}"
+            )));
         };
         if s.fail_times > 0 {
             let mut f = lock(&self.failed);
             let n = f.entry(key.clone()).or_default();
             if *n < s.fail_times {
                 *n += 1;
-                return Err(PortError::failed(format!("bench infrastructure hiccup #{n}")));
+                return Err(PortError::failed(format!(
+                    "bench infrastructure hiccup #{n}"
+                )));
             }
         }
         let started_at = self.clock.now();
@@ -478,7 +510,10 @@ impl FakeRunners {
 
     /// Script events an agent's runner will report (appended after existing ones).
     pub fn emit(&self, agent_id: &str, events: Vec<AgentEvent>) {
-        lock(&self.queues).entry(agent_id.to_owned()).or_default().extend(events);
+        lock(&self.queues)
+            .entry(agent_id.to_owned())
+            .or_default()
+            .extend(events);
     }
 
     pub fn sent_to(&self, agent_id: &str) -> Vec<RunnerMessage> {
@@ -520,7 +555,10 @@ impl RunnerControl for FakeRunners {
         if lock(&self.fail_poll).contains(handle.agent_id.as_str()) {
             return Err(PortError::failed("s3 unavailable"));
         }
-        let all = lock(&self.queues).get(handle.agent_id.as_str()).cloned().unwrap_or_default();
+        let all = lock(&self.queues)
+            .get(handle.agent_id.as_str())
+            .cloned()
+            .unwrap_or_default();
         let from = cursor.and_then(|c| c.parse::<usize>().ok()).unwrap_or(0);
         Ok(PolledEvents {
             events: all.iter().skip(from).cloned().collect(),
@@ -651,7 +689,8 @@ impl CloudCompute for FakeCompute {
         optimization_id: &OptimizationId,
         agent_id: &AgentId,
     ) -> PortResult<AgentIdentity> {
-        self.log.push(format!("compute.createAgentIdentity:{agent_id}"));
+        self.log
+            .push(format!("compute.createAgentIdentity:{agent_id}"));
         let id = AgentIdentity {
             optimization_id: optimization_id.clone(),
             agent_id: agent_id.clone(),
@@ -670,7 +709,8 @@ impl CloudCompute for FakeCompute {
     }
 
     async fn revoke_agent_identity(&self, identity: &AgentIdentity) -> PortResult<()> {
-        self.log.push(format!("compute.revoke:{}", identity.agent_id));
+        self.log
+            .push(format!("compute.revoke:{}", identity.agent_id));
         if lock(&self.fail_revoke).contains(identity.agent_id.as_str()) {
             return Err(PortError::failed("iam throttled"));
         }
@@ -681,7 +721,8 @@ impl CloudCompute for FakeCompute {
     }
 
     async fn delete_agent_identity(&self, identity: &AgentIdentity) -> PortResult<()> {
-        self.log.push(format!("compute.deleteIdentity:{}", identity.agent_id));
+        self.log
+            .push(format!("compute.deleteIdentity:{}", identity.agent_id));
         if let Some(cur) = lock(&self.identities).get_mut(identity.agent_id.as_str()) {
             cur.deleted = true;
         }
@@ -695,8 +736,12 @@ impl CloudCompute for FakeCompute {
         name: &str,
         value: &str,
     ) -> PortResult<SecretRef> {
-        self.log.push(format!("compute.putSecret:{agent_id}:{name}"));
-        lock(&self.secrets).insert(format!("{optimization_id}/{agent_id}/{name}"), value.to_owned());
+        self.log
+            .push(format!("compute.putSecret:{agent_id}:{name}"));
+        lock(&self.secrets).insert(
+            format!("{optimization_id}/{agent_id}/{name}"),
+            value.to_owned(),
+        );
         Ok(SecretRef {
             name: name.to_owned(),
             reference: format!("/ratchet/{optimization_id}/{agent_id}/{name}"),
@@ -720,7 +765,8 @@ impl CloudCompute for FakeCompute {
 
     async fn launch_runner(&self, spec: &RunnerLaunchSpec) -> PortResult<InstanceInfo> {
         let n = self.launches.fetch_add(1, Ordering::SeqCst) + 1;
-        self.log.push(format!("compute.launchRunner:{}", spec.agent_id));
+        self.log
+            .push(format!("compute.launchRunner:{}", spec.agent_id));
         if self.hang_launch_at.load(Ordering::SeqCst) == n {
             std::future::pending::<()>().await;
         }
@@ -733,11 +779,17 @@ impl CloudCompute for FakeCompute {
     }
 
     async fn launch_bench_instance(&self, spec: &BenchLaunchSpec) -> PortResult<InstanceInfo> {
-        Ok(self.add(InstanceRole::Bench, &spec.optimization_id, None, &spec.instance_type))
+        Ok(self.add(
+            InstanceRole::Bench,
+            &spec.optimization_id,
+            None,
+            &spec.instance_type,
+        ))
     }
 
     async fn terminate(&self, instance_ids: &[String]) -> PortResult<()> {
-        self.log.push(format!("compute.terminate:{}", instance_ids.join(",")));
+        self.log
+            .push(format!("compute.terminate:{}", instance_ids.join(",")));
         let stubborn = lock(&self.stubborn).clone();
         let mut instances = lock(&self.instances);
         for id in instance_ids {
@@ -752,7 +804,10 @@ impl CloudCompute for FakeCompute {
         Ok(())
     }
 
-    async fn list_tagged(&self, optimization_id: Option<&OptimizationId>) -> PortResult<Vec<InstanceInfo>> {
+    async fn list_tagged(
+        &self,
+        optimization_id: Option<&OptimizationId>,
+    ) -> PortResult<Vec<InstanceInfo>> {
         Ok(lock(&self.instances)
             .values()
             .filter(|i| optimization_id.is_none_or(|o| &i.optimization_id == o))
@@ -786,7 +841,11 @@ impl FakePrices {
 #[async_trait]
 impl PriceBook for FakePrices {
     async fn hourly_usd(&self, instance_type: &str) -> PortResult<f64> {
-        Ok(self.prices.get(instance_type).copied().unwrap_or(self.fallback))
+        Ok(self
+            .prices
+            .get(instance_type)
+            .copied()
+            .unwrap_or(self.fallback))
     }
 }
 
@@ -815,7 +874,11 @@ impl ArtifactStore for FakeArtifacts {
     }
 
     async fn list(&self, prefix: &str) -> PortResult<Vec<String>> {
-        Ok(lock(&self.store).keys().filter(|k| k.starts_with(prefix)).cloned().collect())
+        Ok(lock(&self.store)
+            .keys()
+            .filter(|k| k.starts_with(prefix))
+            .cloned()
+            .collect())
     }
 }
 
@@ -859,7 +922,11 @@ impl SandboxProvider for FakeSandbox {
         let exists = lock(&self.applied).contains_key(&i.sandbox_id);
         Ok(SandboxPlan {
             changes: vec![PlanChange {
-                action: if exists { PlanAction::NoOp } else { PlanAction::Create },
+                action: if exists {
+                    PlanAction::NoOp
+                } else {
+                    PlanAction::Create
+                },
                 address: "aws_s3_bucket.artifacts".into(),
                 resource_type: "aws_s3_bucket".into(),
             }],
@@ -991,6 +1058,7 @@ pub struct Harness {
     costs: Option<Arc<dyn CostReconciler>>,
 }
 
+#[derive(Debug, Clone)]
 pub struct Begun {
     pub id: String,
     /// kind -> agent id
@@ -1012,7 +1080,10 @@ impl Harness {
             log.clone(),
             clock.clone(),
             &[
-                ("ratchet.yaml", opts.config_yaml.as_deref().unwrap_or(CONFIG_YAML)),
+                (
+                    "ratchet.yaml",
+                    opts.config_yaml.as_deref().unwrap_or(CONFIG_YAML),
+                ),
                 ("RATCHET.md", "# Brief\nMake it faster.\n"),
             ],
         ));
@@ -1021,7 +1092,9 @@ impl Harness {
         settings
             .secrets
             .get_or_insert_with(|| Arc::new(|_k, name| Some(format!("value-of-{name}"))));
-        settings.new_id.get_or_insert_with(|| Arc::new(|| "opt-test".to_owned()));
+        settings
+            .new_id
+            .get_or_insert_with(|| Arc::new(|| "opt-test".to_owned()));
         let tmp = tempfile::tempdir().expect("tempdir");
         if settings.scratch_dir.is_none() {
             settings.scratch_dir = Some(tmp.path().join("scratch"));
@@ -1069,7 +1142,9 @@ impl Harness {
                 artifacts: self.artifacts.clone(),
                 git: GitSource::One(self.git.clone()),
                 runners: self.runners.clone(),
-                local_runners: self.opts_local.then(|| self.local_runners.clone() as Arc<dyn RunnerControl>),
+                local_runners: self
+                    .opts_local
+                    .then(|| self.local_runners.clone() as Arc<dyn RunnerControl>),
                 bench: self.bench.clone(),
                 costs: self.costs.clone(),
             },
@@ -1082,7 +1157,10 @@ impl Harness {
     pub async fn restart(&mut self, reopen_ledger: bool) -> Engine {
         self.engine.close().await;
         if reopen_ledger {
-            let path = self.ledger_path.clone().expect("reopen_ledger needs ledger_path");
+            let path = self
+                .ledger_path
+                .clone()
+                .expect("reopen_ledger needs ledger_path");
             self.ledger.close().await;
             self.ledger = open_ledger(Some(&path), self.clock.clone()).await;
         }
@@ -1121,6 +1199,8 @@ impl Harness {
                 return;
             }
             self.cycle(1).await;
+            // background work (a resumed kill switch) runs on real I/O, not microtasks: give it real time
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
         assert!(pred().await, "condition not met after {max} cycles");
     }
@@ -1130,20 +1210,31 @@ impl Harness {
         self.bench.set(
             "main-sha",
             "baseline",
-            ScriptedBench::samples(&b.baseline.clone().unwrap_or_else(|| vec![100.0, 102.0, 98.0]))
-                .with_metric("peak_rss", 500.0),
+            ScriptedBench::samples(
+                &b.baseline
+                    .clone()
+                    .unwrap_or_else(|| vec![100.0, 102.0, 98.0]),
+            )
+            .with_metric("peak_rss", 500.0),
         );
         self.bench.set(
             "main-sha",
             "confirm",
-            ScriptedBench::samples(&b.confirm_baseline.clone().unwrap_or_else(|| vec![100.0, 100.0, 100.0])),
+            ScriptedBench::samples(
+                &b.confirm_baseline
+                    .clone()
+                    .unwrap_or_else(|| vec![100.0, 100.0, 100.0]),
+            ),
         );
         let id = self
             .engine
             .create_optimization(CreateOptimizationInput {
                 repo_url: self.git.remote_url(),
                 base_ref: "main".into(),
-                agents: b.agents.clone().unwrap_or_else(|| vec![AgentKind::ClaudeCode, AgentKind::Codex]),
+                agents: b
+                    .agents
+                    .clone()
+                    .unwrap_or_else(|| vec![AgentKind::ClaudeCode, AgentKind::Codex]),
                 budget_usd: b.budget_usd.unwrap_or(100.0),
                 time_limit_seconds: b.time_limit_seconds.unwrap_or(8 * 3600),
                 plateau_evals: b.plateau_evals.unwrap_or(50),
@@ -1186,19 +1277,26 @@ impl Harness {
 
     /// Script a candidate: the commit on the branch plus its trusted bench / confirm samples.
     pub fn candidate(&self, branch: &str, sha: &str, c: Cand) {
-        self.git
-            .push(branch, sha, &c.files.iter().map(String::as_str).collect::<Vec<_>>());
+        self.git.push(
+            branch,
+            sha,
+            &c.files.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
         if let Some(bench) = c.bench {
             let g = if c.guardrail_fail {
                 vec![failed("pytest -q", Some("exited with status 1"))]
             } else {
                 vec![passed("pytest -q")]
             };
-            self.bench
-                .set(sha, "bench", ScriptedBench::samples(&bench).with_guardrails(g));
+            self.bench.set(
+                sha,
+                "bench",
+                ScriptedBench::samples(&bench).with_guardrails(g),
+            );
         }
         if let Some(confirm) = c.confirm {
-            self.bench.set(sha, "confirm", ScriptedBench::samples(&confirm));
+            self.bench
+                .set(sha, "confirm", ScriptedBench::samples(&confirm));
         }
     }
 }

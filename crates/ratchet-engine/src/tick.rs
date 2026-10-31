@@ -5,18 +5,16 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use ratchet_core::enums::{
-    AgentStatus, BenchPhase, CandidateVerdict, OptimizationStatus, Verdict,
-};
+use ratchet_core::enums::{AgentStatus, BenchPhase, CandidateVerdict, OptimizationStatus, Verdict};
 use ratchet_core::numfmt::{js_number_to_string, to_fixed};
 use ratchet_core::ports::{
-    AgentEvent, AgentEventType, BaselineMetrics, BenchJob, BenchJobPhase, BenchOutcome, CancellationToken,
-    EngineEvent, NoticeLevel, PolledEvents, PortError, RunnerMessage,
+    AgentEvent, AgentEventType, BaselineMetrics, BenchJob, BenchJobPhase, BenchOutcome,
+    CancellationToken, EngineEvent, NoticeLevel, PolledEvents, PortError, RunnerMessage,
 };
 use ratchet_core::rows::{Agent, CandidateWithResults, Optimization};
 use ratchet_core::{
-    ProtectedConfigInput, RatchetInput, RatchetOutcome, effective_protected,
-    evaluate_ratchet, find_protected_violations, median,
+    ProtectedConfigInput, RatchetInput, RatchetOutcome, effective_protected, evaluate_ratchet,
+    find_protected_violations, median,
 };
 use ratchet_ledger::{
     AppendAgentEventInput, LedgerErrorCode, Patch, RecordBenchResultInput, RecordSpendInput,
@@ -184,11 +182,13 @@ impl Engine {
         for summary in self.ledger.list_optimizations(None).await? {
             let id = summary.id.to_string();
             let r = match summary.status {
-                OptimizationStatus::Baselining => async {
-                    self.enforce_limits(&id).await?;
-                    self.reap_one(&id).await
+                OptimizationStatus::Baselining => {
+                    async {
+                        self.enforce_limits(&id).await?;
+                        self.reap_one(&id).await
+                    }
+                    .await
                 }
-                .await,
                 OptimizationStatus::Running => self.tick_running(&id).await,
                 OptimizationStatus::Stopping => self.tick_stopping(&id).await,
                 OptimizationStatus::Stopped
@@ -468,7 +468,12 @@ impl Engine {
             .into_iter()
             .filter(|c| c.candidate.verdict != CandidateVerdict::Pending)
             .collect();
-        decided.sort_by_key(|c| (c.candidate.verdict_at.unwrap_or(0), c.candidate.submitted_at));
+        decided.sort_by_key(|c| {
+            (
+                c.candidate.verdict_at.unwrap_or(0),
+                c.candidate.submitted_at,
+            )
+        });
         Ok(decided
             .iter()
             .rev()
@@ -478,7 +483,12 @@ impl Engine {
 
     // ------------------------------------------------------------------ runner events
 
-    async fn poll_runner(&self, opt: &Optimization, agent: &Agent, force: bool) -> EngineResult<()> {
+    async fn poll_runner(
+        &self,
+        opt: &Optimization,
+        agent: &Agent,
+        force: bool,
+    ) -> EngineResult<()> {
         if agent.runner_instance_id.is_none() {
             return Ok(());
         }
@@ -532,9 +542,11 @@ impl Engine {
                         tx.append_agent_event(AppendAgentEventInput {
                             agent_id: aid_.clone(),
                             event_type: event_type_str(e.event_type),
-                            payload: Some(serde_json::to_value(e).map_err(|x| {
-                                ratchet_core::LedgerError::invalid(x.to_string())
-                            })?),
+                            payload: Some(
+                                serde_json::to_value(e).map_err(|x| {
+                                    ratchet_core::LedgerError::invalid(x.to_string())
+                                })?,
+                            ),
                             at: Some(e.at),
                         })
                         .await?;
@@ -623,7 +635,8 @@ impl Engine {
             // millisecond.
             seq += 1;
             let candidate_id = format!("{}-c{seq:05}", opt.id);
-            let mut input = SubmitCandidateInput::new(opt.id.clone(), agent.id.clone(), c.sha.clone());
+            let mut input =
+                SubmitCandidateInput::new(opt.id.clone(), agent.id.clone(), c.sha.clone());
             input.id = Some(candidate_id.clone().into());
             input.message = Some(c.message.clone());
             input.submitted_at = Some(now);
@@ -639,8 +652,16 @@ impl Engine {
                     .iter()
                     .map(|v| format!("protected path changed: {} (matches {})", v.path, v.pattern))
                     .collect();
-                self.finalize(opt, row.id.as_str(), agent.id.as_str(), &row.sha, Verdict::Blocked, reasons, None)
-                    .await?;
+                self.finalize(
+                    opt,
+                    row.id.as_str(),
+                    agent.id.as_str(),
+                    &row.sha,
+                    Verdict::Blocked,
+                    reasons,
+                    None,
+                )
+                .await?;
             }
         }
         Ok(true)
@@ -687,7 +708,9 @@ impl Engine {
             }
         }
         if let Some(c) = needs_confirm {
-            return self.launch_job(&opt, &config, &c, BenchPhase::Confirm).await;
+            return self
+                .launch_job(&opt, &config, &c, BenchPhase::Confirm)
+                .await;
         }
 
         let pending: Vec<CandidateWithResults> = self
@@ -709,7 +732,9 @@ impl Engine {
             let agent = &agents[(start + i) % agents.len()];
             if let Some(next) = pending.iter().find(|c| c.candidate.agent_id == agent.id) {
                 *lock(&rt.last_served_agent) = Some(agent.id.to_string());
-                return self.launch_job(&opt, &config, next, BenchPhase::Bench).await;
+                return self
+                    .launch_job(&opt, &config, next, BenchPhase::Bench)
+                    .await;
             }
         }
         Ok(())
@@ -853,7 +878,9 @@ impl Engine {
                 .bench_attempt_failed(&rt, &opt, &cand, job.phase, err.message)
                 .await;
         }
-        let fresh = self.require_candidate(id, cand.candidate.id.as_str()).await?;
+        let fresh = self
+            .require_candidate(id, cand.candidate.id.as_str())
+            .await?;
         self.settle_candidate(&opt, &fresh).await?;
         Ok(())
     }
@@ -869,7 +896,9 @@ impl Engine {
     ) -> EngineResult<()> {
         let attempts = {
             let mut a = lock(&rt.attempts);
-            let n = a.entry(format!("{}:{phase}", cand.candidate.id)).or_default();
+            let n = a
+                .entry(format!("{}:{phase}", cand.candidate.id))
+                .or_default();
             *n += 1;
             *n
         };
@@ -906,16 +935,28 @@ impl Engine {
         opt: &Optimization,
         cand: &CandidateWithResults,
     ) -> EngineResult<Option<RatchetOutcome>> {
-        let Some(bench) = cand.results.iter().rev().find(|r| r.phase == BenchPhase::Bench) else {
+        let Some(bench) = cand
+            .results
+            .iter()
+            .rev()
+            .find(|r| r.phase == BenchPhase::Bench)
+        else {
             return Ok(None);
         };
-        let confirm = cand.results.iter().rev().find(|r| r.phase == BenchPhase::Confirm);
+        let confirm = cand
+            .results
+            .iter()
+            .rev()
+            .find(|r| r.phase == BenchPhase::Confirm);
         let baseline = self.ledger.get_baseline(&opt.id).await?;
         let current_best = self.ledger.current_best(&opt.id).await?;
         let (Some(baseline), Some(current_best)) = (baseline, current_best) else {
             return Ok(None);
         };
-        let confirm_best = self.kv.get_number(&k::confirm_best(opt.id.as_str())).await?;
+        let confirm_best = self
+            .kv
+            .get_number(&k::confirm_best(opt.id.as_str()))
+            .await?;
         let config = self.config(opt.id.as_str()).await?;
         let min_gain = self
             .calibration_for(opt.id.as_str(), &config)
@@ -1024,7 +1065,12 @@ impl Engine {
                     err.message
                 ));
                 self.ledger
-                    .set_verdict(&cand_id.into(), CandidateVerdict::Rejected, &final_reasons, Some(now))
+                    .set_verdict(
+                        &cand_id.into(),
+                        CandidateVerdict::Rejected,
+                        &final_reasons,
+                        Some(now),
+                    )
                     .await?;
             }
             Err(err) => return Err(err.into()),
@@ -1127,15 +1173,21 @@ impl Engine {
         if let Some(agent) = self.ledger.get_agent(&aid(agent_id)).await? {
             self.log_agent(
                 &agent,
-                AgentEvent::new(self.clock.now(), ty)
-                    .with_text(format!("{}: {text}", sha.chars().take(10).collect::<String>())),
+                AgentEvent::new(self.clock.now(), ty).with_text(format!(
+                    "{}: {text}",
+                    sha.chars().take(10).collect::<String>()
+                )),
             )
             .await?;
         }
         Ok(())
     }
 
-    async fn require_candidate(&self, opt_id: &str, cand_id: &str) -> EngineResult<CandidateWithResults> {
+    async fn require_candidate(
+        &self,
+        opt_id: &str,
+        cand_id: &str,
+    ) -> EngineResult<CandidateWithResults> {
         self.ledger
             .candidates_with_results(&oid(opt_id))
             .await?

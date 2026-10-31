@@ -94,17 +94,18 @@ impl CostMeter {
             if inst.optimization_id != opt_id {
                 continue;
             }
-            let from = d
-                .kv
-                .get_i64(&k::acct(&inst.id))
-                .await?
-                .unwrap_or(inst.launched_at);
+            let from =
+                d.kv.get_i64(&k::acct(&inst.id))
+                    .await?
+                    .unwrap_or(inst.launched_at);
             // A terminated instance with no recorded end time cannot be charged past what we already have.
-            let ended = inst.terminated_at.unwrap_or(if inst.state == InstanceState::Terminated {
-                from
-            } else {
-                now
-            });
+            let ended = inst
+                .terminated_at
+                .unwrap_or(if inst.state == InstanceState::Terminated {
+                    from
+                } else {
+                    now
+                });
             let to = now.min(ended);
             if to <= from {
                 continue;

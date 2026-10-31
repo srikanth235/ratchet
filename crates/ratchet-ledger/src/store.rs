@@ -351,12 +351,8 @@ impl Ledger {
         T: Send,
     {
         let now = self.now();
-        self.transaction(move |conn| {
-            Box::pin(async move {
-                f(Tx { conn, now }).await
-            })
-        })
-        .await
+        self.transaction(move |conn| Box::pin(async move { f(Tx { conn, now }).await }))
+            .await
     }
 
     // ---- optimizations ----------------------------------------------------------------------------------------

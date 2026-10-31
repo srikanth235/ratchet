@@ -14,11 +14,16 @@ fn fmt(n: f64) -> String {
 }
 
 /// Fallback PR body when no `ReportBuilder` is configured. A richer report builder replaces it.
-pub async fn default_report(ledger: &Ledger, optimization_id: &OptimizationId) -> EngineResult<String> {
+pub async fn default_report(
+    ledger: &Ledger,
+    optimization_id: &OptimizationId,
+) -> EngineResult<String> {
     let opt = ledger
         .get_optimization(optimization_id)
         .await?
-        .ok_or_else(|| EngineError::not_found(format!("optimization {optimization_id} not found")))?;
+        .ok_or_else(|| {
+            EngineError::not_found(format!("optimization {optimization_id} not found"))
+        })?;
     let baseline = ledger.get_baseline(optimization_id).await?;
     let best = ledger.current_best(optimization_id).await?;
     let history = ledger.ratchet_history(optimization_id).await?;
@@ -99,7 +104,11 @@ pub async fn default_report(ledger: &Ledger, optimization_id: &OptimizationId) -
         })
         .collect::<Vec<_>>()
         .join(", ");
-    lines.push(if summary.is_empty() { "none".into() } else { summary });
+    lines.push(if summary.is_empty() {
+        "none".into()
+    } else {
+        summary
+    });
     lines.push(String::new());
     lines.push("### Spend".into());
     lines.push(String::new());

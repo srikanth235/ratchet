@@ -9,7 +9,10 @@ use ratchet_core::ports::{
     EngineEvent, InstanceState, NoticeLevel, PortError, ProposeTemplateInput,
     ProposeTemplateResult, PullRequestInput, PullRequestRef, TeardownOrphan,
 };
-use ratchet_core::{ReconcileSpendOptions, TemplateInfo, build_template_proposal, get_template, list_templates, reconcile_spend};
+use ratchet_core::{
+    ReconcileSpendOptions, TemplateInfo, build_template_proposal, get_template, list_templates,
+    reconcile_spend,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::engine::{Engine, oid};
@@ -146,7 +149,11 @@ impl Engine {
             Err(PortError::Unsupported(_)) => return Err(unavailable()),
             Err(first) => {
                 // most likely the branch exists from an earlier proposal: take a fresh name once, then give up
-                branch = format!("{}-{}", proposal.branch, base36(self.clock.now().max(0) as u64));
+                branch = format!(
+                    "{}-{}",
+                    proposal.branch,
+                    base36(self.clock.now().max(0) as u64)
+                );
                 match git.commit_files(&commit(&branch)).await {
                     Ok(r) => r.sha,
                     Err(_) => return Err(first.into()),
@@ -206,7 +213,8 @@ impl Engine {
         if let Some(existing) = self.kv.get(&k::pr(id)).await? {
             return Ok(PullRequestRef { url: existing });
         }
-        if opt.status != OptimizationStatus::Stopped && opt.status != OptimizationStatus::Completed {
+        if opt.status != OptimizationStatus::Stopped && opt.status != OptimizationStatus::Completed
+        {
             return Err(EngineError::invalid_state(format!(
                 "optimization {id} is {}; stop it before opening the pull request",
                 opt.status
@@ -232,7 +240,11 @@ impl Engine {
             baseline.as_ref().map_or("?".to_owned(), |b| fmt5(b.value)),
             fmt5(best),
             fmt5(gain),
-            if opt.direction == Direction::Minimize { "lower" } else { "higher" },
+            if opt.direction == Direction::Minimize {
+                "lower"
+            } else {
+                "higher"
+            },
             shas.len()
         );
         let body = match &self.settings.report_builder {
@@ -293,7 +305,9 @@ impl Engine {
         )
         .await
         .map_err(|e| match e {
-            ratchet_core::cost::ReconcileError::NotFound(_) => EngineError::not_found(e.to_string()),
+            ratchet_core::cost::ReconcileError::NotFound(_) => {
+                EngineError::not_found(e.to_string())
+            }
             ratchet_core::cost::ReconcileError::Ledger(l) => l.into(),
             ratchet_core::cost::ReconcileError::Billing(p) => p.into(),
         })?;
@@ -327,7 +341,9 @@ impl Engine {
         }
         if matches!(
             opt.status,
-            OptimizationStatus::Running | OptimizationStatus::Baselining | OptimizationStatus::Stopping
+            OptimizationStatus::Running
+                | OptimizationStatus::Baselining
+                | OptimizationStatus::Stopping
         ) {
             self.stop(id, Some("teardown")).await?;
             opt = self.require_opt(id).await?;
@@ -351,9 +367,12 @@ impl Engine {
             if !local {
                 let c = compute.clone();
                 let (o, a) = (oid(id), agent.id.clone());
-                if attempt(&mut errors, self, &format!("deleteSecrets {}", agent.id), || async move {
-                    c.delete_secrets(&o, &a).await.map_err(Into::into)
-                })
+                if attempt(
+                    &mut errors,
+                    self,
+                    &format!("deleteSecrets {}", agent.id),
+                    || async move { c.delete_secrets(&o, &a).await.map_err(Into::into) },
+                )
                 .await
                 {
                     report.deleted_secrets_for.push(agent.id.to_string());
@@ -383,9 +402,12 @@ impl Engine {
         let runners = self.runners_for(id).await;
         {
             let o = oid(id);
-            attempt(&mut errors, self, "release agent workspaces", || async move {
-                runners.release(&o).await.map_err(Into::into)
-            })
+            attempt(
+                &mut errors,
+                self,
+                "release agent workspaces",
+                || async move { runners.release(&o).await.map_err(Into::into) },
+            )
             .await;
         }
         match self.terminate_all(id).await {
@@ -463,7 +485,12 @@ impl Engine {
                 format!(
                     "teardown left {} orphaned instance(s): {}",
                     report.orphans.len(),
-                    report.orphans.iter().map(|o| o.id.as_str()).collect::<Vec<_>>().join(", ")
+                    report
+                        .orphans
+                        .iter()
+                        .map(|o| o.id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ),
             )
             .with_details(serde_json::to_value(&report)?));

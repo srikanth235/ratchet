@@ -2,9 +2,10 @@
 
 pub use ratchet_core::enums::{AgentKind, AgentStatus, OptimizationStatus};
 pub use ratchet_core::ids::OptimizationId;
+pub use ratchet_core::ports::Clock as _;
 pub use ratchet_core::ports::{AgentEvent, AgentEventType, EngineEvent, RunnerMessage};
+pub use ratchet_engine::CreateOptimizationInput;
 pub use ratchet_engine::testing::*;
-pub use ratchet_engine::{CreateOptimizationInput, EngineErrorCode};
 
 pub use AgentKind::{ClaudeCode, Codex};
 
@@ -56,7 +57,10 @@ pub async fn all_decided(h: &Harness, id: &str, n: usize) -> bool {
 }
 
 pub fn v(pairs: &[(&str, &str)]) -> std::collections::BTreeMap<String, String> {
-    pairs.iter().map(|(a, b)| ((*a).to_owned(), (*b).to_owned())).collect()
+    pairs
+        .iter()
+        .map(|(a, b)| ((*a).to_owned(), (*b).to_owned()))
+        .collect()
 }
 
 pub fn types(events: &[EngineEvent]) -> Vec<&'static str> {
