@@ -1,5 +1,8 @@
 //! Port of `packages/bench/src/units.test.ts`.
 
+// What only the Linux-gated `remote_script_helpers` uses is unused elsewhere.
+#![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
@@ -317,6 +320,7 @@ mod overlay {
     }
 }
 
+#[cfg(target_os = "linux")] // `grep -P` is GNU
 mod remote_script_helpers {
     use super::*;
 

@@ -1,3 +1,4 @@
+#![cfg(target_os = "linux")] // the generated bench-host scripts run under GNU tools; see PARITY.md
 //! Port of `packages/bench/src/remote-image.test.ts`.
 //!
 //! The repo's container (`environment.image`) end to end: the REAL generated scripts run by local bash, with `docker`, `aws`,

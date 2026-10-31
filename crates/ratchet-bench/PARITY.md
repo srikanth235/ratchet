@@ -38,6 +38,13 @@ Rust-only: `tests/golden.rs` (12), `tests/snapshots.rs` (6), `tests/properties.r
 (`shell`, `posix`, `exec`, `launcher`: 15 besides the ported header test), and 3 launcher integration cases the C test did
 not have (root-owned configuration, symlinked configuration, compiled-in path of the production binary).
 
+## Tests that run on Linux only
+
+The bench's remote, dependency-snapshot and image machinery only ever runs on Linux bench hosts; on other platforms the crate
+has to compile and its pure-logic tests run. The integration tests that execute the generated host scripts with local bash and
+GNU `tar` / `zstd` / `grep -P` / coreutils shims (`tests/remote_deps.rs`, `tests/remote_image.rs`, the `remote` / `remote_specifics` modules of `tests/runners.rs`, `remote_script_helpers` in `tests/units.rs`) and the setuid launcher
+(`src/launcher.rs`, `tests/launcher.rs`, its binaries) are `cfg(target_os = "linux")`. CI runs them on ubuntu-latest.
+
 ## Dropped or changed on purpose
 
 | What | Why |

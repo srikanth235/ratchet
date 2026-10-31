@@ -143,18 +143,37 @@ impl GitHost for LocalGitHost {
             c.push((sha.to_owned(), dir.to_path_buf()));
         }
         std::fs::create_dir_all(dir).map_err(|e| PortError::failed(e.to_string()))?;
-        let out = tokio::process::Command::new("sh")
-            .args([
-                "-c",
-                "git -C \"$1\" archive \"$2\" | tar -x -C \"$3\"",
-                "sh",
-            ])
+        // Two steps, not `git archive | tar -x`: a pipe reports tar's status, and BSD tar (macOS) accepts the empty
+        // archive that a failed `git archive` leaves behind, so an unknown sha would "check out" an empty tree.
+        let archive = tokio::process::Command::new("git")
+            .arg("-C")
             .arg(&self.repo)
-            .arg(sha)
-            .arg(dir)
+            .args(["archive", "--format=tar", sha])
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_CONFIG_SYSTEM", "/dev/null")
             .output()
+            .await
+            .map_err(|e| PortError::failed(e.to_string()))?;
+        if !archive.status.success() {
+            return Err(PortError::failed(
+                String::from_utf8_lossy(&archive.stderr).trim().to_owned(),
+            ));
+        }
+        let mut tar = tokio::process::Command::new("tar")
+            .arg("-x")
+            .arg("-C")
+            .arg(dir)
+            .stdin(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| PortError::failed(e.to_string()))?;
+        if let Some(mut stdin) = tar.stdin.take() {
+            tokio::io::AsyncWriteExt::write_all(&mut stdin, &archive.stdout)
+                .await
+                .map_err(|e| PortError::failed(e.to_string()))?;
+        }
+        let out = tar
+            .wait_with_output()
             .await
             .map_err(|e| PortError::failed(e.to_string()))?;
         if out.status.success() {
