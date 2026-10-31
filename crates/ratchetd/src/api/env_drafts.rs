@@ -117,8 +117,10 @@ pub struct EnvironmentDraftVm {
     /// Starts at 1, +1 per revision.
     pub revision: u32,
     /// Set once approved (the environment is locked from then on).
+    #[schema(required = true)]
     pub approved_at: Option<i64>,
     /// "Open as PR": the pull request that adds the environment files to the repo.
+    #[schema(required = true)]
     pub pr_url: Option<String>,
     pub created_at: i64,
 }

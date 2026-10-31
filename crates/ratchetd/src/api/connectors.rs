@@ -43,6 +43,7 @@ pub enum GithubAccountKind {
 pub struct GithubConnectorInfo {
     pub login: String,
     pub account_kind: GithubAccountKind,
+    #[schema(required = true)]
     pub repo_count: Option<u32>,
 }
 
@@ -61,12 +62,16 @@ pub enum AwsConnectorAuth {
 pub struct AwsConnectorInfo {
     pub auth: AwsConnectorAuth,
     /// Profile or SSO session name; `null` for a role.
+    #[schema(required = true)]
     pub profile: Option<String>,
     pub region: String,
+    #[schema(required = true)]
     pub account_id: Option<String>,
     /// Monthly spend cap in USD, when the user set one.
+    #[schema(required = true)]
     pub cap_usd_per_month: Option<f64>,
     /// What is left of the cap this month ("$412 left this month").
+    #[schema(required = true)]
     pub remaining_usd_this_month: Option<f64>,
 }
 
@@ -85,8 +90,10 @@ pub struct AgentConnectorInfo {
     pub agent: AgentKind,
     pub credential: AgentCredential,
     /// CLI version for a login connector.
+    #[schema(required = true)]
     pub version: Option<String>,
     /// Last characters of an API key (`····4f2a`).
+    #[schema(required = true)]
     pub key_hint: Option<String>,
     /// Where this connector can run agents: a login runs on this Mac, a key also in the cloud.
     pub runs_in: Vec<AgentsWhere>,
@@ -108,9 +115,13 @@ pub struct ConnectorVm {
     /// The default of its kind: preselected for new optimizations.
     pub is_default: bool,
     /// Cost line on the New optimization step ("Free while this Mac is awake", "Billed to the key").
+    #[schema(required = true)]
     pub cost_note: Option<String>,
+    #[schema(required = true)]
     pub github: Option<GithubConnectorInfo>,
+    #[schema(required = true)]
     pub aws: Option<AwsConnectorInfo>,
+    #[schema(required = true)]
     pub agent: Option<AgentConnectorInfo>,
 }
 

@@ -79,8 +79,10 @@ pub struct Calibration {
     pub baseline_runs: u64,
     /// Coefficient of variation of the baseline (fraction); `None` when it cannot be estimated (fewer than
     /// 3 runs, or a zero mean).
+    #[cfg_attr(feature = "utoipa", schema(required = true))]
     pub cv: Option<f64>,
     /// `2 x CV` as a fraction: "this metric moves by about +/- noise from run to run". `None` with `cv`.
+    #[cfg_attr(feature = "utoipa", schema(required = true))]
     pub noise: Option<f64>,
     /// Runs per candidate / confirm run.
     pub repeats: u64,
@@ -92,6 +94,7 @@ pub struct Calibration {
     pub min_gain_source: CalibrationSource,
     /// The gain the chosen repeats can resolve with confidence (a fraction); `min_gain` is never below it
     /// when auto.
+    #[cfg_attr(feature = "utoipa", schema(required = true))]
     pub resolvable: Option<f64>,
     /// The k of the noise floor `k x stddev(baseline)`.
     pub noise_factor: f64,

@@ -15,7 +15,9 @@ pub struct RepoVm {
     pub full_name: String,
     pub default_branch: String,
     pub private: bool,
+    #[schema(required = true)]
     pub description: Option<String>,
+    #[schema(required = true)]
     pub pushed_at: Option<String>,
 }
 
@@ -39,16 +41,20 @@ pub struct InspectRepoInput {
 pub struct RepoInspectVm {
     pub source: RepoSource,
     /// `owner/name` (also for a local folder, from its `origin`); `null` for a local folder with no GitHub remote.
+    #[schema(required = true)]
     pub repo: Option<String>,
     pub base_ref: String,
     /// The ratchet.yaml text, read-only; `null` when the repo has none.
+    #[schema(required = true)]
     pub config_yaml: Option<String>,
     /// Parsed summary; `null` when there is no ratchet.yaml or it does not parse.
+    #[schema(required = true)]
     pub config: Option<ConfigSummary>,
     pub errors: Vec<ConfigError>,
     /// Offered when there is no ratchet.yaml: "Add via pull request".
     pub templates: Vec<TemplateInfo>,
     /// Why the repo cannot be used here (a local folder with no GitHub remote, not a git repo, ...).
+    #[schema(required = true)]
     pub problem: Option<String>,
 }
 
@@ -80,17 +86,21 @@ pub enum EnvironmentPhase {
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentVm {
     pub sandbox_id: String,
+    #[schema(required = true)]
     pub region: Option<String>,
     pub phase: EnvironmentPhase,
     /// The last phase message ("environment ready").
     pub text: String,
     pub simulated: bool,
     pub active_runs: Vec<String>,
+    #[schema(required = true)]
     pub instances_running: Option<u64>,
     /// Estimated spend of the runs that are active in it.
     pub spend_usd: f64,
     /// When the automatic destroy is due.
+    #[schema(required = true)]
     pub destroy_at: Option<i64>,
+    #[schema(required = true)]
     pub idle_since: Option<i64>,
     /// Ending it now is possible (no run is active).
     pub can_end: bool,
@@ -101,6 +111,7 @@ pub struct EnvironmentVm {
 pub struct EnvironmentsVm {
     pub environments: Vec<EnvironmentVm>,
     /// The most recent teardown across environments.
+    #[schema(required = true)]
     pub last_receipt: Option<TeardownReceiptVm>,
     /// Idle window before an unused environment is removed, minutes.
     pub idle_minutes: u32,

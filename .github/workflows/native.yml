@@ -7,12 +7,14 @@ on:
       - "Cargo.toml"
       - "crates/**"
       - "apps/mac/**"
+      - "api/**"
       - ".github/workflows/native.yml"
   pull_request:
     paths:
       - "Cargo.toml"
       - "crates/**"
       - "apps/mac/**"
+      - "api/**"
       - ".github/workflows/native.yml"
 
 concurrency:

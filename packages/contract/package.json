@@ -1,0 +1,15 @@
+{
+  "name": "@ratchet/contract",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "TypeScript types generated from api/openapi.yaml, plus compile-time checks that the desktop view models agree with them.",
+  "scripts": {
+    "contract:gen": "openapi-typescript ../../api/openapi.yaml -o src/api.d.ts",
+    "contract:check": "node scripts/check-generated.mjs",
+    "typecheck": "pnpm run contract:check && tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0"
+  }
+}

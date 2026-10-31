@@ -41,6 +41,7 @@ pub struct TemplateInfo {
     /// What the evaluator reports, in plain words (e.g. "k6 p50/p95/p99, error rate").
     pub measures: String,
     /// The hidden workload that re-checks every win, or `None` when the template has none.
+    #[cfg_attr(feature = "utoipa", schema(required = true))]
     pub holdout: Option<String>,
     /// Default bench machine (instance type).
     pub machine: String,

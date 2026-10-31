@@ -58,8 +58,11 @@ pub struct Kpi {
     pub id: String,
     pub label: String,
     pub value: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(nullable = false)]
     pub unit: Option<String>,
     /// `null` when the previous window has no data to compare with.
+    #[schema(required = true)]
     pub change: Option<KpiChange>,
     pub foot: String,
     pub trend: Vec<f64>,
@@ -70,11 +73,13 @@ pub struct Kpi {
 #[serde(rename_all = "camelCase")]
 pub struct ValueVm {
     pub usd_per_unit: f64,
+    #[schema(required = true)]
     pub unit: Option<String>,
     pub period: ValuePeriod,
     pub basis: ValueBasis,
     pub usd_per_year: f64,
     /// Yearly value per dollar spent; `null` when nothing was spent.
+    #[schema(required = true)]
     pub return_on_spend: Option<f64>,
 }
 
@@ -104,6 +109,8 @@ pub struct RatchetPoint {
     pub value: f64,
     pub agent: AgentKind,
     pub verified: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(nullable = false)]
     pub label: Option<String>,
 }
 
@@ -137,12 +144,14 @@ pub struct RatchetSeries {
     pub options: Vec<MetricOption>,
     pub unit: String,
     pub direction: Better,
+    #[schema(required = true)]
     pub baseline: Option<f64>,
     /// Staircase of the best value; the first step is the baseline at t=0.
     pub steps: Vec<StepPoint>,
     /// Every candidate that has a bench result.
     pub points: Vec<RatchetPoint>,
     /// Absolute noise floor of the baseline (metric units).
+    #[schema(required = true)]
     pub noise_floor: Option<f64>,
     pub t_max: f64,
 }
@@ -185,8 +194,11 @@ pub struct OptimizationVm {
     pub metric: String,
     pub unit: String,
     pub direction: Better,
+    #[schema(required = true)]
     pub baseline: Option<f64>,
+    #[schema(required = true)]
     pub best: Option<f64>,
+    #[schema(required = true)]
     pub gain_pct: Option<f64>,
     pub status: UiStatus,
     pub agents: Vec<AgentKind>,
@@ -198,9 +210,11 @@ pub struct OptimizationVm {
     pub verified_wins: i64,
     pub created_at: i64,
     /// Template category and evaluator kind from ratchet.yaml (ledger columns).
+    #[schema(required = true)]
     pub pack: Option<String>,
     pub evaluator_kind: EvaluatorKind,
     /// Dollar value of the improvement so far; `null` without `objective.value` or without an improvement.
+    #[schema(required = true)]
     pub value: Option<ValueVm>,
 }
 
@@ -218,6 +232,7 @@ pub enum ActivityTone {
 pub struct ActivityVm {
     pub id: String,
     pub optimization_id: String,
+    #[schema(required = true)]
     pub agent: Option<AgentKind>,
     pub text: String,
     /// Relative time ("12m ago").
@@ -249,8 +264,10 @@ pub enum EngineKind {
 pub struct OptimizationsSnapshot {
     pub range: KpiRange,
     pub kpis: Vec<Kpi>,
+    #[schema(required = true)]
     pub featured_id: Option<String>,
     /// Series for the featured optimization's chart.
+    #[schema(required = true)]
     pub featured_series: Option<RatchetSeries>,
     pub optimizations: Vec<OptimizationVm>,
     pub activity: Vec<ActivityVm>,
@@ -283,11 +300,13 @@ pub struct AgentVm {
     pub branch: String,
     pub status: AgentStatus,
     /// Latest agent message, used as the "current hypothesis".
+    #[schema(required = true)]
     pub hypothesis: Option<String>,
     pub recent: Vec<AgentRecentEval>,
     pub stats: AgentStats,
     /// Pass to `GET /v1/agents/{id}/events?cursor=` to read only newer events.
     pub last_event_id: i64,
+    #[schema(required = true)]
     pub runner_instance_id: Option<String>,
 }
 
@@ -331,6 +350,7 @@ pub struct PipelineCandidate {
 #[serde(rename_all = "camelCase")]
 pub struct BenchPipelineVm {
     /// Candidate the pipeline is working on / last worked on.
+    #[schema(required = true)]
     pub candidate: Option<PipelineCandidate>,
     pub queued: i64,
     pub stages: Vec<PipelineStage>,
@@ -396,9 +416,12 @@ pub struct CompareRow {
     pub key: String,
     pub label: String,
     pub unit: String,
+    #[schema(required = true)]
     pub baseline: Option<f64>,
+    #[schema(required = true)]
     pub best: Option<f64>,
     /// Signed % change best vs baseline.
+    #[schema(required = true)]
     pub delta_pct: Option<f64>,
     /// Which way is better for this metric.
     pub better: Better,
@@ -420,18 +443,24 @@ pub struct OptimizationDetail {
     pub base_ref: String,
     pub min_gain: f64,
     pub time_limit_s: i64,
+    #[schema(required = true)]
     pub started_at: Option<i64>,
+    #[schema(required = true)]
     pub ended_at: Option<i64>,
     pub elapsed_s: f64,
     pub baseline_samples: Vec<f64>,
     pub baseline_stats: BTreeMap<String, f64>,
+    #[schema(required = true)]
     pub noise_floor: Option<f64>,
     pub agents: Vec<AgentVm>,
     pub pipeline: BenchPipelineVm,
+    #[schema(required = true)]
     pub pr_url: Option<String>,
     /// The sandbox teardown receipt; `null` while the environment is still alive (or the run never used one).
+    #[schema(required = true)]
     pub receipt: Option<TeardownReceiptVm>,
     /// Plain-words calibration ("this metric is noisy (+-9%); wins must beat 9%"); `null` until the baseline ran.
+    #[schema(required = true)]
     pub calibration: Option<String>,
     /// Read-only: the repo owns ratchet.yaml, changes go through a pull request.
     pub config_yaml: String,
@@ -440,6 +469,7 @@ pub struct OptimizationDetail {
     /// Baseline vs best verified, objective family first, then guardrail metrics; empty before the first win.
     pub compare: Vec<CompareRow>,
     /// `null` when the evaluator reports no spans or there is no verified win yet.
+    #[schema(required = true)]
     pub spans: Option<Vec<SpanRow>>,
 }
 
@@ -482,14 +512,17 @@ pub struct WinningChangeVm {
     /// Verified commits (ratchet moves) the PR squashes.
     pub commits: i64,
     /// Short sha of the best verified commit; `null` before the first win.
+    #[schema(required = true)]
     pub sha: Option<String>,
     pub base_ref: String,
     pub files: Vec<DiffFileVm>,
     pub additions: u64,
     pub deletions: u64,
     /// First hunk of the most-changed file.
+    #[schema(required = true)]
     pub excerpt: Option<DiffExcerpt>,
     /// Why there is no diff (no wins yet, the engine has no git access, git failed); `null` when `files` is real.
+    #[schema(required = true)]
     pub unavailable: Option<String>,
 }
 
@@ -506,9 +539,12 @@ pub struct CandidateVm {
     pub t: f64,
     pub verdict: CandidateVerdict,
     pub reasons: Vec<String>,
+    #[schema(required = true)]
     pub bench_value: Option<f64>,
+    #[schema(required = true)]
     pub confirm_value: Option<f64>,
     /// Signed % improvement vs the baseline (positive = better).
+    #[schema(required = true)]
     pub vs_baseline_pct: Option<f64>,
     pub moved_ratchet: bool,
     pub samples: Vec<f64>,
@@ -527,8 +563,11 @@ pub struct SpendLine {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SpendByAgent {
+    #[schema(required = true)]
     pub agent_id: Option<String>,
+    #[schema(required = true)]
     pub kind: Option<AgentKind>,
+    #[schema(required = true)]
     pub branch: Option<String>,
     pub usd: f64,
 }
@@ -580,9 +619,12 @@ pub struct EvaluatorSummary {
     #[serde(rename = "ref")]
     pub git_ref: String,
     pub run: String,
+    #[schema(required = true)]
     pub repeats: Option<u64>,
     pub hardware: String,
+    #[schema(required = true)]
     pub holdout: Option<String>,
+    #[schema(required = true)]
     pub template: Option<String>,
 }
 
@@ -590,8 +632,10 @@ pub struct EvaluatorSummary {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvironmentSummary {
+    #[schema(required = true)]
     pub image: Option<String>,
     pub machine: String,
+    #[schema(required = true)]
     pub region: Option<String>,
     pub network: Vec<String>,
 }
@@ -602,6 +646,7 @@ pub struct ValueSummary {
     pub usd_per_unit: f64,
     pub period: ValuePeriod,
     pub basis: ValueBasis,
+    #[schema(required = true)]
     pub unit: Option<String>,
 }
 
@@ -616,13 +661,16 @@ pub struct ProtectedEntryVm {
 #[serde(rename_all = "camelCase")]
 pub struct ConfigSummary {
     /// `objective.name`, the default optimization name.
+    #[schema(required = true)]
     pub name: Option<String>,
+    #[schema(required = true)]
     pub pack: Option<String>,
     pub metric: String,
     pub direction: Direction,
     pub min_gain: f64,
     pub evaluator: EvaluatorSummary,
     pub environment: EnvironmentSummary,
+    #[schema(required = true)]
     pub value: Option<ValueSummary>,
     pub guardrails: Vec<String>,
     /// The user's own `protected:` additions.
@@ -637,6 +685,7 @@ pub struct ConfigSummary {
 #[serde(rename_all = "camelCase")]
 pub struct ValidateConfigResult {
     pub ok: bool,
+    #[schema(required = true)]
     pub summary: Option<ConfigSummary>,
     pub errors: Vec<ConfigError>,
 }

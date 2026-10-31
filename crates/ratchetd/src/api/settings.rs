@@ -211,6 +211,7 @@ pub struct GithubFlowVm {
     pub user_code: String,
     pub verification_uri: String,
     pub expires_at: i64,
+    #[schema(required = true)]
     pub message: Option<String>,
 }
 
@@ -219,11 +220,14 @@ pub struct GithubFlowVm {
 #[serde(rename_all = "camelCase")]
 pub struct GithubStatusVm {
     pub signed_in: bool,
+    #[schema(required = true)]
     pub login: Option<String>,
+    #[schema(required = true)]
     pub source: Option<GithubSource>,
     /// False while the built-in placeholder OAuth client id is in use.
     pub client_id_configured: bool,
     /// The device-flow sign-in in progress (or the reason the last one ended).
+    #[schema(required = true)]
     pub flow: Option<GithubFlowVm>,
 }
 
@@ -254,6 +258,7 @@ pub struct AwsProfileVm {
     pub kind: AwsProfileKind,
     pub source: AwsProfileSource,
     /// The `sso-session` a profile uses.
+    #[schema(required = true)]
     pub sso_session: Option<String>,
 }
 
@@ -297,7 +302,9 @@ pub enum HarnessAuth {
 pub struct HarnessVm {
     pub kind: HarnessKind,
     pub installed: bool,
+    #[schema(required = true)]
     pub version: Option<String>,
+    #[schema(required = true)]
     pub path: Option<String>,
     pub auth: HarnessAuth,
     /// What to do next, or what was found. Never contains a credential.

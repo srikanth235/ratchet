@@ -83,6 +83,7 @@ expression: "d[\"components\"][\"schemas\"][\"ApiEvent\"]"
       "required": [
         "optimizationId",
         "agentId",
+        "event",
         "type"
       ],
       "properties": {
@@ -247,6 +248,7 @@ expression: "d[\"components\"][\"schemas\"][\"ApiEvent\"]"
       "required": [
         "sandboxId",
         "phase",
+        "region",
         "text",
         "type"
       ],
@@ -302,6 +304,7 @@ expression: "d[\"components\"][\"schemas\"][\"ApiEvent\"]"
       "description": "Provisional: a connector changed status (signed in, expired, removed).",
       "required": [
         "connectorId",
+        "status",
         "type"
       ],
       "properties": {
