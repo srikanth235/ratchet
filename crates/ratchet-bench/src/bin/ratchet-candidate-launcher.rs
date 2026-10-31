@@ -11,8 +11,17 @@
 //!
 //! The configuration path is fixed at `/ratchet/launcher.conf`: a setuid program must not take it from its caller.
 
+#[cfg(target_os = "linux")]
 use std::path::Path;
 
+#[cfg(target_os = "linux")]
 fn main() {
     ratchet_bench::launcher::main_with(Path::new(ratchet_bench::launcher::CONF_PATH));
+}
+
+/// The launcher only ever runs on Linux bench hosts (it needs `setresuid`); the workspace still builds elsewhere.
+#[cfg(not(target_os = "linux"))]
+fn main() {
+    eprintln!("the candidate launcher is Linux-only");
+    std::process::exit(70);
 }

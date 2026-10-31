@@ -24,6 +24,7 @@ pub mod exec;
 pub mod flatten;
 pub mod image;
 pub mod image_scripts;
+#[cfg(target_os = "linux")]
 pub mod launcher;
 pub mod local;
 pub mod log;

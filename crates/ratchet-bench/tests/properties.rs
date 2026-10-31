@@ -5,10 +5,12 @@ use std::process::Command;
 use proptest::prelude::*;
 use ratchet_bench::deps::{FileHashes, lockfile_changes};
 use ratchet_bench::image::{normalize_repo_relative, parse_dockerfile, parse_jsonc};
+#[cfg(target_os = "linux")]
 use ratchet_bench::launcher::{build_plan, parse_conf};
 use ratchet_bench::pipeline::parse_bench_output;
 use ratchet_bench::shell::{fill, js_cmp, sq};
 use ratchet_bench::{flatten_numeric, protected_pcre};
+#[cfg(target_os = "linux")]
 use std::ffi::OsString;
 
 fn hashes(pairs: &[(String, String)]) -> FileHashes {
@@ -72,6 +74,7 @@ proptest! {
     fn parsers_do_not_panic(s in ".{0,200}") {
         let _ = parse_dockerfile(&s);
         let _ = parse_jsonc(&s);
+        #[cfg(target_os = "linux")]
         let _ = parse_conf(&s);
         let _ = parse_bench_output(&s, "a.b");
     }
@@ -82,6 +85,7 @@ proptest! {
     }
 
     /// The launcher's environment never carries the holdout or credentials, whatever the arguments are.
+    #[cfg(target_os = "linux")]
     #[test]
     fn launcher_environment_never_has_the_holdout_or_aws(args in proptest::collection::vec("[A-Z_]{0,6}(=[a-z]{0,3})?", 0..6)) {
         let vars = [("RATCHET_CANDIDATE_DIR", "/w"), ("RATCHET_CANDIDATE_HOME", "/w"), ("RATCHET_CANDIDATE_TMP", "/w"), ("RATCHET_TRACE", "secret"), ("AWS_SECRET_ACCESS_KEY", "x")];

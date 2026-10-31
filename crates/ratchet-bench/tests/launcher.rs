@@ -1,3 +1,4 @@
+#![cfg(target_os = "linux")]
 //! Port of `infra/tests/src/candidate-launcher.test.ts`: the setuid-root launcher the harness uses inside the bench container.
 //!
 //! The behaviour tests run the real binary code (`ratchet-candidate-launcher-seam`: the same `launcher::run`, with the
