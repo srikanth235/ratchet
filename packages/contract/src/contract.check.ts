@@ -207,14 +207,17 @@ export type Events = Expect<AssertAll<EventsTable>>;
 
 /** D10. Fields of features the desktop app does not have (or has not got yet) that the daemon already accepts. */
 type CreateOptimizationExtra = 'connectors' | 'environmentDraftId';
+/** D14. TypeScript-only fields of the connectors feature (provisional, see PENDING): `connections` (the wire form is `connectors`) and the `repo` of a preflight. */
+type CreateOptimizationTsOnly = 'connections';
+type PreflightTsOnly = 'repo';
 /** D11. Template parameters the desktop app does not offer: the starting direction, metric and value. */
 type ProposeTemplateExtra = 'direction' | 'metric' | 'valueUsd';
 
 type Arg<M extends keyof RatchetApi, I extends number> = Parameters<RatchetApi[M]>[I & keyof Parameters<RatchetApi[M]>];
 
 type RequestsTable = {
-  CreateOptimizationInput: Sends<CreateOptimizationInput, S['CreateOptimizationInput'], CreateOptimizationExtra>;
-  PreflightInput: Sends<PreflightInput, S['PreflightInput']>;
+  CreateOptimizationInput: Sends<Omit<CreateOptimizationInput, CreateOptimizationTsOnly>, S['CreateOptimizationInput'], CreateOptimizationExtra>;
+  PreflightInput: Sends<Omit<PreflightInput, PreflightTsOnly>, S['PreflightInput']>;
   ProposeTemplateInput: Sends<ProposeTemplateInput, S['ProposeTemplateInput'], ProposeTemplateExtra>;
   LiveSettingsInput: Sends<LiveSettingsInput, S['LiveSettingsInput']>;
   RepoSourceInput: Same<RepoSourceInput, S['RepoSource']>;

@@ -49,6 +49,7 @@ Each row is spelled out in `contract.check.ts` (the `D…` comments), so a new d
 | D11 | `ProposeTemplateInput` has no `direction`, `metric`, `valueUsd` | accepted, optional | The daemon takes the template's starting direction, metric and value; the desktop app does not offer them. Listed as `Extra`. |
 | D12 | `createOptimization` resolves to the id | `{ id }` | A bare string is not a JSON document. |
 | D13 | `exportReport` saves a file | `GET …/report` returns `{ fileName, markdown }` | The save dialog is the app's; `pickLocalFolder` is likewise the app's (`inspectRepo` takes the path). Not compared. |
+| D14 | `CreateOptimizationInput.connections`, `PreflightInput.repo` | no such field (the wire has `connectors`; preflight has no `repo`) | Provisional (connectors, see `PENDING`). The check leaves these two TypeScript-only keys out; remove when the connectors group is aligned. |
 
 Also not compared because the desktop app has no counterpart: daemon `status`, `calibration`, `protected-paths`,
 `spend/reconciliations`, `getTemplate`.
