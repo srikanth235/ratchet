@@ -1,9 +1,21 @@
 import { getTemplate, listTemplates, parseConfig, type EngineEvent, type Ledger } from '@ratchet/core';
-import { validateSecretFormat } from '../shared/live-settings.js';
+import { validateLiveSetting, validateSecretFormat } from '../shared/live-settings.js';
+import {
+  type AddAgentConnectorInput,
+  type AddAwsConnectorInput,
+  type AddGithubConnectorInput,
+  type ConnectorsVM,
+  type ConnectorTestVM,
+  type RepoConnections,
+  type RepoConnectionsVM,
+  type StartGithubSignInInput,
+  type UpdateConnectorInput,
+} from '../shared/connectors.js';
 import type {
   AwsProfilesVM,
   ConnectionResultVM,
   ConnectionTarget,
+  AgentKind,
   CreateOptimizationInput,
   EngineEventVM,
   EnvironmentVM,
@@ -26,6 +38,7 @@ import type {
   TemplateVM,
 } from '../shared/types.js';
 import { listAwsProfiles, type AwsProfileList } from './aws-profiles.js';
+import { ConnectorError, ConnectorStore, type ConnectionTesterLike } from './connectors.js';
 import type { AppEngine } from './dev-app.js';
 import { slugOf } from './repo-slug.js';
 import type { GithubApi } from './github.js';
@@ -58,7 +71,7 @@ export interface ServiceDeps {
   ledger: Ledger;
   settings: SettingsStore;
   /** Builds the engine; called at startup. `configFor` hands it the parsed ratchet.yaml of repos seen in step 1 (region). */
-  createApp: (hooks: { configFor(slug: string): unknown }) => AppEngine;
+  createApp: (hooks: { configFor(slug: string): unknown; connectors: ConnectorStore }) => AppEngine;
   now?: () => number;
   /** Ask the user where to save the report; resolves to the written path, or null if cancelled. */
   saveReport?: (defaultName: string, markdown: string) => Promise<string | null>;
@@ -84,12 +97,7 @@ export interface ServiceDeps {
   idleMinutes?: number;
 }
 
-/** The slice of @ratchet/runtime's ConnectionTester the service uses (kept structural so renderer tests need no AWS SDK). */
-export interface ConnectionTesterLike {
-  aws(i: { region: string; profile?: string | undefined; expectedAccountId?: string | undefined }): Promise<{ ok: boolean; detail: string }>;
-  anthropic(i: { apiKey: string }): Promise<{ ok: boolean; detail: string }>;
-  openai(i: { apiKey: string }): Promise<{ ok: boolean; detail: string }>;
-}
+export type { ConnectionTesterLike } from './connectors.js';
 
 export type RatchetService = Omit<RatchetApi, 'onEvent'> & {
   onEvent(listener: (e: EngineEventVM) => void): () => void;
@@ -105,18 +113,29 @@ export function createService(deps: ServiceDeps): RatchetService {
   const listeners = new Set<(e: EngineEventVM) => void>();
   const configs = new Map<string, unknown>();
   const phases = new Map<string, { phase: SandboxPhaseVM; region: string | null; text: string }>();
-  const app = deps.createApp({ configFor: (slug) => configs.get(slug) });
+  const github = deps.github;
+  const awsProfiles = (): AwsProfileList => (deps.listAwsProfiles ?? listAwsProfiles)();
+  const connectors = new ConnectorStore(settings, {
+    github,
+    harnesses: deps.harnesses,
+    listAwsProfiles: awsProfiles,
+    tester: deps.connectionTester,
+    now,
+  });
+  const app = deps.createApp({ configFor: (slug) => configs.get(slug), connectors });
   const unsubscribe = app.engine.subscribe((e) => {
     if (e.type === 'sandbox') phases.set(e.sandboxId, { phase: e.phase, region: e.region, text: e.text });
     const vm = toEventVM(e);
     for (const l of listeners) l(vm);
   });
   const liveDefaults: LivePaths = deps.liveDefaults ?? { tofuBinary: 'tofu', moduleDir: 'infra/aws' };
-  const github = deps.github;
   const signIn = github
     ? new GithubSignIn({
         api: github,
-        settings,
+        save: (token, login, connectorId) => {
+          connectors.upsertGithub({ login, token, source: 'device', ...(connectorId ? { connectorId } : {}) });
+          envLogin = null;
+        },
         ...(deps.openExternal ? { openExternal: deps.openExternal } : {}),
         ...(deps.sleep ? { sleep: deps.sleep } : {}),
         now,
@@ -129,23 +148,31 @@ export function createService(deps: ServiceDeps): RatchetService {
   const meta: MetaView = { prUrl: (id) => settings.prUrl(id) };
   const engineInfo = () => ({ kind: app.kind, mode: app.engine.mode() });
   const idleMinutes = deps.idleMinutes ?? DEFAULT_IDLE_MINUTES;
-  const awsProfiles = (): AwsProfileList => (deps.listAwsProfiles ?? listAwsProfiles)();
+
+  /** The default AWS connector: what the single-profile Settings used to hold. */
+  const defaultAws = () => {
+    const r = connectors.defaultOf('aws');
+    return r?.kind === 'aws' ? r : null;
+  };
+  const awsProfileName = (): string => defaultAws()?.profile ?? '';
+  const awsRegionName = (): string => defaultAws()?.region ?? (settings.live.awsRegion || DEFAULT_REGION);
 
   const settingsVM = (): SettingsVM => ({
-    awsProfile: settings.awsProfile,
-    awsRegion: settings.live.awsRegion || DEFAULT_REGION,
+    awsProfile: awsProfileName(),
+    awsRegion: awsRegionName(),
     secrets: {
-      anthropicApiKey: settings.hasSecret('anthropicApiKey'),
-      openaiApiKey: settings.hasSecret('openaiApiKey'),
-      githubToken: settings.hasSecret('githubToken'),
+      anthropicApiKey: connectors.hasSecret('anthropicApiKey'),
+      openaiApiKey: connectors.hasSecret('openaiApiKey'),
+      githubToken: connectors.hasSecret('githubToken'),
     },
-    dev: { ...settings.live, defaults: { tofuBinary: effectivePaths(settings.live, liveDefaults).tofuBinary, moduleDir: effectivePaths(settings.live, liveDefaults).moduleDir } },
+    dev: { ...settings.live, awsProfile: awsProfileName(), awsRegion: awsRegionName(), defaults: { tofuBinary: effectivePaths(settings.live, liveDefaults).tofuBinary, moduleDir: effectivePaths(settings.live, liveDefaults).moduleDir } },
     encryptionAvailable: settings.encryptionAvailable,
     engine: engineInfo(),
   });
 
-  const needToken = (): string => {
-    const token = settings.getSecret('githubToken');
+  /** The token of a GitHub connector (default: the default one). */
+  const needToken = (connectorId?: string): string => {
+    const token = connectors.githubToken(connectorId) ?? (connectorId ? null : settings.envSecret('githubToken'));
     if (!token) throw new Error('Sign in with GitHub first (Settings).');
     return token;
   };
@@ -154,13 +181,15 @@ export function createService(deps: ServiceDeps): RatchetService {
     return github;
   };
 
+  /** The default GitHub account, as the old single-account row showed it. */
   async function githubStatus(): Promise<GithubStatusVM> {
-    const token = settings.getSecret('githubToken');
+    const rec = connectors.defaultOf('github');
+    const token = connectors.githubToken();
     const flow = signIn?.current() ?? null;
     const clientIdConfigured = github?.clientIdConfigured ?? false;
-    if (!token) return { signedIn: false, login: null, source: null, clientIdConfigured, flow };
-    let login = settings.githubLogin || null;
-    const source = settings.githubSource ?? 'env';
+    if (!token || rec?.kind !== 'github') return { signedIn: false, login: null, source: null, clientIdConfigured, flow };
+    let login = rec.login || null;
+    const source = rec.id === 'github-env' ? 'env' : rec.source;
     if (!login && github) {
       if (envLogin?.token !== token) {
         envLogin = { token, login: await github.user(token).then((u) => u.login, () => null) };
@@ -221,20 +250,21 @@ export function createService(deps: ServiceDeps): RatchetService {
     return { source, repo, baseRef, configYaml, config, errors, templates, problem };
   }
 
-  async function preflight({ agents, agentsWhere, source }: PreflightInput): Promise<PreflightItem[]> {
+  async function preflight({ agents, agentsWhere, source, repo }: PreflightInput): Promise<PreflightItem[]> {
     if (source === 'demo') {
       return [{ id: 'demo', label: 'Demo run', state: 'ok', detail: 'simulation: scripted agents, mock AWS, nothing is installed or billed' }];
     }
     const items: PreflightItem[] = [];
-    const gh = await githubStatus();
+    // The connectors this repo's runs use: its remembered choice, else the defaults.
+    const chosen = await connectors.resolve(repo ?? null);
     items.push(
-      gh.signedIn
-        ? { id: 'github', label: 'GitHub', state: 'ok', detail: gh.login ? `signed in as ${gh.login}` : 'signed in' }
+      chosen.github
+        ? { id: 'github', label: 'GitHub', state: 'ok', detail: chosen.github.login ? `signed in as ${chosen.github.login}` : 'signed in' }
         : { id: 'github', label: 'Sign in with GitHub', state: 'fail', detail: 'Ratchet pushes candidate branches and opens the pull request as you' },
     );
     items.push(
-      settings.awsProfile
-        ? { id: 'aws', label: 'AWS', state: 'ok', detail: `${settings.awsProfile} · ${settings.live.awsRegion || DEFAULT_REGION}` }
+      chosen.aws
+        ? { id: 'aws', label: 'AWS', state: 'ok', detail: `${chosen.aws.profile} · ${chosen.aws.region}` }
         : { id: 'aws', label: 'Connect AWS', state: 'fail', detail: 'the evaluator runs in a sandbox in your AWS account' },
     );
     if (agentsWhere === 'local') {
@@ -250,7 +280,8 @@ export function createService(deps: ServiceDeps): RatchetService {
     } else {
       for (const a of agents) {
         const name: SecretName | null = a === 'claude-code' ? 'anthropicApiKey' : a === 'codex' ? 'openaiApiKey' : null;
-        if (name && !settings.hasSecret(name)) items.push({ id: `key-${a}`, label: `${a === 'codex' ? 'OpenAI' : 'Anthropic'} API key`, state: 'fail', detail: 'cloud runners need an API key (Settings > Agents)' });
+        const key = a === 'claude-code' || a === 'codex' ? chosen.cloudKeys[a] : undefined;
+        if (name && !key && !settings.envSecret(name)) items.push({ id: `key-${a}`, label: `${a === 'codex' ? 'OpenAI' : 'Anthropic'} API key`, state: 'fail', detail: 'cloud runners need an API key (Connectors)' });
         else if (name) items.push({ id: `key-${a}`, label: `${a === 'codex' ? 'OpenAI' : 'Anthropic'} API key`, state: 'ok', detail: 'stored in the keychain' });
       }
     }
@@ -259,11 +290,11 @@ export function createService(deps: ServiceDeps): RatchetService {
 
   async function testConnection(target: ConnectionTarget): Promise<ConnectionResultVM> {
     const t = deps.connectionTester;
-    const l = settings.live;
+    const aws = defaultAws();
     const result = ((): Promise<ConnectionResultVM> => {
       const need = (what: string): Promise<ConnectionResultVM> => Promise.resolve({ target, ok: false, detail: what });
       if (target === 'github') {
-        const token = settings.getSecret('githubToken');
+        const token = connectors.secretValue('githubToken');
         if (!github) return need('GitHub is not available in this build.');
         if (!token) return need('Sign in with GitHub first.');
         return github.user(token).then((u) => ({ target, ok: true, detail: `signed in as ${u.login}` }));
@@ -271,14 +302,14 @@ export function createService(deps: ServiceDeps): RatchetService {
       if (!t) return need('Connection tests are not available in this build.');
       switch (target) {
         case 'aws':
-          if (!l.awsProfile) return need('Choose an AWS profile first.');
-          return t.aws({ region: l.awsRegion || DEFAULT_REGION, profile: l.awsProfile }).then((x) => ({ target, ...x }));
+          if (!aws) return need('Choose an AWS profile first.');
+          return t.aws({ region: aws.region, profile: aws.profile }).then((x) => ({ target, ...x }));
         case 'anthropic': {
-          const apiKey = settings.getSecret('anthropicApiKey');
+          const apiKey = connectors.secretValue('anthropicApiKey');
           return apiKey ? t.anthropic({ apiKey }).then((x) => ({ target, ...x })) : need('Store an Anthropic API key first.');
         }
         case 'openai': {
-          const apiKey = settings.getSecret('openaiApiKey');
+          const apiKey = connectors.secretValue('openaiApiKey');
           return apiKey ? t.openai({ apiKey }).then((x) => ({ target, ...x })) : need('Store an OpenAI API key first.');
         }
       }
@@ -292,13 +323,44 @@ export function createService(deps: ServiceDeps): RatchetService {
     // Belt and braces: no stored secret value may ever leave in a message, whatever the tester returned.
     let detail = r.detail;
     for (const name of ['anthropicApiKey', 'openaiApiKey', 'githubToken'] as SecretName[]) {
-      const v = settings.getSecret(name);
+      const v = connectors.secretValue(name);
       if (v && v.length >= 4) detail = detail.split(v).join('***');
     }
-    if (target === 'aws' && !r.ok && l.awsProfile && awsProfiles().profiles.find((p) => p.name === l.awsProfile)?.kind === 'sso') {
-      detail += ` Run "aws sso login --profile ${l.awsProfile}" in a terminal, then test again.`;
+    if (target === 'aws' && !r.ok && aws && awsProfiles().profiles.find((p) => p.name === aws.profile)?.kind === 'sso') {
+      detail += ` Run "aws sso login --profile ${aws.profile}" in a terminal, then test again.`;
     }
     return { target, ok: r.ok, detail };
+  }
+
+  // ---------------------------------------------------------------- connectors
+
+  async function connectorsVM(): Promise<ConnectorsVM> {
+    return {
+      connectors: await connectors.list(),
+      githubFlow: signIn?.current() ?? null,
+      encryptionAvailable: settings.encryptionAvailable,
+      clientIdConfigured: github?.clientIdConfigured ?? false,
+    };
+  }
+  /** A connector changed: runtimes built from the old choice are rebuilt on next use. */
+  async function changed(): Promise<ConnectorsVM> {
+    app.invalidate?.();
+    return connectorsVM();
+  }
+
+  /** The single-profile call of the first Settings: the profile becomes the default AWS connector (added when it is new). */
+  function setProfile(profile: string): void {
+    if (profile === '') {
+      const def = defaultAws();
+      if (def) connectors.remove(def.id);
+      return;
+    }
+    const existing = connectors.snapshot().find((c) => c.kind === 'aws' && c.profile === profile);
+    if (existing) connectors.setDefault(existing.id);
+    else connectors.addAws({ profile, region: settings.live.awsRegion || DEFAULT_REGION, makeDefault: true });
+    // The auth kind follows the chosen profile (SSO sessions need `aws sso login`).
+    const kind = awsProfiles().profiles.find((p) => p.name === profile)?.kind;
+    settings.setLive({ awsAuth: kind === 'sso' ? 'sso' : 'profile' });
   }
 
   return {
@@ -371,18 +433,18 @@ export function createService(deps: ServiceDeps): RatchetService {
     },
     async githubSignOut() {
       signIn?.cancel();
-      settings.clearSecret('githubToken');
-      settings.clearGithubAccount();
+      const rec = connectors.defaultOf('github');
+      if (rec && rec.id !== 'github-env') connectors.remove(rec.id);
       envLogin = null;
       app.invalidate?.();
       return githubStatus();
     },
-    async listRepos(query): Promise<RepoVM[]> {
-      return needGithub().repos(needToken(), query);
+    async listRepos(query, connectorId): Promise<RepoVM[]> {
+      return needGithub().repos(needToken(connectorId), query);
     },
-    async inspectRepo(source): Promise<RepoInspectVM> {
+    async inspectRepo(source, connectorId): Promise<RepoInspectVM> {
       if (source.kind === 'github') {
-        const token = needToken();
+        const token = needToken(connectorId);
         const gh = needGithub();
         const repo = await gh.repo(token, source.repo);
         const configYaml = await gh.file(token, repo.fullName, repo.defaultBranch, 'ratchet.yaml');
@@ -401,8 +463,8 @@ export function createService(deps: ServiceDeps): RatchetService {
       return {
         profiles: found.profiles,
         ssoSessions: found.ssoSessions,
-        selected: settings.awsProfile,
-        region: settings.live.awsRegion || DEFAULT_REGION,
+        selected: awsProfileName(),
+        region: awsRegionName(),
         defaultRegion: DEFAULT_REGION,
         filesFound: found.filesFound,
       };
@@ -415,6 +477,64 @@ export function createService(deps: ServiceDeps): RatchetService {
       const r = await deps.harnesses.refresh();
       app.invalidate?.();
       return r.harnesses.map(toHarnessVM);
+    },
+
+    // ------------------------------------------------------------ connectors
+    listConnectors: connectorsVM,
+    async refreshConnectors() {
+      await connectors.refresh();
+      return changed();
+    },
+    async addGithubConnector(input: AddGithubConnectorInput) {
+      await connectors.addGithubToken(input.token, input.name);
+      envLogin = null;
+      return changed();
+    },
+    async startGithubConnectorSignIn(input?: StartGithubSignInInput) {
+      if (input?.connectorId && !connectors.vmOf(input.connectorId)) throw new ConnectorError('That connector no longer exists.');
+      await needSignIn().start(input?.connectorId ? { connectorId: input.connectorId } : {});
+      return connectorsVM();
+    },
+    async cancelGithubConnectorSignIn() {
+      signIn?.cancel();
+      return connectorsVM();
+    },
+    async addAwsConnector(input: AddAwsConnectorInput) {
+      const known = awsProfiles();
+      if (known.filesFound && !known.profiles.some((p) => p.name === input.profile.trim())) throw new ConnectorError(`${input.profile} is not in ~/.aws/config or ~/.aws/credentials.`);
+      const rec = connectors.addAws(input);
+      await connectors.test(rec.id).catch(() => undefined);
+      return changed();
+    },
+    async addAgentConnector(input: AddAgentConnectorInput) {
+      await connectors.addAgent(input);
+      return changed();
+    },
+    async updateConnector(id: string, patch: UpdateConnectorInput) {
+      connectors.update(id, patch);
+      return changed();
+    },
+    async removeConnector(id: string) {
+      connectors.remove(id);
+      envLogin = null;
+      return changed();
+    },
+    async setDefaultConnector(id: string) {
+      connectors.setDefault(id);
+      return changed();
+    },
+    async testConnector(id: string): Promise<ConnectorTestVM> {
+      const r = await connectors.test(id);
+      return { ...r, connector: connectors.vmOf(id) };
+    },
+    async getRepoConnections(repo: string): Promise<RepoConnectionsVM> {
+      await connectors.list(); // detected CLI logins are connectors too
+      return connectors.repoConnections(repo);
+    },
+    async saveRepoConnections(repo: string, selection: RepoConnections): Promise<RepoConnectionsVM> {
+      const r = connectors.saveRepoConnections(repo, selection);
+      app.invalidate?.();
+      return r;
     },
 
     // ------------------------------------------------------------ templates
@@ -444,14 +564,24 @@ export function createService(deps: ServiceDeps): RatchetService {
       }
       const slug = slugOf(input.repoUrl);
       if (!slug) throw new Error(`${input.repoUrl} is not a GitHub repository (owner/name).`);
+      // The connectors picked for this run become the repo's remembered choice, and the runtime for the repo is built from them.
+      let agentsWhere = input.agentsWhere;
+      let agents = input.agents;
+      if (input.connections) {
+        connectors.saveRepoConnections(slug, input.connections);
+        agentsWhere = connectors.whereOf(input.connections.agents) ?? agentsWhere;
+        agents = [...new Set(input.connections.agents.map((a) => (connectors.vmOf(a.connectorId) as { agent: AgentKind }).agent))];
+        app.invalidate?.();
+      }
       const missing = (await app.missingFor?.(slug)) ?? [];
       if (missing.length > 0) throw new Error(`Not ready: ${missing.join('; ')}`);
       return app.engine.createOptimization({
         ...base,
+        agents,
         ...(input.name ? { name: input.name } : {}),
         repoUrl: slug,
         baseRef: input.baseRef,
-        ...(input.agentsWhere ? { agentsWhere: input.agentsWhere } : {}),
+        ...(agentsWhere ? { agentsWhere } : {}),
       });
     },
     async startOptimization(id) {
@@ -488,39 +618,45 @@ export function createService(deps: ServiceDeps): RatchetService {
 
     // ------------------------------------------------------------ settings
     async setAwsProfile(profile) {
-      settings.setAwsProfile(profile);
-      // The auth kind follows the chosen profile (SSO sessions need `aws sso login`).
-      const kind = awsProfiles().profiles.find((p) => p.name === profile)?.kind;
-      if (profile) settings.setLive({ awsAuth: kind === 'sso' ? 'sso' : 'profile' });
+      setProfile(profile);
       app.invalidate?.();
       return settingsVM();
     },
     async setSecret(name: SecretName, value) {
       const problem = validateSecretFormat(name, value);
       if (problem) throw new Error(problem);
-      if (name === 'githubToken' && github) {
-        // A pasted token (Advanced): prove it works and learn the account before keeping it.
-        let login: string;
-        try {
-          login = (await github.user(value)).login;
-        } catch (err) {
-          throw new Error((err as Error).message.split(value).join('***'));
-        }
-        settings.setSecret(name, value);
-        settings.setGithubAccount(login, 'token');
+      if (name === 'githubToken') {
+        // A pasted token: prove it works and learn the account before keeping it; it becomes the default GitHub account.
+        await connectors.addGithubToken(value, undefined, true);
         envLogin = null;
-      } else settings.setSecret(name, value);
+      } else {
+        // The single key of the first Settings: replaces the agent's stored key connector (or adds one).
+        const agent = name === 'anthropicApiKey' ? 'claude-code' : 'codex';
+        for (const c of connectors.snapshot()) if (c.kind === 'agent' && c.agent === agent && c.source === 'api-key') connectors.remove(c.id);
+        await connectors.addAgent({ agent, source: 'api-key', apiKey: value });
+      }
       app.invalidate?.();
       return settingsVM();
     },
     async clearSecret(name: SecretName) {
-      settings.clearSecret(name);
-      if (name === 'githubToken') settings.clearGithubAccount();
+      if (name === 'githubToken') {
+        const rec = connectors.defaultOf('github');
+        if (rec && rec.id !== 'github-env') connectors.remove(rec.id);
+      } else {
+        const agent = name === 'anthropicApiKey' ? 'claude-code' : 'codex';
+        for (const c of connectors.snapshot()) if (c.kind === 'agent' && c.agent === agent && c.source === 'api-key') connectors.remove(c.id);
+      }
       app.invalidate?.();
       return settingsVM();
     },
     async saveLiveSettings(input) {
-      settings.setLive(input); // validates the whole batch first
+      const { awsProfile, ...rest } = input;
+      const bad = awsProfile !== undefined ? validateLiveSetting('awsProfile', awsProfile) : null;
+      if (bad) throw new Error(`AWS profile: ${bad}`);
+      settings.setLive(rest); // validates the whole batch first
+      if (awsProfile !== undefined) setProfile(awsProfile.trim());
+      const def = defaultAws();
+      if (rest.awsRegion && def) connectors.update(def.id, { region: rest.awsRegion.trim() });
       app.invalidate?.();
       return settingsVM();
     },

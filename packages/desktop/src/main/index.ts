@@ -105,9 +105,9 @@ app.whenReady().then(() => {
       const res = await dialog.showOpenDialog({ properties: ['openDirectory'], title: 'Choose a local repository' });
       return res.canceled || !res.filePaths[0] ? null : res.filePaths[0];
     },
-    createApp: ({ configFor }) =>
+    createApp: ({ configFor, connectors }) =>
       createEngineForApp(ledger, {
-        live: { settings, stateRoot, defaults: liveDefaults, harnesses, appVersion: app.getVersion(), configFor },
+        live: { settings, connectors, stateRoot, defaults: liveDefaults, harnesses, appVersion: app.getVersion(), configFor },
       }),
     saveReport: async (defaultName, markdown) => {
       // Test/CI override: write the report into this directory instead of asking through a native dialog.

@@ -5,6 +5,19 @@ export type { AgentKind, OptimizationStatus, Verdict };
 export type { AwsAuthKind, LiveSettings, LiveSettingsInput };
 export type Mode = 'live' | 'simulation';
 
+export * from './connectors.js';
+import type {
+  AddAgentConnectorInput,
+  AddAwsConnectorInput,
+  AddGithubConnectorInput,
+  ConnectorsVM,
+  ConnectorTestVM,
+  RepoConnections,
+  RepoConnectionsVM,
+  StartGithubSignInInput,
+  UpdateConnectorInput,
+} from './connectors.js';
+
 // ------------------------------------------------------------------ view models (main → renderer)
 
 /** Window the Optimizations KPI cards cover (compared with the equal-length window before it). */
@@ -549,6 +562,11 @@ export interface CreateOptimizationInput {
   demo?: DemoId;
   agents: AgentKind[];
   agentsWhere?: AgentsWhere;
+  /**
+   * The connectors this run uses (GitHub account, AWS profile, each agent and where it runs). Remembered for the repo.
+   * Without it the repo's remembered choice is used, else the defaults. When given, `agents` and `agentsWhere` follow it.
+   */
+  connections?: RepoConnections;
   budgetUsd: number;
   timeLimitSeconds: number;
   plateauEvals: number;
@@ -559,6 +577,8 @@ export interface PreflightInput {
   agentsWhere: AgentsWhere;
   /** `demo` needs nothing; `github` / `local` need GitHub, AWS and agents. */
   source: 'github' | 'local' | 'demo';
+  /** `owner/name`: check the connectors remembered for this repo instead of the defaults. */
+  repo?: string;
 }
 
 /** The only surface the renderer gets from the main process (`window.ratchet`). */
@@ -584,10 +604,31 @@ export interface RatchetApi {
   /** Start the device flow: returns the code to show; the main process polls and stores the token. */
   githubSignIn(): Promise<GithubStatusVM>;
   githubSignOut(): Promise<GithubStatusVM>;
-  listRepos(query?: string): Promise<RepoVM[]>;
-  inspectRepo(source: RepoSourceInput): Promise<RepoInspectVM>;
+  /** `connectorId`: list with this GitHub connector (default: the default one). */
+  listRepos(query?: string, connectorId?: string): Promise<RepoVM[]>;
+  inspectRepo(source: RepoSourceInput, connectorId?: string): Promise<RepoInspectVM>;
   /** Native folder dialog; null when cancelled. */
   pickLocalFolder(): Promise<string | null>;
+  // connectors: saved GitHub accounts, AWS profiles and agent credentials (several of each, one default per kind)
+  listConnectors(): Promise<ConnectorsVM>;
+  /** Check every connector with its provider (and probe the machine for agent CLIs again), then list. */
+  refreshConnectors(): Promise<ConnectorsVM>;
+  /** A pasted token (personal access token or app token), checked before it is kept. */
+  addGithubConnector(input: AddGithubConnectorInput): Promise<ConnectorsVM>;
+  /** Start the device flow for a new account, or `connectorId` to sign it in again. `githubFlow` in the result carries the code. */
+  startGithubConnectorSignIn(input?: StartGithubSignInInput): Promise<ConnectorsVM>;
+  cancelGithubConnectorSignIn(): Promise<ConnectorsVM>;
+  addAwsConnector(input: AddAwsConnectorInput): Promise<ConnectorsVM>;
+  /** A detected CLI login (one that was removed) or a pasted API key. */
+  addAgentConnector(input: AddAgentConnectorInput): Promise<ConnectorsVM>;
+  /** Rename; AWS: region and monthly cap. */
+  updateConnector(id: string, patch: UpdateConnectorInput): Promise<ConnectorsVM>;
+  removeConnector(id: string): Promise<ConnectorsVM>;
+  setDefaultConnector(id: string): Promise<ConnectorsVM>;
+  testConnector(id: string): Promise<ConnectorTestVM>;
+  /** The choice remembered for a repo, and what a run on it would use now (saved choice, else the defaults). */
+  getRepoConnections(repo: string): Promise<RepoConnectionsVM>;
+  saveRepoConnections(repo: string, selection: RepoConnections): Promise<RepoConnectionsVM>;
   // AWS and agents
   awsProfiles(): Promise<AwsProfilesVM>;
   detectHarnesses(): Promise<HarnessVM[]>;

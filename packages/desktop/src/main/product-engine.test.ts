@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_CONFIG_YAML } from './default-config.js';
 import { configColumns } from './dev-engine.js';
 import { createEngineForApp, friendlyMissing, slugOf, type AppEngine, type CreateEngineOptions } from './engine.js';
+import { ConnectorStore } from './connectors.js';
 import { HarnessCache } from './harnesses.js';
 import { SettingsStore } from './settings.js';
 
@@ -69,6 +70,7 @@ interface Built {
   app: AppEngine;
   ledger: Ledger;
   settings: SettingsStore;
+  connectors: ConnectorStore;
   live: Array<{ options: HybridOptions; engine: FakeEngine; rt: LiveRuntime; disposed: boolean }>;
   sims: Array<{ project: string; settings: unknown; engine: FakeEngine; disposed: boolean }>;
   imageCalls: unknown[];
@@ -90,8 +92,9 @@ function build(extra: Partial<CreateEngineOptions> = {}, opts: { token?: boolean
   roots.push(stateRoot);
   const ledger = openLedger(':memory:');
   const settings = new SettingsStore(null, cipher, {});
-  if (opts.token ?? true) settings.setSecret('githubToken', 'gho_TOKENTOKENTOKENTOKEN1234');
-  if (opts.aws ?? true) settings.setAwsProfile('sandbox');
+  const connectors = new ConnectorStore(settings);
+  if (opts.token ?? true) connectors.upsertGithub({ login: 'octocat', token: 'gho_TOKENTOKENTOKENTOKEN1234', source: 'token' });
+  if (opts.aws ?? true) connectors.addAws({ profile: 'sandbox' });
   if (opts.seedAwsSandbox) {
     ledger.recordSandbox({ id: 'ratchet-sandbox', provider: 'aws', region: 'us-east-1', status: 'applied', outputs: { artifactsBucket: 'x' } } as never);
   }
@@ -110,7 +113,7 @@ function build(extra: Partial<CreateEngineOptions> = {}, opts: { token?: boolean
     repoRoot: stateRoot,
     ...extra,
     live: {
-      settings, stateRoot, defaults: { tofuBinary: 'tofu', moduleDir: '/m' }, harnesses, appVersion: '1.2.3', configFor: (s) => configs.get(s),
+      settings, connectors, stateRoot, defaults: { tofuBinary: 'tofu', moduleDir: '/m' }, harnesses, appVersion: '1.2.3', configFor: (s) => configs.get(s),
       createRuntime: async (options) => {
         const engine = new FakeEngine(`live${live.length}`, ledger);
         const entry = { options, engine, disposed: false, rt: null as unknown as LiveRuntime };
@@ -130,7 +133,7 @@ function build(extra: Partial<CreateEngineOptions> = {}, opts: { token?: boolean
       } as unknown as SimulationRuntime;
     }) as never,
   });
-  return { app, ledger, settings, live, sims, imageCalls, stateRoot, configs, setMissing: (m) => { missing = m; }, setResolver: (f) => { resolver = f; } };
+  return { app, ledger, settings, connectors, live, sims, imageCalls, stateRoot, configs, setMissing: (m) => { missing = m; }, setResolver: (f) => { resolver = f; } };
 }
 
 const input = (repoUrl: string) => ({ repoUrl, baseRef: 'main', agents: ['claude-code' as const], budgetUsd: 10, timeLimitSeconds: 600, plateauEvals: 5 });

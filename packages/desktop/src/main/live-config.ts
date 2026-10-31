@@ -2,8 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentKind } from '@ratchet/core';
 import type { LiveSettings } from '../shared/live-settings.js';
-import type { SecretName } from '../shared/types.js';
-import type { SettingsStore } from './settings.js';
+import type { ResolvedConnections } from './connectors.js';
 
 /** What empty `tofuBinary` / `moduleDir` settings resolve to. */
 export interface LivePaths {
@@ -28,19 +27,21 @@ export function effectivePaths(live: LiveSettings, defaults: LivePaths): LivePat
   return { tofuBinary: live.tofuBinary || defaults.tofuBinary, moduleDir: live.moduleDir || defaults.moduleDir };
 }
 
-const SECRET_FOR_ENV: Record<string, SecretName> = {
-  ANTHROPIC_API_KEY: 'anthropicApiKey',
-  OPENAI_API_KEY: 'openaiApiKey',
-  GITHUB_TOKEN: 'githubToken',
-};
+const AGENT_FOR_ENV: Record<string, 'claude-code' | 'codex'> = { ANTHROPIC_API_KEY: 'claude-code', OPENAI_API_KEY: 'codex' };
 
 /**
- * The engine's secret source: looks the value up in the main process only (keychain or environment). The engine
- * hands it to the runner's parameter store and nowhere else.
+ * The engine's secret source: looks the value up in the main process only. The engine hands it to the runner's parameter
+ * store and nowhere else. The GitHub token and the API keys come from the connectors chosen for the repo; a model key falls back
+ * to the environment only when no connector of that agent holds one (never next to a chosen login).
  */
-export function secretSource(settings: SettingsStore): (kind: AgentKind, name: string) => string | undefined {
+export function secretSource(resolved: ResolvedConnections, env: (name: 'ANTHROPIC_API_KEY' | 'OPENAI_API_KEY') => string | null = () => null): (kind: AgentKind, name: string) => string | undefined {
   return (_kind, name) => {
-    const key = SECRET_FOR_ENV[name];
-    return key ? (settings.getSecret(key) ?? undefined) : undefined;
+    if (name === 'GITHUB_TOKEN') return resolved.github?.token;
+    const agent = AGENT_FOR_ENV[name];
+    if (!agent) return undefined;
+    const key = resolved.cloudKeys[agent];
+    if (key) return key;
+    const chosenLogin = resolved.agents.some((a) => a.agent === agent && a.source === 'login');
+    return chosenLogin ? undefined : (env(name as 'ANTHROPIC_API_KEY' | 'OPENAI_API_KEY') ?? undefined);
   };
 }

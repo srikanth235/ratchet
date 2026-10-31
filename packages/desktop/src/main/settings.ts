@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname } from 'node:path';
 import { LIVE_SETTING_DEFAULTS, SETTING_LABELS, validateLiveSettings, type LiveSettings, type LiveSettingsInput } from '../shared/live-settings.js';
 import type { SecretName } from '../shared/types.js';
+import { emptyConnectors, type ConnectorsPersisted } from './connector-records.js';
 
 /** Matches Electron's `safeStorage` (OS keychain: Keychain on macOS, DPAPI, libsecret). */
 export interface SecretCipher {
@@ -23,10 +24,23 @@ interface Persisted {
   pullRequests: Record<string, string>;
   /** base64 of the cipher text; plaintext never touches disk. */
   secrets: Partial<Record<SecretName, string>>;
+  /** Saved connectors (metadata only) and the repo selections; see `ConnectorStore`. */
+  connectors: ConnectorsPersisted;
+  /** Cipher text (base64) of each connector's token or key, by connector id. */
+  connectorSecrets: Record<string, string>;
 }
 
 const { awsProfile: _profile, ...LIVE_DEFAULTS } = LIVE_SETTING_DEFAULTS;
-const DEFAULTS: Persisted = { awsProfile: '', githubLogin: '', githubSource: '', live: LIVE_DEFAULTS, pullRequests: {}, secrets: {} };
+const DEFAULTS: Persisted = {
+  awsProfile: '',
+  githubLogin: '',
+  githubSource: '',
+  live: LIVE_DEFAULTS,
+  pullRequests: {},
+  secrets: {},
+  connectors: emptyConnectors(),
+  connectorSecrets: {},
+};
 
 const ENV_FOR: Record<SecretName, string[]> = {
   anthropicApiKey: ['ANTHROPIC_API_KEY'],
@@ -46,11 +60,19 @@ export class SettingsStore {
     private readonly cipher: SecretCipher,
     private readonly env: NodeJS.ProcessEnv = process.env,
   ) {
-    this.data = { ...DEFAULTS, live: { ...LIVE_DEFAULTS }, pullRequests: {}, secrets: {} };
+    this.data = { ...DEFAULTS, live: { ...LIVE_DEFAULTS }, pullRequests: {}, secrets: {}, connectors: emptyConnectors(), connectorSecrets: {} };
     if (file && existsSync(file)) {
       try {
         const raw = JSON.parse(readFileSync(file, 'utf8')) as Partial<Persisted>;
-        this.data = { ...this.data, ...raw, live: { ...LIVE_DEFAULTS, ...raw.live }, secrets: { ...raw.secrets }, pullRequests: { ...raw.pullRequests } };
+        this.data = {
+          ...this.data,
+          ...raw,
+          live: { ...LIVE_DEFAULTS, ...raw.live },
+          secrets: { ...raw.secrets },
+          pullRequests: { ...raw.pullRequests },
+          connectors: { ...emptyConnectors(), ...raw.connectors },
+          connectorSecrets: { ...raw.connectorSecrets },
+        };
       } catch {
         /* corrupt settings file: start from defaults rather than crash the app */
       }
@@ -132,6 +154,71 @@ export class SettingsStore {
     if (enc !== undefined && this.cipher.isAvailable()) return this.cipher.decrypt(Buffer.from(enc, 'base64'));
     for (const k of ENV_FOR[name]) if (this.env[k]) return this.env[k]!;
     return null;
+  }
+
+  // ------------------------------------------------------------------ connectors (used by ConnectorStore)
+
+  /** The persisted connector metadata (mutated in place by the ConnectorStore, then `saveConnectors()`). */
+  get connectorData(): ConnectorsPersisted {
+    return this.data.connectors;
+  }
+  saveConnectors(): void {
+    this.save();
+  }
+  setConnectorSecret(id: string, value: string): void {
+    if (!this.cipher.isAvailable()) throw new Error('OS keychain encryption is unavailable; refusing to store the secret in plaintext');
+    this.data.connectorSecrets[id] = this.cipher.encrypt(value).toString('base64');
+    this.save();
+  }
+  hasConnectorSecret(id: string): boolean {
+    return this.data.connectorSecrets[id] !== undefined;
+  }
+  /** Main-process only. Null when none is stored or the keychain cannot decrypt it. */
+  getConnectorSecret(id: string): string | null {
+    const enc = this.data.connectorSecrets[id];
+    if (enc === undefined || !this.cipher.isAvailable()) return null;
+    try {
+      return this.cipher.decrypt(Buffer.from(enc, 'base64'));
+    } catch {
+      return null;
+    }
+  }
+  clearConnectorSecret(id: string): void {
+    delete this.data.connectorSecrets[id];
+    this.save();
+  }
+  /** A value from the process environment (GITHUB_TOKEN, ANTHROPIC_API_KEY ...), or null. */
+  envSecret(name: SecretName): string | null {
+    for (const k of ENV_FOR[name]) if (this.env[k]) return this.env[k]!;
+    return null;
+  }
+
+  /**
+   * The single GitHub token / AWS profile / API keys of the first versions, read once to become connectors. `locked` = a secret is
+   * stored but cannot be decrypted right now (keychain unavailable): migration waits for the next launch instead of dropping it.
+   */
+  legacy(): { awsProfile: string; githubLogin: string; githubSource: GithubSource | null; secrets: Partial<Record<SecretName, string>>; locked: boolean } {
+    const secrets: Partial<Record<SecretName, string>> = {};
+    let locked = false;
+    for (const [name, enc] of Object.entries(this.data.secrets) as [SecretName, string][]) {
+      if (!this.cipher.isAvailable()) {
+        locked = true;
+        continue;
+      }
+      try {
+        secrets[name] = this.cipher.decrypt(Buffer.from(enc, 'base64'));
+      } catch {
+        locked = true;
+      }
+    }
+    return { awsProfile: this.data.awsProfile, githubLogin: this.data.githubLogin, githubSource: this.githubSource, secrets, locked };
+  }
+  clearLegacy(): void {
+    this.data.awsProfile = '';
+    this.data.githubLogin = '';
+    this.data.githubSource = '';
+    this.data.secrets = {};
+    this.save();
   }
 
   private save(): void {

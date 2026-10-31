@@ -1,0 +1,104 @@
+/* Connectors: hairline lists, one muted detail line, status as a dot and a word. Follows design/v02.html #s2.
+   Only tokens (--rt-*) from @ratchet/ui; nothing here changes the shell, the sidebar or the global tokens. */
+.cn { display: flex; flex-direction: column; gap: 40px; max-width: 980px; }
+.cn > * { min-width: 0; }
+
+.cn-group h2 { margin: 0 0 14px; font: 600 13px/1.2 var(--rt-font-sans); color: var(--rt-color-text-secondary); }
+.cn-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rt-color-hairline); }
+.cn-empty { margin: 0; padding: 14px 0; border-top: 1px solid var(--rt-color-hairline); border-bottom: 1px solid var(--rt-color-hairline); color: var(--rt-color-text-tertiary); }
+
+.cn-row { border-bottom: 1px solid var(--rt-color-hairline); }
+.cn-row__line { display: flex; align-items: center; gap: 14px; padding: 14px 0; }
+.cn-row__main { flex: 1 1 auto; min-width: 0; }
+.cn-row__name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cn-row__detail { color: var(--rt-color-text-tertiary); font-size: 12.5px; margin-top: 2px; }
+.cn-row__detail .mono { font-size: 12px; color: var(--rt-color-text-secondary); }
+.cn-default { color: var(--rt-color-brass-highlight); font-size: 12.5px; }
+.cn-status { display: inline-flex; align-items: center; width: 120px; flex: none; }
+.cn-dot { display: inline-block; width: 7px; height: 7px; border-radius: 4px; margin-right: 7px; background: var(--rt-color-dim); }
+.cn-dot--ok { background: var(--rt-color-mint); }
+.cn-dot--wait { background: #E9B85C; }
+.cn-dot--off { background: #4A5568; }
+.cn-dot--bad { background: var(--rt-color-rose); }
+
+/* A quiet text-and-hairline button, as in the design's small "Sign in". */
+.cn-btn {
+  height: 28px; padding: 0 11px; border-radius: 9px; cursor: pointer; white-space: nowrap;
+  border: 1px solid var(--rt-color-hairline-strong); background: transparent; color: var(--rt-color-text); font: 500 12px var(--rt-font-sans);
+}
+.cn-btn:hover:not(:disabled) { background: rgba(148, 163, 190, .07); }
+.cn-btn:disabled { opacity: .45; cursor: default; }
+.cn-btn--primary { background: var(--rt-color-brass); border-color: var(--rt-color-brass); color: var(--rt-color-on-brass); font-weight: 600; }
+.cn-btn--primary:hover:not(:disabled) { background: var(--rt-color-brass-highlight); }
+.cn-btn--danger { border-color: rgba(240, 138, 147, .45); color: var(--rt-color-rose-light); }
+.cn-link { background: none; border: 0; padding: 0; cursor: pointer; color: var(--rt-color-brass-highlight); font: 500 12.5px var(--rt-font-sans); }
+.cn-link:hover { text-decoration: underline; }
+.cn:focus-within :is(.cn-btn, .cn-link, .cn-menu__button, .cn-kind, .cn-choice):focus-visible { outline: 2px solid var(--rt-color-brass-highlight); outline-offset: 2px; }
+
+/* the row's menu */
+.cn-menu { position: relative; flex: none; }
+.cn-menu__button { width: 28px; height: 28px; border-radius: 8px; border: 0; background: transparent; color: var(--rt-color-text-tertiary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.cn-menu__button:hover, .cn-menu__button[aria-expanded='true'] { background: rgba(148, 163, 190, .09); color: var(--rt-color-text); }
+.cn-menu__list {
+  position: absolute; right: 0; top: 32px; z-index: 20; min-width: 190px; padding: 4px;
+  background: var(--rt-color-raised); border: 1px solid var(--rt-color-hairline-strong); border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, .35);
+  display: flex; flex-direction: column;
+}
+.cn-menu__item { text-align: left; border: 0; background: transparent; color: var(--rt-color-text); padding: 7px 10px; border-radius: 7px; cursor: pointer; font: 400 13px var(--rt-font-sans); }
+.cn-menu__item:hover { background: rgba(148, 163, 190, .09); }
+.cn-menu__item--danger { color: var(--rt-color-rose-light); }
+
+/* what opens under a row */
+.cn-row__extra { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 0 0 14px; color: var(--rt-color-text-secondary); }
+.cn-note--ok { color: var(--rt-color-mint); }
+.cn-note--bad { color: var(--rt-color-rose-light); }
+.cn-inline { display: flex; align-items: center; gap: 10px; }
+.cn-inline input, .cn-field input, .cn-field select {
+  height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--rt-color-hairline-strong); background: transparent; color: var(--rt-color-text); font: 400 13px var(--rt-font-sans);
+}
+.cn-inline input:focus, .cn-field input:focus, .cn-field select:focus { outline: none; border-color: rgba(217, 178, 111, .55); }
+.cn-field input[aria-invalid='true'] { border-color: rgba(240, 138, 147, .6); }
+.cn-field select { padding-right: 6px; }
+.cn-field select option { background: var(--rt-color-raised); }
+
+/* the add panel: a hairline above and below, no box */
+.cn-add { border-top: 1px solid var(--rt-color-hairline); border-bottom: 1px solid var(--rt-color-hairline); padding: 18px 0 22px; display: flex; flex-direction: column; gap: 16px; }
+.cn-add__head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.cn-add__head h2 { margin: 0; font: 600 13px/1.2 var(--rt-font-sans); color: var(--rt-color-text-secondary); }
+.cn-add__body { display: flex; flex-direction: column; gap: 16px; }
+.cn-kinds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.cn-kind { text-align: left; display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--rt-color-hairline); background: transparent; color: var(--rt-color-text); cursor: pointer; font: inherit; }
+.cn-kind:hover { border-color: rgba(217, 178, 111, .45); }
+.cn-kind__name { font-weight: 500; }
+.cn-kind__sub { color: var(--rt-color-text-tertiary); font-size: 12.5px; }
+.cn-sub { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.cn-sub__title { font-weight: 500; }
+.cn-found { list-style: none; margin: 0; padding: 0; width: 100%; }
+.cn-found li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--rt-color-hairline); }
+.cn-actions, .cn-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 14px; }
+.cn-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--rt-color-text-tertiary); }
+.cn-field--wide { flex: 1 1 260px; }
+.cn-field--wide input { width: 100%; }
+.cn-choices { display: flex; flex-direction: column; border-top: 1px solid var(--rt-color-hairline); }
+.cn-choice { display: flex; align-items: baseline; gap: 12px; text-align: left; padding: 9px 2px; border: 0; border-bottom: 1px solid var(--rt-color-hairline); background: transparent; color: var(--rt-color-text); cursor: pointer; font: inherit; }
+.cn-choice:hover { background: rgba(148, 163, 190, .05); }
+.cn-choice--on .cn-choice__name { color: var(--rt-color-brass-highlight); }
+.cn-choice--on::before { content: ''; align-self: center; width: 7px; height: 7px; border-radius: 4px; background: var(--rt-color-brass); }
+.cn-choice__hint { color: var(--rt-color-text-tertiary); font-size: 12.5px; }
+.cn-code { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.cn-code__value { font-size: 20px; letter-spacing: .12em; color: var(--rt-color-brass-highlight); }
+.cn-more > summary { cursor: pointer; color: var(--rt-color-text-secondary); font-weight: 500; }
+.cn-more[open] > summary { margin-bottom: 12px; }
+.cn-muted { color: var(--rt-color-text-tertiary); font-size: 12.5px; margin: 0; }
+.cn-problem { color: var(--rt-color-rose-light); font-size: 12.5px; margin: 0; }
+
+/* Advanced (development): collapsed, quiet, at the bottom */
+.cn-advanced { border-top: 1px solid var(--rt-color-hairline); padding-top: 14px; }
+.cn-advanced > summary { cursor: pointer; color: var(--rt-color-text-tertiary); font-weight: 500; }
+.cn-advanced[open] > summary { margin-bottom: 12px; color: var(--rt-color-text-secondary); }
+.cn-advanced > p { margin: 0 0 12px; }
+
+@media (max-width: 900px) {
+  .cn-kinds { grid-template-columns: 1fr; }
+  .cn-status { width: auto; }
+}

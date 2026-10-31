@@ -7,6 +7,7 @@ import { createEngineForApp } from './engine.js';
 import { HarnessCache } from './harnesses.js';
 import { registerIpc, type IpcMainLike } from './ipc.js';
 import { createService, type ConnectionTesterLike, type RatchetService, type ServiceDeps } from './service.js';
+import type { ConnectorStore } from './connectors.js';
 import { SettingsStore } from './settings.js';
 import { ANTHROPIC_KEY, DEVICE_TOKEN, FakeGithub, GH_TOKEN, OPENAI_KEY, YAML_OK, claude, codex, receipt } from './test-support.js';
 
@@ -33,6 +34,7 @@ interface Setup {
   service: RatchetService;
   ledger: Ledger;
   settings: SettingsStore;
+  connectors: ConnectorStore;
   gh: FakeGithub;
   tester: FakeTester;
   engineCalls: string[];
@@ -47,6 +49,7 @@ function setup(opts: { engine?: Partial<EngineApi>; deps?: Partial<ServiceDeps>;
   const tester = new FakeTester();
   const engineCalls: string[] = [];
   const opened: string[] = [];
+  let connectors!: ConnectorStore;
   const base = (): AppEngine => createEngineForApp(ledger, { engine: 'dev', tickMs: 3_600_000 });
   const service = createService({
     ledger,
@@ -57,7 +60,8 @@ function setup(opts: { engine?: Partial<EngineApi>; deps?: Partial<ServiceDeps>;
     sleep: async () => undefined,
     listAwsProfiles: () => ({ profiles: [{ name: 'default', kind: 'keys', source: 'credentials', ssoSession: null }, { name: 'corp-sso', kind: 'sso', source: 'config', ssoSession: 'corp' }], ssoSessions: ['corp'], filesFound: true }),
     harnesses: new HarnessCache({ loginPath: async () => '/bin', detect: async () => opts.harnesses ?? [claude(), codex()] }),
-    createApp: () => {
+    createApp: (hooks) => {
+      connectors = hooks.connectors;
       const app = base();
       const engine = Object.assign(Object.create(app.engine) as EngineApi, opts.engine ?? {});
       return {
@@ -71,14 +75,14 @@ function setup(opts: { engine?: Partial<EngineApi>; deps?: Partial<ServiceDeps>;
     ...opts.deps,
   });
   services.push(service);
-  return { service, ledger, settings, gh, tester, engineCalls, opened };
+  return { service, ledger, settings, connectors, gh, tester, engineCalls, opened };
 }
 
 const settle = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); await new Promise((r) => setTimeout(r, 5)); };
 
 describe('GitHub row', () => {
   it('signed out by default; the device flow shows a code, then signs in once approved', async () => {
-    const { service, gh, settings, opened, engineCalls } = setup();
+    const { service, gh, connectors, opened, engineCalls } = setup();
     expect(await service.githubStatus()).toEqual({ signedIn: false, login: null, source: null, clientIdConfigured: true, flow: null });
     gh.polls = [{ status: 'pending' }, { status: 'ok', token: DEVICE_TOKEN }];
     const s = await service.githubSignIn();
@@ -86,13 +90,13 @@ describe('GitHub row', () => {
     expect(opened).toEqual(['https://github.com/login/device']);
     await settle();
     expect(await service.githubStatus()).toEqual({ signedIn: true, login: 'octocat', source: 'device', clientIdConfigured: true, flow: null });
-    expect(settings.getSecret('githubToken')).toBe(DEVICE_TOKEN);
+    expect(connectors.githubToken()).toBe(DEVICE_TOKEN);
     expect(engineCalls).toContain('invalidate'); // runtimes built before the sign-in are rebuilt
     expect((await service.getSettings()).secrets.githubToken).toBe(true);
   });
 
   it('a denied sign-in is reported with its reason, and sign out clears the token and the account', async () => {
-    const { service, gh, settings } = setup();
+    const { service, gh, connectors } = setup();
     gh.polls = [{ status: 'denied' }];
     await service.githubSignIn();
     await settle();
@@ -101,20 +105,20 @@ describe('GitHub row', () => {
     expect(await service.githubStatus()).toMatchObject({ signedIn: true, login: 'octocat', source: 'token' });
     const out = await service.githubSignOut();
     expect(out).toMatchObject({ signedIn: false, login: null, flow: null });
-    expect(settings.hasSecret('githubToken')).toBe(false);
-    expect(settings.githubLogin).toBe('');
+    expect(connectors.githubToken()).toBeNull();
+    expect(connectors.snapshot()).toEqual([]);
   });
 
   it('a pasted token (Advanced) is proven against GitHub first, and a rejected one is not kept', async () => {
-    const { service, gh, settings } = setup();
+    const { service, gh, connectors } = setup();
     gh.userFails = true;
     await expect(service.setSecret('githubToken', GH_TOKEN)).rejects.toThrow(/rejected the sign-in/);
-    expect(settings.hasSecret('githubToken')).toBe(false);
+    expect(connectors.snapshot()).toEqual([]);
     gh.userFails = false;
     await service.setSecret('githubToken', GH_TOKEN);
-    expect(settings.githubSource).toBe('token');
+    expect(connectors.snapshot()).toMatchObject([{ source: 'token', login: 'octocat' }]);
     await service.clearSecret('githubToken');
-    expect(settings.githubLogin).toBe('');
+    expect(connectors.snapshot()).toEqual([]);
   });
 
   it('a token from the environment counts as signed in; its login is looked up once', async () => {
