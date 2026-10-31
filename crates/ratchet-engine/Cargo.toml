@@ -20,6 +20,8 @@ async-trait = "0.1"
 futures = "0.3"
 indexmap = { version = "2", features = ["serde"] }
 rand = "0.9"
+regex = "1"
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 ratchet-agents = { path = "../ratchet-agents" }
 ratchet-bench = { path = "../ratchet-bench" }
 ratchet-core = { path = "../ratchet-core" }
@@ -33,6 +35,7 @@ tempfile = "3"
 thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs", "process", "io-util"] }
 tracing = "0.1"
+url = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"

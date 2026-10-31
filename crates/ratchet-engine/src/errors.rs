@@ -112,6 +112,12 @@ impl From<LedgerError> for EngineError {
 
 impl From<PortError> for EngineError {
     fn from(e: PortError) -> Self {
+        // the live runtime's unready ports fail with `not_configured: <what is missing>`
+        if let PortError::Failed(m) = &e
+            && let Some(rest) = m.strip_prefix("not_configured: ")
+        {
+            return Self::new(EngineErrorCode::NotConfigured, rest);
+        }
         Self::new(EngineErrorCode::Port, e.to_string())
     }
 }
