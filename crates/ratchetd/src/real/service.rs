@@ -2,8 +2,8 @@
 //! [`ratchet_engine::desktop::ProductEngine`].
 //!
 //! Reads come from the ledger through [`LedgerViews`]; commands go to the engine through the product router; settings and
-//! secrets live in [`SettingsStore`] (secret values stay in the daemon). The provisional groups (overview, connectors,
-//! environment drafts) are not supported yet and answer `501`.
+//! secrets live in [`SettingsStore`] (secret values stay in the daemon). Environment drafts run the user's own setup agent
+//! (`crate::drafts`). The provisional groups (overview, connectors) are not supported yet and answer `501`.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -36,6 +36,7 @@ use super::mappers::{
 };
 use super::settings::SettingsStore;
 use crate::api::validate::{validate_profile_name, validate_secret_format};
+use crate::drafts::{DrafterSource, EnvDrafts};
 use crate::api::*;
 use crate::service::{AppService, ServiceError, ServiceResult};
 use crate::views::{LedgerViews, PrUrlLookup};
@@ -204,6 +205,21 @@ struct Inner {
     probe: Option<Arc<dyn ConnectionProbe>>,
     idle_minutes: u32,
     pump: Mutex<Option<JoinHandle<()>>>,
+    /// Environment drafts: the setup agent (the user's own Claude Code / Codex, run on this machine) per repository.
+    drafts: EnvDrafts,
+}
+
+/// The setup agent of a repository comes from its live runtime.
+struct ProductDrafters(ProductEngine);
+
+#[async_trait]
+impl DrafterSource for ProductDrafters {
+    async fn drafter_for(
+        &self,
+        repo: &str,
+    ) -> ServiceResult<Arc<dyn ratchet_env::EnvironmentDrafter>> {
+        self.0.environment_drafter(repo).await.map_err(service_error)
+    }
 }
 
 #[derive(Clone)]
@@ -321,6 +337,12 @@ impl RealService {
                 probe: opts.connection_probe.clone(),
                 idle_minutes: opts.idle_minutes,
                 pump: Mutex::new(None),
+                drafts: EnvDrafts::new(Arc::new(ProductDrafters(product.clone())), {
+                    let tx = tx.clone();
+                    Arc::new(move |e| {
+                        let _ = tx.send(e);
+                    })
+                }),
             }
         });
 
@@ -877,6 +899,9 @@ impl AppService for RealService {
         input: CreateOptimizationInput,
     ) -> ServiceResult<CreatedOptimization> {
         validate_create(&input)?;
+        if let Some(draft) = &input.environment_draft_id {
+            self.0.drafts.require_approved(draft)?;
+        }
         let base = EngineCreateOptimizationInput {
             name: input.name.clone(),
             repo_url: String::new(),
@@ -1305,6 +1330,53 @@ impl AppService for RealService {
             .propose_template(&i)
             .await
             .map_err(service_error)
+    }
+
+    // ---- environment drafts ------------------------------------------------------------------------------
+
+    async fn create_environment_draft(
+        &self,
+        mut input: CreateEnvironmentDraftInput,
+    ) -> ServiceResult<EnvironmentDraftVm> {
+        self.0.need_token()?;
+        input.repo = slug_of(&input.repo).ok_or_else(|| ServiceError::InvalidFields {
+            message: format!("{} is not a GitHub repository (owner/name).", input.repo),
+            fields: vec![FieldError::new("repo", "use owner/name")],
+        })?;
+        if input.aws_profile.is_none() {
+            input.aws_profile = Some(self.0.settings.aws_profile()).filter(|p| !p.is_empty());
+        }
+        self.0.drafts.create(input).await
+    }
+
+    async fn list_environment_drafts(&self) -> ServiceResult<EnvironmentDraftsVm> {
+        Ok(EnvironmentDraftsVm {
+            drafts: self.0.drafts.list(),
+        })
+    }
+
+    async fn get_environment_draft(&self, id: &str) -> ServiceResult<EnvironmentDraftVm> {
+        self.0.drafts.get(id)
+    }
+
+    async fn discard_environment_draft(&self, id: &str) -> ServiceResult<()> {
+        self.0.drafts.discard(id)
+    }
+
+    async fn revise_environment_draft(
+        &self,
+        id: &str,
+        input: ReviseEnvironmentDraftInput,
+    ) -> ServiceResult<EnvironmentDraftVm> {
+        self.0.drafts.revise(id, input).await
+    }
+
+    async fn approve_environment_draft(
+        &self,
+        id: &str,
+        input: ApproveEnvironmentDraftInput,
+    ) -> ServiceResult<EnvironmentDraftVm> {
+        self.0.drafts.approve(id, input).await
     }
 
     // ---- environments ------------------------------------------------------------------------------------

@@ -6,6 +6,7 @@ use std::fmt;
 use aws_smithy_types::error::display::DisplayErrorContext;
 use aws_smithy_types::error::metadata::ProvideErrorMetadata;
 
+use crate::sandbox::environment::EnvironmentRejectedError;
 use crate::sandbox::infra_override::{ContractViolationError, InfraOverrideError};
 use crate::sandbox::tofu::{TeardownBlockedError, TofuError};
 
@@ -28,6 +29,8 @@ pub enum Error {
     ContractViolation(#[from] ContractViolationError),
     #[error(transparent)]
     InfraOverride(#[from] InfraOverrideError),
+    #[error(transparent)]
+    EnvironmentRejected(#[from] EnvironmentRejectedError),
     #[error(transparent)]
     ImageLookup(#[from] crate::images::ImageLookupError),
     /// Anything else the TypeScript code threw as a plain `Error`.

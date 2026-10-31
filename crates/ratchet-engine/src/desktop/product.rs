@@ -53,12 +53,22 @@ type BoxFut<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 pub trait RuntimeEngine: EngineApi {
     /// Tick until `cancel` fires.
     async fn run(&self, cancel: CancellationToken);
+
+    /// The setup agent that drafts environments (docs/SIMPLIFIED_MODEL.md, "Dynamic environments"); `None` for an
+    /// engine that has none.
+    fn environment_drafter(&self) -> Option<Arc<dyn ratchet_env::EnvironmentDrafter>> {
+        None
+    }
 }
 
 #[async_trait]
 impl RuntimeEngine for Engine {
     async fn run(&self, cancel: CancellationToken) {
         Engine::run(self, Some(cancel)).await;
+    }
+
+    fn environment_drafter(&self) -> Option<Arc<dyn ratchet_env::EnvironmentDrafter>> {
+        self.ports.environment.clone()
     }
 }
 
@@ -842,6 +852,27 @@ impl ProductEngine {
                 "This engine cannot open template pull requests.",
             ),
             other => port(other),
+        })
+    }
+
+    /// The setup agent for one GitHub repository: the user's own Claude Code / Codex on this machine, with `tofu plan` checked
+    /// in their AWS account. Needs the GitHub sign-in and a signed-in agent CLI.
+    pub async fn environment_drafter(
+        &self,
+        repo: &str,
+    ) -> EngineResult<Arc<dyn ratchet_env::EnvironmentDrafter>> {
+        let slug = slug_of(repo).ok_or_else(|| {
+            err(
+                EngineErrorCode::InvalidInput,
+                format!("{repo} is not a GitHub repository (owner/name)."),
+            )
+        })?;
+        let rt = self.live(Some(&slug)).await?;
+        rt.engine.environment_drafter().ok_or_else(|| {
+            err(
+                EngineErrorCode::Unavailable,
+                "No setup agent is available: sign in to Claude Code or Codex on this machine and connect GitHub (Settings).",
+            )
         })
     }
 

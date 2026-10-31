@@ -10,7 +10,6 @@
 
 mod connectors;
 mod data;
-mod drafts;
 mod engine;
 mod environments;
 mod overview;
@@ -42,7 +41,6 @@ pub use data::{DEFAULT_CONFIG_YAML, Rng};
 pub use seed::DEMO_RUNNING_ID;
 
 use self::connectors::ConnectorsState;
-use self::drafts::DraftsState;
 use self::environments::EnvState;
 use self::settings::SettingsState;
 use crate::api::*;
@@ -107,7 +105,6 @@ pub(crate) struct State {
     pub settings: SettingsState,
     pub env: EnvState,
     pub connectors: ConnectorsState,
-    pub drafts: DraftsState,
 }
 
 pub(crate) struct Inner {
@@ -119,6 +116,8 @@ pub(crate) struct Inner {
     pub rng: Mutex<Rng>,
     pub pr_urls: Arc<Mutex<HashMap<String, String>>>,
     pub state: Mutex<State>,
+    /// Environment drafts: the real `ratchet-env` flow with its deterministic mock drafter (no agent, no AWS).
+    pub drafts: crate::drafts::EnvDrafts,
 }
 
 impl Inner {
@@ -258,6 +257,23 @@ impl SimService {
         };
         let (tx, _) = broadcast::channel(1024);
         let views = LedgerViews::new(ledger.clone(), Arc::clone(&clock), lookup);
+        let drafts = {
+            let tx = tx.clone();
+            let n = std::sync::atomic::AtomicU32::new(0);
+            let mock = ratchet_env::MockEnvironmentDrafter::new(ratchet_env::MockEnvironmentDrafterOptions {
+                clock: Some(Arc::clone(&clock)),
+                new_id: Some(Arc::new(move || {
+                    format!("env-{:04}", n.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1)
+                })),
+                ..Default::default()
+            });
+            crate::drafts::EnvDrafts::new(
+                Arc::new(crate::drafts::FixedDrafter(Arc::new(mock))),
+                Arc::new(move |e| {
+                    let _ = tx.send(e);
+                }),
+            )
+        };
         let inner = Arc::new(Inner {
             ledger,
             views,
@@ -267,6 +283,7 @@ impl SimService {
             pr_urls,
             state: Mutex::new(State::default()),
             opts: opts.clone(),
+            drafts,
         });
         inner.st().settings = SettingsState::demo();
         inner.st().connectors = ConnectorsState::demo();
@@ -709,21 +726,27 @@ impl AppService for SimService {
         self.0.save_connector_selection(input)
     }
 
-    // ---- environment drafts (provisional) ----------------------------------------------------------------
+    // ---- environment drafts ------------------------------------------------------------------------------
 
     async fn create_environment_draft(
         &self,
         input: CreateEnvironmentDraftInput,
     ) -> ServiceResult<EnvironmentDraftVm> {
-        self.0.create_draft(input)
+        self.0.drafts.create(input).await
+    }
+
+    async fn list_environment_drafts(&self) -> ServiceResult<EnvironmentDraftsVm> {
+        Ok(EnvironmentDraftsVm {
+            drafts: self.0.drafts.list(),
+        })
     }
 
     async fn get_environment_draft(&self, id: &str) -> ServiceResult<EnvironmentDraftVm> {
-        self.0.get_draft(id)
+        self.0.drafts.get(id)
     }
 
-    async fn environment_draft_files(&self, id: &str) -> ServiceResult<EnvFilesVm> {
-        self.0.draft_files(id)
+    async fn discard_environment_draft(&self, id: &str) -> ServiceResult<()> {
+        self.0.drafts.discard(id)
     }
 
     async fn revise_environment_draft(
@@ -731,15 +754,15 @@ impl AppService for SimService {
         id: &str,
         input: ReviseEnvironmentDraftInput,
     ) -> ServiceResult<EnvironmentDraftVm> {
-        self.0.revise_draft(id, input)
+        self.0.drafts.revise(id, input).await
     }
 
-    async fn approve_environment_draft(&self, id: &str) -> ServiceResult<EnvironmentDraftVm> {
-        self.0.approve_draft(id)
-    }
-
-    async fn open_environment_draft_pr(&self, id: &str) -> ServiceResult<EnvironmentDraftVm> {
-        self.0.open_draft_pr(id)
+    async fn approve_environment_draft(
+        &self,
+        id: &str,
+        input: ApproveEnvironmentDraftInput,
+    ) -> ServiceResult<EnvironmentDraftVm> {
+        self.0.drafts.approve(id, input).await
     }
 }
 
@@ -821,7 +844,7 @@ impl Inner {
             }
         };
         if let Some(draft) = &input.environment_draft_id {
-            self.require_approved_draft(draft)?;
+            self.drafts.require_approved(draft)?;
         }
         let cfg = ratchet_core::parse_config(&yaml).map_err(|e| {
             ServiceError::Invalid(format!("invalid ratchet.yaml: {}", join_errors(&e)))

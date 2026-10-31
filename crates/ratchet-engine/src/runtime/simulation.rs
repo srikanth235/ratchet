@@ -159,6 +159,10 @@ pub struct SimulationRuntime {
     /// The simulated repo's ratchet.yaml (after the overlay), parsed: objective, value model, guardrails.
     pub config: RatchetConfig,
     pub git: Arc<LocalGitHost>,
+    /// The mock environment drafter (no agent, no AWS): deterministic drafts per scope, validated and priced by the real
+    /// validator and cost estimator. Approving one commits its files to the simulated repo through the same commit / PR
+    /// flow as live mode.
+    pub environment: Arc<dyn ratchet_env::EnvironmentDrafter>,
 }
 
 impl SimulationRuntime {
@@ -563,6 +567,13 @@ pub async fn create_simulation_runtime(opts: SimulationOptions) -> EngineResult<
         tick_interval_ms: Some(1000),
         ..EngineSettings::default()
     };
+    let environment: Arc<dyn ratchet_env::EnvironmentDrafter> = Arc::new(
+        ratchet_env::MockEnvironmentDrafter::new(ratchet_env::MockEnvironmentDrafterOptions {
+            clock: Some(clock.clone()),
+            git: Some(ratchet_env::fixed_git(git.clone() as Arc<dyn ratchet_core::ports::GitHost>)),
+            ..Default::default()
+        }),
+    );
     let engine = Engine::new(EngineOptions {
         ledger: opts.ledger.clone(),
         mode: Mode::Simulation,
@@ -577,6 +588,8 @@ pub async fn create_simulation_runtime(opts: SimulationOptions) -> EngineResult<
             local_runners: None,
             bench,
             costs: Some(Arc::new(LedgerMirrorCosts(opts.ledger.clone()))),
+            // No agent, no AWS: deterministic drafts per scope; approving one commits its files to the simulated repo.
+            environment: Some(environment.clone()),
         },
         settings: overlay_settings(base, opts.settings.clone()),
     })
@@ -590,5 +603,6 @@ pub async fn create_simulation_runtime(opts: SimulationOptions) -> EngineResult<
         base_ref: repo.base_ref,
         config: parsed,
         git,
+        environment,
     })
 }

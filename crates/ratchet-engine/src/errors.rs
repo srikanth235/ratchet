@@ -110,6 +110,22 @@ impl From<LedgerError> for EngineError {
     }
 }
 
+impl From<ratchet_env::EnvError> for EngineError {
+    fn from(e: ratchet_env::EnvError) -> Self {
+        use ratchet_env::EnvErrorKind as K;
+        let code = match e.kind {
+            K::InvalidInput => EngineErrorCode::InvalidInput,
+            K::InvalidConfig => EngineErrorCode::InvalidConfig,
+            K::InvalidState => EngineErrorCode::InvalidState,
+            K::NotFound => EngineErrorCode::NotFound,
+            K::Unavailable => EngineErrorCode::Unavailable,
+            K::Aborted => EngineErrorCode::Aborted,
+            K::Port => EngineErrorCode::Port,
+        };
+        Self::new(code, e.message)
+    }
+}
+
 impl From<PortError> for EngineError {
     fn from(e: PortError) -> Self {
         // the live runtime's unready ports fail with `not_configured: <what is missing>`

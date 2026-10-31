@@ -103,6 +103,20 @@ export interface EnvironmentDraftProgress {
 
 export type EnvironmentDraftStatus = 'drafting' | 'ready' | 'failed' | 'approved';
 
+/**
+ * The `environment-draft` event of the daemon's event stream (`api/openapi.yaml`, checked in `packages/contract`): a draft changed
+ * status, or its setup agent reported progress (`phase` and `text` are then those of `EnvironmentDraftProgress`).
+ */
+export interface EnvironmentDraftEvent {
+  type: 'environment-draft';
+  draftId: string;
+  status: EnvironmentDraftStatus;
+  /** 0 while the first draft is being made. */
+  revision: number;
+  phase?: EnvironmentDraftProgress['phase'];
+  text?: string;
+}
+
 /** One turn of the revise loop. */
 export interface EnvironmentDraftMessage {
   from: 'user' | 'agent';

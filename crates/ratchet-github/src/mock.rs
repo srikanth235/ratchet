@@ -197,12 +197,6 @@ impl GitHost for MockGitHost {
                     input.branch
                 )));
             }
-            if input.update && !s.existing_branches.contains(&input.branch) {
-                return Err(PortError::failed(format!(
-                    "commitFiles: branch {} does not exist",
-                    input.branch
-                )));
-            }
             s.existing_branches.insert(input.branch.clone());
             let sha = format!("files-{}", s.files_committed.len() + 1);
             s.files_committed.push((input.clone(), sha.clone()));

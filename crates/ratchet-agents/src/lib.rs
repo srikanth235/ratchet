@@ -67,7 +67,7 @@ pub use git::{
 pub use inbox::MemoryInbox;
 pub use local_agents::{
     LocalAdapterOptions, LocalAgentControlOptions, create_local_agent_control,
-    local_adapter_factory, local_agent_problem,
+    local_adapter_factory, local_adapter_for, local_agent_problem,
 };
 pub use process::{
     LineSplitter, RunProcessOptions, RunProcessResult, Spawner, TokioSpawner, run_process,

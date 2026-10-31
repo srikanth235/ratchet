@@ -16,9 +16,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
 use ratchet_core::config::RatchetConfig;
-use ratchet_core::enums::{Mode, OptimizationStatus, SandboxStatus};
+use ratchet_core::enums::{EnvironmentScope, Mode, OptimizationStatus, SandboxStatus};
 use ratchet_core::ports::{
-    EngineEvent, InstanceState, SandboxActivity, SandboxInput, SandboxOutputs, SandboxPhase,
+    EngineEvent, InstanceState, SandboxActivity, SandboxEnvironment, SandboxInput, SandboxOutputs,
+    SandboxPhase,
     SandboxStateStatus, SandboxTeardownReceipt, TeardownOrphan, TeardownRemoved, TeardownRun,
     TeardownTrigger,
 };
@@ -105,25 +106,42 @@ impl Engine {
             Some(s) => self.ledger.get_sandbox(s.as_str()).await?,
             None => None,
         };
+        let already_applied = existing
+            .as_ref()
+            .is_some_and(|e| e.status == SandboxStatus::Applied);
         let region = existing
             .map(|e| e.region)
             .unwrap_or_else(|| region_of(&config, &self.settings.sandbox.default_region));
-        let sandbox_id = opt
-            .sandbox_id
-            .as_ref()
-            .map_or_else(|| self.auto_sandbox_id_for(&region), |s| s.to_string());
+        // The environment (if any) comes from the PROTECTED ref, never a candidate. Optimizations with the same region
+        // and the same environment share a sandbox; a different environment gets a sandbox of its own (the id carries
+        // the content hash).
+        let environment = if already_applied {
+            None
+        } else {
+            self.environment_of(optimization_id).await?
+        };
+        let sandbox_id = match (&opt.sandbox_id, &environment) {
+            (Some(s), _) => s.to_string(),
+            (None, Some(env)) => ratchet_env::environment_sandbox_id(&region, &env.hash),
+            (None, None) => self.auto_sandbox_id_for(&region),
+        };
 
         {
             let q = self.queue_for(&sandbox_id);
             let _turn = q.lock().await;
             let row = self.ledger.get_sandbox(&sandbox_id).await?;
             if row.is_none_or(|r| r.status != SandboxStatus::Applied) {
-                let input = self.sandbox_input_for(&sandbox_id, &region, &config);
+                let input =
+                    self.sandbox_input_for(&sandbox_id, &region, &config, environment.clone());
+                let what = match &environment {
+                    Some(env) if env.scope == EnvironmentScope::Full => "the full-stack environment",
+                    _ => "the environment",
+                };
                 self.phase(
                     &sandbox_id,
                     SandboxPhase::Creating,
                     Some(&region),
-                    format!("creating the environment in {region}"),
+                    format!("creating {what} in {region}"),
                 );
                 if let Err(err) = self.apply_lifecycle(&input).await {
                     self.phase(
@@ -160,6 +178,26 @@ impl Engine {
     }
 
     fn sandbox_input_for(
+        &self,
+        sandbox_id: &str,
+        region: &str,
+        config: &RatchetConfig,
+        environment: Option<SandboxEnvironment>,
+    ) -> SandboxInput {
+        let base = self.sandbox_base_input(sandbox_id, region, config);
+        let Some(env) = environment else {
+            return base;
+        };
+        let mut tags = base.tags.clone().unwrap_or_default();
+        tags.insert("ratchet:env".to_owned(), env.hash.clone());
+        SandboxInput {
+            tags: Some(tags),
+            environment: Some(env),
+            ..base
+        }
+    }
+
+    fn sandbox_base_input(
         &self,
         sandbox_id: &str,
         region: &str,
@@ -438,6 +476,12 @@ impl Engine {
                 instances.push(i);
             }
         };
+        // the machines of the environment stage are instances of the run too
+        if let Some(env) = outputs.as_ref().and_then(|o| o.environment.as_ref()) {
+            for m in env.machines.values().filter(|m| !m.id.is_empty()) {
+                add(m.id.clone());
+            }
+        }
         for o in &after {
             for src in self.ledger.spend_sources(&o.id, "ec2:").await? {
                 add(src["ec2:".len()..].to_owned());
@@ -595,7 +639,13 @@ fn json_str<T: serde::Serialize>(v: &T) -> String {
 }
 
 fn resources_of(o: &SandboxOutputs) -> Vec<String> {
-    vec![
+    let env = o.environment.as_ref().map(|env| {
+        env.resources
+            .iter()
+            .map(|r| format!("environment ({}): {r}", env.scope))
+            .collect::<Vec<_>>()
+    });
+    env.unwrap_or_default().into_iter().chain([
         format!("S3 bucket {} (artifacts)", o.artifacts_bucket),
         format!("S3 bucket {} (sealed holdout)", o.sealed_bucket),
         format!("network subnet {}", o.network.subnet_id),
@@ -605,7 +655,8 @@ fn resources_of(o: &SandboxOutputs) -> Vec<String> {
         ),
         format!("agent permission boundary {}", o.agent_boundary_ref),
         format!("evaluator identity {}", o.eval_identity_ref),
-    ]
+    ])
+    .collect()
 }
 
 fn summarize(r: &SandboxTeardownReceipt) -> String {

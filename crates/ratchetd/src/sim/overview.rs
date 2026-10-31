@@ -87,7 +87,8 @@ impl Inner {
 
         // needs you
         let mut needs = Vec::new();
-        for d in self.drafts_waiting() {
+        for d in self.drafts.waiting() {
+            let Some(p) = d.draft.as_ref() else { continue };
             needs.push(NeedsYouItem {
                 id: format!("approve-{}", d.id),
                 kind: NeedsYouKind::ApproveEnvironment,
@@ -95,12 +96,12 @@ impl Inner {
                 subtitle: format!(
                     "{} \u{00b7} {} stack, ${}/h",
                     d.goal,
-                    match d.scope {
-                        EnvScope::Full => "full",
-                        EnvScope::Single => "single-machine",
-                        EnvScope::None => "no extra",
+                    match p.scope {
+                        EnvironmentScope::Full => "full",
+                        EnvironmentScope::Single => "single-machine",
+                        EnvironmentScope::None => "no extra",
                     },
-                    d.cost.hourly_usd
+                    ratchet_core::numfmt::fixed_trimmed(p.cost.usd_per_hour, 2)
                 ),
                 action_label: "Review".into(),
                 optimization_id: None,

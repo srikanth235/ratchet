@@ -44,5 +44,6 @@ pub use pricing::{AwsPriceBook, StaticPriceBook};
 pub use reaper::{Reaper, ReaperOptions, ReaperPolicy, ReaperReport};
 pub use region::{DEFAULT_REGION, environment_region, region_for_optimization};
 pub use sandbox::{
-    AwsSandboxOutputs, MockSandboxProvider, TofuSandboxProvider, TofuSandboxProviderOptions,
+    AwsSandboxOutputs, EnvironmentRejectedError, MockSandboxProvider, TofuEnvironmentChecker,
+    TofuEnvironmentCheckerOptions, TofuSandboxProvider, TofuSandboxProviderOptions,
 };

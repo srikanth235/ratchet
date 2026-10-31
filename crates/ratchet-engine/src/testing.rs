@@ -1153,6 +1153,7 @@ impl Harness {
                     .then(|| self.local_runners.clone() as Arc<dyn RunnerControl>),
                 bench: self.bench.clone(),
                 costs: self.costs.clone(),
+                environment: None,
             },
             settings: self.settings.clone(),
         })
@@ -1394,6 +1395,7 @@ async fn placeholder_engine(ledger: &Ledger) -> Engine {
             local_runners: None,
             bench: Arc::new(FakeBench::new(log, clock)),
             costs: None,
+            environment: None,
         },
         settings: EngineSettings::default(),
     })

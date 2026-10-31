@@ -31,7 +31,7 @@ fn ov(msg: impl Into<String>) -> Error {
 }
 
 /// POSIX `path.normalize` for a relative path: collapses `.`, empty segments and `..` where possible.
-fn posix_normalize(p: &str) -> String {
+pub(crate) fn posix_normalize(p: &str) -> String {
     let mut out: Vec<&str> = vec![];
     for seg in p.split('/') {
         match seg {
@@ -90,7 +90,7 @@ pub fn read_infra_override(config: &Value) -> Result<Option<String>> {
     Ok(Some(n))
 }
 
-static LOCAL_EXEC: LazyLock<Regex> = LazyLock::new(|| {
+pub(crate) static LOCAL_EXEC: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"provisioner\s+"(local-exec|remote-exec)"|data\s+"external"|\bexternal\s*=\s*\{|program\s*=\s*\["#).expect("static regex")
 });
 

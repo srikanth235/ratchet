@@ -22,6 +22,9 @@ pub mod tree;
 pub mod types;
 pub mod validate;
 
+pub use approve::{
+    CommitDraftOptions, EnvironmentPullRequest, build_environment_pull_request, commit_draft,
+};
 pub use brief::{
     ANSWER_MARKER, AgentAnswer, MAIN_TF_SKELETON, SetupBriefInput, build_revise_brief,
     build_setup_brief, format_agent_answer, parse_agent_answer,
@@ -35,12 +38,19 @@ pub use cost::{
     estimate_environment_cost_live, estimate_machines_cost, static_hourly_usd, volume_usd_per_hour,
 };
 
+pub use drafter::{
+    AdapterFactory, AgentEnvironmentDrafter, AgentEnvironmentDrafterOptions, DEFAULT_TOKEN_PRICING,
+    ErrorHook, GitFactory, TokenPricing, fixed_git,
+};
 pub use environment::{
     EnvironmentConfigInput, EnvironmentModuleRef, environment_module_of, environment_sandbox_id,
     hash_environment_files,
 };
 pub use error::{EnvError, EnvErrorKind, EnvResult};
 
+pub use mock::{
+    MockEnvironmentDrafter, MockEnvironmentDrafterOptions, ScopeChoice, scope_from_goal,
+};
 pub use samples::{
     MOCK_CONFIG_YAML, SampleEnvironment, SampleOptions, sample_effort, sample_environment,
     sample_reason,

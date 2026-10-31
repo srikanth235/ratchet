@@ -9,6 +9,7 @@ description = "Dynamic environments: scope, validator, cost estimate, setup-agen
 
 [dependencies]
 async-trait = "0.1"
+rand = "0.9"
 ratchet-core = { path = "../ratchet-core" }
 regex = "1"
 serde = { version = "1", features = ["derive"] }
@@ -22,6 +23,7 @@ tokio-util = { version = "0.7", default-features = false }
 tracing = "0.1"
 
 [dev-dependencies]
+ratchet-github = { path = "../ratchet-github" }
 tokio = { version = "1", features = ["fs", "sync", "time", "rt-multi-thread", "macros", "io-util", "test-util"] }
 insta = { version = "1", features = ["json"] }
 

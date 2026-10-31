@@ -228,6 +228,7 @@ async fn runs_a_claude_code_agent_in_a_worktree_verifies_its_commit_then_removes
             local_runners: Some(local_runners.clone()),
             bench: Arc::new(FixedBench),
             costs: None,
+            environment: None,
         },
         settings: EngineSettings {
             tick_interval_ms: Some(40),

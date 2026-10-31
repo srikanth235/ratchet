@@ -25,6 +25,7 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 ratchet-agents = { path = "../ratchet-agents" }
 ratchet-bench = { path = "../ratchet-bench" }
 ratchet-core = { path = "../ratchet-core" }
+ratchet-env = { path = "../ratchet-env" }
 ratchet-github = { path = "../ratchet-github" }
 ratchet-ledger = { path = "../ratchet-ledger" }
 ratchet-sandbox = { path = "../ratchet-sandbox" }

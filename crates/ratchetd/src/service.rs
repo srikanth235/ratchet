@@ -5,7 +5,7 @@
 //! data; `ratchet-engine` will implement it for real. Reads that only need the ledger can reuse
 //! [`crate::views::LedgerViews`].
 //!
-//! The *provisional* groups (connectors, overview, environment drafts) have default bodies that say the engine does
+//! The *provisional* groups (connectors, overview) and the environment drafts have default bodies that say the engine does
 //! not support them yet, so an engine can ship without them.
 
 use async_trait::async_trait;
@@ -259,19 +259,25 @@ pub trait AppService: Send + Sync + 'static {
         unsupported("connectors")
     }
 
-    // ---- environment drafts (provisional) ----------------------------------------------------------------
+    // ---- environment drafts ------------------------------------------------------------------------------
+    /// Records the draft (`drafting`), starts the setup agent in the background and returns at once.
     async fn create_environment_draft(
         &self,
         _input: CreateEnvironmentDraftInput,
     ) -> ServiceResult<EnvironmentDraftVm> {
         unsupported("environment drafts")
     }
+    async fn list_environment_drafts(&self) -> ServiceResult<EnvironmentDraftsVm> {
+        unsupported("environment drafts")
+    }
     async fn get_environment_draft(&self, _id: &str) -> ServiceResult<EnvironmentDraftVm> {
         unsupported("environment drafts")
     }
-    async fn environment_draft_files(&self, _id: &str) -> ServiceResult<EnvFilesVm> {
+    /// Forget a draft that was not approved.
+    async fn discard_environment_draft(&self, _id: &str) -> ServiceResult<()> {
         unsupported("environment drafts")
     }
+    /// "Ask for a change": the same agent session continues; returns at once with the draft `drafting`.
     async fn revise_environment_draft(
         &self,
         _id: &str,
@@ -279,12 +285,13 @@ pub trait AppService: Send + Sync + 'static {
     ) -> ServiceResult<EnvironmentDraftVm> {
         unsupported("environment drafts")
     }
-    /// Locks the draft: agents change code only, never the environment.
-    async fn approve_environment_draft(&self, _id: &str) -> ServiceResult<EnvironmentDraftVm> {
-        unsupported("environment drafts")
-    }
-    /// "Open as PR": add the environment files to the repo through a pull request.
-    async fn open_environment_draft_pr(&self, _id: &str) -> ServiceResult<EnvironmentDraftVm> {
+    /// Commits the files to the protected ref (or opens a pull request) and locks the draft: agents change code only,
+    /// never the environment.
+    async fn approve_environment_draft(
+        &self,
+        _id: &str,
+        _input: ApproveEnvironmentDraftInput,
+    ) -> ServiceResult<EnvironmentDraftVm> {
         unsupported("environment drafts")
     }
 }
