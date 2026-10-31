@@ -86,4 +86,41 @@ struct FormatTests {
         #expect(better.resultText == "412 → 288 ms")
         #expect(Percent.signed(better.change ?? 0) == "−30%")
     }
+
+    @Test("Plural", arguments: [
+        (0, "0 wins"), (1, "1 win"), (2, "2 wins"), (11, "11 wins"),
+    ])
+    func plural(count: Int, expected: String) {
+        #expect(Plural.count(count, "win") == expected)
+    }
+
+    @Test func pluralIrregularAndVerified() {
+        #expect(Plural.count(1, "match", plural: "matches") == "1 match")
+        #expect(Plural.count(2, "match", plural: "matches") == "2 matches")
+        #expect(Plural.count(1, "file") == "1 file")
+        #expect(Plural.count(3, "eval") == "3 evals")
+        #expect(Figure.wins(0) == "0 verified wins")
+    }
+
+    @Test("Elapsed axis labels", arguments: [
+        (0.0, "0 m"), (1800.0, "30 m"), (3600.0, "1 h"), (5400.0, "1 h 30 m"), (7200.0, "2 h"),
+    ])
+    func elapsedAxis(seconds: Double, expected: String) {
+        #expect(Elapsed.axis(seconds) == expected)
+    }
+
+    @Test func elapsedTicksStayInsideThePlot() {
+        // 2 h: 0, 30 m, 1 h, 1 h 30 m; the 2 h tick would sit on the edge and is left out.
+        #expect(ChartTicks.elapsed(span: 7200) == [0, 1800, 3600, 5400])
+        #expect(ChartTicks.elapsed(span: 1200) == [0, 300, 600, 900])
+        let long = ChartTicks.elapsed(span: 86_400)
+        #expect(long.count <= 5)
+        #expect(long.allSatisfy { $0 <= 86_400 * 0.8 })
+        #expect(ChartTicks.elapsed(span: 0) == [0])
+    }
+
+    @Test func dateTickFractionsLeaveTheEndOut() {
+        #expect(ChartTicks.fractions(count: 4) == [0, 0.25, 0.5, 0.75])
+        #expect(ChartTicks.fractions(count: 1) == [0])
+    }
 }

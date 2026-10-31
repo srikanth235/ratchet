@@ -58,12 +58,12 @@ struct EnvironmentStep: View {
                 HairlineList {
                     ForEach(draft.resources) { resource in
                         HairlineRow {
-                            TitleStack(title: resource.name, subtitle: resource.detail)
+                            TitleStack(title: resource.name, subtitle: resource.detail, subtitleLines: 2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Text(resource.machine).kitType(.meta).foregroundStyle(Ink.textMuted)
-                                .frame(width: 128, alignment: .leading)
+                                .frame(width: 96, alignment: .leading)
                             Text(Money.perHour(resource.usdPerHour)).kitType(.mono).foregroundStyle(Ink.text)
-                                .frame(width: 80, alignment: .trailing)
+                                .frame(width: 64, alignment: .trailing)
                         }
                     }
                 }

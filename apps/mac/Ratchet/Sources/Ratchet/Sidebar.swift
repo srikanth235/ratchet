@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SidebarView: View {
     @Environment(AppRouter.self) private var router
+    @Environment(AppStore.self) private var store
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xxl) {
@@ -26,7 +27,16 @@ struct SidebarView: View {
             }
 
             Spacer(minLength: 0)
-            SandboxStatusLine()
+            VStack(alignment: .leading, spacing: Space.xs) {
+                if store.isDemoData {
+                    Text("Demo data")
+                        .kitType(.caption).foregroundStyle(Ink.textFaint)
+                        .padding(.horizontal, Space.md)
+                        .help("No ratchetd is running, so Ratchet shows sample data.")
+                        .accessibilityLabel("Demo data, no daemon is running")
+                }
+                SandboxStatusLine()
+            }
         }
         .padding(.horizontal, Space.sm)
         .padding(.top, Space.sm)

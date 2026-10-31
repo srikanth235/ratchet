@@ -107,7 +107,7 @@ struct OptimizationDetailView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         Text(agent.name).kitType(.bodyStrong).foregroundStyle(Ink.text).lineLimit(1)
                         Text(agent.activity).kitType(.meta).foregroundStyle(Ink.textMuted).lineLimit(2)
-                        Text("Runs on \(agent.placement.title) · \(agent.evals) evals · \(agent.wins) wins")
+                        Text("Runs on \(agent.placement.title) · " + Plural.count(agent.evals, "eval") + " · " + Plural.count(agent.wins, "win"))
                             .kitType(.caption).foregroundStyle(Ink.textFaint)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -164,7 +164,7 @@ struct OptimizationDetailView: View {
     }
 
     private func spentNote(_ optimization: Optimization) -> String {
-        let agents = optimization.agentsCount == 1 ? "1 agent" : "\(optimization.agentsCount) agents"
+        let agents = Plural.count(optimization.agentsCount, "agent")
         return Figure.wins(optimization.winsCount) + " from " + agents
     }
 
@@ -173,7 +173,7 @@ struct OptimizationDetailView: View {
             if let detail, detail.filesChanged > 0 {
                 HairlineList {
                     HairlineRow {
-                        TitleStack(title: "Winning change", subtitle: "\(detail.filesChanged) files, squashed")
+                        TitleStack(title: "Winning change", subtitle: Plural.count(detail.filesChanged, "file") + ", squashed")
                             .frame(maxWidth: .infinity, alignment: .leading)
                         Text("+\(detail.additions)").kitType(.mono).foregroundStyle(Ink.ok)
                         Text("−\(detail.deletions)").kitType(.mono).foregroundStyle(Ink.bad)
@@ -199,12 +199,18 @@ struct OptimizationDetailView: View {
         let points = stairPoints(optimization)
         return StaircaseChart(
             points: points, yFormat: optimization.metric.number, yDomain: yDomain(optimization, points),
-            reference: optimization.baseline, previewLast: Store.isOverridden)
+            reference: optimization.baseline, xAxis: .elapsed(since: runStart(optimization)),
+            previewLast: Store.isOverridden)
+    }
+
+    /// Where the elapsed-time axis starts.
+    private func runStart(_ optimization: Optimization) -> Date {
+        optimization.startedAt ?? (detail?.moves ?? []).map(\.at).min() ?? Date()
     }
 
     private func stairPoints(_ optimization: Optimization) -> [StairPoint] {
         let moves = (detail?.moves ?? []).sorted { $0.at < $1.at }
-        let start = optimization.startedAt ?? moves.first?.at ?? Date()
+        let start = runStart(optimization)
         var points = [StairPoint(id: "start", date: start, value: optimization.baseline)]
         for move in moves {
             points.append(StairPoint(id: move.id, date: move.at, value: move.value,

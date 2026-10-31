@@ -297,6 +297,10 @@ public struct ValuePoint: Identifiable, Codable, Hashable, Sendable {
 
 public enum NeedsYouKind: String, Codable, Sendable {
     case approveEnvironment, mergeWins
+    /// A connector that needs signing in again; opens the Connectors page.
+    case signIn
+    /// A budget that ran out; opens the optimization.
+    case budgetLimit
 }
 
 public struct NeedsYouItem: Identifiable, Codable, Hashable, Sendable {

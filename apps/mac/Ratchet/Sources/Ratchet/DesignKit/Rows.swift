@@ -68,14 +68,21 @@ struct StatusLabel: View {
 struct TitleStack: View {
     let title: String
     var subtitle: String?
+    /// How many lines the grey line may take before it is cut. One keeps table rows level; rows with free text
+    /// (Needs you, resources) allow two.
+    var subtitleLines = 1
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title).kitType(.bodyStrong).foregroundStyle(Ink.text).lineLimit(1)
             if let subtitle {
-                Text(subtitle).kitType(.meta).foregroundStyle(Ink.textFaint).lineLimit(1)
+                Text(subtitle).kitType(.meta).foregroundStyle(Ink.textFaint)
+                    .lineLimit(subtitleLines)
+                    .fixedSize(horizontal: false, vertical: subtitleLines > 1)
             }
         }
+        // The text column gives way last: the columns beside it shrink first.
+        .layoutPriority(1)
     }
 }
 

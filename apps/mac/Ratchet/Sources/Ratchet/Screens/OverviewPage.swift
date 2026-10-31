@@ -82,9 +82,11 @@ struct OverviewPage: View {
     }
 
     private func act(on item: NeedsYouItem) {
-        if item.kind == .approveEnvironment, let optimization = store.optimization(id: item.optimizationID) {
+        if item.kind == .signIn {
+            router.show(.connectors)
+        } else if item.kind == .approveEnvironment, let optimization = store.optimization(id: item.optimizationID) {
             router.reviewEnvironment(of: optimization, client: store.client)
-        } else {
+        } else if !item.optimizationID.isEmpty {
             router.open(optimization: item.optimizationID)
         }
     }
@@ -96,7 +98,7 @@ struct OverviewPage: View {
                     ForEach(store.needsYou) { item in
                         HairlineRow {
                             StatusDot(tone: .wait)
-                            TitleStack(title: item.title, subtitle: item.detail)
+                            TitleStack(title: item.title, subtitle: item.detail, subtitleLines: 2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Button(item.actionTitle) { act(on: item) }
                                 .buttonStyle(.kit(.quiet, small: true))
