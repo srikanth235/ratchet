@@ -10,6 +10,7 @@
  * Only sandboxes this class created are destroyed automatically; one applied explicitly (`applySandbox`) stays until
  * `destroySandbox`. The idle clock is persisted, so a sandbox that outlived the app is destroyed on the first tick after launch.
  */
+import { environmentSandboxId } from '@ratchet/core';
 import type {
   CloudCompute,
   Clock,
@@ -19,6 +20,7 @@ import type {
   OptimizationRow,
   RatchetConfig,
   SandboxActivity,
+  SandboxEnvironment,
   SandboxInput,
   SandboxLifecycle,
   SandboxOutputs,
@@ -44,6 +46,13 @@ export interface AutoSandboxHost {
   provider: SandboxProvider;
   compute: CloudCompute;
   configOf(optimizationId: string): RatchetConfig;
+  /**
+   * The environment this optimization is measured in, read from the protected ref (docs/SIMPLIFIED_MODEL.md, "Dynamic
+   * environments"): the approved drafted environment, or the custom `infra:` module. `undefined` for scope `none` (and `single`
+   * without OpenTofu): the standard sandbox, nothing extra. Throws `EngineError('invalid_config')` when the config asks for an
+   * environment the protected ref does not hold, or one that fails the sandbox contract.
+   */
+  environmentOf(optimizationId: string): Promise<SandboxEnvironment | undefined>;
   /** The engine's `teardown`: secrets, identities, leftover instances; marks the optimization `completed`. */
   teardown(optimizationId: string): Promise<void>;
   teardownReport(optimizationId: string): TeardownReport | undefined;
@@ -110,13 +119,17 @@ export class AutoSandbox {
     const config = this.h.configOf(optimizationId);
     const existing = opt.sandboxId ? ledger.getSandbox(opt.sandboxId) : undefined;
     const region = existing?.region ?? regionOf(config, settings.sandbox.defaultRegion);
-    const sandboxId = opt.sandboxId ?? this.sandboxIdFor(region);
+    // The environment (if any) comes from the PROTECTED ref, never a candidate. Optimizations with the same region and the same
+    // environment share a sandbox; a different environment gets a sandbox of its own (the id carries the content hash).
+    const environment = existing?.status === 'applied' ? undefined : await this.h.environmentOf(optimizationId);
+    const sandboxId = opt.sandboxId ?? (environment ? environmentSandboxId(region, environment.hash) : this.sandboxIdFor(region));
 
     await this.queue(sandboxId, async () => {
       const row = ledger.getSandbox(sandboxId);
       if (row?.status !== 'applied') {
-        const input = this.inputFor(sandboxId, region, config);
-        this.phase(sandboxId, 'creating', region, `creating the environment in ${region}`);
+        const input = this.inputFor(sandboxId, region, config, environment);
+        const what = environment ? `the ${environment.scope === 'full' ? 'full-stack ' : ''}environment` : 'the environment';
+        this.phase(sandboxId, 'creating', region, `creating ${what} in ${region}`);
         try {
           await this.h.lifecycleCall(() => this.h.lifecycle.apply(input));
         } catch (err) {
@@ -132,11 +145,19 @@ export class AutoSandbox {
     return sandboxId;
   }
 
-  private inputFor(sandboxId: string, region: string, config: RatchetConfig): SandboxInput {
+  private inputFor(sandboxId: string, region: string, config: RatchetConfig, environment?: SandboxEnvironment): SandboxInput {
     const custom = this.h.settings.sandbox.input?.({ sandboxId, region, config });
-    if (custom) return custom;
-    const types = [...new Set([...config.agent.allowed_instance_types, config.bench.hardware])];
-    return { sandboxId, region, allowedInstanceTypes: types, maxInstancesPerAgent: 2, maxInstanceLifetimeHours: 4, tags: { 'ratchet:managed': 'true' } };
+    const base =
+      custom ??
+      ({
+        sandboxId,
+        region,
+        allowedInstanceTypes: [...new Set([...config.agent.allowed_instance_types, config.bench.hardware])],
+        maxInstancesPerAgent: 2,
+        maxInstanceLifetimeHours: 4,
+        tags: { 'ratchet:managed': 'true' },
+      } satisfies SandboxInput);
+    return environment ? { ...base, environment, tags: { ...base.tags, 'ratchet:env': environment.hash } } : base;
   }
 
   // ------------------------------------------------------------------ idle clock + destroy
@@ -251,7 +272,7 @@ export class AutoSandbox {
       for (const [cat, v] of Object.entries(ledger.spendBreakdown(o.id).byCategory)) if (v) spendByCategory[cat] = (spendByCategory[cat] ?? 0) + v;
       return { optimizationId: o.id, status: o.status, spendUsd: usd };
     });
-    const instances = new Set<string>();
+    const instances = new Set<string>(Object.values(outputs?.environment?.machines ?? {}).map((m) => m.id).filter(Boolean));
     for (const o of after) {
       for (const r of this.h.ledger.sqlite.prepare("SELECT DISTINCT source FROM spend_events WHERE optimization_id = ? AND source LIKE 'ec2:%'").all(o.id) as Array<{ source: string }>) {
         instances.add(r.source.slice('ec2:'.length));
@@ -331,7 +352,9 @@ export class AutoSandbox {
 }
 
 function resourcesOf(o: SandboxOutputs): string[] {
+  const env = o.environment;
   return [
+    ...(env ? env.resources.map((r) => `environment (${env.scope}): ${r}`) : []),
     `S3 bucket ${o.artifactsBucket} (artifacts)`,
     `S3 bucket ${o.sealedBucket} (sealed holdout)`,
     `network subnet ${o.network.subnetId}`,

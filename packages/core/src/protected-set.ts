@@ -1,4 +1,5 @@
 import { normalizeRepoPath } from './protected.js';
+import { DEFAULT_ENVIRONMENT_INFRA_DIR } from './config/schema.js';
 import { findEvaluatorTemplate } from './templates/registry.js';
 
 /**
@@ -10,7 +11,8 @@ import { findEvaluatorTemplate } from './templates/registry.js';
  *  - `ratchet.yaml` itself (the config path in use);
  *  - the evaluator's files: the template's (`evaluator.template`), plus every `bench/` or `eval/` directory that
  *    `evaluator.run` references;
- *  - the environment: `environment.image` (and `.devcontainer/` when the image lives there) and the `infra` module;
+ *  - the environment: `environment.image` (and `.devcontainer/` when the image lives there), the `infra` module, and the
+ *    approved drafted environment (`environment.scope` set: everything under `infra/ratchet/`);
  *  - lockfiles and install config (`INSTALL_FILES`): the bench has no network, so dependencies are those of the base ref;
  *  - the user's own `protected:` list, which only ADDS to the above.
  */
@@ -46,7 +48,7 @@ export interface ProtectedEntry {
 export interface ProtectedConfigInput {
   protected?: readonly string[] | undefined;
   evaluator: { run?: string | undefined; template?: string | undefined };
-  environment?: { image?: string | undefined } | undefined;
+  environment?: { image?: string | undefined; scope?: string | undefined } | undefined;
   infra?: string | undefined;
 }
 
@@ -116,6 +118,8 @@ export function effectiveProtected(config: ProtectedConfigInput, opts: { configP
     if (image.startsWith('.devcontainer/')) add('.devcontainer/**', 'environment', 'the environment image');
   }
   if (config.infra) add(normalizeRepoPath(config.infra), 'environment', 'the custom infrastructure module');
+  // An approved, drafted environment (docs/SIMPLIFIED_MODEL.md "Dynamic environments") is locked: agents change code only.
+  if (config.environment?.scope) add(`${DEFAULT_ENVIRONMENT_INFRA_DIR}/**`, 'environment', 'the approved environment');
 
   for (const f of INSTALL_FILES) add(`**/${f}`, 'install', 'dependencies are fixed: the bench has no network');
 

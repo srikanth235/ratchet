@@ -15,8 +15,8 @@ import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync } from 'node
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import YAML from 'yaml';
-import { parseConfig, type AgentKind, type Clock, type Ledger, type RatchetConfig, type SandboxProvider } from '@ratchet/core';
-import { Engine, type EngineSettings } from '@ratchet/engine';
+import { parseConfig, type AgentKind, type Clock, type EnvironmentDrafter, type Ledger, type RatchetConfig, type SandboxProvider } from '@ratchet/core';
+import { Engine, MockEnvironmentDrafter, type EngineSettings } from '@ratchet/engine';
 import { FsArtifactStore, MockCloudCompute, MockCostReconciler, MockSandboxProvider, StaticPriceBook, billed, type AwsSandboxOutputs } from '@ratchet/aws';
 import { LocalGitHost, createBareRemote } from '@ratchet/github';
 import { LocalBenchRunner, withNodeOnPath } from '@ratchet/bench';
@@ -63,6 +63,11 @@ export interface SimulationRuntime {
   /** The simulated repo's ratchet.yaml (after the overlay), parsed: objective, value model, guardrails. */
   config: RatchetConfig;
   git: LocalGitHost;
+  /**
+   * The mock environment drafter (no agent, no AWS): deterministic drafts per scope, validated and priced by the real validator
+   * and cost estimator. Approving one commits its files to the simulated repo through the same commit / PR flow as live mode.
+   */
+  environment: EnvironmentDrafter;
   dispose(): Promise<void>;
 }
 
@@ -187,6 +192,7 @@ export async function createSimulationRuntime(opts: SimulationOptions): Promise<
     adapterFor: (config) => new ScriptedAgent(scripts[config.kind] ?? scripts['claude-code']!, { clock }),
   });
 
+  const environment = new MockEnvironmentDrafter({ clock, git });
   const engine = new Engine({
     ledger: opts.ledger,
     mode: 'simulation',
@@ -199,6 +205,7 @@ export async function createSimulationRuntime(opts: SimulationOptions): Promise<
       git,
       runners,
       bench,
+      environment,
       // The mock "bill" mirrors the ledger's own estimate, so a simulated reconcile is a no-op rather than a lag.
       costs: new MockCostReconciler({ actuals: (q) => billed(opts.ledger.spendBreakdown(q.optimizationId).byCategory) }),
     },
@@ -219,6 +226,7 @@ export async function createSimulationRuntime(opts: SimulationOptions): Promise<
     baseRef: repo.baseRef,
     config: parsed.config,
     git,
+    environment,
     async dispose() {
       engine.close();
     },

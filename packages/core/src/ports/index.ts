@@ -4,7 +4,8 @@
  * and a mock / local one, so the whole product runs in `simulation` mode.
  * See docs/REAL_ENV_TESTING.md for which mocks must be re-tested for real.
  */
-import type { RatchetConfig } from '../config/schema.js';
+import type { EnvironmentScope, RatchetConfig } from '../config/schema.js';
+import type { EnvironmentDraftRecord, DraftEnvironmentInput, ApproveEnvironmentOptions } from '../environment/types.js';
 import type { GuardrailResult } from '../config/guardrails.js';
 import type { Calibration } from '../bench/calibrate.js';
 import type { EffectiveProtected } from '../protected-set.js';
@@ -24,6 +25,28 @@ export interface Clock {
 
 // ---------------------------------------------------------------- sandbox (OpenTofu)
 
+/**
+ * The environment an optimization is measured in, read from the PROTECTED ref (never a candidate): the approved drafted
+ * environment (docs/SIMPLIFIED_MODEL.md, "Dynamic environments") or, advanced, the custom module named by `infra:` in ratchet.yaml.
+ * The provider materializes `files`, validates them against the sandbox contract and applies them.
+ */
+export interface SandboxEnvironment {
+  /**
+   * `drafted`: the base module Ratchet ships plus the drafted files, applied on top of the standard sandbox (two stages, the
+   * drafted stage is destroyed first). `custom`: `infra:` replaces the standard module; it must satisfy every contract output.
+   */
+  kind: 'drafted' | 'custom';
+  scope: EnvironmentScope;
+  /** Repo path of the module directory (`infra/ratchet` for a drafted one). */
+  path: string;
+  /** The protected-ref commit the files were read from. */
+  commit: string;
+  /** Short content hash: part of the sandbox id, so two environments never share a sandbox. */
+  hash: string;
+  /** The module's files, paths relative to `path`. */
+  files: Array<{ path: string; content: string }>;
+}
+
 export interface SandboxInput {
   sandboxId: string;
   region: string;
@@ -31,6 +54,19 @@ export interface SandboxInput {
   maxInstancesPerAgent: number;
   maxInstanceLifetimeHours: number;
   tags?: Record<string, string>;
+  /** Absent for scope `none` (and `single` without OpenTofu): the standard sandbox, nothing extra. */
+  environment?: SandboxEnvironment;
+}
+
+/** What a drafted / custom environment created, as reported after apply (and listed on the teardown receipt). */
+export interface SandboxEnvironmentOutputs {
+  kind: SandboxEnvironment['kind'];
+  scope: EnvironmentScope;
+  hash: string;
+  /** Resource addresses created by the environment stage (`module.sandbox.aws_instance.machine["api"]`). */
+  resources: string[];
+  /** The machines of the base module: name -> where to reach them. Private addresses only. */
+  machines: Record<string, { id: string; role: string; privateIp: string }>;
 }
 
 /** Mirrors infra/contract.md outputs. */
@@ -41,6 +77,8 @@ export interface SandboxOutputs {
   evalIdentityRef: string;
   agentRolePath: string;
   network: { subnetId: string; agentRunnerSecurityGroupId: string; benchSecurityGroupId: string };
+  /** Set when the sandbox was applied with a drafted / custom environment. */
+  environment?: SandboxEnvironmentOutputs;
 }
 
 export interface PlanChange {
@@ -247,6 +285,11 @@ export interface CommitFilesInput {
   message: string;
   /** Written over the base tree (added, or replaced when the path exists). */
   files: CommitFile[];
+  /**
+   * Commit onto `branch`, which must already exist (and be the tip `baseRef` resolves to), instead of creating it: the files land
+   * directly on a protected ref. The push is a fast-forward / lease on the tip that was read, never a force.
+   */
+  update?: boolean;
 }
 
 export interface GitHost {
@@ -574,6 +617,16 @@ export interface EngineApi {
    * run never used one). Optional so existing implementations keep compiling.
    */
   teardownReceipt?(optimizationId: OptimizationId): Promise<SandboxTeardownReceipt | null>;
+  /**
+   * Dynamic environments (docs/SIMPLIFIED_MODEL.md): a setup agent drafts the environment the optimization is measured in,
+   * Ratchet validates and costs it, the user asks for changes and approves, and the files are committed to the protected ref
+   * and locked. Optional so existing implementations keep compiling; `Engine` provides them when given an `environment` port.
+   */
+  draftEnvironment?(input: DraftEnvironmentInput): Promise<EnvironmentDraftRecord>;
+  reviseEnvironment?(draftId: string, message: string): Promise<EnvironmentDraftRecord>;
+  approveEnvironment?(draftId: string, options?: ApproveEnvironmentOptions): Promise<EnvironmentDraftRecord>;
+  environmentDraft?(draftId: string): Promise<EnvironmentDraftRecord | null>;
+  discardEnvironmentDraft?(draftId: string): Promise<void>;
   /** Live view of the automatic sandbox (running instances, spend, destroy time, last receipt). */
   sandboxActivity?(sandboxId: string): Promise<SandboxActivity>;
   /** "End the environment now": tear the sandbox down without waiting for the idle window. Refuses while a run is active. */

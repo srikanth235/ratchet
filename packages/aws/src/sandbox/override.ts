@@ -30,7 +30,7 @@ export function readInfraOverride(config: unknown): string | undefined {
   return n;
 }
 
-const LOCAL_EXEC = /provisioner\s+"(local-exec|remote-exec)"|data\s+"external"|\bexternal\s*=\s*\{|program\s*=\s*\[/;
+export const LOCAL_EXEC = /provisioner\s+"(local-exec|remote-exec)"|data\s+"external"|\bexternal\s*=\s*\{|program\s*=\s*\[/;
 
 /**
  * Checks `ref` out (the protected ref, resolved to a commit) and returns the module directory. Refuses a module that is not a

@@ -9,6 +9,7 @@ import {
   buildTemplateProposal,
   calibrate,
   effectiveProtected,
+  environmentModuleOf,
   evaluateRatchet,
   listTemplates,
   reconcileSpend,
@@ -27,10 +28,13 @@ import {
   type AgentStatus,
   type BenchOutcome,
   type Calibration,
+  type ApproveEnvironmentOptions,
   type CandidateWithResults,
   type Clock,
   type CostReconcileReport,
+  type DraftEnvironmentInput,
   type EffectiveProtected,
+  type EnvironmentDraftRecord,
   type EngineApi,
   type EngineCreateOptimizationInput,
   type EngineEvent,
@@ -47,6 +51,7 @@ import {
   type RunnerHandle,
   type RunnerMessage,
   type SandboxActivity,
+  type SandboxEnvironment,
   type SandboxInput,
   type SandboxOutputs,
   type SandboxPlan,
@@ -58,6 +63,7 @@ import {
   SandboxLifecycleError,
 } from '@ratchet/core';
 import { metricsFromStats, samplesOf, statsOf } from './bench-stats.js';
+import { readEnvironment } from './environment-files.js';
 import { CostMeter } from './cost.js';
 import { tokenCostUsd, type Deps } from './deps.js';
 import { assertValidId, EngineError } from './errors.js';
@@ -190,6 +196,7 @@ export class Engine implements EngineApi {
       provider: this.ports.sandbox,
       compute: this.ports.compute,
       configOf: (id) => this.config(id),
+      environmentOf: (id) => this.environmentOf(id),
       teardown: (id) => this.teardown(id),
       teardownReport: (id) => this.teardownReport(id),
       lifecycleCall: (fn) => this.sandboxCall(fn),
@@ -515,6 +522,9 @@ export class Engine implements EngineApi {
     try {
       // The sandbox is created lazily, at the first run start in a region, and reused while runs are active.
       if (!resumable && this.autoSandbox.enabled) await this.autoSandbox.ensureFor(id);
+      else if (!resumable && environmentModuleOf(this.config(id))) {
+        this.emit({ type: 'notice', optimizationId: id, level: 'warning', text: 'ratchet.yaml declares an environment, but this engine does not manage the sandbox itself (apply it by hand): the environment is not applied.' });
+      }
       this.assertSandboxApplied(this.requireOpt(id).sandboxId);
       await this.beginStart(id);
     } finally {
@@ -899,6 +909,60 @@ export class Engine implements EngineApi {
     await this.resumed;
     this.requireOpt(id);
     return effectiveProtected(this.config(id));
+  }
+
+  // ------------------------------------------------------------------ dynamic environments
+
+  /**
+   * The environment this optimization is measured in (docs/SIMPLIFIED_MODEL.md, "Dynamic environments"), read from a checkout of
+   * the PROTECTED ref pinned to one commit for the life of the optimization (`baseSha`): the approved drafted environment under
+   * `infra/ratchet/` when `environment.scope` says so, or the custom module `infra:` names. `undefined` for scope `none`.
+   * Candidates cannot change it: their copy is never read, and the paths are protected so a candidate touching them is blocked.
+   */
+  private async environmentOf(id: string): Promise<SandboxEnvironment | undefined> {
+    const opt = this.requireOpt(id);
+    const config = this.config(id);
+    if (!environmentModuleOf(config)) return undefined;
+    const git = this.gitFor(opt.repo);
+    const commit = await this.baseSha(opt);
+    const scratchRoot = this.settings.scratchDir ?? tmpdir();
+    await mkdir(scratchRoot, { recursive: true });
+    const dir = await mkdtemp(join(scratchRoot, 'ratchet-env-'));
+    try {
+      await git.checkout(commit, dir);
+      return await readEnvironment(dir, config, commit, opt.baseRef);
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
+  private get drafter(): NonNullable<EnginePorts['environment']> {
+    const d = this.ports.environment;
+    if (!d) throw new EngineError('unavailable', 'this engine has no environment drafter (no setup agent is configured)');
+    return d;
+  }
+
+  async draftEnvironment(input: DraftEnvironmentInput): Promise<EnvironmentDraftRecord> {
+    await this.resumed;
+    return this.drafter.draft(input);
+  }
+
+  async reviseEnvironment(draftId: string, message: string): Promise<EnvironmentDraftRecord> {
+    await this.resumed;
+    return this.drafter.revise(draftId, message);
+  }
+
+  async approveEnvironment(draftId: string, options?: ApproveEnvironmentOptions): Promise<EnvironmentDraftRecord> {
+    await this.resumed;
+    return this.drafter.approve(draftId, options);
+  }
+
+  async environmentDraft(draftId: string): Promise<EnvironmentDraftRecord | null> {
+    return this.drafter.get(draftId) ?? null;
+  }
+
+  async discardEnvironmentDraft(draftId: string): Promise<void> {
+    this.drafter.discard(draftId);
   }
 
   // ------------------------------------------------------------------ templates

@@ -93,7 +93,7 @@ export class GitHubGitHost extends BaseGitHost {
     });
   }
 
-  protected async publish(branch: string, sha: string, opts: { force: boolean }): Promise<void> {
+  protected async publish(branch: string, sha: string, opts: { force: boolean; expected?: string }): Promise<void> {
     const refspec = `${opts.force ? '+' : ''}${sha}:refs/heads/${branch}`;
     await this.git(['push', '-q', this.url, refspec], { env: this.authEnv() });
     // keep the mirror consistent with what we just pushed

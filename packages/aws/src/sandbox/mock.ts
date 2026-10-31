@@ -1,5 +1,7 @@
-import type { PlanChange, SandboxInput, SandboxProvider } from '@ratchet/core';
+import { validateEnvironment } from '@ratchet/core';
+import type { PlanChange, SandboxEnvironment, SandboxEnvironmentOutputs, SandboxInput, SandboxProvider } from '@ratchet/core';
 import { assertValidSandboxId } from '../util.js';
+import { assertDraftedEnvironment } from './environment.js';
 import { TeardownBlockedError, type AwsSandboxOutputs } from './tofu.js';
 
 /** The headline resources of infra/aws (docs/V0_ARCHITECTURE.md §7), with real addresses. */
@@ -27,6 +29,20 @@ export const SANDBOX_RESOURCES: ReadonlyArray<{ address: string; type: string }>
   { address: 'aws_security_group.endpoints', type: 'aws_security_group' },
 ];
 
+/** What a drafted environment would create, from its files (the simulation's stand-in for the second tofu stage). */
+function mockEnvironmentOutputs(env: SandboxEnvironment): SandboxEnvironmentOutputs {
+  const v = validateEnvironment({ scope: env.scope, moduleOnly: true, files: env.files.map((f) => ({ path: `${env.path}/${f.path}`, content: f.content })) });
+  const machines: SandboxEnvironmentOutputs['machines'] = {};
+  const resources: string[] = [];
+  v.machines.forEach((m, i) => {
+    const key = m.key ?? m.name;
+    machines[key] = { id: `i-0mockenv${String(i).padStart(4, '0')}`, role: m.role, privateIp: `10.42.1.${10 + i}` };
+    resources.push(`module.sandbox.aws_instance.machine["${key}"]`);
+    if ((m.dataVolumeGb ?? 0) > 0) resources.push(`module.sandbox.aws_ebs_volume.data["${key}"]`, `module.sandbox.aws_volume_attachment.data["${key}"]`);
+  });
+  return { kind: env.kind, scope: env.scope, hash: env.hash, resources, machines };
+}
+
 export interface MockSandboxProviderOptions {
   accountId?: string;
   /** Called on destroy, mirroring TofuSandboxProvider's teardown guard. */
@@ -53,6 +69,12 @@ export class MockSandboxProvider implements SandboxProvider {
       address: r.address,
       type: r.type,
     }));
+    if (input.environment?.kind === 'drafted') {
+      assertDraftedEnvironment(input.environment);
+      for (const address of mockEnvironmentOutputs(input.environment).resources) {
+        changes.push({ action: exists ? 'no-op' : 'create', address, type: /ebs_volume/.test(address) ? 'aws_ebs_volume' : /volume_attachment/.test(address) ? 'aws_volume_attachment' : 'aws_instance' });
+      }
+    }
     const n = exists ? 0 : changes.length;
     return { changes, summary: `Plan: ${n} to add, 0 to change, 0 to destroy.` };
   }
@@ -60,6 +82,7 @@ export class MockSandboxProvider implements SandboxProvider {
   async apply(input: SandboxInput): Promise<AwsSandboxOutputs> {
     this.calls.push(`apply:${input.sandboxId}`);
     assertValidSandboxId(input.sandboxId);
+    if (input.environment?.kind === 'drafted') assertDraftedEnvironment(input.environment); // the same refusal as the real provider
     const existing = this.applied.get(input.sandboxId);
     if (existing) return existing;
     const acct = this.opts.accountId ?? '000000000000';
@@ -99,6 +122,7 @@ export class MockSandboxProvider implements SandboxProvider {
       },
       sealedConfirmPrefix: 'holdout/',
       limits: { maxInstancesPerAgent: input.maxInstancesPerAgent, maxInstanceLifetimeHours: input.maxInstanceLifetimeHours },
+      ...(input.environment ? { environment: input.environment.kind === 'drafted' ? mockEnvironmentOutputs(input.environment) : { kind: input.environment.kind, scope: input.environment.scope, hash: input.environment.hash, resources: [], machines: {} } } : {}),
     };
     this.applied.set(input.sandboxId, out);
     return out;
