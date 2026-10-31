@@ -2,21 +2,19 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { NavContext, SnapshotContext, useQuery, type NavState } from './data';
 import type { NavId } from './nav';
-import type { KpiRange } from '../shared/types';
 import { Benchmarks } from './screens/Benchmarks';
 import { LiveAgents } from './screens/LiveAgents';
 import { NewOptimization } from './screens/NewOptimization';
 import { Optimizations } from './screens/Optimizations';
+import { Overview } from './screens/Overview';
 import { Result } from './screens/Result';
 import { Sandbox } from './screens/Sandbox';
 import { Settings } from './screens/Settings';
 
-export function App({ initialRoute = 'optimizations' }: { initialRoute?: NavId }) {
+export function App({ initialRoute = 'overview' }: { initialRoute?: NavId }) {
   const [route, setRoute] = useState<NavId>(initialRoute);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [range, setRange] = useState<KpiRange>('30d');
-  const query = useQuery(() => window.ratchet.listOptimizations({ range }), [range], { intervalMs: 10_000 });
-  const snapshot = useMemo(() => ({ ...query, range, setRange }), [query, range]);
+  const snapshot = useQuery(() => window.ratchet.listOptimizations(), [], { intervalMs: 10_000 });
 
   const refreshRef = useRef(snapshot.refresh);
   refreshRef.current = snapshot.refresh;
@@ -33,6 +31,7 @@ export function App({ initialRoute = 'optimizations' }: { initialRoute?: NavId }
         <div className="shell">
           <Sidebar />
           <main className="content" data-screen={route}>
+            {route === 'overview' && <Overview />}
             {route === 'optimizations' && <Optimizations />}
             {route === 'new' && <NewOptimization />}
             {route === 'agents' && <LiveAgents />}

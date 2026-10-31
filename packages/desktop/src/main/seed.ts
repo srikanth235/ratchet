@@ -36,6 +36,8 @@ interface OptSpec {
   budgetUsd: number;
   /** Keep the demo config's `objective.value` (USD per ms of p95): only meaningful for the search demo. */
   valued?: boolean;
+  /** A value model of its own: USD per metric unit per year. */
+  value?: { usdPerUnit: number; unit: string };
   candidates: CandSpec[];
 }
 
@@ -87,6 +89,7 @@ const SPECS: OptSpec[] = [
     endedAgo: 120,
     spendUsd: 61.2,
     budgetUsd: 100,
+    value: { usdPerUnit: 400, unit: 'k/s' },
     candidates: [
       { t: 90, agent: 0, value: 49.8, verdict: 'verified', confirm: 49.1, message: 'Batch writes into 4 KiB segments', reason: 'bench improvement 8.6 exceeds required gain 1.24' },
       { t: 170, agent: 0, value: 50.4, verdict: 'rejected', message: 'Larger socket buffers', reason: 'improvement 0.6 does not exceed required gain 1.49' },
@@ -109,6 +112,7 @@ const SPECS: OptSpec[] = [
     endedAgo: 40 * 24 * 60,
     spendUsd: 38.9,
     budgetUsd: 60,
+    value: { usdPerUnit: 3000, unit: 's' },
     candidates: [{ t: 120, agent: 1, value: 1.62, verdict: 'verified', confirm: 1.66, message: 'Lazy-load the template engine', reason: 'bench improvement 0.79 exceeds required gain 0.072' }],
   },
   {
@@ -151,7 +155,8 @@ function seedOne(ledger: Ledger, spec: OptSpec, now: number): void {
   doc.setIn(['objective', 'name'], spec.name);
   doc.setIn(['objective', 'metric'], spec.metric);
   doc.setIn(['objective', 'direction'], spec.direction);
-  if (!spec.valued) doc.deleteIn(['objective', 'value']);
+  if (spec.value) doc.setIn(['objective', 'value'], doc.createNode({ usd_per_unit: spec.value.usdPerUnit, period: 'year', basis: 'estimated', unit: spec.value.unit }));
+  else if (!spec.valued) doc.deleteIn(['objective', 'value']);
   const yaml = doc.toString();
   const cfg = parseConfig(yaml);
   if (!cfg.ok) throw new Error(`seed config for ${spec.id} is invalid`);

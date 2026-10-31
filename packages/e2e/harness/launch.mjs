@@ -116,14 +116,21 @@ export async function goTo(win, label) {
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-/** Screens in sidebar order: screenshot name, sidebar label, route id (`main[data-screen]`). */
+/**
+ * Screens in sidebar order: screenshot name, sidebar label, route id (`main[data-screen]`).
+ * Agents, Result and Environments are not in the sidebar any more (see SCREENS_FROM_OPTIMIZATION and `openSandboxDetails`).
+ */
 export const SCREENS = [
+  { name: 'overview', nav: 'Overview', route: 'overview' },
   { name: 'optimizations', nav: 'Optimizations', route: 'optimizations' },
   { name: 'benchmarks', nav: 'Benchmarks', route: 'benchmarks' },
-  { name: 'live-agents', nav: 'Agents', route: 'agents' },
-  { name: 'sandbox', nav: 'Environments', route: 'sandbox' },
-  { name: 'result', nav: 'Result', route: 'result' },
-  { name: 'settings', nav: 'Settings', route: 'settings' },
+  { name: 'settings', nav: 'Connectors', route: 'settings' },
+];
+
+/** Routes reached from an optimization (the tabs of its header): screenshot name, tab label, route id. */
+export const SCREENS_FROM_OPTIMIZATION = [
+  { name: 'live-agents', tab: 'Agents', route: 'agents' },
+  { name: 'result', tab: 'Result', route: 'result' },
 ];
 
 /** Wait until the main column shows the given route and its first heading has rendered. */
@@ -136,6 +143,33 @@ export async function openNewOptimization(win) {
   await goTo(win, 'Optimizations');
   await win.getByRole('button', { name: /New optimization/ }).click();
   await waitForScreen(win, 'new');
+}
+
+/** Open an optimization from the Optimizations list (a running one opens Agents, a finished one Result). `name`: its row's name. */
+export async function openOptimization(win, name) {
+  await goTo(win, 'Optimizations');
+  await win.locator('main[data-screen="optimizations"] tbody').waitFor();
+  await win.locator('[data-testid=optimizations-table] tbody tr', name ? { hasText: name } : {}).first().getByRole('button').first().click();
+}
+
+/** Switch to another view of the selected optimization (Agents / Benchmark history / Result) with the tabs of its header. */
+export async function openTab(win, label) {
+  await win.getByRole('tab', { name: label }).click();
+}
+
+/** Open the sandbox panel from the status line at the bottom of the sidebar. */
+export async function openSandboxPanel(win) {
+  const panel = win.getByTestId('sandbox-panel');
+  if (!(await panel.isVisible())) await win.locator('.sbx__line').click();
+  await panel.waitFor();
+  return panel;
+}
+
+/** The full Environments screen (the "Details" link of the sandbox panel). */
+export async function openSandboxDetails(win) {
+  const panel = await openSandboxPanel(win);
+  await panel.getByRole('button', { name: 'Details' }).click();
+  await waitForScreen(win, 'sandbox');
 }
 
 // ---------------------------------------------------------------- polling + helpers shared by the specs

@@ -10,7 +10,7 @@ const call =
     ipcRenderer.invoke(IPC[method], ...args);
 
 const methods: Invoke[] = [
-  'listOptimizations', 'getOptimization', 'ratchetHistory', 'winningChange', 'candidatesWithResults', 'spendBreakdown',
+  'listOptimizations', 'overview', 'getOptimization', 'ratchetHistory', 'winningChange', 'candidatesWithResults', 'spendBreakdown',
   'recentActivity', 'agentEvents', 'validateConfig', 'preflight', 'getSettings', 'environments',
   'githubStatus', 'githubSignIn', 'githubSignOut', 'listRepos', 'inspectRepo', 'pickLocalFolder',
   'listConnectors', 'refreshConnectors', 'addGithubConnector', 'startGithubConnectorSignIn', 'cancelGithubConnectorSignIn',

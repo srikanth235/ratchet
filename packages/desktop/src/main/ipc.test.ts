@@ -66,7 +66,20 @@ describe('registerIpc', () => {
     ctx.service.dispose();
   });
 
+  it('serves the Overview for a range (default 90d) and it survives structured clone', async () => {
+    const o = (await ctx.ipc.invoke(IPC.overview, '30d')) as { range: string; rows: { id: string }[]; value: { wins: number } | null };
+    expect(o.range).toBe('30d');
+    expect(o.rows.map((r) => r.id)).toContain('opt_demo_search');
+    expect(o.value!.wins).toBeGreaterThan(0);
+    expect(((await ctx.ipc.invoke(IPC.overview)) as { range: string }).range).toBe('90d');
+    expect(structuredClone(o)).toEqual(o);
+    ctx.service.dispose();
+  });
+
   const bad: [keyof typeof IPC, unknown[]][] = [
+    ['overview', ['7d']],
+    ['overview', [30]],
+    ['overview', ['all', 'extra']],
     ['getOptimization', []],
     ['getOptimization', [42]],
     ['getOptimization', ['']],

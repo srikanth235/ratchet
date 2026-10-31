@@ -81,3 +81,27 @@ export function demoTitle(title: string): string {
   const t = title.replace(/^Demo:\s*/i, '');
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
+
+/** `$0`, `$0.40`, `$38`, `$184`, `$4.8k`, `$15.4k`, `$1.2M`: dollars for the hero numbers and table cells. */
+export function fmtUsdCell(v: number): string {
+  const a = Math.abs(v);
+  if (a >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
+  if (a >= 1000) return `$${(v / 1000).toFixed(1)}k`;
+  if (a >= 10 || v === 0) return `$${Math.round(v).toLocaleString('en-US')}`;
+  return `$${v.toFixed(2)}`;
+}
+
+/** `84×`, `8.4×`: yearly value per dollar spent. */
+export function fmtReturn(x: number): string {
+  if (x >= 1_000_000) return `${(x / 1_000_000).toFixed(1)}M×`;
+  if (x >= 10_000) return `${(x / 1000).toFixed(1)}k×`;
+  return x >= 10 ? `${Math.round(x).toLocaleString('en-US')}×` : `${x.toFixed(1)}×`;
+}
+
+/** `under a day`, `4 days`, `3 months`: how long until the spend is earned back. */
+export function fmtPayback(days: number): string {
+  if (days < 1) return 'under a day';
+  if (days < 100) return `${Math.round(days)} day${Math.round(days) === 1 ? '' : 's'}`;
+  const months = Math.round(days / 30);
+  return months < 24 ? `${months} months` : `${(days / 365).toFixed(1)} years`;
+}

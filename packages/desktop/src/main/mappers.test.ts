@@ -73,7 +73,9 @@ describe('ledger rows → view models', () => {
     expect(search.value).toMatchObject({ usdPerUnit: 1200, unit: 'ms', period: 'year', basis: 'estimated', usdPerYear: 51 * 1200 });
     expect(search.value!.returnOnSpend).toBeCloseTo((51 * 1200) / search.spendUsd, 6);
     expect(search).toMatchObject({ pack: 'perf', evaluatorKind: 'benchmark' });
-    expect(rows.find((r) => r.id === 'opt_demo_ingest')!.value).toBeNull(); // no value model
+    // 41.2 → 58.9 k/s at $400 per k/s per year; the draft has no baseline to value
+    expect(rows.find((r) => r.id === 'opt_demo_ingest')!.value).toMatchObject({ usdPerUnit: 400, unit: 'k/s', usdPerYear: expect.closeTo(17.7 * 400, 6) });
+    expect(rows.find((r) => r.id === 'opt_demo_web')!.value).toBeNull();
   });
 
   it('builds the ratchet series: baseline step + one step per move, scatter for every benched candidate', () => {
@@ -132,8 +134,8 @@ describe('ledger rows → view models', () => {
     expect(k.spend!.value).toBe('$104');
     expect(k.spend!.change).toEqual({ text: '+167%', tone: 'neutral' });
     expect(k.cpw).toMatchObject({ value: '$15', change: { text: '−62%', tone: 'good' } });
-    // 51 ms of p95 at $1,200 per ms per year; nothing valued in the previous range → no chip
-    expect(k.value).toMatchObject({ value: '$61.2k', change: null });
+    // 51 ms of p95 at $1,200 per ms per year + 17.7 k/s of ingest at $400; the edge worker (previous range) is valued too
+    expect(k.value).toMatchObject({ value: '$68.3k', change: { text: '+2781%', tone: 'good' } });
     expect(k.value!.foot).toMatch(/^per year · \d+× ROI · estimated$/);
     expect(kpis.every((x) => x.trend.length > 1)).toBe(true);
   });

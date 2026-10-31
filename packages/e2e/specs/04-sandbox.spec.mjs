@@ -1,7 +1,7 @@
 // Connectors and repo selection against fakes, through the real main process: a fake GitHub (device flow, repos, ratchet.yaml),
 // fake `claude` / `codex` executables on PATH, and a ~/.aws fixture. No network, no AWS, no installed CLIs.
 //
-// File name kept (04-sandbox): the sandbox itself is automatic now; its lifecycle is covered by 03 (demo run -> Environments -> receipt).
+// File name kept (04-sandbox): the sandbox itself is automatic now; its lifecycle is covered by 03 (demo run -> sandbox line and panel -> receipt).
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -38,7 +38,7 @@ describe('Connectors: GitHub, AWS and Agents (fakes)', () => {
     machine = fakeMachine();
     h = await launchApp({ env: { ...gh.env, ...machine.env } });
     await h.win.waitForTimeout(1000);
-    await goTo(h.win, 'Settings');
+    await goTo(h.win, 'Connectors');
     await waitForScreen(h.win, 'settings');
     await waitSettled(h.win);
   });

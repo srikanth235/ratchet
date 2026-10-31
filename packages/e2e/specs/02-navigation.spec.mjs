@@ -3,14 +3,14 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { ARTIFACTS, SCREENS, goTo, launchApp, openNewOptimization, screenshotScreen, waitForScreen, waitSettled } from '../harness/launch.mjs';
+import { ARTIFACTS, SCREENS, goTo, launchApp, openNewOptimization, openSandboxDetails, openSandboxPanel, screenshotScreen, waitForScreen, waitSettled } from '../harness/launch.mjs';
 
+const EMPTY = [/No optimizations yet/i, /Create one to start a baseline run/i];
 const EXPECT = {
-  optimizations: { h1: /^Optimizations$/, text: [/No optimizations yet/i, /Create one to start a baseline run/i, /Verified wins/i, /All optimizations/i] },
+  overview: { h1: /^Overview$/, text: EMPTY },
+  optimizations: { h1: /^Optimizations$/, text: EMPTY },
   benchmarks: { h1: /^Benchmarks$/, text: [/No optimization selected/i, /Start one from Optimizations/i, /evaluator templates/i] },
-  agents: { h1: /^Agents$/, text: [/No optimization selected/i, /Start one from Optimizations/i] },
-  sandbox: { h1: /^Environments$/, text: [/No environment is running/i, /Last teardown receipt/i, /No environment has been removed yet/i, /How it fits together/i, /None running/i] },
-  result: { h1: /^Result$/, text: [/No optimization selected/i, /Start one from Optimizations/i] },
+  // The `settings` route is the Connectors screen. Agents / Result / Environments are reached from an optimization or the sandbox line (see the tests below and 04-sandbox).
   settings: { h1: /^Connectors$/, text: [/GitHub/, /AWS/, /Agents/, /Add connector/, /Advanced \(development\)/] },
 };
 
@@ -22,15 +22,16 @@ describe('navigation on an empty ledger', () => {
   });
   after(() => h?.close());
 
-  test('sidebar lists every screen and the integrations', async () => {
+  test('sidebar is the logo, four places and the sandbox line; nothing else', async () => {
     const labels = await h.win.getByRole('navigation', { name: 'Primary' }).getByRole('button').allInnerTexts();
-    assert.deepEqual(labels.map((l) => l.replace(/\s+/g, ' ').trim()), ['Optimizations', 'Benchmarks', 'Agents', 'Environments', 'Result', 'Settings']);
+    assert.deepEqual(labels.map((l) => l.replace(/\s+/g, ' ').trim()), ['Overview', 'Optimizations', 'Benchmarks', 'Connectors']);
     const active = await h.win.locator('.nav__item--active').innerText();
-    assert.match(active, /Optimizations/);
-    assert.equal(await h.win.locator('.live-card').count(), 0, 'no "Live now" card without a running optimization');
-    assert.deepEqual(await h.win.locator('.integration').allInnerTexts(), ['GitHub', 'AWS', 'Claude Code', 'Codex']);
-    // nothing is signed in or connected on a clean machine
-    assert.equal(await h.win.locator('.integration--on', { hasText: /GitHub|AWS/ }).count(), 0);
+    assert.match(active, /Overview/);
+    assert.equal(await h.win.locator('.sidebar .brand__name').innerText(), 'Ratchet');
+    // the old furniture is gone: Live now card, integration chips, workspace switcher, user row, Environments / Agents / Result entries
+    for (const gone of ['.live-card', '.integration', '.workspace', '.user']) assert.equal(await h.win.locator(gone).count(), 0, gone);
+    assert.equal(await h.win.getByRole('navigation', { name: 'Primary' }).getByRole('button', { name: /Environments|Agents|Result|Settings/ }).count(), 0);
+    assert.match(await h.win.locator('.sbx__line').innerText(), /No sandbox running/);
   });
 
   for (const s of SCREENS) {
@@ -54,15 +55,24 @@ describe('navigation on an empty ledger', () => {
     });
   }
 
-  test('Environments is read-only: no Plan / Apply / Destroy anywhere', async () => {
-    await goTo(h.win, 'Environments');
-    await waitForScreen(h.win, 'sandbox');
-    const buttons = (await h.win.locator('main button').allInnerTexts()).map((t) => t.trim());
+  test('the sandbox line opens a quiet panel: nothing is billing, no End now, no Plan / Apply / Destroy; Details opens Environments', async () => {
+    await goTo(h.win, 'Overview');
+    const panel = await openSandboxPanel(h.win);
+    assert.match(await panel.innerText(), /No sandbox is running, so nothing is billing/);
+    assert.equal(await h.win.getByRole('button', { name: 'End now' }).count(), 0);
+    const buttons = (await panel.getByRole('button').allInnerTexts()).map((t) => t.trim());
     assert.deepEqual(buttons.filter((t) => /plan|apply|destroy/i.test(t)), []);
+    await h.win.keyboard.press('Escape');
+    assert.equal(await h.win.getByTestId('sandbox-panel').count(), 0);
+    await openSandboxDetails(h.win);
+    assert.equal((await h.win.locator('main h1').first().innerText()).trim(), 'Environments');
+    const all = (await h.win.locator('main button').allInnerTexts()).map((t) => t.trim());
+    assert.deepEqual(all.filter((t) => /plan|apply|destroy/i.test(t)), []);
+    assert.equal(await h.win.locator('.nav__item--active').count(), 0, 'Environments is under no sidebar entry');
   });
 
   test('Connectors lists GitHub, AWS and Agents as hairline groups and none of the old per-repo knobs; the development overrides are collapsed', async () => {
-    await goTo(h.win, 'Settings');
+    await goTo(h.win, 'Connectors');
     await waitForScreen(h.win, 'settings');
     await waitSettled(h.win);
     assert.equal((await h.win.locator('main h1').first().innerText()).trim(), 'Connectors');
@@ -77,7 +87,7 @@ describe('navigation on an empty ledger', () => {
     assert.deepEqual(h.errors, []);
   });
 
-  test('New optimization is reached from the Optimizations header: step 1 offers the repo picker, Local folder and the demos', async () => {
+  test('New optimization is reached from the Overview and Optimizations headers: step 1 offers the repo picker, Local folder and the demos', async () => {
     await openNewOptimization(h.win);
     await waitSettled(h.win);
     assert.equal((await h.win.locator('main h1').first().innerText()).trim(), 'New optimization');

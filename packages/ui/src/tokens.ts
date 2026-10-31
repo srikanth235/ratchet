@@ -2,7 +2,7 @@
 export const tokens = {
   color: {
     window: '#0B1019',
-    sidebar: '#0E1420',
+    sidebar: '#0B1019',
     card: '#111827',
     hairline: 'rgba(148,163,190,.13)',
     text: '#ECEFF4',
@@ -12,6 +12,7 @@ export const tokens = {
     brassHighlight: '#EBCB8E',
     mint: '#7BD8B0',
     rose: '#F08A93',
+    amber: '#E9B85C',
     claudeCode: '#B8A6FF',
     codex: '#7CC4F2',
     // Surfaces & lines beyond the three layers (from the screen designs).
