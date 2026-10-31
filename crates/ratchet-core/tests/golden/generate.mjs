@@ -222,6 +222,13 @@ function sampleSet() {
     const configPath = rnd() < 0.3 ? pick(['ops/ratchet.yaml', './ratchet.yaml', 'ratchet.yml', '/x/ratchet.yaml', '']) : undefined;
     configs.push({ input, configPath: configPath ?? null, out: core.effectiveProtected(input, configPath === undefined ? {} : { configPath }) });
   }
+  // The approved drafted environment is locked once environment.scope is set (hand-picked, so the seeded draws above stay put).
+  for (const environment of [{ scope: 'none' }, { scope: 'single' }, { scope: 'full' }, { scope: 'full', image: '.devcontainer/Dockerfile' }, { scope: 'single', image: 'infra/ratchet/Dockerfile' }, { image: 'Dockerfile' }, {}]) {
+    for (const infra of [undefined, 'ops/tofu']) {
+      const input = { evaluator: { run: 'node bench/run.js' }, environment, ...(infra ? { infra } : {}), protected: ['tests/**'] };
+      configs.push({ input, configPath: null, out: core.effectiveProtected(input, {}) });
+    }
+  }
   write('protected_set.json', { runs, configs });
 }
 
@@ -359,6 +366,12 @@ evaluator:
     if (base.evaluator) add({ ...structuredClone(base), bench: structuredClone(base.evaluator) });
   }
   for (const text of ['', '   ', '# nothing', 'null', '~', '[]', '- a', 'just a string', '42', 'version: 0\n', 'version: 1\n', 'version: 0.0\nobjective: 1\nevaluator: 2\n', 'a: b: c', 'a: [', "a: 'x", '\tversion: 0', 'version: 0\nversion: 0\n']) cases.push({ yaml: text, result: core.parseConfig(text) });
+  // environment.scope (hand-picked, appended so the seeded draws above stay put)
+  const scopeBase = 'version: 0\nobjective:\n  metric: m\n  direction: minimize\nevaluator:\n  run: node bench/x.js\n';
+  for (const env of ['scope: none', 'scope: single', 'scope: full', 'scope: huge', 'scope: 3', 'scope: [full]', 'scope: null', 'scope: ""', 'scope: full\n  machine: c7i.2xlarge\n  image: infra/ratchet/Dockerfile', 'scope: FULL', 'scope: Full\n  zzz: 1']) {
+    const yaml = `${scopeBase}environment:\n  ${env}\n`;
+    cases.push({ yaml, result: core.parseConfig(yaml) });
+  }
   write('config.json', cases);
 }
 console.log('golden fixtures written to', here);

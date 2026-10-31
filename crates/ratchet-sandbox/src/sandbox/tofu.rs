@@ -581,5 +581,6 @@ pub fn parse_tofu_outputs(json: &str, region: Option<&str>) -> Result<Option<San
             max_instances_per_agent: max_instances as u32,
             max_instance_lifetime_hours: max_hours,
         },
+        environment: None,
     }))
 }

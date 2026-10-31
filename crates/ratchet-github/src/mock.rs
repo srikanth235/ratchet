@@ -190,9 +190,16 @@ impl GitHost for MockGitHost {
     async fn commit_files(&self, input: &CommitFilesInput) -> PortResult<CommitRef> {
         self.log(format!("git.commitFiles:{}", input.branch));
         self.state(|s| {
-            if s.fail_commit_files || s.existing_branches.contains(&input.branch) {
+            if s.fail_commit_files || (!input.update && s.existing_branches.contains(&input.branch))
+            {
                 return Err(PortError::failed(format!(
                     "branch {} already exists",
+                    input.branch
+                )));
+            }
+            if input.update && !s.existing_branches.contains(&input.branch) {
+                return Err(PortError::failed(format!(
+                    "commitFiles: branch {} does not exist",
                     input.branch
                 )));
             }
@@ -285,6 +292,7 @@ mod tests {
             branch: "ratchet/t".into(),
             message: "m".into(),
             files: vec![CommitFile::new("a", "b")],
+            update: false,
         };
         assert_eq!(h.commit_files(&input).await.unwrap().sha, "files-1");
         assert!(

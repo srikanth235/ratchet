@@ -127,6 +127,68 @@ pub trait Clock: Send + Sync {
 
 // ---------------------------------------------------------------- sandbox (OpenTofu)
 
+/// Which kind of module an optimization's [`SandboxEnvironment`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxEnvironmentKind {
+    /// The base module Ratchet ships plus the drafted files, applied on top of the standard sandbox (two stages;
+    /// the drafted stage is destroyed first).
+    Drafted,
+    /// `infra:` in ratchet.yaml replaces the standard module; it must satisfy every contract output.
+    Custom,
+}
+
+/// A file of a [`SandboxEnvironment`]: path relative to the module directory, text content.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SandboxEnvironmentFile {
+    pub path: String,
+    pub content: String,
+}
+
+/// The environment an optimization is measured in, read from the PROTECTED ref (never a candidate): the approved
+/// drafted environment (docs/SIMPLIFIED_MODEL.md, "Dynamic environments") or, advanced, the custom module named by
+/// `infra:` in ratchet.yaml. The provider materializes `files`, validates them against the sandbox contract and
+/// applies them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SandboxEnvironment {
+    pub kind: SandboxEnvironmentKind,
+    pub scope: crate::enums::EnvironmentScope,
+    /// Repo path of the module directory (`infra/ratchet` for a drafted one).
+    pub path: String,
+    /// The protected-ref commit the files were read from.
+    pub commit: String,
+    /// Short content hash: part of the sandbox id, so two environments never share a sandbox.
+    pub hash: String,
+    /// The module's files, paths relative to `path`.
+    pub files: Vec<SandboxEnvironmentFile>,
+}
+
+/// One machine the environment stage created (private addresses only).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxEnvironmentMachine {
+    pub id: String,
+    pub role: String,
+    pub private_ip: String,
+}
+
+/// What a drafted / custom environment created, as reported after apply (and listed on the teardown receipt).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SandboxEnvironmentOutputs {
+    pub kind: SandboxEnvironmentKind,
+    pub scope: crate::enums::EnvironmentScope,
+    pub hash: String,
+    /// Resource addresses created by the environment stage (`module.sandbox.aws_instance.machine["api"]`).
+    pub resources: Vec<String>,
+    /// The machines of the base module: name -> where to reach them.
+    pub machines: BTreeMap<String, SandboxEnvironmentMachine>,
+}
+
 /// The contract inputs of a sandbox (`infra/contract.md`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -142,6 +204,9 @@ pub struct SandboxInput {
     pub max_instance_lifetime_hours: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<BTreeMap<String, String>>,
+    /// Absent for scope `none` (and `single` without OpenTofu): the standard sandbox, nothing extra.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<SandboxEnvironment>,
 }
 
 /// AWS-side identity of a role + instance profile pair (`eval_identity_ref`, `confirm_identity_ref`,
@@ -207,6 +272,9 @@ pub struct SandboxOutputs {
     /// Key prefix of the confirm traces in the sealed bucket.
     pub sealed_confirm_prefix: String,
     pub limits: SandboxLimits,
+    /// Set when the sandbox was applied with a drafted / custom environment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<SandboxEnvironmentOutputs>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -585,11 +653,16 @@ impl CommitFile {
 pub struct CommitFilesInput {
     /// Branch (or sha) the new commit is parented on and whose tree it extends.
     pub base_ref: String,
-    /// The branch to create. It must not exist yet.
+    /// The branch to create. It must not exist yet (unless `update`).
     pub branch: String,
     pub message: String,
     /// Written over the base tree (added, or replaced when the path exists).
     pub files: Vec<CommitFile>,
+    /// Commit onto `branch`, which must already exist (and be the tip `base_ref` resolves to), instead of creating
+    /// it: the files land directly on a protected ref. The push is a fast-forward / lease on the tip that was read,
+    /// never a force.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub update: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1426,6 +1499,7 @@ pub mod mock {
                 max_instances_per_agent: 4,
                 max_instance_lifetime_hours: 2.0,
             },
+            environment: None,
         }
     }
 

@@ -1370,6 +1370,7 @@ async fn derives_the_compute_config_from_sandbox_outputs_bench_profile_for_bench
         max_instances_per_agent: 4,
         max_instance_lifetime_hours: 2.0,
         tags: None,
+        environment: None,
     };
     let out = MockSandboxProvider::default().apply(&input).await.unwrap();
     let derived = AwsComputeConfig::from_outputs(&out, "sim");

@@ -176,6 +176,7 @@ impl SandboxProvider for MockSandboxProvider {
                 max_instances_per_agent: input.max_instances_per_agent,
                 max_instance_lifetime_hours: input.max_instance_lifetime_hours,
             },
+            environment: None,
         };
         self.applied
             .lock()

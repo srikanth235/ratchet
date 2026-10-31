@@ -142,6 +142,7 @@ impl Engine {
             branch: branch.to_owned(),
             message: proposal.commit_message.clone(),
             files: files.clone(),
+            update: false,
         };
         let mut branch = proposal.branch.clone();
         let sha = match git.commit_files(&commit(&branch)).await {

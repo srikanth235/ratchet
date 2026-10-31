@@ -17,7 +17,7 @@ use super::schema::{
     AgentConfig, DEFAULT_AGENT_INSTRUCTIONS, DEFAULT_BENCH_MACHINE, DEFAULT_EVALUATOR_REF,
     Environment, Evaluator, Objective, RatchetConfig, ValueModel,
 };
-use crate::enums::{DepsMode, Direction, EvaluatorKind, ValueBasis, ValuePeriod};
+use crate::enums::{DepsMode, Direction, EnvironmentScope, EvaluatorKind, ValueBasis, ValuePeriod};
 use crate::templates::{evaluator_template_ids, find_evaluator_template};
 
 /// One problem found in `ratchet.yaml`.
@@ -855,6 +855,16 @@ fn objective(v: Option<&Value>, path: &[Seg], cx: &mut Cx) -> Option<Objective> 
 fn environment(v: Option<&Value>, path: &[Seg], cx: &mut Cx) -> Option<Environment> {
     let map = object(v, false, path, cx)?;
     let before = cx.hard;
+    let scope = enumeration::<EnvironmentScope>(
+        get(map, "scope"),
+        false,
+        &format!(
+            "environment.scope must be one of {}",
+            names(EnvironmentScope::ALL)
+        ),
+        &child(path, "scope"),
+        cx,
+    );
     let image = repo_path(
         get(map, "image"),
         "environment.image",
@@ -940,11 +950,17 @@ fn environment(v: Option<&Value>, path: &[Seg], cx: &mut Cx) -> Option<Environme
             },
         }
     };
-    unknown_keys(map, &["image", "machine", "region", "network"], path, cx);
+    unknown_keys(
+        map,
+        &["scope", "image", "machine", "region", "network"],
+        path,
+        cx,
+    );
     if cx.hard > before {
         return None;
     }
     Some(Environment {
+        scope,
         image,
         machine,
         region,

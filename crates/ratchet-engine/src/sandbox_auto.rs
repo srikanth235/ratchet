@@ -195,6 +195,7 @@ impl Engine {
                 "ratchet:managed".to_owned(),
                 "true".to_owned(),
             )])),
+            environment: None,
         }
     }
 

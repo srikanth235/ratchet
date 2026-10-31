@@ -28,6 +28,7 @@ fn input() -> SandboxInput {
         max_instances_per_agent: 4,
         max_instance_lifetime_hours: 2.0,
         tags: Some(BTreeMap::from([("owner".to_string(), "me".to_string())])),
+        environment: None,
     }
 }
 
