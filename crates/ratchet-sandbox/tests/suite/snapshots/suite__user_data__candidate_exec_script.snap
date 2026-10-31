@@ -1,0 +1,19 @@
+---
+source: crates/ratchet-sandbox/tests/suite/user_data.rs
+expression: CANDIDATE_EXEC_SCRIPT
+---
+#!/bin/bash
+set -eu
+[ "$(id -un)" = ratchet-bench ] || { echo "ratchet-candidate-exec must run as ratchet-bench" >&2; exit 77; }
+: "${RATCHET_CANDIDATE_DIR:?}" "${RATCHET_CANDIDATE_HOME:?}" "${RATCHET_CANDIDATE_TMP:?}" "${RATCHET_CANDIDATE_PATH:?}"
+for a in "$@"; do
+  case "$a" in
+    [A-Za-z_]*=*)
+      case "$a" in
+        RATCHET_TRACE=*|AWS_*=*) echo "refusing to pass ${a%%=*} to candidate code" >&2; exit 78 ;;
+      esac ;;
+    *) break ;;
+  esac
+done
+cd "$RATCHET_CANDIDATE_DIR"
+exec env -i PATH="$RATCHET_CANDIDATE_PATH" HOME="$RATCHET_CANDIDATE_HOME" TMPDIR="$RATCHET_CANDIDATE_TMP" USER=ratchet-bench LOGNAME=ratchet-bench LANG=C.UTF-8 "$@"
