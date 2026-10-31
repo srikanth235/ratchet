@@ -145,14 +145,11 @@ pub async fn simulate(o: SimulateOptions) -> EngineResult<SimulateResult> {
                             ));
                         }
                     }
-                    other => log(&format!(
-                        "{}",
-                        serde_json::to_string(other)
-                            .unwrap_or_default()
-                            .chars()
-                            .take(200)
-                            .collect::<String>()
-                    )),
+                    other => log(&serde_json::to_string(other)
+                        .unwrap_or_default()
+                        .chars()
+                        .take(200)
+                        .collect::<String>()),
                 }
             }
         })
