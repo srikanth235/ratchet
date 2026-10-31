@@ -503,11 +503,11 @@ export function createService(deps: ServiceDeps): RatchetService {
       const known = awsProfiles();
       if (known.filesFound && !known.profiles.some((p) => p.name === input.profile.trim())) throw new ConnectorError(`${input.profile} is not in ~/.aws/config or ~/.aws/credentials.`);
       const rec = connectors.addAws(input);
-      await connectors.test(rec.id).catch(() => undefined);
+      void connectors.test(rec.id).catch(() => undefined); // the screen refreshes the status; an offline probe must not hold the add
       return changed();
     },
     async addAgentConnector(input: AddAgentConnectorInput) {
-      await connectors.addAgent(input);
+      await connectors.addAgent(input, { waitForCheck: false });
       return changed();
     },
     async updateConnector(id: string, patch: UpdateConnectorInput) {

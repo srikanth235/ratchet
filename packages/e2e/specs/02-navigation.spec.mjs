@@ -1,5 +1,5 @@
 // Navigation: every route reachable from the sidebar renders on an empty ledger, without errors, with an intentional empty state;
-// the first screens of the simplified model (three Settings rows, the three-step New optimization, the Templates gallery).
+// the first screens of the simplified model (the Connectors lists, the three-step New optimization, the Templates gallery).
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -11,7 +11,7 @@ const EXPECT = {
   agents: { h1: /^Agents$/, text: [/No optimization selected/i, /Start one from Optimizations/i] },
   sandbox: { h1: /^Environments$/, text: [/No environment is running/i, /Last teardown receipt/i, /No environment has been removed yet/i, /How it fits together/i, /None running/i] },
   result: { h1: /^Result$/, text: [/No optimization selected/i, /Start one from Optimizations/i] },
-  settings: { h1: /^Settings$/, text: [/GitHub/, /Sign in with GitHub/, /AWS/, /Region/, /Agents/, /Re-detect/, /Advanced \(development\)/] },
+  settings: { h1: /^Connectors$/, text: [/GitHub/, /AWS/, /Agents/, /Add connector/, /Advanced \(development\)/] },
 };
 
 describe('navigation on an empty ledger', () => {
@@ -61,27 +61,19 @@ describe('navigation on an empty ledger', () => {
     assert.deepEqual(buttons.filter((t) => /plan|apply|destroy/i.test(t)), []);
   });
 
-  test('Settings has three rows and none of the old per-repo knobs; the development overrides are collapsed', async () => {
+  test('Connectors lists GitHub, AWS and Agents as hairline groups and none of the old per-repo knobs; the development overrides are collapsed', async () => {
     await goTo(h.win, 'Settings');
     await waitForScreen(h.win, 'settings');
     await waitSettled(h.win);
-    for (const row of ['github', 'aws', 'agents']) assert.equal(await h.win.getByTestId(`row-${row}`).count(), 1, `row ${row}`);
+    assert.equal((await h.win.locator('main h1').first().innerText()).trim(), 'Connectors');
+    assert.deepEqual(await h.win.locator('.cn-group > h2').allInnerTexts(), ['GitHub', 'AWS', 'Agents']);
+    assert.equal(await h.win.getByRole('button', { name: 'Add connector' }).isEnabled(), true);
     assert.equal(await h.win.getByRole('radio', { name: /Simulation|Live/ }).count(), 0, 'no simulation / live toggle');
     const open = await h.win.locator('details').evaluateAll((ds) => ds.map((d) => d.open));
-    assert.ok(open.length >= 3 && open.every((o) => !o), 'every disclosure starts collapsed');
-    // GitHub: signed out, offering the device flow; AWS: nothing connected, with the region default and the override note
-    const gh = h.win.getByTestId('row-github');
-    assert.match(await gh.innerText(), /Not signed in/);
-    assert.equal(await gh.getByRole('button', { name: 'Sign in with GitHub' }).isEnabled(), true);
-    const aws = h.win.getByTestId('row-aws');
-    assert.match(await aws.innerText(), /Not connected/);
-    assert.equal(await aws.getByLabel('AWS region').inputValue(), 'us-east-1');
-    assert.match(await aws.innerText(), /a repo can override it in ratchet\.yaml/);
-    // Agents: both harnesses are reported (installed or not), never silently missing
-    const agents = h.win.getByTestId('row-agents');
-    assert.equal(await agents.getByTestId('harness-claude-code').count(), 1);
-    assert.equal(await agents.getByTestId('harness-codex').count(), 1);
-    assert.equal(await agents.getByRole('button', { name: 'Re-detect' }).isEnabled(), true);
+    assert.ok(open.length >= 1 && open.every((o) => !o), 'every disclosure starts collapsed');
+    // nothing is connected yet: GitHub and AWS say so; the agents found on this machine (if any) are listed
+    assert.match(await h.win.getByTestId('connectors-github').innerText(), /No GitHub account yet/);
+    assert.match(await h.win.getByTestId('connectors-aws').innerText(), /No AWS profile yet/);
     assert.deepEqual(h.errors, []);
   });
 

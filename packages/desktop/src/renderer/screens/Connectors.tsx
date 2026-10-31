@@ -363,7 +363,11 @@ function AddAws({ vm, onChange, onDone }: { vm: ConnectorsVM; onChange(v: Connec
         onSubmit={(e) => {
           e.preventDefault();
           if (!pick || regionProblem || capProblem || region.trim() === '') return;
-          void run(async () => { onChange(await window.ratchet.addAwsConnector({ profile: pick, region: region.trim(), ...(capNum !== null ? { monthlyCapUsd: capNum } : {}) })); onDone(); });
+          void run(async () => {
+            onChange(await window.ratchet.addAwsConnector({ profile: pick, region: region.trim(), ...(capNum !== null ? { monthlyCapUsd: capNum } : {}) }));
+            onDone();
+            void window.ratchet.refreshConnectors().then(onChange, () => undefined);
+          });
         }}
       >
         <label className="cn-field">
@@ -425,7 +429,12 @@ function AddAgent({ vm, onChange, onDone }: { vm: ConnectorsVM; onChange(v: Conn
           onSubmit={(e) => {
             e.preventDefault();
             if (problem || key.length < 8) return;
-            void run(async () => { onChange(await window.ratchet.addAgentConnector({ agent, source: 'api-key', apiKey: key, ...(name.trim() ? { name: name.trim() } : {}) })); setKey(''); onDone(); });
+            void run(async () => {
+              onChange(await window.ratchet.addAgentConnector({ agent, source: 'api-key', apiKey: key, ...(name.trim() ? { name: name.trim() } : {}) }));
+              setKey('');
+              onDone();
+              void window.ratchet.refreshConnectors().then(onChange, () => undefined);
+            });
           }}
         >
           <label className="cn-field">

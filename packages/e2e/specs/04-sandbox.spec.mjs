@@ -1,4 +1,4 @@
-// Settings and repo selection against fakes, through the real main process: a fake GitHub (device flow, repos, ratchet.yaml),
+// Connectors and repo selection against fakes, through the real main process: a fake GitHub (device flow, repos, ratchet.yaml),
 // fake `claude` / `codex` executables on PATH, and a ~/.aws fixture. No network, no AWS, no installed CLIs.
 //
 // File name kept (04-sandbox): the sandbox itself is automatic now; its lifecycle is covered by 03 (demo run -> Environments -> receipt).
@@ -18,11 +18,20 @@ environment: { image: .devcontainer/Dockerfile, machine: c7i.4xlarge, region: eu
 protected: [docs/**]
 `;
 
-describe('Settings: GitHub, AWS and Agents (fakes)', () => {
+describe('Connectors: GitHub, AWS and Agents (fakes)', () => {
   let h;
   let gh;
   let machine;
   const shot = (name) => screenshotScreen(h.app, h.win, name, SHOTS);
+  const agents = () => h.win.getByTestId('connectors-agent');
+  const addPanel = () => h.win.getByRole('region', { name: 'Add a connector' });
+  const openAdd = async (kind) => {
+    if (!(await addPanel().count())) await h.win.getByRole('button', { name: 'Add connector' }).click();
+    await addPanel().getByRole('button', { name: kind }).click();
+  };
+  const closeAdd = async () => {
+    if (await addPanel().count()) await h.win.getByRole('button', { name: 'Add connector' }).click();
+  };
 
   before(async () => {
     gh = await startFakeGithub({ repos: [], files: {} });
@@ -39,90 +48,106 @@ describe('Settings: GitHub, AWS and Agents (fakes)', () => {
     machine?.cleanup();
   });
 
-  test('Agents: both harnesses are detected in the main process with version and sign-in status; hints and key fields only where needed', async () => {
-    const row = h.win.getByTestId('row-agents');
-    const cc = row.getByTestId('harness-claude-code');
-    await poll('Claude Code detected', async () => /v2\.1\.4/.test(await cc.innerText()), { timeout: 30_000 });
+  test('Agents: both CLI logins are detected in the main process with version and sign-in status', async () => {
+    await poll('Claude Code detected', async () => /v2\.1\.4/.test(await agents().innerText()), { timeout: 30_000 });
+    const cc = agents().getByRole('listitem').filter({ hasText: 'Claude Code · your login' });
+    assert.match(await cc.innerText(), /Found on this Mac · v2\.1\.4/);
     assert.match(await cc.innerText(), /Signed in/);
-    assert.equal(await cc.getByLabel('Anthropic API key value').count(), 0, 'no key field for a signed-in harness');
-    const cx = row.getByTestId('harness-codex');
+    assert.match(await cc.innerText(), /Default/, 'the one signed-in agent is the default');
+    const cx = agents().getByRole('listitem').filter({ hasText: 'Codex · your login' });
     assert.match(await cx.innerText(), /v0\.9\.0/);
     assert.match(await cx.innerText(), /Signed out/);
-    assert.match(await cx.getByRole('status').innerText(), /codex login/, 'the sign-in hint');
-    assert.equal(await cx.getByLabel('OpenAI API key value').count(), 1, 'a key field for the harness that is not signed in');
-    assert.match(await row.innerText(), /1 ready/);
+    assert.match(await cx.innerText(), /codex login/, 'the sign-in command');
     const api = await rpc(h.win, 'detectHarnesses');
     assert.deepEqual(api.map((x) => [x.kind, x.installed, x.auth]), [['claude-code', true, 'signed-in'], ['codex', true, 'signed-out']]);
     assert.ok(api[0].path.startsWith(machine.dir), 'found on the PATH the app resolved');
+    const list = await rpc(h.win, 'listConnectors');
+    assert.deepEqual(list.connectors.filter((c) => c.kind === 'agent').map((c) => [c.name, c.status, c.runsOn.join()]), [
+      ['Claude Code · your login', 'connected', 'local'],
+      ['Codex · your login', 'signed-out', 'local'],
+    ]);
   });
 
   test('Re-detect probes again: signing in to Codex in a terminal is picked up', async () => {
     machine.setCodexSignedIn(true);
-    const row = h.win.getByTestId('row-agents');
-    await row.getByRole('button', { name: 'Re-detect' }).click();
-    const cx = row.getByTestId('harness-codex');
+    await openAdd('Agent');
+    await addPanel().getByRole('button', { name: 'Re-detect' }).click();
+    const cx = agents().getByRole('listitem').filter({ hasText: 'Codex · your login' });
     await poll('Codex signed in', async () => /Signed in/.test(await cx.innerText()), { timeout: 30_000 });
-    assert.equal(await cx.getByLabel('OpenAI API key value').count(), 0);
-    assert.match(await row.innerText(), /2 ready/);
-    assert.equal(await row.getByText('Cloud runners need API keys').locator('xpath=ancestor::details').evaluate((d) => d.open), false);
+    await closeAdd();
   });
 
-  test('AWS: profiles come from ~/.aws as names only; picking one connects; the region defaults to us-east-1', async () => {
-    const row = h.win.getByTestId('row-aws');
-    assert.match(await row.innerText(), /Not connected/);
-    const list = row.getByRole('radiogroup', { name: 'AWS profile' });
+  test('AWS: profiles come from ~/.aws as names only; adding one with a cap connects it; the region defaults to us-east-1', async () => {
+    const aws = h.win.getByTestId('connectors-aws');
+    assert.match(await aws.innerText(), /No AWS profile yet/);
+    await openAdd('AWS profile');
+    const list = addPanel().getByRole('radiogroup', { name: 'AWS profile' });
     await list.waitFor({ timeout: 15_000 });
-    assert.deepEqual((await list.locator('.agent-choice__name').allInnerTexts()).map((t) => t.trim()), ['default', 'corp-sso', 'deploy-role']);
+    assert.deepEqual((await list.locator('.cn-choice__name').allInnerTexts()).map((t) => t.trim()), ['default', 'corp-sso', 'deploy-role']);
     assert.match(await list.getByRole('radio', { name: /corp-sso/ }).innerText(), /SSO · session corp/);
     const body = await h.win.locator('body').innerText();
     for (const secret of ['AKIAIOSFODNN7EXAMPLE', AWS_SECRET, '111122223333', 'awsapps.com']) assert.ok(!body.includes(secret), `the page never shows ${secret}`);
-    assert.equal(await row.getByLabel('AWS region').inputValue(), 'us-east-1');
-    assert.match(await row.innerText(), /a repo can override it in ratchet\.yaml/);
+    assert.equal(await addPanel().getByLabel('AWS region').inputValue(), 'us-east-1');
     await list.getByRole('radio', { name: /corp-sso/ }).click();
-    await poll('connected', async () => /Connected · corp-sso/.test(await row.innerText()), { timeout: 15_000 });
+    await addPanel().getByLabel('Monthly cap in dollars').fill('250');
+    await addPanel().getByRole('button', { name: 'Add', exact: true }).click();
+    const row = aws.getByRole('listitem').filter({ hasText: 'corp-sso' });
+    await row.waitFor({ timeout: 15_000 });
+    assert.match(await row.innerText(), /SSO · us-east-1 · cap \$250 \/ month/);
+    assert.match(await row.innerText(), /Default/);
     const s = await rpc(h.win, 'getSettings');
-    assert.equal(s.awsProfile, 'corp-sso');
-    assert.equal(s.dev.awsAuth, 'sso');
+    assert.equal(s.awsProfile, 'corp-sso', 'the default AWS connector is what the engine uses without a choice');
     assert.equal(s.awsRegion, 'us-east-1');
-    assert.equal(await row.getByRole('button', { name: 'Test connection' }).isEnabled(), true);
+    await shot('00-aws-connected');
   });
 
   test('GitHub: "Sign in with GitHub" runs the device flow in the main process and shows the code', async (t) => {
-    const row = h.win.getByTestId('row-github');
-    assert.match(await row.innerText(), /Not signed in/);
-    assert.equal((await rpc(h.win, 'githubStatus')).clientIdConfigured, true);
-    await row.getByRole('button', { name: 'Sign in with GitHub' }).click();
-    const code = row.getByTestId('device-code');
+    const github = h.win.getByTestId('connectors-github');
+    assert.match(await github.innerText(), /No GitHub account yet/);
+    assert.equal((await rpc(h.win, 'listConnectors')).clientIdConfigured, true);
+    await openAdd('GitHub account');
+    await addPanel().getByRole('button', { name: 'Sign in with GitHub' }).click();
+    const code = addPanel().getByTestId('device-code');
     await code.waitFor({ timeout: 15_000 });
     assert.equal((await code.innerText()).trim(), DEVICE_CODE);
-    assert.match(await row.innerText(), /Waiting for you to approve/);
+    assert.match(await addPanel().innerText(), /Waiting for you to approve/);
     await shot('01-device-code');
     gh.approve();
     const settings = await rpc(h.win, 'getSettings');
     if (!settings.encryptionAvailable) {
       // No OS keychain here (Linux CI): the app refuses to keep a token in plaintext and says so, instead of signing in.
-      await poll('the keychain refusal', async () => /keychain/i.test(await row.getByRole('alert').innerText().catch(() => '')), { timeout: 30_000 });
+      await poll('the keychain refusal', async () => /keychain/i.test(await addPanel().getByRole('alert').innerText().catch(() => '')), { timeout: 30_000 });
       assert.equal((await rpc(h.win, 'githubStatus')).signedIn, false);
+      await closeAdd();
       return t.skip('no OS keychain in this environment: the token cannot be stored (covered by unit tests)');
     }
-    await poll('signed in as the fake account', async () => new RegExp(`Signed in as ${FAKE_LOGIN}`).test(await row.innerText()), { timeout: 30_000 });
+    const row = github.getByRole('listitem').filter({ hasText: FAKE_LOGIN });
+    await row.waitFor({ timeout: 30_000 });
+    assert.match(await row.innerText(), /Signed in with GitHub/);
+    assert.match(await row.innerText(), /Default/);
     assert.equal((await rpc(h.win, 'githubStatus')).login, FAKE_LOGIN);
     assert.ok(!(await h.win.locator('body').innerText()).includes(FAKE_TOKEN), 'the token never reaches the page');
+    assert.ok(!JSON.stringify(await rpc(h.win, 'listConnectors')).includes(FAKE_TOKEN));
     assert.ok(!JSON.stringify(await rpc(h.win, 'getSettings')).includes(FAKE_TOKEN));
-    await row.getByRole('button', { name: 'Sign out' }).click();
-    await poll('signed out', async () => /Not signed in/.test(await row.innerText()), { timeout: 15_000 });
+    await row.getByRole('button', { name: `Actions for ${FAKE_LOGIN}` }).click();
+    await h.win.getByRole('menuitem', { name: 'Remove' }).click();
+    await row.getByRole('button', { name: 'Remove', exact: true }).click();
+    await poll('removed', async () => /No GitHub account yet/.test(await github.innerText()), { timeout: 15_000 });
   });
 
-  test('pasting a token is an Advanced fallback; the page never gets a secret back', async (t) => {
-    const row = h.win.getByTestId('row-github');
-    const adv = row.getByText('Advanced: paste a token instead');
-    await adv.click();
-    const input = row.getByLabel('GitHub token value');
-    if (await input.isDisabled()) return t.skip('no OS keychain in this environment: secrets cannot be stored (covered by unit tests)');
+  test('pasting a token is a second way in; the page never gets a secret back', async (t) => {
+    await openAdd('GitHub account');
+    await addPanel().getByText('Use an access token instead').click();
+    const input = addPanel().getByLabel('GitHub token');
+    if (await input.isDisabled()) {
+      await closeAdd();
+      return t.skip('no OS keychain in this environment: secrets cannot be stored (covered by unit tests)');
+    }
     await input.fill('ghp_E2EPASTEDTOKEN0123456789abcdefgh');
-    await row.getByRole('button', { name: 'Save' }).click();
-    await poll('signed in with the pasted token', async () => new RegExp(`Signed in as ${FAKE_LOGIN}`).test(await row.innerText()), { timeout: 30_000 });
-    assert.match(await row.innerText(), /pasted token/);
+    await addPanel().getByRole('button', { name: 'Add', exact: true }).click();
+    const row = h.win.getByTestId('connectors-github').getByRole('listitem').filter({ hasText: FAKE_LOGIN });
+    await row.waitFor({ timeout: 30_000 });
+    assert.match(await row.innerText(), /Access token/);
     assert.ok(!(await h.win.locator('body').innerText()).includes('ghp_E2EPASTED'));
     assert.equal(await h.win.evaluate(() => typeof window.ratchet.getSecret), 'undefined');
     await shot('02-signed-in');

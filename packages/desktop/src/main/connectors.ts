@@ -78,6 +78,9 @@ const SECRET_FOR: Record<ConnectorAgent, SecretName> = { 'claude-code': 'anthrop
 const LOGIN_COMMAND: Record<ConnectorAgent, string> = { 'claude-code': '`claude`', codex: '`codex login`' };
 const MAX_CAP_USD = 10_000_000;
 
+/** A probe that failed because the network or the service was out of reach says nothing about the account. */
+const unreachable = (detail: string): boolean => /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ETIMEDOUT|getaddrinfo|fetch failed|network|timed out|timeout|could not connect|could not reach|answered 5\d\d/i.test(detail);
+
 const newId = (prefix: string): string => `${prefix}-${randomBytes(4).toString('hex')}`;
 const loginId = (agent: ConnectorAgent): string => `agent-${agent}-login`;
 const scrub = (text: string, secrets: Array<string | null>): string => secrets.reduce<string>((t, s) => (s && s.length >= 4 ? t.split(s).join('***') : t), text);
@@ -409,7 +412,7 @@ export class ConnectorStore {
   }
 
   /** An API key for Claude Code or Codex, kept in the keychain and checked with the provider (a rejected key is kept as `invalid`). */
-  async addAgent(input: AddAgentConnectorInput): Promise<AgentRecord> {
+  async addAgent(input: AddAgentConnectorInput, opts: { waitForCheck?: boolean } = {}): Promise<AgentRecord> {
     if (input.source === 'login') {
       const id = loginId(input.agent);
       await this.sync();
@@ -437,7 +440,8 @@ export class ConnectorStore {
     };
     this.data.items.push(rec);
     this.settings.saveConnectors();
-    await this.test(id).catch(() => undefined);
+    const check = this.test(id).catch(() => undefined);
+    if (opts.waitForCheck ?? true) await check;
     return rec;
   }
 
@@ -503,6 +507,7 @@ export class ConnectorStore {
         if (!this.deps.tester) return unavailable;
         const res = await this.deps.tester.aws({ region: r.region, profile: r.profile });
         if (res.ok) return { ok: true, detail: res.detail, status: 'connected' };
+        if (unreachable(res.detail)) return { ok: false, detail: res.detail };
         const auth = this.awsAuth(r.profile);
         const expired = auth === 'sso' || auth === 'role' || auth === 'process';
         return {
@@ -522,7 +527,8 @@ export class ConnectorStore {
         const apiKey = this.secretOf(r);
         if (!apiKey) return { ok: false, detail: 'The key is not in the keychain any more; add it again.', status: 'invalid' };
         const res = await (r.agent === 'claude-code' ? this.deps.tester.anthropic({ apiKey }) : this.deps.tester.openai({ apiKey }));
-        return { ok: res.ok, detail: res.detail, status: res.ok ? 'valid' : 'invalid' };
+        if (res.ok) return { ok: true, detail: res.detail, status: 'valid' };
+        return { ok: false, detail: res.detail, ...(unreachable(res.detail) ? {} : { status: 'invalid' as const }) };
       }
     }
   }
