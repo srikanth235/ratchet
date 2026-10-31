@@ -72,6 +72,32 @@ struct MockClientTests {
         await #expect(throws: RatchetClientError.self) { try await client.pauseAgent(id: "nope") }
     }
 
+    @Test func stoppingEndsARunAndKeepsItsWins() async throws {
+        let client = MockRatchetClient(now: testNow)
+        try await client.stopOptimization(id: "opt-checkout")
+        let stopped = try await client.optimization(id: "opt-checkout")
+        #expect(stopped.optimization.status == .done)  // it had verified wins
+        #expect(stopped.agents.allSatisfy { $0.state == .idle })
+        await #expect(throws: RatchetClientError.self) { try await client.stopOptimization(id: "opt-checkout") }
+        await #expect(throws: RatchetClientError.self) { try await client.stopOptimization(id: "nope") }
+    }
+
+    @Test func aPullRequestNeedsAWinAndGetsAnAddress() async throws {
+        let client = MockRatchetClient(now: testNow)
+        let url = try await client.openPullRequest(optimizationID: "opt-checkout")
+        #expect(url.absoluteString.hasPrefix("https://github.com/acme-org/shop-api/pull/"))
+        let after = try await client.optimization(id: "opt-checkout")
+        #expect(after.optimization.prURL == url.absoluteString)
+        #expect(after.optimization.prNumber != nil)
+        await #expect(throws: RatchetClientError.self) { try await client.openPullRequest(optimizationID: "opt-bundle") }  // no win
+    }
+
+    @Test func theReportIsMarkdownWithAFileName() async throws {
+        let report = try await MockRatchetClient(now: testNow).report(optimizationID: "opt-cli")
+        #expect(report.fileName.hasSuffix(".md"))
+        #expect(report.markdown.hasPrefix("# CLI cold start"))
+    }
+
     @Test func connectorsAddDefaultRemove() async throws {
         let client = MockRatchetClient(now: testNow)
         let before = try await client.connectors()

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build-time smoke test for the bench image: fails the Packer build if what the bench runner needs
-# (packages/bench remote-scripts.ts, image-scripts.ts) is missing, or if anything that must not be there is.
+# (crates/ratchet-bench remote_scripts.rs, image_scripts.rs) is missing, or if anything that must not be there is.
 set -euo pipefail
 # shellcheck source=lib.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -12,7 +12,7 @@ HOST_TOOLCHAIN="${RATCHET_HOST_TOOLCHAIN:-0}"
 BU=ratchet-bench
 HU=ratchet-holdout
 LAUNCHER="$PREFIX/libexec/ratchet/ratchet-candidate-ctr"
-# Must be identical to the rule in packages/aws `benchUserData` (infra/tests compares them).
+# Must be identical to the rule in crates/ratchet-sandbox `compute/user_data.rs` (infra/tests compares them).
 IMDS_RULE=(OUTPUT -m owner --uid-owner "$BU" -d 169.254.169.254 -j REJECT)
 as_bench() { setpriv --reuid="$BU" --regid="$BU" --clear-groups --no-new-privs -- "$@"; }
 

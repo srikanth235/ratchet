@@ -10,7 +10,8 @@ note() { echo "SMOKE $*"; }
 # Bundle layout.
 for rel in Contents/MacOS/Ratchet Contents/Helpers/ratchetd Contents/Helpers/ratchet \
             Contents/Library/LaunchAgents/com.ratchet.ratchetd.plist \
-            Contents/Library/LaunchAgents/com.ratchet.ratchetd.demo.plist; do
+            Contents/Library/LaunchAgents/com.ratchet.ratchetd.demo.plist \
+            Contents/Resources/infra/aws/main.tf; do
   if [[ -e "$app/$rel" ]]; then note "ok   $rel"; else note "FAIL missing $rel"; fail=1; fi
 done
 (( fail )) && exit 1

@@ -289,6 +289,45 @@ public final class AppStore {
         persist()
     }
 
+    /// The kill switch. Reloads the optimization so the screen shows how it ended.
+    public func stopOptimization(_ id: String) async {
+        do {
+            try await client.stopOptimization(id: id)
+            await refreshOptimization(id)
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    /// Opens the pull request for the verified wins. Returns where it is, or nil (and `lastError`) when it could not.
+    public func openPullRequest(_ id: String) async -> URL? {
+        do {
+            let url = try await client.openPullRequest(optimizationID: id)
+            await refreshOptimization(id)
+            return url
+        } catch {
+            lastError = error.localizedDescription
+            return nil
+        }
+    }
+
+    public func report(_ id: String) async -> OptimizationReport? {
+        do {
+            return try await client.report(optimizationID: id)
+        } catch {
+            lastError = error.localizedDescription
+            return nil
+        }
+    }
+
+    /// Something the views did (saving a file) failed: shown like any other error.
+    public func reportProblem(_ text: String) { lastError = text }
+
+    private func refreshOptimization(_ id: String) async {
+        await loadDetail(id: id)
+        if let fresh = details[id]?.optimization { applyUpdate(fresh) }
+    }
+
     public func pauseAgent(_ id: String) async {
         do {
             let agent = try await client.pauseAgent(id: id)

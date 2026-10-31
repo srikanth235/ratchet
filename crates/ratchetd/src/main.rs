@@ -14,7 +14,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result, bail};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use ratchet_engine::desktop::{
-    DefaultPathsInput, NoPowerBlocker, PowerSaveHook, default_live_paths, default_secret_store,
+    DefaultPathsInput, PowerSaveHook, default_live_paths, default_secret_store,
 };
 use ratchet_engine::runtime::{ConnectionTesterDeps, create_connection_tester};
 use ratchet_github::{GithubApiOptions, HttpGithubApi};
@@ -41,11 +41,42 @@ enum Command {
     Serve(ServeArgs),
     /// Generate the OpenAPI document.
     Openapi(OpenapiArgs),
+    /// Run one full optimization on a shipped demo, headless, and print the summary. Exits 0 when it verified a
+    /// win (the old `node packages/runtime/dist/bin/simulate.js`).
+    Simulate(SimulateArgs),
     /// Install or remove the LaunchAgent.
     Launchagent {
         #[command(subcommand)]
         action: LaunchAgentCmd,
     },
+}
+
+#[derive(Args, Clone)]
+struct SimulateArgs {
+    /// `search` (examples/demo-search), `forecast` or `cli`.
+    #[arg(long, default_value = "search")]
+    project: String,
+    /// Keep only the first N attempts of each agent's script.
+    #[arg(long)]
+    attempts: Option<usize>,
+    /// Load-generator duration per bench run, seconds.
+    #[arg(long, default_value_t = 3)]
+    duration: u32,
+    /// Evaluator repeats.
+    #[arg(long, default_value_t = 2)]
+    repeats: u32,
+    /// Time limit of the optimization, minutes.
+    #[arg(long, default_value_t = 20)]
+    minutes: u64,
+    /// Put the ledger here instead of the scratch directory (which is never deleted).
+    #[arg(long)]
+    db: Option<PathBuf>,
+    /// Also write the machine-readable run summary here.
+    #[arg(long)]
+    summary: Option<PathBuf>,
+    /// The monorepo root holding `examples/` and `node_modules` (default: the current directory).
+    #[arg(long)]
+    repo_root: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
@@ -154,6 +185,7 @@ async fn main() -> Result<()> {
         None => serve(cli.serve).await,
         Some(Command::Serve(a)) => serve(a).await,
         Some(Command::Openapi(a)) => generate(&a),
+        Some(Command::Simulate(a)) => simulate_demo(a).await,
         Some(Command::Launchagent { action }) => launch_agent(action),
     }
 }
@@ -257,9 +289,15 @@ async fn real_service(args: &ServeArgs, ledger_path: Option<PathBuf>) -> Result<
         .repo_root
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    // inside the Mac app the OpenTofu module ships in Contents/Resources; the LaunchAgent plist cannot name it
+    let resources_path = args.resources_path.clone().or_else(|| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| ratchetd::host::bundled_resources(&exe))
+    });
     let live_defaults = default_live_paths(&DefaultPathsInput {
-        is_packaged: args.resources_path.is_some(),
-        resources_path: args.resources_path.clone().unwrap_or_default(),
+        is_packaged: resources_path.is_some(),
+        resources_path: resources_path.clone().unwrap_or_default(),
         repo_root: repo_root.clone(),
         exists: None,
     });
@@ -276,9 +314,13 @@ async fn real_service(args: &ServeArgs, ledger_path: Option<PathBuf>) -> Result<
     let service = RealService::new(opts)
         .await
         .context("cannot start the real engine")?;
-    // Keep the machine awake while a run is active. The blocker is the host's to provide (the Mac app supplies an IOKit
-    // assertion); the daemon alone has none, so this is a hook point.
-    let hook = PowerSaveHook::new(NoPowerBlocker);
+    // Keep the machine awake while a run is active (the Electron app did this with powerSaveBlocker): `caffeinate` on a
+    // Mac, nothing elsewhere.
+    let hook = PowerSaveHook::new(if cfg!(target_os = "macos") {
+        ratchetd::host::CommandPowerBlocker::caffeinate()
+    } else {
+        ratchetd::host::CommandPowerBlocker::disabled()
+    });
     let mut events = service.subscribe();
     tokio::spawn(async move {
         while let Ok(e) = events.recv().await {
@@ -289,6 +331,78 @@ async fn real_service(args: &ServeArgs, ledger_path: Option<PathBuf>) -> Result<
         hook.release();
     });
     Ok(service)
+}
+
+/// `ratchetd simulate`: scripted agents, the real evaluator, a mock cloud, on one of the shipped demos.
+async fn simulate_demo(a: SimulateArgs) -> Result<()> {
+    use ratchet_engine::runtime::{
+        SimulateOptions, SimulationProject, SummaryInput, build_simulation_summary, simulate,
+        write_simulation_summary,
+    };
+    let Some(project) = SimulationProject::parse(&a.project) else {
+        eprintln!(
+            "unknown --project {}; expected one of search, forecast, cli",
+            a.project
+        );
+        std::process::exit(2);
+    };
+    let repo_root = match a.repo_root {
+        Some(r) => r,
+        None => std::env::current_dir()?,
+    };
+    let mut o = SimulateOptions::new(repo_root);
+    o.project = project;
+    o.db_path = a.db;
+    o.attempts = a.attempts;
+    o.duration_sec = a.duration;
+    o.repeats = a.repeats;
+    o.minutes = a.minutes;
+    let r = simulate(o)
+        .await
+        .map_err(|e| anyhow::anyhow!("simulation failed: {e}"))?;
+    let spend = r
+        .ledger
+        .spend_breakdown(&r.summary.id)
+        .await
+        .context("cannot read the spend")?;
+    let summary = build_simulation_summary(SummaryInput {
+        project: project.as_str().to_owned(),
+        pack: r.config.pack.clone(),
+        objective: r
+            .config
+            .objective
+            .name
+            .clone()
+            .unwrap_or_else(|| r.config.objective.metric.clone()),
+        summary: &r.summary,
+        candidates: r.candidates.iter().map(|c| c.candidate.verdict).collect(),
+        spend: &spend,
+        value: r.value.clone(),
+        roi: r.roi,
+        pr: r.pr.clone(),
+        work_root: r.work_root.display().to_string(),
+        db: r.db_path.display().to_string(),
+    });
+    println!("\n=== summary ===");
+    println!("{}", serde_json::to_string_pretty(&summary)?);
+    if let Some(path) = a.summary {
+        println!(
+            "summary written to {}",
+            write_simulation_summary(path, &summary)?.display()
+        );
+    }
+    for c in &r.candidates {
+        println!(
+            "  {:<15} {:.8}  bench={:?} confirm={:?}  {}",
+            c.candidate.verdict.as_str(),
+            c.candidate.sha,
+            c.bench_value,
+            c.confirm_value,
+            c.candidate.message.lines().next().unwrap_or("")
+        );
+    }
+    println!("ledger: {}", r.db_path.display());
+    std::process::exit(if r.summary.verified_wins > 0 { 0 } else { 1 });
 }
 
 fn generate(a: &OpenapiArgs) -> Result<()> {

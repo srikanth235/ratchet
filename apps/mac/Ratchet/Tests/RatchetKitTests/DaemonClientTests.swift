@@ -317,6 +317,28 @@ struct DaemonClientTests {
         #expect(sent.body.contains("Try caching"))
     }
 
+    @Test func theKillSwitchThePullRequestAndTheReportGoToTheirRoutes() async throws {
+        let daemon = daemonWithData()
+        daemon.route("POST /v1/optimizations/opt_demo_ingest/stop", 204)
+        daemon.route("POST /v1/optimizations/opt_demo_ingest/pull-request", 201, #"{"url":"https://ghe.acme.test/acme/ingest/pull/7"}"#)
+        daemon.route("GET /v1/optimizations/opt_demo_ingest/report", 200, #"{"fileName":"ratchet-ingest.md","markdown":"# Ingest throughput\n"}"#)
+        let client = make(daemon)
+        try await client.stopOptimization(id: "opt_demo_ingest")
+        #expect(daemon.count("POST /v1/optimizations/opt_demo_ingest/stop") == 1)
+        let url = try await client.openPullRequest(optimizationID: "opt_demo_ingest")
+        #expect(url.absoluteString == "https://ghe.acme.test/acme/ingest/pull/7")  // any host, not github.com
+        let report = try await client.report(optimizationID: "opt_demo_ingest")
+        #expect(report == OptimizationReport(fileName: "ratchet-ingest.md", markdown: "# Ingest throughput\n"))
+    }
+
+    @Test func aPullRequestWithoutAWinIsRefusedWithTheDaemonsWords() async throws {
+        let daemon = daemonWithData()
+        daemon.route("POST /v1/optimizations/opt_demo_ingest/pull-request", 409, #"{"code":"conflict","message":"no verified win yet"}"#)
+        await #expect(throws: RatchetClientError.invalid("no verified win yet")) {
+            _ = try await make(daemon).openPullRequest(optimizationID: "opt_demo_ingest")
+        }
+    }
+
     @Test(.timeLimit(.minutes(1))) func aDraftIsAwaitedWhileTheAgentWritesIt() async throws {
         let daemon = daemonWithData()
         let drafting = Fixtures.draft.replacingOccurrences(of: "\"status\":\"ready\"", with: "\"status\":\"drafting\"")

@@ -1,3 +1,4 @@
+import AppKit
 import RatchetKit
 import SwiftUI
 
@@ -8,6 +9,7 @@ struct OptimizationDetailView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
     @Environment(\.openURL) private var openURL
+    @State private var confirmingStop = false
 
     private var detail: OptimizationDetail? { store.details[id] }
     private var optimization: Optimization? { store.optimization(id: id) ?? detail?.optimization }
@@ -49,12 +51,48 @@ struct OptimizationDetailView: View {
             if let number = optimization.prNumber {
                 Button("Open pull request #\(number)") { openPullRequest(optimization, number) }
                     .buttonStyle(.kit(.primary))
+            } else if optimization.status.isFinished && optimization.winsCount > 0 {
+                Button("Create pull request") { Task { if let url = await store.openPullRequest(id) { openURL(url) } } }
+                    .buttonStyle(.kit(.primary))
+            }
+            if optimization.status.isFinished {
+                Button("Export report") { Task { await exportReport() } }
+                    .buttonStyle(.kit(.quiet))
+            } else {
+                Button("Stop…") { confirmingStop = true }
+                    .buttonStyle(.kit(.quiet))
+                    .confirmationDialog(
+                        "Stop this optimization?", isPresented: $confirmingStop, titleVisibility: .visible
+                    ) {
+                        Button("Stop and revoke keys", role: .destructive) { Task { await store.stopOptimization(id) } }
+                        Button("Keep running", role: .cancel) {}
+                    } message: {
+                        Text("The agents stop, their keys are revoked and the sandbox is removed once nothing else uses it. Wins found so far are kept.")
+                    }
             }
         }
     }
 
+    /// Where the pull request is: the address the daemon gave, else GitHub's.
     private func openPullRequest(_ optimization: Optimization, _ number: Int) {
-        if let url = URL(string: "https://github.com/\(optimization.repo)/pull/\(number)") { openURL(url) }
+        let address = optimization.prURL ?? "https://github.com/\(optimization.repo)/pull/\(number)"
+        if let url = URL(string: address) { openURL(url) }
+    }
+
+    /// The markdown report, through the system save dialog.
+    @MainActor
+    private func exportReport() async {
+        guard let report = await store.report(id) else { return }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = report.fileName
+        panel.allowedContentTypes = [.plainText]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try report.markdown.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            store.reportProblem(error.localizedDescription)
+        }
     }
 
     // MARK: Live

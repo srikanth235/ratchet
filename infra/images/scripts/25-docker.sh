@@ -1,7 +1,7 @@
 #!/bin/bash
 # Bench image only: the Docker engine. The repo's container (`environment.image`) is built by the dependency/image job on
 # an instance of this image that has egress, saved to the artifacts bucket and loaded (`docker load`) on the offline bench
-# instances, where setup, guardrails and the evaluator run inside it with `--network none` (packages/bench image-scripts.ts).
+# instances, where setup, guardrails and the evaluator run inside it with `--network none` (crates/ratchet-bench image_scripts.rs).
 #
 # What this step does NOT do, on purpose:
 #   - add any user to the `docker` group (membership is root on the box): the candidate and holdout users are created

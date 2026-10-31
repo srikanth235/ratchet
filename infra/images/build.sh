@@ -4,8 +4,9 @@
 # usage: infra/images/build.sh runner|bench|both [extra `packer build` arguments...]
 #   e.g. infra/images/build.sh both -var region=us-east-1 -var subnet_id=subnet-0abc
 #
-# Needs: packer >= 1.10, AWS credentials for the SANDBOX account (AWS_PROFILE / SSO), pnpm + node
-# (runner image only: the ratchet-runner tarballs are packed from this checkout) and, for the bench image, the prebuilt
+# Needs: packer >= 1.10, AWS credentials for the SANDBOX account (AWS_PROFILE / SSO), for the runner image the prebuilt
+# static ratchet-runner of the image's architecture (CI artifact ratchet-runner-<arch>: RATCHET_RUNNER_BINARY=/path, see
+# pack-runner.sh, which can also build it with cargo + musl) and, for the bench image, the prebuilt
 # static launcher of the image's architecture from CI (.github/workflows/images.yml, artifact
 # ratchet-candidate-launcher-<arch>): infra/images/launcher/ratchet-candidate-launcher-<arch> plus the .sha256 next to it,
 # or RATCHET_LAUNCHER_BINARY=/path/to/binary (its <binary>.sha256, or RATCHET_LAUNCHER_SHA256=<hex>). <arch> is the
@@ -19,8 +20,10 @@ case "$which" in runner | bench | both) shift ;; *) echo "usage: $0 runner|bench
 
 commit="$(git -C "$repo" rev-parse --short=9 HEAD 2>/dev/null || echo unknown)"
 if [ -n "$(git -C "$repo" status --porcelain 2>/dev/null)" ]; then commit="${commit}-dirty"; fi
-# The tag the app matches (ratchet:image_version): the app version, then a build suffix (packages/aws findRatchetImages).
-app_version="${RATCHET_APP_VERSION:-$(node -p "require('$repo/packages/desktop/package.json').version" 2>/dev/null || echo 0.0.0)}"
+# The tag the app matches (ratchet:image_version): the app version, then a build suffix (ratchet-sandbox
+# `Ec2ImageLookup::find_images`). The version the daemon asks for is `ratchetd::VERSION`, the version of crates/ratchetd.
+app_version="${RATCHET_APP_VERSION:-$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$repo/crates/ratchetd/Cargo.toml" | head -n1)}"
+app_version="${app_version:-0.0.0}"
 version="${RATCHET_IMAGE_VERSION:-${app_version}-$(date -u +%Y%m%d)-${commit}}"
 
 packer init "$here"
@@ -28,6 +31,16 @@ packer init "$here"
 # sha256_of FILE: the hex digest (sha256sum on Linux, shasum on macOS).
 sha256_of() {
   if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
+}
+
+# arch_of_args ARGS...: the Packer `arch` variable of the command line (x86_64 default).
+arch_of_args() {
+  local arch=x86_64 prev="" a
+  for a in "$@"; do
+    case "$a" in arch=*) [ "$prev" = -var ] && arch="${a#arch=}" ;; -var=arch=*) arch="${a#-var=arch=}" ;; esac
+    prev="$a"
+  done
+  printf '%s\n' "$arch"
 }
 
 # launcher_args ARGS...: the -var arguments for the prebuilt launcher, checked here so a wrong or missing binary fails
@@ -65,7 +78,7 @@ build_one() {
 
 if [ "$which" = both ]; then launcher_args "$@" >/dev/null || exit 2; fi # fail before the runner image takes its time
 if [ "$which" = runner ] || [ "$which" = both ]; then
-  "$here/pack-runner.sh"
+  "$here/pack-runner.sh" "$(arch_of_args "$@")"
   build_one runner "$@"
 fi
 if [ "$which" = bench ] || [ "$which" = both ]; then

@@ -1,19 +1,22 @@
 name: Images
 # Inputs of the machine-image builds (infra/images, docs: infra/images/README.md): the static setuid candidate launcher
-# (crates/ratchet-bench, bin ratchet-candidate-launcher) per architecture, and a Packer validation of the templates.
-# The bench image installs the artifact `ratchet-candidate-launcher-<arch>` (binary + .sha256); nothing is compiled on the
-# image builder.
+# (crates/ratchet-bench, bin ratchet-candidate-launcher) and the static agent runner (crates/ratchet-agents, bin
+# ratchet-runner) per architecture, and a Packer validation of the templates.
+# The bench image installs the artifact `ratchet-candidate-launcher-<arch>`, the runner image `ratchet-runner-<arch>`
+# (binary + .sha256); nothing is compiled on the image builder.
 on:
   push:
     paths:
       - "Cargo.toml"
       - "crates/**"
+      - "templates/**"
       - "infra/images/**"
       - ".github/workflows/images.yml"
   pull_request:
     paths:
       - "Cargo.toml"
       - "crates/**"
+      - "templates/**"
       - "infra/images/**"
       - ".github/workflows/images.yml"
   workflow_dispatch:
@@ -97,6 +100,81 @@ jobs:
           path: |
             out/ratchet-candidate-launcher-${{ matrix.arch }}
             out/ratchet-candidate-launcher-${{ matrix.arch }}.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+  runner:
+    name: runner (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    env:
+      NAME: ratchet-runner-${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: runner-${{ matrix.arch }}
+      - name: Install musl
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      # musl: fully static, with a resolver of its own, so it runs unchanged on any image of the architecture.
+      - name: Build
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+          CARGO_PROFILE_RELEASE_STRIP: symbols
+        run: |
+          cargo build --release -p ratchet-agents --bin ratchet-runner --target "${{ matrix.target }}"
+          mkdir -p out
+          cp "target/${{ matrix.target }}/release/ratchet-runner" "out/$NAME"
+      # What 90-verify-runner.sh checks on the image, on the real binary; then pack-runner.sh + 60-ratchet-runner.sh as the
+      # image build runs them, into a scratch prefix.
+      - name: Check, pack and install it
+        run: |
+          set -euxo pipefail
+          file "out/$NAME" | tee /dev/stderr | grep -E 'statically linked|static-pie'
+          (cd out && sha256sum "$NAME" > "$NAME.sha256" && cat "$NAME.sha256")
+          "out/$NAME" --version
+          # no configuration: exit 2, and the message names what is missing
+          rc=0
+          out_text="$(env -i PATH="$PATH" "out/$NAME" 2>&1)" || rc=$?
+          test "$rc" = 2
+          grep -q RATCHET_OPTIMIZATION_ID <<<"$out_text"
+          RATCHET_RUNNER_BINARY="$PWD/out/$NAME" infra/images/pack-runner.sh "${{ matrix.arch }}" "$PWD/dist"
+          prefix=$(mktemp -d)
+          sudo RATCHET_PREFIX="$prefix" RATCHET_RUNNER_DIST="$PWD/dist" bash infra/images/scripts/60-ratchet-runner.sh
+          rc=0
+          out_text="$(env -i PATH="$prefix/bin:$PATH" "$prefix/bin/ratchet-runner" 2>&1)" || rc=$?
+          test "$rc" = 2
+          grep -q RATCHET_OPTIMIZATION_ID <<<"$out_text"
+          # a tampered binary must stop the install
+          echo tamper >> dist/ratchet-runner
+          if sudo RATCHET_PREFIX="$(mktemp -d)" RATCHET_RUNNER_DIST="$PWD/dist" bash infra/images/scripts/60-ratchet-runner.sh; then
+            echo "a tampered runner was installed"; exit 1
+          fi
+          {
+            echo "### $NAME"
+            echo '```'
+            cat "out/$NAME.sha256"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ratchet-runner-${{ matrix.arch }}
+          path: |
+            out/ratchet-runner-${{ matrix.arch }}
+            out/ratchet-runner-${{ matrix.arch }}.sha256
           if-no-files-found: error
           retention-days: 30
 

@@ -4,7 +4,7 @@ Packer definitions for the two machine images that live mode launches. Nothing e
 
 | Image | Launched by | Passed to live mode as | Contains |
 |---|---|---|---|
-| **runner** | `AwsCloudCompute.launchRunner` | `runnerImageRef` | Node 22, pnpm, git, AWS CLI v2, SSM agent, `claude` and `codex` (pinned), perf/strace/sysstat, hyperfine, k6, gcc/make/python3, the `ratchet-runner` bin from this repository |
+| **runner** | `AwsCloudCompute.launchRunner` | `runnerImageRef` | Node 22, pnpm, git, AWS CLI v2, SSM agent, `claude` and `codex` (pinned), perf/strace/sysstat, hyperfine, k6, gcc/make/python3, the static Rust `ratchet-runner` bin of this repository |
 | **bench** | `AwsCloudCompute.launchBenchInstance` | `benchImageRef` (override only; normally found by tag) | **Generic**: the Docker engine, git, AWS CLI v2, SSM agent, iptables, zstd, the unprivileged `ratchet-bench` and `ratchet-holdout` users and the setuid `ratchet-candidate-ctr` launcher (the Rust binary `ratchet-candidate-launcher`, prebuilt by CI; the dependency-snapshot / container-image job boots this image too, as `purpose: 'deps'`; its `ratchet-deps` user is created by that instance's user data). The toolchain is the repo's container (`environment.image`), built once and loaded offline. **No language toolchain, no compiler, no agent CLIs, no model keys, no runner bin** |
 
 Both are Amazon Linux 2023 (`x86_64` by default, `arm64` with `-var arch=arm64`; build the architecture of the instance types you launch).
@@ -14,9 +14,9 @@ infra/images/
   common.pkr.hcl      plugin pin, variables, shared locals (tags, builder type)
   runner.pkr.hcl      source + build for the runner image (script list = `runner_scripts`)
   bench.pkr.hcl       source + build for the bench image (script list = `bench_scripts`)
-  build.sh            packs the runner tarballs (runner only), checks the launcher binary (bench only), runs packer, prints the AMI ids
+  build.sh            packs the runner binary (runner only), checks the launcher binary (bench only), runs packer, prints the AMI ids
   launcher/           (git-ignored) the CI artifact ratchet-candidate-launcher-<arch> + .sha256, where build.sh looks for it
-  pack-runner.sh      builds + `pnpm pack`s @ratchet/core and @ratchet/agents into dist/ with SHA256SUMS
+  pack-runner.sh      puts the static `ratchet-runner` (CI artifact, or built here with cargo + musl) into dist/ with SHA256SUMS
   scripts/
     versions.sh         pinned versions + checksums (node, pnpm, aws cli, k6, hyperfine)
     versions-agents.sh  pinned versions + integrity (claude, codex); never uploaded to the bench builder
@@ -30,7 +30,7 @@ infra/images/
                         setuid root (4755) in a 0700 directory; nothing is compiled                (bench)
     40-runner-tools.sh  perf, strace, sysstat, gcc, make, python3                             (runner)
     50-agent-clis.sh    claude + codex, pinned + sha512 checked                               (runner)
-    60-ratchet-runner.sh  installs the packed tarballs, adds the `ratchet-runner` launcher    (runner)
+    60-ratchet-runner.sh  checks the prebuilt runner binary (sha256) and installs it, adds the `ratchet-runner` launcher  (runner)
     70-bench-user.sh    iptables-nft + the `ratchet-bench` user                               (bench)
     90-verify-*.sh      build-time smoke test; a failure fails the Packer build               (each)
     99-cleanup.sh       caches, logs, cloud-init state, build ssh keys                        (both)
@@ -40,7 +40,7 @@ infra/images/
 
 Prerequisites: Packer >= 1.10 (CI validates with 1.14.2), AWS credentials for the **sandbox account** (AMIs are
 regional and, encrypted by default, only launchable from the account that built them), and for the runner
-image `pnpm` + Node 22 on the machine running the build.
+image the prebuilt `ratchet-runner` of its architecture (CI artifact `ratchet-runner-<arch>`, `RATCHET_RUNNER_BINARY=/path`; `pack-runner.sh` can build it with cargo, rustup and a musl C compiler).
 
 The **bench image needs the prebuilt launcher** of its architecture. CI (`.github/workflows/images.yml`, job `launcher`) builds
 `crates/ratchet-bench` bin `ratchet-candidate-launcher` as a static executable (`RUSTFLAGS='-C target-feature=+crt-static'`, glibc
@@ -106,7 +106,7 @@ Every AMI and snapshot carries:
 |---|---|
 | `ratchet:image` | `runner` or `bench` (`bench-host` for the host-toolchain variant) |
 | `ratchet:image_version` | `-var image_version`. `build.sh`: `<app version>-<UTC date>-<commit>` (`-dirty` suffix for an unclean tree); the app finds images whose version equals its own or starts with `<its version>-` |
-| `ratchet:source_commit` | commit the runner tarballs were packed from |
+| `ratchet:source_commit` | commit the image was built from |
 | `ratchet:arch` | `x86_64` or `arm64` |
 | `ratchet:managed` | `packer` |
 
@@ -119,22 +119,21 @@ aws ec2 describe-images --owners self --filters Name=tag:ratchet:image,Values=ru
 
 ### Finding the images (no AMI ids to type)
 
-Live mode finds the images by tag: `findRatchetImages(appVersion, { region, arch })` (`packages/aws/src/images.ts`) calls EC2
+Live mode finds the images by tag: `Ec2ImageLookup::find_images` (`crates/ratchet-sandbox/src/images.rs`) calls EC2
 `DescribeImages` (own account, `state=available`, the architecture) filtered on `tag:ratchet:image` and picks, per kind, the newest
-whose `ratchet:image_version` matches the app version. `createLiveRuntimeFor` / `resolveLiveImages` (`packages/runtime/src/live.ts`)
+whose `ratchet:image_version` matches the app version. `create_live_runtime_for` / `resolve_live_images` (`crates/ratchet-engine/src/runtime/live.rs`)
 wire it in, in the region of the optimization (`environment.region`). Build the images in the sandbox account and region **with the
 app's version** (`build.sh` does) or the lookup fails with a message naming the image to build and the versions that exist.
 
 The explicit override is for development only (Settings > Advanced):
-`createLiveRuntime({ ..., runnerImageRef: 'ami-...', benchImageRef: 'ami-...' })`. The runner AMI id also reaches the engine as
-`settings.runnerImageRef`. Both are plain `ami-...` ids in the sandbox's region. See `docs/real-env/aws.md` and `docs/real-env/agents.md`.
+the `runnerImageRef` / `benchImageRef` settings of `ratchetd`. Both are plain `ami-...` ids in the sandbox's region. See `docs/real-env/aws.md` and `docs/real-env/agents.md`.
 
 ## How the images and the instance user data fit together
 
-The launcher (`packages/aws/src/compute/aws.ts`) boots these images with user data. The image provides what the user
+The launcher (`crates/ratchet-sandbox/src/compute/aws.rs`, user data in `user_data.rs`) boots these images with user data. The image provides what the user
 data needs; it does not repeat what the user data does.
 
-| | Image (this directory) | User data (`runnerUserData` / `benchUserData`) |
+| | Image (this directory) | User data (`runner_user_data` / `bench_user_data`) |
 |---|---|---|
 | Bench users `ratchet-bench`, `ratchet-holdout` | create them with the same flags (`useradd --system --no-create-home --shell /usr/sbin/nologin`); user data's `id -u \|\| useradd` is then a no-op | creates them only if missing |
 | Docker engine | installs and enables it (`25-docker.sh`), writes `daemon.json` (no tcp socket, no seccomp or `no-new-privileges` override), puts nobody in group `docker`, ships no layers | bench: `systemctl start docker` when present. Image/deps job: also rejects metadata for forwarded container traffic (`DOCKER-USER`, `FORWARD`) and gives the daemon the egress-proxy settings |
@@ -189,7 +188,7 @@ packer validate -syntax-only infra/images                     # no plugin downlo
 ```
 
 The install steps that need no root-only tooling (Node, pnpm, AWS CLI, k6, hyperfine, claude, codex, the runner
-tarballs) can be exercised in a scratch directory:
+runner binary) can be exercised in a scratch directory:
 `RATCHET_PREFIX=/tmp/p RATCHET_ETC=/tmp/e RATCHET_RUNNER_DIST=infra/images/dist bash infra/images/scripts/10-node.sh`.
 The `dnf`, `useradd`, `systemctl` and `iptables` steps (and both verify scripts) only run on a real builder.
 

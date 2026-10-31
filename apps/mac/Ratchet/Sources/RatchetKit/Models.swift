@@ -66,6 +66,17 @@ public struct MetricSpec: Codable, Hashable, Sendable {
 
 // MARK: - Optimizations
 
+/// The markdown report of an optimization, as the daemon renders it (`GET /v1/optimizations/{id}/report`).
+public struct OptimizationReport: Hashable, Sendable {
+    public var fileName: String
+    public var markdown: String
+
+    public init(fileName: String, markdown: String) {
+        self.fileName = fileName
+        self.markdown = markdown
+    }
+}
+
 public enum OptimizationStatus: String, CaseIterable, Codable, Sendable {
     case running, waiting, merged, done, noWin
 
@@ -101,6 +112,8 @@ public struct Optimization: Identifiable, Codable, Hashable, Sendable {
     public var timeLimitHours: Double
     public var startedAt: Date?
     public var prNumber: Int?
+    /// Where the pull request lives (any host: GitHub Enterprise too), when there is one.
+    public var prURL: String?
     public var winsCount: Int
     public var evalsCount: Int
     public var agentsCount: Int
@@ -110,7 +123,7 @@ public struct Optimization: Identifiable, Codable, Hashable, Sendable {
         status: OptimizationStatus, metric: MetricSpec, baseline: Double, best: Double? = nil, noise: Double? = nil,
         spentUSD: Double = 0, budgetUSD: Double? = nil, valuePerYearUSD: Double? = nil,
         secondsLeft: Double? = nil, timeLimitHours: Double = 2, startedAt: Date? = nil, prNumber: Int? = nil,
-        winsCount: Int = 0, evalsCount: Int = 0, agentsCount: Int = 1
+        prURL: String? = nil, winsCount: Int = 0, evalsCount: Int = 0, agentsCount: Int = 1
     ) {
         self.id = id
         self.title = title
@@ -129,6 +142,7 @@ public struct Optimization: Identifiable, Codable, Hashable, Sendable {
         self.timeLimitHours = timeLimitHours
         self.startedAt = startedAt
         self.prNumber = prNumber
+        self.prURL = prURL
         self.winsCount = winsCount
         self.evalsCount = evalsCount
         self.agentsCount = agentsCount

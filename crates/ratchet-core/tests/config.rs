@@ -559,3 +559,19 @@ fn evaluator_field_messages() {
         ]
     );
 }
+
+#[test]
+fn rejects_a_protected_glob_that_could_never_match() {
+    // `[z-a]` made the TypeScript regex throw; here they would protect nothing, silently
+    for bad in ["bench/[z-a]", "eval/{a,{b}/[9-0]"] {
+        let yaml = mutate("  - bench/**\n", &format!("  - \"{bad}\"\n"));
+        let errs = errors_of(&yaml);
+        let text = format!("{errs:?}");
+        assert!(
+            text.contains("protected glob is not a valid pattern"),
+            "{bad}: {text}"
+        );
+    }
+    // the same list with well-formed globs is fine
+    assert!(parse_config(VALID).is_ok());
+}

@@ -1,8 +1,8 @@
 # Agent runner image: what `AwsCloudCompute.launchRunner` boots (LiveOptions.runnerImageRef).
 #
 # Node 22, pnpm, git, AWS CLI v2, the SSM agent, perf/strace/sysstat, hyperfine, k6, the pinned
-# `claude` and `codex` CLIs and the `ratchet-runner` bin from this repository's packed tarballs
-# (infra/images/pack-runner.sh). No model keys, no tokens, no repository: those arrive at launch
+# `claude` and `codex` CLIs and the `ratchet-runner` bin, the static Rust binary of this repository
+# (crates/ratchet-agents; infra/images/pack-runner.sh). No model keys, no tokens, no repository: those arrive at launch
 # through the instance profile, SSM SecureString parameters and user data.
 
 locals {

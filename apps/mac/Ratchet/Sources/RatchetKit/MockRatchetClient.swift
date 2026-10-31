@@ -135,6 +135,47 @@ public actor MockRatchetClient: RatchetClient {
         return optimization
     }
 
+    public func stopOptimization(id: String) async throws {
+        guard var detail = world.details[id] else { throw RatchetClientError.notFound("optimization \(id)") }
+        guard !detail.optimization.status.isFinished else { throw RatchetClientError.invalid("This optimization already ended.") }
+        var stopped = detail.optimization
+        stopped.status = stopped.winsCount > 0 ? .done : .noWin
+        stopped.secondsLeft = nil
+        for index in detail.agents.indices {
+            detail.agents[index].state = .idle
+            detail.agents[index].activity = "Stopped by you"
+        }
+        detail.optimization = stopped
+        world.details[id] = detail
+        if let at = world.optimizations.firstIndex(where: { $0.id == id }) { world.optimizations[at] = stopped }
+        emit([.optimizationUpdated(stopped)])
+    }
+
+    public func openPullRequest(optimizationID id: String) async throws -> URL {
+        guard var detail = world.details[id] else { throw RatchetClientError.notFound("optimization \(id)") }
+        var opt = detail.optimization
+        guard opt.winsCount > 0 else { throw RatchetClientError.invalid("No verified win yet, so there is nothing to merge.") }
+        let number = opt.prNumber ?? (300 + world.optimizations.count)
+        let url = "https://github.com/\(opt.repo)/pull/\(number)"
+        opt.prNumber = number
+        opt.prURL = url
+        detail.optimization = opt
+        world.details[id] = detail
+        if let at = world.optimizations.firstIndex(where: { $0.id == id }) { world.optimizations[at] = opt }
+        emit([.optimizationUpdated(opt)])
+        guard let parsed = URL(string: url) else { throw RatchetClientError.unavailable(url) }
+        return parsed
+    }
+
+    public func report(optimizationID id: String) async throws -> OptimizationReport {
+        guard let detail = world.details[id] else { throw RatchetClientError.notFound("optimization \(id)") }
+        let opt = detail.optimization
+        let slug = opt.title.lowercased().map { $0.isLetter || $0.isNumber ? String($0) : "-" }.joined()
+        return OptimizationReport(
+            fileName: "ratchet-\(slug).md",
+            markdown: "# \(opt.title)\n\n\(opt.repo) · \(Plural.count(opt.winsCount, "verified win")).\n")
+    }
+
     // MARK: Agents
 
     public func agents(optimizationID: String) async throws -> [Agent] {

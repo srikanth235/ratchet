@@ -81,6 +81,14 @@ if [[ -z "${RATCHET_SKIP_DAEMON:-}" ]]; then
         --associated-bundle-id dev.ratchet.app $demo > "$plist"
       plutil -lint "$plist" >/dev/null
     done
+    # The OpenTofu module real runs apply (the Electron app shipped it as extraResources). ratchetd finds it from where
+    # it lives: Contents/Helpers/ratchetd -> Contents/Resources/infra/aws.
+    infra="$here/../../../infra/aws"
+    if [[ -d "$infra" ]]; then
+      mkdir -p "$app/Contents/Resources/infra"
+      rm -rf "$app/Contents/Resources/infra/aws"
+      rsync -a --exclude tests --exclude .terraform --exclude '*.tfstate*' "$infra/" "$app/Contents/Resources/infra/aws/"
+    fi
     for tool in ratchetd ratchet; do
       codesign --force --sign "$identity" --identifier "com.ratchet.$tool" "$helpers/$tool" 2>&1 \
         | grep -v "replacing existing signature" || true

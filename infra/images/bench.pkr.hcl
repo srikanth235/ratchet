@@ -11,7 +11,7 @@
 # `environment.image`). That image is tagged `ratchet:image=bench-host`, so tag lookup never picks it; pass its ami id explicitly.
 #
 # The IMDS block for ratchet-bench is added by the instance user data on every boot
-# (packages/aws `benchUserData`), not baked in; 70-bench-user.sh and 90-verify-bench.sh only
+# (crates/ratchet-sandbox `compute/user_data.rs`), not baked in; 70-bench-user.sh and 90-verify-bench.sh only
 # provide and check what that user data needs.
 
 locals {

@@ -13,8 +13,9 @@
 //!
 //! Like the regex, matching works on UTF-16 code units, so `?` matches half of an emoji.
 //!
-//! Differences: where the TypeScript `new RegExp(...)` threw (an inverted range `[z-a]`, an unterminated
-//! `{a`), the Rust glob simply never matches.
+//! Differences: where the TypeScript `new RegExp(...)` threw (an inverted range `[z-a]`;
+//! an unterminated `{a` is literal in both), the Rust glob never matches ([`Glob::is_malformed`] tells), and `parse_config` rejects such a glob in
+//! `protected:` so that it cannot silently protect nothing.
 
 use serde::{Deserialize, Serialize};
 
@@ -107,8 +108,10 @@ enum Node {
     /// `[^]`: any code unit
     Any,
     Group(Vec<Vec<Node>>),
-    /// Never matches
+    /// Never matches (a valid pattern that matches nothing, e.g. `[]`)
     Fail,
+    /// Never matches, and the TypeScript `new RegExp(...)` threw on it: the glob is malformed
+    Invalid,
 }
 
 #[derive(Debug, Clone)]
@@ -164,7 +167,7 @@ fn parse_class(body: &[u16]) -> Node {
         if i + 2 < items.len() && items[i + 1] == unit('-') {
             let hi = items[i + 2];
             if lo > hi {
-                return Node::Fail; // JavaScript: "Range out of order in character class"
+                return Node::Invalid; // JavaScript: "Range out of order in character class"
             }
             ranges.push((lo, hi));
             i += 3;
@@ -258,9 +261,17 @@ fn parse_glob(glob: &[u16]) -> Vec<Node> {
     }
     if stack.len() > 1 {
         // an unterminated `{`: the TypeScript regex failed to compile
-        return vec![Node::Fail];
+        return vec![Node::Invalid];
     }
     stack.pop().map(|(_, cur)| cur).unwrap_or_default()
+}
+
+fn has_invalid(nodes: &[Node]) -> bool {
+    nodes.iter().any(|n| match n {
+        Node::Invalid => true,
+        Node::Group(alts) => alts.iter().any(|a| has_invalid(a)),
+        _ => false,
+    })
 }
 
 fn emit_seq(nodes: &[Node], prog: &mut Vec<Inst>) {
@@ -284,7 +295,7 @@ fn emit_node(n: &Node, prog: &mut Vec<Inst>) {
         Node::Lit(c) => prog.push(Inst::Lit(*c)),
         Node::NotSlash => prog.push(Inst::NotSlash),
         Node::Any => prog.push(Inst::Any),
-        Node::Fail => prog.push(Inst::Fail),
+        Node::Fail | Node::Invalid => prog.push(Inst::Fail),
         Node::Class { negated, ranges } => prog.push(Inst::Class {
             negated: *negated,
             ranges: ranges.clone(),
@@ -327,6 +338,7 @@ fn emit_node(n: &Node, prog: &mut Vec<Inst>) {
 #[derive(Debug, Clone)]
 pub struct Glob {
     prog: Vec<Inst>,
+    malformed: bool,
 }
 
 impl Glob {
@@ -337,7 +349,16 @@ impl Glob {
         let mut prog = Vec::new();
         emit_seq(&nodes, &mut prog);
         prog.push(Inst::Match);
-        Glob { prog }
+        Glob {
+            prog,
+            malformed: has_invalid(&nodes),
+        }
+    }
+
+    /// Is the glob malformed (an inverted range `[z-a]`, an unterminated `{a`)? Such a glob never matches, so a
+    /// protected list holding one protects nothing: the configuration parser rejects it instead.
+    pub fn is_malformed(&self) -> bool {
+        self.malformed
     }
 
     fn add(&self, set: &mut Vec<usize>, seen: &mut [bool], pc: usize) {
@@ -410,6 +431,11 @@ fn matches_compiled(path: &str, g: &str, re: &Glob) -> bool {
     }
     let parts: Vec<&str> = p.split('/').collect();
     (1..=parts.len()).any(|n| re.is_match(&parts[..n].join("/")))
+}
+
+/// Is `glob` malformed, as `matches_glob` reads it? See [`Glob::is_malformed`].
+pub fn is_malformed_glob(glob: &str) -> bool {
+    Glob::new(&clean_glob(glob)).is_malformed()
 }
 
 /// Does `path` match `glob`? A path also matches when the glob matches one of its parent directories (so

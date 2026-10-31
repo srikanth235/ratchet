@@ -10,7 +10,7 @@
 #
 # Installed in a root-only directory: on the host nobody but root can even execute it. Docker (root) bind-mounts it read-only
 # into the harness container of confirm / bench runs; inside, it only works when the root-owned launcher.conf next to it names
-# the calling uid (packages/bench image-scripts.ts, imageRestoreFragment probes exactly that). The path of that file
+# the calling uid (crates/ratchet-bench image_scripts.rs, the image restore fragment probes exactly that). The path of that file
 # (/ratchet/launcher.conf) is compiled into the binary; nothing on the image has to provide it.
 set -euo pipefail
 # shellcheck source=lib.sh

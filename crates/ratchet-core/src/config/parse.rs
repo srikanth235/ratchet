@@ -1105,6 +1105,16 @@ pub(crate) fn validate(doc: &Value) -> Result<RatchetConfig, Vec<ConfigError>> {
         Some(list) => list.unwrap_or_default(),
         None => Vec::new(),
     };
+    // A malformed glob matches nothing, so it would silently protect nothing: refuse it (the TypeScript threw when
+    // the glob was first used).
+    for (i, glob) in protected.iter().enumerate() {
+        if crate::protected::is_malformed_glob(glob) {
+            cx.push(
+                &at(&child(&root, "protected"), i),
+                "protected glob is not a valid pattern",
+            );
+        }
+    }
     let agent = agent(get(top, "agent"), &child(&root, "agent"), &mut cx);
 
     // unknown top-level keys (a lone `bench:` is the alias, not unknown)

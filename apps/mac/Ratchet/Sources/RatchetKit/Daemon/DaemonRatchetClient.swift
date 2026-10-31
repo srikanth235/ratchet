@@ -89,6 +89,33 @@ public final class DaemonRatchetClient: RatchetClient {
         }
     }
 
+    // MARK: Run controls
+
+    public func stopOptimization(id: String) async throws {
+        try await calling {
+            _ = try await api.stopOptimization(path: .init(id: id), body: .json(.init())).noContent
+            await state.forgetRows()
+        }
+    }
+
+    public func openPullRequest(optimizationID: String) async throws -> URL {
+        try await calling {
+            let pull = try await api.openPullRequest(path: .init(id: optimizationID)).created.body.json
+            await state.forgetRows()
+            guard let url = URL(string: pull.url) else {
+                throw RatchetClientError.unavailable("The pull request was opened, but its address is not readable: \(pull.url)")
+            }
+            return url
+        }
+    }
+
+    public func report(optimizationID: String) async throws -> OptimizationReport {
+        try await calling {
+            let report = try await api.getReport(path: .init(id: optimizationID)).ok.body.json
+            return OptimizationReport(fileName: report.fileName, markdown: report.markdown)
+        }
+    }
+
     // MARK: Fetching
 
     private func optimizationDetail(_ id: String) async throws -> VM.OptimizationDetail {

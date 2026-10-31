@@ -67,12 +67,14 @@ enum DaemonMapping {
         var startedAt: Date?
         var noise: Double?
         var prNumber: Int?
+        var prURL: String?
         if let detail {
             timeLimitHours = Double(detail.timeLimitS) / 3600
             startedAt = detail.startedAt.map(date(ms:))
             if status(vm) == .running { secondsLeft = max(Double(detail.timeLimitS) - detail.elapsedS, 0) }
             if let floor = detail.noiseFloor, baseline != 0 { noise = abs(floor / baseline) }
             prNumber = pullRequestNumber(detail.prUrl)
+            prURL = detail.prUrl
         }
         return Optimization(
             id: vm.id, title: vm.name, repo: vm.repo, branch: detail?.baseRef ?? "main", goal: "",
@@ -80,6 +82,7 @@ enum DaemonMapping {
             spentUSD: vm.spendUsd, budgetUSD: vm.budgetUsd > 0 ? vm.budgetUsd : nil,
             valuePerYearUSD: vm.value?.usdPerYear, secondsLeft: secondsLeft, timeLimitHours: timeLimitHours,
             startedAt: startedAt ?? (vm.createdAt > 0 ? date(ms: vm.createdAt) : nil), prNumber: prNumber,
+            prURL: prURL,
             winsCount: Int(vm.verifiedWins), evalsCount: Int(vm.candidateCount), agentsCount: vm.agents.count)
     }
 

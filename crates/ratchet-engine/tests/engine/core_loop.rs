@@ -295,6 +295,33 @@ async fn never_stores_secret_values_in_the_ledger() {
     for (k, val) in &kv {
         assert!(!val.contains("value-of-"), "{k} holds a secret value");
     }
+    // the whole database, as the TypeScript test did with the serialized file: every column of every table
+    use sqlx::{Column, Row};
+    let tables = sqlx::query(
+        "select name from sqlite_master where type = 'table' and name not like 'sqlite_%'",
+    )
+    .fetch_all(h.ledger.pool())
+    .await
+    .unwrap();
+    assert!(tables.len() > 3, "the ledger has its tables");
+    for table in tables {
+        let name: String = table.get("name");
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!("select * from \"{name}\"")))
+            .fetch_all(h.ledger.pool())
+            .await
+            .unwrap();
+        for row in rows {
+            for (i, col) in row.columns().iter().enumerate() {
+                if let Ok(Some(text)) = row.try_get::<Option<String>, _>(i) {
+                    assert!(
+                        !text.contains("value-of-"),
+                        "{name}.{} holds a secret value",
+                        col.name()
+                    );
+                }
+            }
+        }
+    }
     assert!(
         kv.iter()
             .any(|(_, val)| val.contains("/ratchet/opt-test/opt-test-codex/OPENAI_API_KEY"))

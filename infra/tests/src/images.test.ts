@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
 
 // Invariants of the machine-image definitions in infra/images (Packer HCL + provisioning scripts),
 // checked without Packer or AWS. The images are what live mode launches (runnerImageRef /
-// benchImageRef), and the bench image must agree with packages/aws `benchUserData`.
+// benchImageRef), and the bench image must agree with the instance user data of crates/ratchet-sandbox
+// (`compute/user_data.rs`, `compute/aws.rs`) and the bench scripts of crates/ratchet-bench.
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const imagesDir = join(repo, "infra", "images");
@@ -28,7 +29,9 @@ const runnerHcl = read("runner.pkr.hcl");
 const benchHcl = read("bench.pkr.hcl");
 const versions = read("scripts", "versions.sh");
 const agentVersions = read("scripts", "versions-agents.sh");
-const awsTs = readRepo("packages", "aws", "src", "compute", "aws.ts");
+const awsRs = readRepo("crates", "ratchet-sandbox", "src", "compute", "aws.rs");
+const userDataRs = readRepo("crates", "ratchet-sandbox", "src", "compute", "user_data.rs");
+const benchRs = (f: string) => readRepo("crates", "ratchet-bench", "src", f);
 
 /** The string items of `name = [ "a", "b" ]` in a locals block. */
 function hclList(hcl: string, name: string): string[] {
@@ -218,8 +221,8 @@ describe("images: AMI tags", () => {
       expect(hcl).toMatch(/http_tokens\s*=\s*"required"/);
       expect(hcl).toMatch(/http_put_response_hop_limit\s*=\s*1/);
     }
-    expect(awsTs).toContain("HttpTokens: 'required'");
-    expect(awsTs).toContain('HttpPutResponseHopLimit: 1');
+    expect(awsRs).toContain(".http_tokens(ec2t::HttpTokensState::Required)");
+    expect(awsRs).toContain(".http_put_response_hop_limit(1)");
   });
   it("builds on Amazon Linux 2023 from the amazon account", () => {
     for (const hcl of [runnerHcl, benchHcl]) {
@@ -291,8 +294,8 @@ describe("bench image", () => {
     expect(script.indexOf("verify_sha256")).toBeGreaterThan(script.indexOf('cp -- "$src" "$bin"'));
     expect(script.indexOf("verify_sha256")).toBeLessThan(script.indexOf("install -d"));
     // the path and name the bench scripts mount into the container
-    const ts = readRepo("packages", "bench", "src", "image-scripts.ts");
-    expect(/CANDIDATE_HELPER = '([^']+)'/.exec(ts)![1]).toBe("/usr/local/libexec/ratchet/ratchet-candidate-ctr");
+    const rs = benchRs("image_scripts.rs");
+    expect(/CANDIDATE_HELPER: &str = "([^"]+)"/.exec(rs)![1]).toBe("/usr/local/libexec/ratchet/ratchet-candidate-ctr");
     expect(script).toContain('dest="$PREFIX/libexec/ratchet"');
     // the C program and its compile step are gone
     expect(existsSync(join(scriptsDir, "ratchet-candidate-ctr.c"))).toBe(false);
@@ -333,8 +336,8 @@ describe("bench image", () => {
     expect(wf).toMatch(/arch: arm64/);
     expect(wf).toContain("infra/images/scripts/35-candidate-launcher.sh");
   });
-  it("provides what remote-scripts.ts needs: setpriv, pkill, GNU grep -P, find -printf, iptables and ip6tables", () => {
-    const remote = readRepo("packages", "bench", "src", "remote-scripts.ts");
+  it("provides what remote_scripts.rs needs: setpriv, pkill, GNU grep -P, find -printf, iptables and ip6tables", () => {
+    const remote = benchRs("remote_scripts.rs");
     for (const c of ["setpriv", "iptables", "pkill", "sha256sum"]) expect(remote).toContain(c);
     const verify = read("scripts", "90-verify-bench.sh");
     for (const c of ["setpriv", "pkill", "iptables", "ip6tables", "sha256sum", "aws", "node", "pnpm", "k6"]) expect(verify).toMatch(new RegExp(`\\b${c}\\b`));
@@ -345,7 +348,7 @@ describe("bench image", () => {
     expect(stripComments(read("scripts", "70-bench-user.sh"))).toMatch(/dnf_install iptables-nft/);
   });
   it("provides what the dependency-snapshot job and restore need: zstd (gzip is the fallback), tar --sort, node, pnpm and npm for the unprivileged user", () => {
-    const deps = readRepo("packages", "bench", "src", "deps-scripts.ts") + readRepo("packages", "bench", "src", "remote-scripts.ts");
+    const deps = benchRs("deps_scripts.rs") + benchRs("remote_scripts.rs");
     expect(deps).toContain("zstd");
     expect(deps).toContain("--sort=name");
     expect(stripComments(read("scripts", "00-base.sh"))).toMatch(/\bzstd\b/);
@@ -356,13 +359,13 @@ describe("bench image", () => {
     expect(stripComments(read("scripts", "70-bench-user.sh"))).not.toContain("ratchet-deps");
   });
   it("creates the ratchet-bench and ratchet-holdout users exactly like the instance user data does", () => {
-    const name = /BENCH_OS_USER = '([^']+)'/.exec(awsTs)![1]!;
+    const name = /BENCH_OS_USER: &str = "([^"]+)"/.exec(userDataRs)![1]!;
     expect(name).toBe("ratchet-bench");
-    const holdout = /HOLDOUT_OS_USER = '([^']+)'/.exec(awsTs)![1]!;
+    const holdout = /HOLDOUT_OS_USER: &str = "([^"]+)"/.exec(userDataRs)![1]!;
     expect(holdout).toBe("ratchet-holdout");
-    expect(/BENCH_USER = '([^']+)'/.exec(readRepo("packages", "bench", "src", "shell.ts"))![1]).toBe(name);
+    expect(/BENCH_USER: &str = "([^"]+)"/.exec(benchRs("shell.rs"))![1]).toBe(name);
     // The user data loops over both users: `id -u ${u} ... || useradd <flags> ${u}`.
-    const userData = /useradd ([^\\`]*?)\$\{u\}/.exec(awsTs)![1]!.trim();
+    const userData = /useradd ([^"\\]*?)\{u\}/.exec(userDataRs)![1]!.trim();
     expect(userData).toBe("--system --no-create-home --shell /usr/sbin/nologin");
     const script = stripComments(read("scripts", "70-bench-user.sh"));
     expect(script).toContain(`BENCH_USER=${name}`);
@@ -372,7 +375,7 @@ describe("bench image", () => {
     expect(script).toMatch(/id -u "\$u" >\/dev\/null 2>&1 \|\| useradd/); // same idempotent guard as the user data
   });
   it("leaves the IMDS block to the user data: no persistent rule in the image, none left behind", () => {
-    const rule = /iptables -I OUTPUT 1 (-m owner --uid-owner \$\{u\} -d 169\.254\.169\.254 -j REJECT)/.exec(awsTs)![1]!.replace("${u}", "ratchet-bench");
+    const rule = /iptables -I OUTPUT 1 (-m owner --uid-owner \{u\} -d 169\.254\.169\.254 -j REJECT)/.exec(userDataRs)![1]!.replace("{u}", "ratchet-bench");
     // Nothing in the provisioning steps inserts or saves firewall rules...
     for (const f of benchScripts.filter((x) => x !== "90-verify-bench.sh")) {
       const text = stripComments(read("scripts", f));
@@ -387,10 +390,10 @@ describe("bench image", () => {
     expect(verify).toMatch(/iptables -D "\$\{IMDS_RULE\[@\]\}"/);
     expect(verify).toContain("the image must not keep the IMDS rule");
     // And the user data still carries the rule + the IPv6 twin the image relies on.
-    expect(awsTs).toContain("ip6tables -I OUTPUT 1 -m owner --uid-owner ${u} -d fd00:ec2::254 -j REJECT");
+    expect(userDataRs).toContain("ip6tables -I OUTPUT 1 -m owner --uid-owner {u} -d fd00:ec2::254 -j REJECT");
   });
   it("probes the toolchain as the unprivileged user with the same setpriv flags as the bench runner", () => {
-    const remote = readRepo("packages", "bench", "src", "remote-scripts.ts");
+    const remote = benchRs("remote_scripts.rs");
     const flags = '--reuid="$BU" --regid="$BU" --clear-groups --no-new-privs';
     expect(remote).toContain(`setpriv ${flags}`);
     expect(read("scripts", "90-verify-bench.sh")).toContain(`setpriv ${flags}`);
@@ -427,34 +430,44 @@ describe("runner image", () => {
   it("keeps the pinned claude version from updating itself", () => {
     expect(stripComments(read("scripts", "50-agent-clis.sh"))).toContain('"DISABLE_AUTOUPDATER": "1"');
   });
-  it("installs the ratchet-runner bin the SSM launcher starts, from verified packed tarballs", () => {
-    const bin = Object.keys((JSON.parse(readRepo("packages", "agents", "package.json")) as { bin: Record<string, string> }).bin);
-    expect(bin).toEqual(["ratchet-runner"]);
-    const ssm = readRepo("packages", "agents", "src", "control", "ssm.ts");
-    expect(ssm).toContain("'ratchet-runner'");
+  it("installs the ratchet-runner bin the SSM launcher starts, from a verified prebuilt static binary", () => {
+    const cargo = readRepo("crates", "ratchet-agents", "Cargo.toml");
+    const bins = [...cargo.matchAll(/\[\[bin\]\]\s*name\s*=\s*"([^"]+)"/g)].map((m) => m[1]);
+    expect(bins).toEqual(["ratchet-runner"]);
+    const ssm = readRepo("crates", "ratchet-agents", "src", "control", "ssm.rs");
+    expect(ssm).toContain('"ratchet-runner"');
     const s = stripComments(read("scripts", "60-ratchet-runner.sh"));
     expect(s).toContain("sha256sum --check --strict SHA256SUMS");
-    expect(s).toContain('"@ratchet/core": "file:./tarballs/$core_tgz"');
-    expect(s).toMatch(/"overrides"/);
+    expect(s).toContain('install -m 0755 "$dist/ratchet-runner" "$app/ratchet-runner"');
     expect(s).toContain('"$PREFIX/bin/ratchet-runner"');
+    expect(s).not.toMatch(/\bnpm\b|\bpnpm\b|node_modules|tarball/);
     const pack = stripComments(read("pack-runner.sh"));
-    expect(pack).toContain("pnpm --filter @ratchet/core pack");
-    expect(pack).toContain("pnpm --filter @ratchet/agents pack");
-    expect(pack).toContain("pnpm install --frozen-lockfile");
+    expect(pack).toContain("cargo build --release -p ratchet-agents --bin ratchet-runner");
+    expect(pack).toContain("x86_64-unknown-linux-musl");
+    expect(pack).toContain("aarch64-unknown-linux-musl");
     expect(pack).toContain("SHA256SUMS");
+    expect(pack).not.toMatch(/\bpnpm\b/);
     expect(runnerHcl).toMatch(/source\s*=\s*"\$\{path\.root\}\/dist\/"/);
     expect(read(".gitignore")).toContain("dist/");
   });
+  it("builds the runner in CI as a static musl binary per architecture and installs it like the image build does", () => {
+    const wf = readRepo(".github", "workflows", "images.yml");
+    expect(wf).toContain("--bin ratchet-runner");
+    for (const t of ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]) expect(wf, t).toContain(t);
+    expect(wf).toContain("name: ratchet-runner-${{ matrix.arch }}");
+    expect(wf).toContain("infra/images/pack-runner.sh");
+    expect(wf).toContain("infra/images/scripts/60-ratchet-runner.sh");
+  });
   it("loads the launch environment the user data writes, without letting it override the caller", () => {
-    expect(awsTs).toContain("/etc/ratchet/runner.env");
+    expect(userDataRs).toContain("/etc/ratchet/runner.env");
     const s = stripComments(read("scripts", "60-ratchet-runner.sh"));
     expect(s).toContain("env_file=/etc/ratchet/runner.env");
     expect(s).toContain('saved="$(export -p)"');
     expect(s).toMatch(/eval "\$saved"/);
   });
   it("does not start a second runner from user data: the loop is started over SSM only", () => {
-    expect(awsTs).not.toMatch(/nohup ratchet/);
-    expect(awsTs).toContain("touch /run/ratchet/user-data.done");
+    expect(awsRs + userDataRs).not.toMatch(/nohup ratchet/);
+    expect(userDataRs).toContain("touch /run/ratchet/user-data.done");
     for (const f of runnerScripts) expect(stripComments(read("scripts", f)), f).not.toMatch(/\/usr\/local\/bin\/ratchet\b(?!-)/);
   });
   it("is not the bench image: no ratchet-bench user and no firewall changes", () => {
@@ -485,9 +498,9 @@ describe("images: documentation and wiring", () => {
       expect(doc, f).toContain("runnerImageRef");
       expect(doc, f).toContain("benchImageRef");
     }
-    const live = readRepo("packages", "runtime", "src", "live.ts");
-    expect(live).toMatch(/runnerImageRef\??: string/);
-    expect(live).toMatch(/benchImageRef\??: string/);
+    const live = readRepo("crates", "ratchet-engine", "src", "runtime", "live.rs");
+    expect(live).toMatch(/runner_image_ref: Option<String>/);
+    expect(live).toMatch(/bench_image_ref: Option<String>/);
   });
   it("has a README with the build procedure and the EC2 Image Builder alternative", () => {
     expect(existsSync(join(imagesDir, "README.md"))).toBe(true);

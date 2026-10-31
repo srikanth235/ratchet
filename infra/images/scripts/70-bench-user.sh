@@ -4,7 +4,7 @@
 # evaluator harness and owns the holdout file (its one privilege, a sudo rule that starts the
 # candidate as ratchet-bench, is installed by the user data, not here).
 #
-# What lives where (kept in sync with packages/aws/src/compute/aws.ts `benchUserData`, which is
+# What lives where (kept in sync with crates/ratchet-sandbox/src/compute/user_data.rs, which is
 # checked by infra/tests):
 #   - the image (this script) creates both users, with the very same useradd flags, and installs
 #     iptables/ip6tables, without which the user data's `set -e` script would abort;

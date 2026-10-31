@@ -10,7 +10,7 @@ require_root
 export PATH="$PREFIX/bin:$PATH"
 
 log "commands"
-for c in node npm pnpm git aws claude codex ratchet-runner ratchet k6 hyperfine perf jq unzip tar make gcc; do
+for c in node npm pnpm git aws claude codex ratchet-runner k6 hyperfine perf jq unzip tar make gcc; do
   command -v "$c" >/dev/null || die "missing command: $c"
 done
 

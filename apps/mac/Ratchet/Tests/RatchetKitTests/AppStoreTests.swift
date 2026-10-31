@@ -156,6 +156,20 @@ struct AppStoreTests {
         #expect(store.details["opt-checkout"]?.agents.first { $0.id == "agent-claude-team" }?.state == .working)
     }
 
+    @Test func stoppingAndOpeningAPullRequestRefreshTheOptimization() async {
+        let (store, _) = await loadedStore()
+        await store.loadDetail(id: "opt-checkout")
+        await store.stopOptimization("opt-checkout")
+        #expect(store.optimization(id: "opt-checkout")?.status == .done)
+        #expect(store.details["opt-checkout"]?.optimization.status == .done)
+        let url = await store.openPullRequest("opt-checkout")
+        #expect(url != nil)
+        #expect(store.optimization(id: "opt-checkout")?.prURL == url?.absoluteString)
+        #expect(await store.openPullRequest("opt-bundle") == nil)  // nothing to merge: the error is shown, not thrown
+        #expect(store.lastError != nil)
+        #expect(await store.report("opt-cli")?.fileName.hasSuffix(".md") == true)
+    }
+
     @Test func theLastSnapshotRendersBeforeTheClientAnswers() async {
         let url = FileManager.default.temporaryDirectory.appending(path: "ratchet-cache-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }

@@ -14,6 +14,12 @@ public protocol RatchetClient: Sendable {
     func candidates(optimizationID: String) async throws -> [Candidate]
     func ratchetHistory(optimizationID: String) async throws -> [RatchetMove]
     func startOptimization(_ request: StartRequest) async throws -> Optimization
+    /// The kill switch: stops the agents, revokes their keys and ends the run. Wins found so far are kept.
+    func stopOptimization(id: String) async throws
+    /// Opens the pull request with the squashed verified wins and returns where it is. Refused without a verified win.
+    func openPullRequest(optimizationID: String) async throws -> URL
+    /// The markdown report, for the save dialog.
+    func report(optimizationID: String) async throws -> OptimizationReport
 
     // Agents
     func agents(optimizationID: String) async throws -> [Agent]

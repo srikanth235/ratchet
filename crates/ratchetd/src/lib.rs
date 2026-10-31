@@ -18,6 +18,8 @@ pub mod auth;
 pub mod connectors_hub;
 #[cfg(feature = "server")]
 pub mod drafts;
+#[cfg(feature = "engine")]
+pub mod host;
 #[cfg(feature = "server")]
 pub mod hub;
 #[cfg(feature = "server")]
