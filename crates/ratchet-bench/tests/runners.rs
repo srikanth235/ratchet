@@ -3,6 +3,9 @@
 //!
 //! The fixture bench and check scripts are bash (`bench/bench.sh`, `tests/check.sh`) instead of node.
 
+// What only the Linux-gated remote tests use is unused elsewhere.
+#![cfg_attr(not(target_os = "linux"), allow(dead_code, unused_imports))]
+
 mod common;
 
 use std::fs;
@@ -884,6 +887,8 @@ macro_rules! shared {
             use super::*;
             $( #[tokio::test] async fn $name() { super::$name(Kind::Local).await } )*
         }
+        // the remote runner's scripts run under GNU tools (see PARITY.md): Linux only
+        #[cfg(target_os = "linux")]
         mod remote {
             use super::*;
             $( #[tokio::test] async fn $name() { super::$name(Kind::Remote).await } )*
@@ -934,6 +939,7 @@ async fn local_can_keep_candidate_only_protected_files_when_pruning_is_off() {
 
 // ------------------------------------------------------------------------------------------------ RemoteBenchRunner specifics
 
+#[cfg(target_os = "linux")]
 mod remote_specifics {
     use super::*;
 

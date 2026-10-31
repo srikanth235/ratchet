@@ -317,6 +317,7 @@ mod overlay {
     }
 }
 
+#[cfg(target_os = "linux")] // `grep -P` is GNU
 mod remote_script_helpers {
     use super::*;
 

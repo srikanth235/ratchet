@@ -42,7 +42,7 @@ not have (root-owned configuration, symlinked configuration, compiled-in path of
 
 The bench's remote, dependency-snapshot and image machinery only ever runs on Linux bench hosts; on other platforms the crate
 has to compile and its pure-logic tests run. The integration tests that execute the generated host scripts with local bash and
-GNU `tar` / `zstd` / `grep -P` / coreutils shims (`tests/remote_deps.rs`, `tests/remote_image.rs`) and the setuid launcher
+GNU `tar` / `zstd` / `grep -P` / coreutils shims (`tests/remote_deps.rs`, `tests/remote_image.rs`, the `remote` / `remote_specifics` modules of `tests/runners.rs`, `remote_script_helpers` in `tests/units.rs`) and the setuid launcher
 (`src/launcher.rs`, `tests/launcher.rs`, its binaries) are `cfg(target_os = "linux")`. CI runs them on ubuntu-latest.
 
 ## Dropped or changed on purpose
