@@ -31,8 +31,10 @@ pub struct OverviewQuery {
 pub struct SpentHero {
     pub usd: f64,
     /// The total monthly caps of the connected AWS accounts and keys, when any is set.
+    #[schema(required = true)]
     pub cap_usd: Option<f64>,
     /// 0..=1, for the thin bar; `null` without a cap.
+    #[schema(required = true)]
     pub fraction_of_cap: Option<f64>,
     /// "across AWS and agent keys"
     pub note: String,
@@ -53,7 +55,9 @@ pub struct ValueHero {
 #[serde(rename_all = "camelCase")]
 pub struct ReturnHero {
     /// `null` when nothing was spent.
+    #[schema(required = true)]
     pub ratio: Option<f64>,
+    #[schema(required = true)]
     pub payback_days: Option<f64>,
     pub note: String,
 }
@@ -95,10 +99,14 @@ pub struct NeedsYouItem {
     pub subtitle: String,
     /// The button: "Review", "Open PR".
     pub action_label: String,
+    #[schema(required = true)]
     pub optimization_id: Option<String>,
+    #[schema(required = true)]
     pub environment_draft_id: Option<String>,
+    #[schema(required = true)]
     pub connector_id: Option<String>,
     /// For `merge-wins`: the pull request to open.
+    #[schema(required = true)]
     pub url: Option<String>,
 }
 
@@ -126,13 +134,17 @@ pub struct OverviewRow {
     /// "Running", "Waiting on you", "Merged", "Done", "No win".
     pub state_text: String,
     /// Under the state: "1 h 12 m left".
+    #[schema(required = true)]
     pub state_note: Option<String>,
     /// Signed percent change of the metric, positive = better.
+    #[schema(required = true)]
     pub result_pct: Option<f64>,
     /// "412 -> 288 ms"
     pub result_text: String,
     pub spent_usd: f64,
+    #[schema(required = true)]
     pub budget_usd: Option<f64>,
+    #[schema(required = true)]
     pub value_usd_per_year: Option<f64>,
 }
 
@@ -141,8 +153,10 @@ pub struct OverviewRow {
 #[serde(rename_all = "camelCase")]
 pub struct SandboxChip {
     pub on: bool,
+    #[schema(required = true)]
     pub name: Option<String>,
     pub spent_usd: f64,
+    #[schema(required = true)]
     pub off_at: Option<i64>,
 }
 

@@ -75,8 +75,10 @@ pub struct DaemonStatus {
     pub started_at: i64,
     pub uptime_s: i64,
     /// The unix socket this daemon listens on.
+    #[schema(required = true)]
     pub socket_path: Option<String>,
     /// The ledger file; `None` for an in-memory ledger.
+    #[schema(required = true)]
     pub ledger_path: Option<String>,
     /// Id of the newest event on `/v1/events` (resume point for a fresh client).
     pub last_event_id: u64,

@@ -43,6 +43,7 @@ pub enum ApiEvent {
     AgentEvent {
         optimization_id: String,
         agent_id: String,
+        #[schema(required = true)]
         event: Option<AgentEventVm>,
     },
     /// A candidate got its verdict.
@@ -81,6 +82,7 @@ pub enum ApiEvent {
     Sandbox {
         sandbox_id: String,
         phase: SandboxPhase,
+        #[schema(required = true)]
         region: Option<String>,
         text: String,
     },
@@ -94,6 +96,7 @@ pub enum ApiEvent {
     #[serde(rename_all = "camelCase")]
     Connector {
         connector_id: String,
+        #[schema(required = true)]
         status: Option<ConnectorStatus>,
     },
     /// The GitHub sign-in changed (device flow finished, signed out).

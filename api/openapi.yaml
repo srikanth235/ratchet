@@ -1522,6 +1522,7 @@ components:
       required:
       - id
       - optimizationId
+      - agent
       - text
       - at
       - atMs
@@ -1572,6 +1573,8 @@ components:
       required:
       - agent
       - credential
+      - version
+      - keyHint
       - runsIn
       properties:
         agent:
@@ -1704,9 +1707,11 @@ components:
       - kind
       - branch
       - status
+      - hypothesis
       - recent
       - stats
       - lastEventId
+      - runnerInstanceId
       properties:
         branch:
           type: string
@@ -1816,6 +1821,7 @@ components:
         required:
         - optimizationId
         - agentId
+        - event
         - type
         properties:
           agentId:
@@ -1922,6 +1928,7 @@ components:
         required:
         - sandboxId
         - phase
+        - region
         - text
         - type
         properties:
@@ -1958,6 +1965,7 @@ components:
         description: 'Provisional: a connector changed status (signed in, expired, removed).'
         required:
         - connectorId
+        - status
         - type
         properties:
           connectorId:
@@ -1999,7 +2007,11 @@ components:
       type: object
       required:
       - auth
+      - profile
       - region
+      - accountId
+      - capUsdPerMonth
+      - remainingUsdThisMonth
       properties:
         accountId:
           type:
@@ -2046,6 +2058,7 @@ components:
       - name
       - kind
       - source
+      - ssoSession
       properties:
         kind:
           $ref: '#/components/schemas/AwsProfileKind'
@@ -2090,6 +2103,7 @@ components:
     BenchPipelineVm:
       type: object
       required:
+      - candidate
       - queued
       - stages
       properties:
@@ -2117,11 +2131,14 @@ components:
       required:
       - version
       - baselineRuns
+      - cv
+      - noise
       - repeats
       - repeatsSource
       - repeatsCapped
       - minGain
       - minGainSource
+      - resolvable
       - noiseFactor
       - noiseFactorSource
       - explanation
@@ -2215,6 +2232,9 @@ components:
       - t
       - verdict
       - reasons
+      - benchValue
+      - confirmValue
+      - vsBaselinePct
       - movedRatchet
       - samples
       - stats
@@ -2286,6 +2306,9 @@ components:
       - key
       - label
       - unit
+      - baseline
+      - best
+      - deltaPct
       - better
       properties:
         baseline:
@@ -2328,11 +2351,14 @@ components:
     ConfigSummary:
       type: object
       required:
+      - name
+      - pack
       - metric
       - direction
       - minGain
       - evaluator
       - environment
+      - value
       - guardrails
       - protectedGlobs
       - protectedEntries
@@ -2475,6 +2501,10 @@ components:
       - status
       - statusText
       - isDefault
+      - costNote
+      - github
+      - aws
+      - agent
       properties:
         agent:
           oneOf:
@@ -2747,6 +2777,8 @@ components:
       - pid
       - startedAt
       - uptimeS
+      - socketPath
+      - ledgerPath
       - lastEventId
       properties:
         apiVersion:
@@ -3035,6 +3067,8 @@ components:
       - checks
       - checksPassed
       - revision
+      - approvedAt
+      - prUrl
       - createdAt
       properties:
         approvedAt:
@@ -3110,7 +3144,9 @@ components:
       type: object
       description: '`environment:` of ratchet.yaml (all optional). `image` null = the evaluator runs on the host.'
       required:
+      - image
       - machine
+      - region
       - network
       properties:
         image:
@@ -3132,11 +3168,15 @@ components:
       description: One automatic environment, as seen from outside.
       required:
       - sandboxId
+      - region
       - phase
       - text
       - simulated
       - activeRuns
+      - instancesRunning
       - spendUsd
+      - destroyAt
+      - idleSince
       - canEnd
       properties:
         activeRuns:
@@ -3184,6 +3224,7 @@ components:
       type: object
       required:
       - environments
+      - lastReceipt
       - idleMinutes
       properties:
         environments:
@@ -3228,7 +3269,10 @@ components:
       - kind
       - ref
       - run
+      - repeats
       - hardware
+      - holdout
+      - template
       properties:
         hardware:
           type: string
@@ -3274,6 +3318,7 @@ components:
       required:
       - login
       - accountKind
+      - repoCount
       properties:
         accountKind:
           $ref: '#/components/schemas/GithubAccountKind'
@@ -3299,6 +3344,7 @@ components:
       - userCode
       - verificationUri
       - expiresAt
+      - message
       properties:
         expiresAt:
           type: integer
@@ -3326,7 +3372,10 @@ components:
       description: The GitHub row of Settings. The token itself never leaves the daemon.
       required:
       - signedIn
+      - login
+      - source
       - clientIdConfigured
+      - flow
       properties:
         clientIdConfigured:
           type: boolean
@@ -3363,6 +3412,8 @@ components:
       required:
       - kind
       - installed
+      - version
+      - path
       - auth
       - hint
       properties:
@@ -3396,6 +3447,7 @@ components:
       - id
       - label
       - value
+      - change
       - foot
       - trend
       properties:
@@ -3416,9 +3468,7 @@ components:
             type: number
             format: double
         unit:
-          type:
-          - string
-          - 'null'
+          type: string
         value:
           type: string
     KpiChange:
@@ -3558,6 +3608,10 @@ components:
       - title
       - subtitle
       - actionLabel
+      - optimizationId
+      - environmentDraftId
+      - connectorId
+      - url
       properties:
         actionLabel:
           type: string
@@ -3607,14 +3661,21 @@ components:
       - baseRef
       - minGain
       - timeLimitS
+      - startedAt
+      - endedAt
       - elapsedS
       - baselineSamples
       - baselineStats
+      - noiseFloor
       - agents
       - pipeline
+      - prUrl
+      - receipt
+      - calibration
       - configYaml
       - metrics
       - compare
+      - spans
       properties:
         agents:
           type: array
@@ -3720,6 +3781,9 @@ components:
       - metric
       - unit
       - direction
+      - baseline
+      - best
+      - gainPct
       - status
       - agents
       - spendUsd
@@ -3728,7 +3792,9 @@ components:
       - candidateCount
       - verifiedWins
       - createdAt
+      - pack
       - evaluatorKind
+      - value
       properties:
         agents:
           type: array
@@ -3799,6 +3865,8 @@ components:
       required:
       - range
       - kpis
+      - featuredId
+      - featuredSeries
       - optimizations
       - activity
       - engine
@@ -3842,8 +3910,12 @@ components:
       - repo
       - state
       - stateText
+      - stateNote
+      - resultPct
       - resultText
       - spentUsd
+      - budgetUsd
+      - valueUsdPerYear
       properties:
         budgetUsd:
           type:
@@ -4110,9 +4182,7 @@ components:
         agent:
           $ref: '#/components/schemas/AgentKind'
         label:
-          type:
-          - string
-          - 'null'
+          type: string
         t:
           type: number
           format: double
@@ -4129,8 +4199,10 @@ components:
       - options
       - unit
       - direction
+      - baseline
       - steps
       - points
+      - noiseFloor
       - tMax
       properties:
         baseline:
@@ -4215,9 +4287,13 @@ components:
       description: What step 1 learned about the chosen repo (read from the default branch, never typed).
       required:
       - source
+      - repo
       - baseRef
+      - configYaml
+      - config
       - errors
       - templates
+      - problem
       properties:
         baseRef:
           type: string
@@ -4283,6 +4359,8 @@ components:
       - fullName
       - defaultBranch
       - private
+      - description
+      - pushedAt
       properties:
         defaultBranch:
           type: string
@@ -4314,6 +4392,8 @@ components:
       type: object
       description: '"Return 84x: yearly value for every $1 spent, paid back in 4 days".'
       required:
+      - ratio
+      - paybackDays
       - note
       properties:
         note:
@@ -4347,7 +4427,9 @@ components:
       description: The sandbox line at the bottom of the sidebar ("Sandbox on · acme-prod, $1.20 so far · off at 15:40").
       required:
       - on
+      - name
       - spentUsd
+      - offAt
       properties:
         name:
           type:
@@ -4462,6 +4544,9 @@ components:
     SpendByAgent:
       type: object
       required:
+      - agentId
+      - kind
+      - branch
       - usd
       properties:
         agentId:
@@ -4555,6 +4640,8 @@ components:
       description: '"Spent $184 of $500 across AWS and agent keys".'
       required:
       - usd
+      - capUsd
+      - fractionOfCap
       - note
       properties:
         capUsd:
@@ -4714,6 +4801,7 @@ components:
       - title
       - description
       - measures
+      - holdout
       - machine
       - evaluatorKind
       - objective
@@ -4858,6 +4946,7 @@ components:
       description: 'Result of validating `ratchet.yaml` text: a summary when it is valid, the problems when it is not.'
       required:
       - ok
+      - summary
       - errors
       properties:
         errors:
@@ -4907,6 +4996,7 @@ components:
       - usdPerUnit
       - period
       - basis
+      - unit
       properties:
         basis:
           $ref: '#/components/schemas/ValueBasis'
@@ -4924,9 +5014,11 @@ components:
       description: '`objective.value` applied to baseline -> best (core `estimate_value` / `return_on_spend`).'
       required:
       - usdPerUnit
+      - unit
       - period
       - basis
       - usdPerYear
+      - returnOnSpend
       properties:
         basis:
           $ref: '#/components/schemas/ValueBasis'
@@ -4953,10 +5045,13 @@ components:
       description: 'The squashed result: best verified commit vs the base ref, as the pull request will show it.'
       required:
       - commits
+      - sha
       - baseRef
       - files
       - additions
       - deletions
+      - excerpt
+      - unavailable
       properties:
         additions:
           type: integer
