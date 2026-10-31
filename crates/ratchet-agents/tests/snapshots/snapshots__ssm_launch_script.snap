@@ -1,0 +1,9 @@
+---
+source: crates/ratchet-agents/tests/snapshots.rs
+expression: "compute.commands.lock().unwrap()[0].1.script"
+---
+set -eu
+mkdir -p '/var/lib/ratchet'
+if [ -f '/var/lib/ratchet/opt1-cc.pid' ] && kill -0 "$(cat '/var/lib/ratchet/opt1-cc.pid')" 2>/dev/null; then echo "runner already running" >&2; exit 1; fi
+setsid nohup env RATCHET_OPTIMIZATION_ID='opt1' RATCHET_AGENT_ID='cc' AWS_REGION='us-east-1' RATCHET_ARTIFACTS_BUCKET='my-bucket' ratchet-runner > '/var/lib/ratchet/opt1-cc.log' 2>&1 < /dev/null &
+echo $! > '/var/lib/ratchet/opt1-cc.pid'

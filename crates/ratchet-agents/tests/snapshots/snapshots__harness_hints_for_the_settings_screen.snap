@@ -1,0 +1,22 @@
+---
+source: crates/ratchet-agents/tests/snapshots.rs
+expression: found
+---
+[
+  {
+    "kind": "claude-code",
+    "installed": false,
+    "version": null,
+    "path": null,
+    "auth": "signed-out",
+    "hint": "Claude Code was not found on PATH. Install it with `npm install -g @anthropic-ai/claude-code` (see https://docs.claude.com/en/docs/claude-code/setup), then sign in with `claude`."
+  },
+  {
+    "kind": "codex",
+    "installed": false,
+    "version": null,
+    "path": null,
+    "auth": "signed-out",
+    "hint": "Codex was not found on PATH. Install it with `npm install -g @openai/codex` or `brew install --cask codex`, then run `codex login`."
+  }
+]
