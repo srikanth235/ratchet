@@ -42,10 +42,10 @@ Each row is spelled out in `contract.check.ts` (the `D…` comments), so a new d
 | D3 | `ValidateConfigResult` is a union keyed on `ok` | one object `{ ok, summary \| null, errors }` | A union tagged by a boolean is awkward in OpenAPI and Swift; the check derives the object from the union. |
 | D5 | `TemplateVM` has 11 fields | `TemplateInfo` also has `defaultValueUsd`, `example` | The Rust type is the core registry entry; the desktop mapper trims it. Extra fields are harmless to a client that ignores them; the check strips exactly those two (also in `RepoInspectVM.templates` and `listTemplates`). |
 | D6 | `Optimization.status` is the UI pill status (also `merged`, `blocked`) | `UiStatus` (no `merged` / `blocked`) | `merged` / `blocked` only come from the provisional overview. Checked one way: everything the daemon sends is renderable. |
-| D7 | `EngineEventVM` has 8 members | also `hello`, `resync`, `github`, `environment-draft`, `connector` | `hello` / `resync` are the stream's own control events; the others belong to the app's new features (provisional). The set is asserted exactly. |
+| D7 | `EngineEventVM` has 8 members | also `hello`, `resync`, `github`, `environment-draft`, `connector` | `hello` / `resync` are the stream's own control events; the others belong to the app's new features. The set is asserted exactly. `environment-draft` is checked against `EnvironmentDraftEvent` of `@ratchet/core`. |
 | D8 | `optimization` event: `status: string` | the closed ledger enum | Checked one way (wire narrower than the type). The TypeScript type is looser than the daemon; tightening it is a type-only change for later. |
 | D9 | `agent-event` carries ids only | also `event: AgentEventVm \| null` | Lets a log view append without refetching. |
-| D10 | `CreateOptimizationInput` has no `connectors`, `environmentDraftId` | accepted, optional | Provisional features (connectors, environment drafts). Listed as `Extra`; remove when the TypeScript side grows them. |
+| D10 | `CreateOptimizationInput` has no `connectors`, `environmentDraftId` | accepted, optional | Features the desktop app does not have (connectors, environment drafts; `environmentDraftId` must name an approved draft, else 409). Listed as `Extra`; remove when the TypeScript side grows them. |
 | D11 | `ProposeTemplateInput` has no `direction`, `metric`, `valueUsd` | accepted, optional | The daemon takes the template's starting direction, metric and value; the desktop app does not offer them. Listed as `Extra`. |
 | D12 | `createOptimization` resolves to the id | `{ id }` | A bare string is not a JSON document. |
 | D13 | `exportReport` saves a file | `GET …/report` returns `{ fileName, markdown }` | The save dialog is the app's; `pickLocalFolder` is likewise the app's (`inspectRepo` takes the path). Not compared. |
@@ -53,6 +53,16 @@ Each row is spelled out in `contract.check.ts` (the `D…` comments), so a new d
 
 Also not compared because the desktop app has no counterpart: daemon `status`, `calibration`, `protected-paths`,
 `spend/reconciliations`, `getTemplate`.
+
+| E1 | `EnvironmentApproval.locked: true` | `locked: boolean` | An OpenAPI schema from utoipa has no literal type; the daemon always sends `true`. The check patches the TypeScript type. |
+| D16 | `EnvironmentDrafter.draft / revise` resolve when the agent is done | `POST …/environment-drafts` and `…/revisions` answer at once with the draft in status `drafting` | A setup agent runs for minutes. `environment-draft` events (status, and `phase` / `text` progress lines) and `GET …/{id}` carry the rest. The record's shape is the same. |
+
+Environment drafts are checked against the types of `@ratchet/core` (`packages/core/src/environment/types.ts`), not the desktop
+view models, because the desktop app has no environment step yet: `EnvironmentDraftRecord` <-> `EnvironmentDraftVm`,
+`EnvironmentApproval` <-> `EnvironmentApprovalVm`, `DraftEnvironmentInput` (without `onProgress`) <-> `CreateEnvironmentDraftInput`,
+`EnvironmentDraftEvent` (added to `@ratchet/core` for the check) <-> the `environment-draft` event, and the `EnvironmentDrafter`
+methods <-> the operations. HTTP-only additions: `GET /v1/environment-drafts` (list) and `DELETE …/{id}` (discard); the
+provisional `…/files` and `…/pull-request` routes are gone (the files are in the draft; approving with `mode: pr` opens the PR).
 
 ## Mismatches found and fixed
 
@@ -70,7 +80,7 @@ No TypeScript type needed changing.
 
 ## Not checked yet (provisional)
 
-`overview`, `connectors`, `connector selections` and `environment drafts` are being rewritten on
-`claude/ts-overview-shell`, `claude/ts-connectors` and `claude/ts-dynamic-env`. They are listed as `pending` (with a
+`overview`, `connectors` and `connector selections` are being rewritten on
+`claude/ts-overview-shell` and `claude/ts-connectors`. They are listed as `pending` (with a
 `TODO`) in `PENDING` at the end of `contract.check.ts`; when a group lands, add one row per type to the matching table
 and delete its line.

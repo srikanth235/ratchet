@@ -1,5 +1,6 @@
 ---
 source: crates/ratchetd/tests/api/openapi.rs
+assertion_line: 45
 expression: names
 ---
 - ActivityTone
@@ -19,6 +20,7 @@ expression: names
 - AgentsWhere
 - ApiError
 - ApiEvent
+- ApproveEnvironmentDraftInput
 - AwsAuthKind
 - AwsConnectorAuth
 - AwsConnectorInfo
@@ -32,7 +34,6 @@ expression: names
 - CalibrationSource
 - CandidateVerdict
 - CandidateVm
-- CheckState
 - CompareRow
 - ConfigError
 - ConfigSummary
@@ -58,19 +59,25 @@ expression: names
 - DiffLine
 - DiffLineKind
 - Direction
-- DraftProvenance
 - EffectiveProtected
 - EngineInfo
 - EngineKind
-- EnvCheck
-- EnvCost
-- EnvFile
-- EnvFilesVm
-- EnvResource
-- EnvScope
+- EnvironmentApprovalMode
+- EnvironmentApprovalVm
+- EnvironmentCheckVm
+- EnvironmentCostVm
+- EnvironmentDraftPhase
 - EnvironmentDraftStatus
 - EnvironmentDraftVm
+- EnvironmentDraftsVm
+- EnvironmentFileVm
+- EnvironmentMessageFrom
+- EnvironmentMessageVm
 - EnvironmentPhase
+- EnvironmentProposalVm
+- EnvironmentResourceVm
+- EnvironmentRole
+- EnvironmentScope
 - EnvironmentSummary
 - EnvironmentVm
 - EnvironmentsVm

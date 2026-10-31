@@ -1,5 +1,6 @@
 ---
 source: crates/ratchetd/tests/api/openapi.rs
+assertion_line: 34
 expression: "openapi::route_table().join(\"\\n\")"
 ---
 GET /v1/activity listActivity
@@ -18,11 +19,11 @@ GET /v1/connectors/{id} getConnector
 DELETE /v1/connectors/{id} deleteConnector
 PATCH /v1/connectors/{id} updateConnector
 POST /v1/connectors/{id}/test testConnector
+GET /v1/environment-drafts listEnvironmentDrafts
 POST /v1/environment-drafts createEnvironmentDraft
 GET /v1/environment-drafts/{id} getEnvironmentDraft
+DELETE /v1/environment-drafts/{id} discardEnvironmentDraft
 POST /v1/environment-drafts/{id}/approval approveEnvironmentDraft
-GET /v1/environment-drafts/{id}/files listEnvironmentDraftFiles
-POST /v1/environment-drafts/{id}/pull-request openEnvironmentDraftPullRequest
 POST /v1/environment-drafts/{id}/revisions reviseEnvironmentDraft
 GET /v1/environments listEnvironments
 POST /v1/environments/{sandboxId}/end endEnvironment

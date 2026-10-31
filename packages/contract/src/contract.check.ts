@@ -62,8 +62,18 @@ import type {
   WinningChangeVM,
 } from '../../desktop/src/shared/types.js';
 import type { OptimizationStatus } from '@ratchet/ui';
+import type {
+  ApproveEnvironmentOptions,
+  DraftEnvironmentInput,
+  EnvironmentApproval,
+  EnvironmentDraftEvent,
+  EnvironmentDraftRecord,
+} from '../../core/src/environment/types.js';
 
 type S = components['schemas'];
+
+/** E1. `EnvironmentApproval.locked` is the literal `true` in TypeScript; the wire says `boolean` (an OpenAPI schema has no literal). */
+type EnvironmentApprovalWire = Patch<EnvironmentApproval, { locked: boolean }>;
 type Ops = operations;
 
 /** JSON body of the success response of an operation. */
@@ -156,6 +166,9 @@ type ViewModelsTable = {
   // environments, receipts
   EnvironmentVM: Same<EnvironmentVM, S['EnvironmentVm']>;
   EnvironmentsVM: Same<EnvironmentsVM, S['EnvironmentsVm']>;
+  // dynamic environment drafts (the TypeScript side is `@ratchet/core`'s environment types; E1)
+  EnvironmentDraftRecord: Same<Patch<EnvironmentDraftRecord, { approval?: EnvironmentApprovalWire }>, S['EnvironmentDraftVm']>;
+  EnvironmentApproval: Same<EnvironmentApprovalWire, S['EnvironmentApprovalVm']>;
 };
 export type ViewModels = Expect<AssertAll<ViewModelsTable>>;
 
@@ -199,6 +212,8 @@ type EventsTable = {
   notice: Same<Ts<'notice'>, Wire<'notice'>>;
   'run-active': Same<Ts<'run-active'>, Wire<'run-active'>>;
   sandbox: Same<Ts<'sandbox'>, Wire<'sandbox'>>;
+  // the `environment-draft` event is wire-only for the desktop (D7) but has its own TypeScript type in @ratchet/core
+  'environment-draft': Same<EnvironmentDraftEvent, Wire<'environment-draft'>>;
 };
 export type Events = Expect<AssertAll<EventsTable>>;
 
@@ -229,6 +244,10 @@ type RequestsTable = {
   setSecretName: Same<Arg<'setSecret', 0>, Ops['setSecret']['parameters']['path']['name']>;
   clearSecretName: Same<Arg<'clearSecret', 0>, Ops['clearSecret']['parameters']['path']['name']>;
   testConnection: Same<{ target: Arg<'testConnection', 0> }, Body<'testConnection'>>;
+  // dynamic environment drafts: `EnvironmentDrafter.draft / revise / approve`
+  CreateEnvironmentDraftInput: Sends<Omit<DraftEnvironmentInput, 'onProgress'>, S['CreateEnvironmentDraftInput']>;
+  ReviseEnvironmentDraftInput: Same<{ message: string }, S['ReviseEnvironmentDraftInput']>;
+  ApproveEnvironmentDraftInput: Sends<ApproveEnvironmentOptions, S['ApproveEnvironmentDraftInput']>;
   validateConfig: Same<{ yaml: Arg<'validateConfig', 0> }, Body<'validateConfig'>>;
   // query parameters
   listOptimizationsRange: Same<Opt<Opt<Arg<'listOptimizations', 0>>['range']>, Opt<Query<'listOptimizations'>['range']>>;
@@ -279,13 +298,20 @@ type OperationsTable = {
   clearSecret: Same<SettingsWire, Reply<'clearSecret'>>;
   saveLiveSettings: Same<SettingsWire, Reply<'saveAdvancedSettings'>>;
   testConnection: Same<Returns<'testConnection'>, Reply<'testConnection'>>;
+  // D16. The TypeScript `EnvironmentDrafter` resolves when the agent is done; the daemon answers at once with the draft
+  // `drafting` and says the rest with `environment-draft` events. Same shape.
+  draftEnvironment: Same<Patch<EnvironmentDraftRecord, { approval?: EnvironmentApprovalWire }>, Reply<'createEnvironmentDraft'>>;
+  reviseEnvironment: Same<Patch<EnvironmentDraftRecord, { approval?: EnvironmentApprovalWire }>, Reply<'reviseEnvironmentDraft'>>;
+  approveEnvironment: Same<Patch<EnvironmentDraftRecord, { approval?: EnvironmentApprovalWire }>, Reply<'approveEnvironmentDraft'>>;
+  environmentDraft: Same<Patch<EnvironmentDraftRecord, { approval?: EnvironmentApprovalWire }>, Reply<'getEnvironmentDraft'>>;
+  listEnvironmentDrafts: Same<Patch<EnvironmentDraftRecord, { approval?: EnvironmentApprovalWire }>[], Reply<'listEnvironmentDrafts'>['drafts']>;
 };
 export type Operations = Expect<AssertAll<OperationsTable>>;
 
 // ---------------------------------------------------------------------------------------------------------------
 // 5. Not checked yet. Each group is being rewritten on its own branch; when it lands, move its line into the tables
 //    above (one line per type). Schemas: S['OverviewVm'], S['ConnectorVm'], S['ConnectorSelectionVm'],
-//    S['EnvironmentDraftVm'] and their inputs.
+//    their inputs. (Environment drafts are checked now, against `@ratchet/core`.)
 
 export const PENDING = {
   // TODO(claude/ts-overview-shell): OverviewVM <-> S['OverviewVm'] (+ NeedsYouItem, OverviewRow, hero cards, staircase)
@@ -294,9 +320,6 @@ export const PENDING = {
   connectors: 'pending',
   // TODO(claude/ts-connectors): ConnectorSelectionVM <-> S['ConnectorSelectionVm'], SaveConnectorSelectionInput
   connectorSelections: 'pending',
-  // TODO(claude/ts-dynamic-env): EnvironmentDraftVM <-> S['EnvironmentDraftVm'], CreateEnvironmentDraftInput,
-  // ReviseEnvironmentDraftInput, EnvFilesVm, plus the `environment-draft` and `connector` events
-  environmentDrafts: 'pending',
 } as const;
 
 // Not part of `RatchetApi` (so nothing to compare): daemon status, calibration, protected paths, cost reconciliation,
