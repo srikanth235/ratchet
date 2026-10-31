@@ -186,6 +186,7 @@ struct Inner {
     cancel: CancellationToken,
     tasks: Mutex<Vec<JoinHandle<()>>>,
     disposed: AtomicBool,
+    invalidations: std::sync::atomic::AtomicU64,
 }
 
 /// The product engine. Cheap to clone.
@@ -290,6 +291,7 @@ impl ProductEngine {
             cancel: CancellationToken::new(),
             tasks: Mutex::default(),
             disposed: AtomicBool::new(false),
+            invalidations: std::sync::atomic::AtomicU64::new(0),
         }));
         // An environment that outlived the previous run of the app must still be watched and removed after its idle window.
         if this.0.opts.live.is_some() {
@@ -557,9 +559,15 @@ impl ProductEngine {
 
     /// Mark every real runtime stale (settings or sign-in changed): idle ones are rebuilt on next use, busy ones when they finish.
     pub fn invalidate(&self) {
+        self.0.invalidations.fetch_add(1, Ordering::SeqCst);
         for e in lock(&self.0.lives).values_mut() {
             e.stale = true;
         }
+    }
+
+    /// How many times `invalidate` was called (settings or sign-in changed).
+    pub fn invalidations(&self) -> u64 {
+        self.0.invalidations.load(Ordering::SeqCst)
     }
 
     /// What still blocks a real run on this repo ("what's missing"), after building its runtime.

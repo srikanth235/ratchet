@@ -67,6 +67,11 @@ tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter
 utoipa-axum = { version = "0.2", optional = true }
 
 [dev-dependencies]
+async-trait = "0.1"
+ratchet-engine = { path = "../ratchet-engine", features = ["testing"] }
+ratchet-sandbox = { path = "../ratchet-sandbox" }
+ratchet-github = { path = "../ratchet-github" }
+ratchet-agents = { path = "../ratchet-agents" }
 http-body-util = "0.1"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }

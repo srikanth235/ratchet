@@ -45,6 +45,10 @@ pub struct RecordingRuntime {
     pub end_receipt: Mutex<Option<SandboxTeardownReceipt>>,
     pub receipts: Mutex<std::collections::HashMap<String, SandboxTeardownReceipt>>,
     pub calibration: Mutex<Option<Calibration>>,
+    /// After `end_sandbox`, mark the sandbox destroyed in the ledger (what the engine does) ...
+    pub destroy_on_end: AtomicBool,
+    /// ... and answer this activity from then on.
+    pub activity_after_end: Mutex<Option<SandboxActivity>>,
 }
 
 impl RecordingRuntime {
@@ -64,6 +68,8 @@ impl RecordingRuntime {
             end_receipt: Mutex::default(),
             receipts: Mutex::default(),
             calibration: Mutex::default(),
+            destroy_on_end: AtomicBool::new(false),
+            activity_after_end: Mutex::default(),
         })
     }
     pub fn log(&self, s: String) {
@@ -219,6 +225,19 @@ impl EngineApi for RecordingRuntime {
     }
     async fn end_sandbox(&self, id: &str) -> PortResult<SandboxTeardownReceipt> {
         self.log(format!("end:{id}"));
+        if self.destroy_on_end.load(Ordering::SeqCst) {
+            let _ = self
+                .ledger
+                .set_sandbox_status(
+                    id,
+                    ratchet_core::enums::SandboxStatus::Destroyed,
+                    Default::default(),
+                )
+                .await;
+        }
+        if let Some(a) = self.activity_after_end.lock().unwrap().take() {
+            *self.activity.lock().unwrap() = Some(a);
+        }
         if let Some(r) = self.end_receipt.lock().unwrap().clone() {
             return Ok(r);
         }
