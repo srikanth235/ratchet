@@ -1,5 +1,9 @@
 # Real-environment test plan: trusted bench
 
+> **Written for the TypeScript engine.** Names such as `@ratchet/...`, `packages/...`, `createLiveRuntime` and the `.mjs`/`node` snippets refer to
+> the code at commit `fc503b1`; the Rust replacement is `crates/ratchet-bench` (see [CUTOVER.md](../CUTOVER.md)). What to verify on a real account, and why,
+> still applies; re-express the snippets with `ratchetd` / `ratchet` before using them.
+
 Scope: `@ratchet/bench` (`LocalBenchRunner`, `RemoteBenchRunner`, `BenchQueue`, `evaluateCandidate`).
 Unit and integration tests run the pipeline on one machine; nothing in them proves the numbers are
 stable on the pinned instance, that the generated scripts survive real SSM, or that candidate code

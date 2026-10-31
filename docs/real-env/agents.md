@@ -1,4 +1,8 @@
-# Real-environment testing: agents (`@ratchet/agents`)
+# Real-environment testing: agents (`ratchet-agents`)
+
+> **Written for the TypeScript engine.** Names such as `@ratchet/...`, `packages/...`, `createLiveRuntime` and the `.mjs`/`node` snippets refer to
+> the code at commit `fc503b1`; the Rust replacement is `crates/ratchet-agents` (binary `ratchet-runner`) (see [CUTOVER.md](../CUTOVER.md)). What to verify on a real account, and why,
+> still applies; re-express the snippets with `ratchetd` / `ratchet` before using them.
 
 Everything here is written against recorded or fake CLI output. Nothing in `packages/agents` has been run against
 a real `claude` or `codex` binary, a real EC2 runner, SSM or S3. This page says what is mocked, what to verify,
@@ -204,7 +208,7 @@ TID=$(jq -r 'select(.type=="thread.started") | .thread_id' /tmp/codex-turn1.json
 echo 'Now say goodbye.' | codex exec resume "$TID" --json --skip-git-repo-check - | tee /tmp/codex-turn2.jsonl
 ```
 
-Copy the transcripts into `packages/agents/test/fixtures/` as `real-claude-*.jsonl` / `real-codex-*.jsonl` (strip
+Copy the transcripts into `crates/ratchet-agents/tests/fixtures/` as `real-claude-*.jsonl` / `real-codex-*.jsonl` (strip
 anything sensitive). `test/real-fixtures.test.ts` parses every `real-*` fixture and fails if the parser loses the session
 id, drops a usage event, or skips a known event type, so a CLI release that changes the format shows up as a red test.
 Compare `parser.unknownTypes` for each real transcript and decide whether any unknown type matters.

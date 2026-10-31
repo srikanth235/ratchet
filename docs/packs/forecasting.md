@@ -172,5 +172,5 @@ files are never overwritten), `--dry-run`, `--list-templates`. The output passes
 ```sh
 pnpm --filter @ratchet/demo-forecast test            # 28 unit + contract tests
 pnpm --filter @ratchet/demo-forecast backtest        # {"wape": 43.5043, "mape": ..., "bias": ..., "train_ms": ...}
-pnpm build && node packages/runtime/dist/bin/simulate.js --project forecast   # whole run, scripted agents
+pnpm install && (cd examples/demo-forecast && ../../node_modules/.bin/tsc -p tsconfig.build.json) && ratchetd simulate --project forecast   # whole run, scripted agents
 ```

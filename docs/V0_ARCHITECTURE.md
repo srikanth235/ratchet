@@ -1,5 +1,9 @@
 # Ratchet v0 — Architecture
 
+> **Historical.** This is the TypeScript v0 design, written while the engine and the desktop app were TypeScript (`packages/*`, Electron). The product
+> model it describes still holds; file and API names refer to the code at commit `fc503b1`. The current stack is in
+> [NATIVE_ARCHITECTURE.md](NATIVE_ARCHITECTURE.md); the retirement of the TypeScript is in [CUTOVER.md](CUTOVER.md).
+
 > A ratchet only turns one way. Ratchet lets coding agents try to improve a
 > business metric — cut costs or grow profit — and keeps a change only when a
 > trusted evaluator confirms it is better, on data the agents never saw.

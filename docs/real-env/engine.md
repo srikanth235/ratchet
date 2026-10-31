@@ -1,5 +1,9 @@
 # Real-environment test plan: engine
 
+> **Written for the TypeScript engine.** Names such as `@ratchet/...`, `packages/...`, `createLiveRuntime` and the `.mjs`/`node` snippets refer to
+> the code at commit `fc503b1`; the Rust replacement is `crates/ratchet-engine` (see [CUTOVER.md](../CUTOVER.md)). What to verify on a real account, and why,
+> still applies; re-express the snippets with `ratchetd` / `ratchet` before using them.
+
 Scope: `@ratchet/engine` (the optimization engine: baseline, agent launch, control loop,
 ratchet, cost guard, kill switch, reaper, teardown, PR). Unit tests run it against in-memory
 fakes of every port; nothing in them proves the real ports behave the way the engine assumes.

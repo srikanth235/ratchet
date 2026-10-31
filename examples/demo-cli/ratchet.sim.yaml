@@ -1,4 +1,4 @@
-# Overlay for local simulation runs (packages/runtime): merged over ratchet.yaml before the demo is pushed to the
+# Overlay for local simulation runs (`ratchetd simulate`, crates/ratchet-engine): merged over ratchet.yaml before the demo is pushed to the
 # simulated "GitHub"; the simulator removes this file from the repo it creates.
 #
 # hyperfine is not installed here, so the Node fallback bench (same JSON) is used. The box is shared and loaded:

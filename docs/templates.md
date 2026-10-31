@@ -67,9 +67,9 @@ automatically (core `effectiveProtected`), together with `ratchet.yaml`, lockfil
 
 ## Adding a template
 
-1. `packages/core/templates/<id>/`: `RATCHET.md` (placeholders `{{metric}}`, `{{direction}}`, `{{verb}}`) and the files at
-   their repo-relative paths.
-2. An entry in `packages/core/src/templates/registry.ts` (metadata, `run`, default guardrails, `protect` globs).
-3. `pnpm --filter @ratchet/core gen:templates` to regenerate `src/templates/files.generated.ts` (a test fails when it is stale).
-4. Add the template id to `TEMPLATE_IDS` and a script test in `packages/core/src/templates/templates.test.ts`: every
-   generated config must pass `parseConfig`, and the evaluator must run and print the objective metric.
+1. `templates/<id>/` (repository root): `RATCHET.md` (placeholders `{{metric}}`, `{{direction}}`, `{{verb}}`) and the files at
+   their repo-relative paths. They are embedded into `ratchet-core` at compile time (`include_dir!`); there is nothing to generate.
+2. An entry in `crates/ratchet-core/src/templates/registry.rs` (metadata, `run`, default guardrails, `protect` globs).
+3. Add the template id to the id list in `crates/ratchet-core/tests/templates.rs` and a script test there: every generated config
+   must pass `parse_config`, and the evaluator must run and print the objective metric. `the_embedded_files_are_in_sync_with_the_template_directory`
+   fails when the embedded copy and `templates/` differ (rebuild).

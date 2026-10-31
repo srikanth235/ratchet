@@ -1,4 +1,4 @@
-# Overlay for local simulation runs (packages/runtime): merged over ratchet.yaml before the demo is pushed to the
+# Overlay for local simulation runs (`ratchetd simulate`, crates/ratchet-engine): merged over ratchet.yaml before the demo is pushed to the
 # simulated "GitHub". Not part of the customer-facing contract; the simulator removes this file from the repo it creates.
 sealed:                           # the hidden holdout, produced outside the repo (the demo must be built first)
   run: node dist/eval/holdout.js --seed 424242 --out "{out}"

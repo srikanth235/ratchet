@@ -1,5 +1,9 @@
 # Ratchet v0 — Plan of action
 
+> **Historical.** This is the v0 plan, written while the engine and the desktop app were TypeScript (`packages/*`, Electron). The product
+> model it describes still holds; file and API names refer to the code at commit `fc503b1`. The current stack is in
+> [NATIVE_ARCHITECTURE.md](NATIVE_ARCHITECTURE.md); the retirement of the TypeScript is in [CUTOVER.md](CUTOVER.md).
+
 Goal: an Electron app that runs Claude Code and Codex against a benchmark on
 AWS for 8 hours unattended and hands back a verified, reproducible speed-up as
 a PR. Architecture: [`V0_ARCHITECTURE.md`](V0_ARCHITECTURE.md).

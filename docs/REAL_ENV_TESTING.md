@@ -1,6 +1,6 @@
 # Real-environment testing
 
-Everything in v0 is written against **ports** (`packages/core/src/ports`). Each
+Everything in v0 is written against **ports** (`crates/ratchet-core/src/ports.rs`; originally `packages/core/src/ports`). Each
 port has a real implementation and a mock/local one. In `simulation` mode the
 whole product runs on one machine: mock AWS, a scripted agent, a local git
 remote and a local bench runner against `examples/demo-search`.
@@ -28,14 +28,14 @@ keeps its own detailed notes in `docs/real-env/<area>.md`.
 2. `docs/real-env/bench.md` — baseline noise on pinned hardware, confirm trace.
 3. `docs/real-env/agents.md` — headless Claude Code / Codex on a runner (the `cloud` mode).
 4. `docs/real-env/engine.md` — full optimization on demo-search, then a partner repo.
-5. `docs/real-env/desktop.md` — signed build on macOS, every screen against live data.
+5. `docs/real-env/mac-app.md` — signed build on macOS, every screen against live data.
 
 ## Local agents and the invisible sandbox (what is new, what is unproven)
 
 `createHybridRuntime` (`@ratchet/runtime`) is the product wiring: agents on this machine through `LocalRunnerControl`, the
 evaluator on AWS, and the sandbox created and destroyed by the engine. Its tests run without AWS or the real CLIs: the engine
 with the fake clock (idle window, receipt, orphans, restart), detection against fake spawners and shell stand-ins, and one
-integration test (`packages/runtime/src/local-agents.int.test.ts`) that runs a stand-in `claude` through the real Engine, a
+integration test (`crates/ratchet-engine/tests/engine/runtime_local_agents.rs`) that runs a stand-in `claude` through the real Engine, a
 worktree and a mock sandbox. Unproven until run for real: the real CLIs' flags and auth status output on a developer machine
 (`agents.md`), `tofu apply` at the first run start and `tofu destroy` after the idle window (`aws.md`), and the late-bound AWS
 ports (built from the sandbox outputs in the ledger on first use). Sleep prevention is an engine signal (`run-active` event,

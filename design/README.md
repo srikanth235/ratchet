@@ -1,9 +1,8 @@
 # Design reference — Midnight Brass
 
 Source files of the six app screens from the "Ratchet App Design" canvas
-(`.dc.html` Design Components). They are the visual reference the desktop app is
-checked against by `packages/e2e` (rendered with a small shim, screenshotted with
-Playwright and compared side by side with the running app).
+(`.dc.html` Design Components). They are the visual reference the Mac app is checked against: `design/v02.html` is rendered
+to `design/v02/ref-*.png` by `design/render-reference.mjs`, and `native.yml` compares the app's snapshots with them.
 
 | File | Screen |
 |---|---|

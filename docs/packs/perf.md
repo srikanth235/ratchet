@@ -98,9 +98,9 @@ change that deletes a feature to start faster is blocked by a protected path, no
 booting, so the planted costs overlap: after the first fixes the rest are a smaller share of a smaller total, and on a loaded
 machine they fall below the noise floor (the ratchet then correctly declines them).
 
-### Simulated run (`node packages/runtime/dist/bin/simulate.js --project cli --minutes 10`)
+### Simulated run (`ratchetd simulate --project cli --minutes 10`)
 
-Scripted agents (`packages/agents/scripts/demo-cli`: real patches, one script per agent, `cc` and `cx` in different orders),
+Scripted agents (`crates/ratchet-agents/scripts/demo-cli`: real patches, one script per agent, `cc` and `cx` in different orders),
 shared 4-vCPU box with the agents' own builds and tests running next to the benchmark, so absolute numbers are inflated.
 
 | | |
@@ -150,4 +150,4 @@ guardrails, protects the template's files automatically (plus `ratchet.yaml`, lo
 command, the sealed `holdout`, the brief. `--metric` is a dotted path into the evaluator's JSON, `--value-usd` is USD per
 unit of improvement per year. Existing files are never overwritten without `--force`. The generated `ratchet.yaml` is
 checked with the same parser as `ratchet validate` before anything is written; the next steps are `ratchet validate` and
-`ratchet baseline`. The files live in `packages/core/templates/<id>/` (embedded by `packages/core/scripts/gen-templates.mjs`).
+`ratchet baseline`. The files live in `templates/<id>/` (embedded into `ratchet-core` at compile time).

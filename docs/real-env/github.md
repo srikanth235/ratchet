@@ -1,5 +1,9 @@
 # Real-environment testing: GitHub (`@ratchet/github`)
 
+> **Written for the TypeScript engine.** Names such as `@ratchet/...`, `packages/...`, `createLiveRuntime` and the `.mjs`/`node` snippets refer to
+> the code at commit `fc503b1`; the Rust replacement is `crates/ratchet-github` (see [CUTOVER.md](../CUTOVER.md)). What to verify on a real account, and why,
+> still applies; re-express the snippets with `ratchetd` / `ratchet` before using them.
+
 `GitHubGitHost` is the real `GitHost`; `LocalGitHost` is its simulation twin (a
 local bare repo). Both share one implementation of the git logic
 (`BaseGitHost`), so what the local tests prove about trailer parsing, diffs,

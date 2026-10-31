@@ -70,7 +70,7 @@ Applied cumulatively (`packages/agents/scripts/demo-forecast/*.patch`; details i
 
 ```sh
 pnpm build
-node packages/runtime/dist/bin/simulate.js --project forecast   # two scripted agents, real evaluator, mock cloud
+ratchetd simulate --project forecast   # two scripted agents, real evaluator, mock cloud
 ```
 
 `ratchet.sim.yaml` is the overlay the simulator merges over `ratchet.yaml` (local holdout file, 2 repeats); it is not part of

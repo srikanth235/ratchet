@@ -1,11 +1,12 @@
 name: Native
 # CI for the native stack (docs/NATIVE_ARCHITECTURE.md): the Rust workspace in crates/ and the SwiftUI Mac app in
-# apps/mac/. The TypeScript stack keeps its own workflow (ci.yml) until the cut-over.
+# apps/mac/. ci.yml has the demos and the infra tests (the only Node left), images.yml the machine-image binaries.
 on:
   push:
     paths:
       - "Cargo.toml"
       - "crates/**"
+      - "templates/**"
       - "apps/mac/**"
       - "api/**"
       - ".github/workflows/native.yml"
@@ -13,6 +14,7 @@ on:
     paths:
       - "Cargo.toml"
       - "crates/**"
+      - "templates/**"
       - "apps/mac/**"
       - "api/**"
       - ".github/workflows/native.yml"

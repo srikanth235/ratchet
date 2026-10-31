@@ -1,9 +1,13 @@
 name: CI
+# What is left of the Node toolchain after the cut-over (docs/CUTOVER.md): the three demo repositories in examples/, the
+# infra tests, and the end-to-end run of the demos through the Rust engine. The Rust workspace and the Mac app are in
+# native.yml, the machine-image binaries in images.yml.
 on:
   push:
   pull_request:
 jobs:
-  check:
+  node:
+    name: demos and infra tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,3 +34,48 @@ jobs:
       - run: tofu init -backend=false -input=false
       - run: tofu validate
       - run: tofu test
+  # The demos through the real engine: real git, the real bench pipeline and guardrails, scripted agents, a mock cloud
+  # (the tests of crates/ratchet-engine/tests/engine/runtime_simulation.rs, which only run with RATCHET_E2E=1), then the
+  # same through the `ratchetd simulate` command. This is what proves a demo still produces its verdicts.
+  demos:
+    name: demos end to end
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: demos
+      - run: pnpm install --frozen-lockfile
+      - name: Build the demos
+        run: |
+          for d in demo-search demo-forecast demo-cli; do
+            (cd "examples/$d" && ../../node_modules/.bin/tsc -p tsconfig.build.json)
+          done
+      - name: Engine tests on the demos
+        env:
+          RATCHET_E2E: "1"
+        run: cargo test -p ratchet-engine --test engine runtime_simulation -- --nocapture --test-threads=1
+      - name: ratchetd simulate
+        run: |
+          cargo build -p ratchetd
+          for p in search forecast cli; do
+            target/debug/ratchetd simulate --project "$p" --minutes 10 --summary "summary-$p.json"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: demo-summaries
+          path: summary-*.json
+          if-no-files-found: warn
+          retention-days: 14

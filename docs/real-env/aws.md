@@ -1,4 +1,8 @@
-# Real-environment testing: AWS (`@ratchet/aws`)
+# Real-environment testing: AWS (`ratchet-sandbox`)
+
+> **Written for the TypeScript engine.** Names such as `@ratchet/...`, `packages/...`, `createLiveRuntime` and the `.mjs`/`node` snippets refer to
+> the code at commit `fc503b1`; the Rust replacement is `crates/ratchet-sandbox` (see [CUTOVER.md](../CUTOVER.md)). What to verify on a real account, and why,
+> still applies; re-express the snippets with `ratchetd` / `ratchet` before using them.
 
 Everything in `packages/aws` was built against the AWS SDK for JavaScript v3
 and tested with `aws-sdk-client-mock` and a fake process runner. **No call has
@@ -20,7 +24,7 @@ or production account).
 ## 0. Prerequisites
 
 - A dedicated AWS account with an SSO profile; `export AWS_PROFILE=ratchet-sandbox AWS_REGION=us-east-1`.
-- A pinned `tofu` binary (`tofu version`) and this repo built: `pnpm install && pnpm build`.
+- A pinned `tofu` binary (`tofu version`) and this repo built: `cargo build --release -p ratchetd -p ratchet-cli`.
 - A runner AMI and a bench AMI, built from `infra/images` (see "Build images" below). Until they exist, use any
   SSM-enabled Amazon Linux AMI: instances will launch, tag, accrue cost and be SSM-reachable, which is all
   steps 2-6 need. The bench AMI must also carry `iptables`, `setpriv`, `pkill`, `sudo`, `shred`, GNU
@@ -62,7 +66,7 @@ infra/images/build.sh both          # packs the runner tarballs, checks the laun
   app version or the app version plus a build suffix; newest wins; own account, the sandbox's region, the architecture of the instance
   types): `findRatchetImages(version, { region })` / `resolveImageRefs` in `packages/aws`, wired into
   `createLiveRuntimeFor(opts, config)` / `resolveLiveImages(opts)` in `packages/runtime/src/live.ts`. `build.sh` stamps the app version
-  (`packages/desktop` version, or `RATCHET_APP_VERSION`) into the tag. A missing image is an `ImageLookupError` that says which image to
+  (the version of `crates/ratchetd`, which is what the daemon asks for, or `RATCHET_APP_VERSION`) into the tag. A missing image is an `ImageLookupError` that says which image to
   build. The explicit override stays for development only (Settings > Advanced):
   `createLiveRuntime({ ..., runnerImageRef: 'ami-...', benchImageRef: 'ami-...' })`; it is used verbatim as `ImageId`, so it must be
   the plain `ami-...` id of the sandbox's region and account (the AMIs are encrypted by default).

@@ -1,5 +1,9 @@
 # Simplified product model (v0.2)
 
+> **Historical.** This is the simplified product model, written while the engine and the desktop app were TypeScript (`packages/*`, Electron). The product
+> model it describes still holds; file and API names refer to the code at commit `fc503b1`. The current stack is in
+> [NATIVE_ARCHITECTURE.md](NATIVE_ARCHITECTURE.md); the retirement of the TypeScript is in [CUTOVER.md](CUTOVER.md).
+
 Decision record for the simplification agreed after the first full build. Where this file and
 `V0_ARCHITECTURE.md` disagree, this file wins until the architecture doc is updated.
 

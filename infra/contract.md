@@ -1,7 +1,7 @@
 # Sandbox contract
 
 Every cloud module under `infra/<cloud>/` (v0: `infra/aws`) implements this
-contract. The app (`SandboxProvider` in `packages/core`) depends only on the
+contract. The app (`SandboxProvider` in `crates/ratchet-core`) depends only on the
 inputs and outputs below, never on provider-specific resources.
 
 A *sandbox* is a long-lived, dedicated, per-user environment (one cloud

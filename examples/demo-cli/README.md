@@ -34,7 +34,7 @@ with empty `HOME`, `TMPDIR` and cache directories, so nothing can be cached betw
 
 Unloaded 4-vCPU box, 11 visible invocations: about 350 ms at baseline, about 85 ms with all seven planted problems fixed
 (node itself is ~35 ms). On a busy shared machine the same numbers are 30 to 60% higher and noisy; `ratchet.sim.yaml`
-(used by `node packages/runtime/dist/bin/simulate.js --project cli`) repeats each start and keeps the fastest two thirds.
+(used by `ratchetd simulate --project cli`) repeats each start and keeps the fastest two thirds.
 
 ## For agents
 
