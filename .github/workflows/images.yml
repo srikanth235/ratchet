@@ -75,8 +75,9 @@ jobs:
           prefix=$(mktemp -d)
           sudo RATCHET_PREFIX="$prefix" RATCHET_LAUNCHER_BINARY="$PWD/out/$NAME" RATCHET_LAUNCHER_SHA256="$sha" \
             bash infra/images/scripts/35-candidate-launcher.sh
-          test "$(stat -c '%U:%G %a' "$prefix/libexec/ratchet/ratchet-candidate-ctr")" = "root:root 4755"
-          test "$(stat -c '%U:%G %a' "$prefix/libexec/ratchet")" = "root:root 700"
+          # the 0700 root directory hides the file from this user: stat as root
+          test "$(sudo stat -c '%U:%G %a' "$prefix/libexec/ratchet/ratchet-candidate-ctr")" = "root:root 4755"
+          test "$(sudo stat -c '%U:%G %a' "$prefix/libexec/ratchet")" = "root:root 700"
           # a wrong digest must stop the install
           if sudo RATCHET_PREFIX="$(mktemp -d)" RATCHET_LAUNCHER_BINARY="$PWD/out/$NAME" RATCHET_LAUNCHER_SHA256="$(printf '0%.0s' {1..64})" \
             bash infra/images/scripts/35-candidate-launcher.sh; then echo "a wrong sha256 was accepted"; exit 1; fi
@@ -112,6 +113,8 @@ jobs:
         run: packer fmt -check -diff infra/images
       - name: Validate (no AWS calls)
         run: |
+          # runner.pkr.hcl uploads infra/images/dist/ (pack-runner.sh output); validate only needs it to exist
+          mkdir -p infra/images/dist
           packer init infra/images
           packer validate -var image_version=ci infra/images
           packer validate -var image_version=ci -var arch=arm64 -var launcher_sha256="$(printf 'a%.0s' {1..64})" infra/images
