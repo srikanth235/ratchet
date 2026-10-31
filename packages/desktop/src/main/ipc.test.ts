@@ -113,11 +113,51 @@ describe('registerIpc', () => {
     ['createOptimization', [{ repoUrl: 'a/b', baseRef: 'main', demo: 'demo-evil', agents: ['codex'], budgetUsd: 5, timeLimitSeconds: 60, plateauEvals: 3 }]],
     ['createOptimization', [{ repoUrl: 'a/b', baseRef: 'main', configYaml: 'version: 0', agents: ['codex'], budgetUsd: 5, timeLimitSeconds: 60, plateauEvals: 3 }]],
     ['createOptimization', ['not an object']],
+    ['createOptimization', [{ repoUrl: 'a/b', baseRef: 'main', agents: ['codex'], budgetUsd: 5, timeLimitSeconds: 60, plateauEvals: 3, connections: { github: 'g', aws: 'a', agents: [] } }]],
+    ['preflight', [{ agents: ['codex'], agentsWhere: 'local', source: 'github', repo: 'not a repo' }]],
+    ['listConnectors', ['extra']],
+    ['addGithubConnector', [{ token: 'short' }]],
+    ['addGithubConnector', [{ token: 'not-a-github-token-at-all' }]],
+    ['addGithubConnector', [{ token: 'ghp_0123456789abcdefghijABCDEFGHIJ', extra: true }]],
+    ['addGithubConnector', [{ token: 'ghp_0123456789abcdefghijABCDEFGHIJ', name: '' }]],
+    ['startGithubConnectorSignIn', [{ connectorId: '' }]],
+    ['addAwsConnector', [{ profile: 'bad profile; rm -rf /' }]],
+    ['addAwsConnector', [{ profile: '' }]],
+    ['addAwsConnector', [{ profile: 'dev', region: 'mars-north-9' }]],
+    ['addAwsConnector', [{ profile: 'dev', monthlyCapUsd: -1 }]],
+    ['addAwsConnector', [{ profile: 'dev', monthlyCapUsd: 'lots' }]],
+    ['addAwsConnector', [{ profile: 'dev', secretAccessKey: 'x' }]],
+    ['addAgentConnector', [{ agent: 'gpt-9', source: 'login' }]],
+    ['addAgentConnector', [{ agent: 'claude-code', source: 'login', apiKey: 'sk-ant-smuggled-through-login' }]],
+    ['addAgentConnector', [{ agent: 'claude-code', source: 'api-key', apiKey: 'sk-proj-this-is-an-openai-key' }]],
+    ['addAgentConnector', [{ agent: 'codex', source: 'api-key', apiKey: 'short' }]],
+    ['updateConnector', ['c1', { token: 'smuggled' }]],
+    ['updateConnector', ['c1', { name: '' }]],
+    ['updateConnector', ['', { name: 'x' }]],
+    ['removeConnector', []],
+    ['setDefaultConnector', ['']],
+    ['testConnector', [42]],
+    ['getRepoConnections', ['not a repo']],
+    ['saveRepoConnections', ['acme/api', { github: 'g', aws: 'a', agents: [] }]],
+    ['saveRepoConnections', ['acme/api', { github: 'g', aws: 'a', agents: [{ connectorId: 'x', where: 'moon' }] }]],
+    ['saveRepoConnections', ['acme/api', { github: 'g', aws: 'a', agents: [{ connectorId: 'x', where: 'local' }], extra: 1 }]],
+    ['saveRepoConnections', ['acme/api', { github: '', aws: 'a', agents: [{ connectorId: 'x', where: 'local' }] }]],
   ];
   it.each(bad)('rejects invalid arguments to %s %j before executing anything', async (method, args) => {
     const spy = vi.spyOn(ctx.service, method as 'getOptimization');
     await expect(ctx.ipc.invoke(IPC[method], ...args)).rejects.toBeInstanceOf(IpcValidationError);
     expect(spy).not.toHaveBeenCalled();
+    ctx.service.dispose();
+  });
+
+  it('serves the connectors over IPC as plain data, and refuses a selection that names nothing real', async () => {
+    const vm = (await ctx.ipc.invoke(IPC.listConnectors)) as { connectors: unknown[]; encryptionAvailable: boolean };
+    expect(structuredClone(vm)).toEqual(vm);
+    expect(vm.encryptionAvailable).toBe(true);
+    const sel = { github: 'ghost', aws: 'ghost', agents: [{ connectorId: 'ghost', where: 'local' }] };
+    await expect(ctx.ipc.invoke(IPC.saveRepoConnections, 'acme/api', sel)).rejects.toThrow(/GitHub account/);
+    expect(await ctx.ipc.invoke(IPC.getRepoConnections, 'Acme/Api')).toMatchObject({ repo: 'acme/api', saved: null });
+    await expect(ctx.ipc.invoke(IPC.removeConnector, 'ghost')).rejects.toThrow(/no longer exists/);
     ctx.service.dispose();
   });
 

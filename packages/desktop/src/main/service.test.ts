@@ -261,6 +261,159 @@ describe('creating an optimization', () => {
   });
 });
 
+describe('connectors', () => {
+  const ORG = 'github_pat_ORGTOKENORGTOKENORGTOKEN12';
+
+  it('lists detected logins with the saved accounts, grouped by kind, with one default per kind', async () => {
+    const { service, gh } = setup();
+    await service.setSecret('githubToken', GH_TOKEN);
+    gh.login = 'acme-org';
+    await service.addGithubConnector({ token: ORG, name: 'acme-org' });
+    await service.addAwsConnector({ profile: 'default', region: 'us-west-2', monthlyCapUsd: 100 });
+    const vm = await service.listConnectors();
+    expect(vm).toMatchObject({ encryptionAvailable: true, clientIdConfigured: true, githubFlow: null });
+    expect(vm.connectors.map((c) => [c.kind, c.name, c.isDefault, c.status])).toEqual([
+      ['github', 'octocat', true, 'connected'],
+      ['github', 'acme-org', false, 'connected'],
+      ['aws', 'default', true, 'connected'],
+      ['agent', 'Claude Code · your login', true, 'connected'],
+    ]);
+    expect(JSON.stringify(vm)).not.toContain(GH_TOKEN);
+    expect(JSON.stringify(vm)).not.toContain(ORG);
+  });
+
+  it('every change rebuilds what depends on the accounts', async () => {
+    const { service, engineCalls } = setup();
+    await service.addAwsConnector({ profile: 'default' });
+    const [aws] = (await service.listConnectors()).connectors;
+    const before = engineCalls.length;
+    await service.updateConnector(aws!.id, { name: 'prod' });
+    await service.setDefaultConnector(aws!.id);
+    await service.removeConnector(aws!.id);
+    expect(engineCalls.slice(before)).toEqual(['invalidate', 'invalidate', 'invalidate']);
+  });
+
+  it('adding an AWS connector only offers profiles that exist in ~/.aws, and checks the profile', async () => {
+    const { service, tester } = setup();
+    await expect(service.addAwsConnector({ profile: 'nope' })).rejects.toThrow(/not in ~\/\.aws/);
+    const vm = await service.addAwsConnector({ profile: 'corp-sso', region: 'eu-west-1' });
+    expect(tester.calls.at(-1)).toMatchObject({ target: 'aws', input: { profile: 'corp-sso', region: 'eu-west-1' } });
+    expect(vm.connectors[0]).toMatchObject({ kind: 'aws', status: 'connected', detail: 'SSO · eu-west-1' });
+    tester.failWith = 'token expired';
+    expect((await service.testConnector(vm.connectors[0]!.id)).connector).toMatchObject({ status: 'expired' });
+    await expect(service.addAwsConnector({ profile: 'corp-sso' })).rejects.toThrow(/already connected/);
+  });
+
+  it('the device flow adds an account; signing in again with a connector id replaces that account token', async () => {
+    const { service, gh, connectors } = setup();
+    const started = await service.startGithubConnectorSignIn(); // the fake GitHub keeps answering "pending"
+    expect(started.githubFlow).toMatchObject({ state: 'pending', userCode: 'ABCD-1234' });
+    expect((await service.cancelGithubConnectorSignIn()).githubFlow).toBeNull();
+    gh.polls = [{ status: 'ok', token: DEVICE_TOKEN }];
+    await service.startGithubConnectorSignIn();
+    await settle();
+    const done = await service.listConnectors();
+    expect(done.githubFlow).toBeNull();
+    const [account] = done.connectors;
+    expect(account).toMatchObject({ kind: 'github', login: 'octocat', source: 'device' });
+    gh.polls = [{ status: 'ok', token: 'gho_REFRESHEDTOKENREFRESHED123456' }];
+    await service.startGithubConnectorSignIn({ connectorId: account!.id });
+    await settle();
+    expect((await service.listConnectors()).connectors.filter((c) => c.kind === 'github')).toHaveLength(1);
+    expect(connectors.githubToken(account!.id)).toBe('gho_REFRESHEDTOKENREFRESHED123456');
+    await expect(service.startGithubConnectorSignIn({ connectorId: 'ghost' })).rejects.toThrow(/no longer exists/);
+  });
+
+  it('rename, default and remove; a login that is removed can be added back', async () => {
+    const { service, gh } = setup();
+    const vm = await service.addGithubConnector({ token: GH_TOKEN });
+    gh.login = 'acme-org';
+    const second = await service.addGithubConnector({ token: ORG, name: 'acme-org' });
+    const org = second.connectors.find((c) => c.name === 'acme-org')!;
+    await service.updateConnector(org.id, { name: 'Acme organisation' });
+    expect((await service.setDefaultConnector(org.id)).connectors.find((c) => c.isDefault && c.kind === 'github')?.name).toBe('Acme organisation');
+    await expect(service.updateConnector(vm.connectors[0]!.id, { name: 'Acme organisation' })).rejects.toThrow(/already a connector named/);
+    const left = await service.removeConnector(org.id);
+    expect(left.connectors.filter((c) => c.kind === 'github').map((c) => [c.name, c.isDefault])).toEqual([['octocat', true]]);
+    const loginId = left.connectors.find((c) => c.kind === 'agent')!.id;
+    expect((await service.removeConnector(loginId)).connectors.some((c) => c.kind === 'agent')).toBe(false);
+    expect((await service.addAgentConnector({ agent: 'claude-code', source: 'login' })).connectors.some((c) => c.kind === 'agent')).toBe(true);
+  });
+
+  it('remembers the choice per repo and rebuilds that repo runtime', async () => {
+    const { service, engineCalls, gh } = setup();
+    await service.addGithubConnector({ token: GH_TOKEN });
+    gh.login = 'acme-org';
+    await service.addGithubConnector({ token: ORG, name: 'acme-org' });
+    await service.addAwsConnector({ profile: 'default' });
+    await service.addAwsConnector({ profile: 'corp-sso' });
+    const all = (await service.listConnectors()).connectors;
+    const id = (name: string) => all.find((c) => c.name === name)!.id;
+    const empty = await service.getRepoConnections('acme/api');
+    expect(empty).toMatchObject({ repo: 'acme/api', saved: null, effective: { github: id('octocat'), aws: id('default') } });
+    const sel = { github: id('acme-org'), aws: id('corp-sso'), agents: [{ connectorId: 'agent-claude-code-login', where: 'local' as const }] };
+    const before = engineCalls.length;
+    expect((await service.saveRepoConnections('acme/api', sel)).saved).toEqual(sel);
+    expect(engineCalls.slice(before)).toEqual(['invalidate']);
+    expect((await service.getRepoConnections('ACME/API')).effective).toEqual({ github: sel.github, aws: sel.aws, agents: sel.agents });
+    await expect(service.saveRepoConnections('acme/api', { ...sel, github: 'ghost' })).rejects.toThrow(/GitHub account/);
+  });
+
+  it('createOptimization with connections remembers them and runs the agents where they were chosen', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const { service, connectors } = setup({ engine: { createOptimization: async (i) => (seen.push(i as never), 'opt_x') } });
+    await service.addGithubConnector({ token: GH_TOKEN });
+    await service.addAwsConnector({ profile: 'default' });
+    const key = await connectors.addAgent({ agent: 'claude-code', source: 'api-key', apiKey: ANTHROPIC_KEY });
+    await service.listConnectors();
+    const github = connectors.defaultOf('github')!.id;
+    const aws = connectors.defaultOf('aws')!.id;
+    const common = { baseRef: 'main', agents: ['codex' as const], budgetUsd: 50, timeLimitSeconds: 7200, plateauEvals: 25, repoUrl: 'https://github.com/acme/api.git' };
+    await service.createOptimization({ ...common, connections: { github, aws, agents: [{ connectorId: key.id, where: 'cloud' }] } });
+    expect(seen[0]).toMatchObject({ repoUrl: 'acme/api', agents: ['claude-code'], agentsWhere: 'cloud' }); // the connections win over `agents`
+    expect(connectors.repoConnections('acme/api').saved).toMatchObject({ github, aws, agents: [{ connectorId: key.id, where: 'cloud' }] });
+    await expect(
+      service.createOptimization({ ...common, connections: { github, aws, agents: [{ connectorId: key.id, where: 'cloud' }, { connectorId: 'agent-codex-login', where: 'local' }] } }),
+    ).rejects.toThrow();
+    // without connections: the remembered choice stays, the request decides the rest
+    await service.createOptimization({ ...common, agents: ['claude-code'], agentsWhere: 'local' });
+    expect(seen[1]).toMatchObject({ agents: ['claude-code'], agentsWhere: 'local' });
+  });
+
+  it('preflight checks the connectors remembered for the repo', async () => {
+    const { service, gh } = setup();
+    await service.addGithubConnector({ token: GH_TOKEN });
+    gh.login = 'acme-org';
+    await service.addGithubConnector({ token: ORG, name: 'acme-org' });
+    await service.addAwsConnector({ profile: 'default' });
+    await service.addAwsConnector({ profile: 'corp-sso', region: 'eu-west-1' });
+    const all = (await service.listConnectors()).connectors;
+    await service.saveRepoConnections('acme/api', {
+      github: all.find((c) => c.name === 'acme-org')!.id,
+      aws: all.find((c) => c.name === 'corp-sso')!.id,
+      agents: [{ connectorId: 'agent-claude-code-login', where: 'local' }],
+    });
+    const r = await service.preflight({ agents: ['claude-code'], agentsWhere: 'local', source: 'github', repo: 'acme/api' });
+    expect(r.find((i) => i.id === 'aws')!.detail).toBe('corp-sso · eu-west-1');
+    expect(r.find((i) => i.id === 'github')!.detail).toBe('signed in as acme-org');
+    expect((await service.preflight({ agents: ['claude-code'], agentsWhere: 'local', source: 'github' })).find((i) => i.id === 'aws')!.detail).toBe('default · us-east-1');
+  });
+
+  it('the old single-account calls still work on top of the connectors', async () => {
+    const { service, connectors } = setup();
+    await service.setSecret('githubToken', GH_TOKEN);
+    await service.setAwsProfile('corp-sso');
+    await service.saveLiveSettings({ awsRegion: 'eu-west-2' });
+    expect(await service.getSettings()).toMatchObject({ awsProfile: 'corp-sso', awsRegion: 'eu-west-2', secrets: { githubToken: true } });
+    expect(connectors.snapshot().find((c) => c.kind === 'aws')).toMatchObject({ profile: 'corp-sso', region: 'eu-west-2' });
+    await service.setAwsProfile('default'); // another profile: added, and the default moves to it
+    expect(connectors.snapshot().filter((c) => c.kind === 'aws')).toHaveLength(2);
+    expect((await service.getSettings()).awsProfile).toBe('default');
+    await service.setAwsProfile('');
+    expect((await service.getSettings()).awsProfile).toBe('corp-sso');
+  });
+});
+
 describe('preflight: what is missing', () => {
   it('a demo needs nothing', async () => {
     const r = await setup().service.preflight({ agents: ['claude-code'], agentsWhere: 'local', source: 'demo' });
@@ -445,6 +598,10 @@ describe('secrets never reach the renderer', () => {
     seen.push(await ipc.invoke(IPC.setSecret, 'openaiApiKey', OPENAI_KEY));
     seen.push(await ipc.invoke(IPC.saveLiveSettings, { awsRegion: 'eu-west-1', benchImageRef: 'ami-0fedcba9876543210' }));
     seen.push(await ipc.invoke(IPC.setAwsProfile, 'default'));
+    seen.push(await ipc.invoke(IPC.addGithubConnector, { token: GH_TOKEN, name: 'second' }));
+    seen.push(await ipc.invoke(IPC.addAgentConnector, { agent: 'claude-code', source: 'api-key', apiKey: ANTHROPIC_KEY }));
+    for (const m of [IPC.listConnectors, IPC.refreshConnectors]) seen.push(await ipc.invoke(m));
+    for (const c of (await service.listConnectors()).connectors) seen.push(await ipc.invoke(IPC.testConnector, c.id));
     for (const m of [IPC.getSettings, IPC.environments, IPC.listRepos, IPC.listTemplates, IPC.awsProfiles, IPC.detectHarnesses, IPC.redetectHarnesses, IPC.listOptimizations]) seen.push(await ipc.invoke(m));
     for (const t of ['aws', 'github', 'anthropic', 'openai']) seen.push(await ipc.invoke(IPC.testConnection, t));
     seen.push(await ipc.invoke(IPC.preflight, { agents: ['claude-code', 'codex'], agentsWhere: 'local', source: 'github' }));
