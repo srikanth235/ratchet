@@ -169,7 +169,7 @@ impl EnvDrafts {
             }
         }
         seen.reverse(); // made later = newer; the stable sort keeps that among drafts of the same millisecond
-        seen.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        seen.sort_by_key(|r| std::cmp::Reverse(r.created_at));
         seen.iter().map(draft_vm).collect()
     }
 

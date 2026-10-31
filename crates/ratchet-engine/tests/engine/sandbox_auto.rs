@@ -120,6 +120,7 @@ fn explicit_input() -> SandboxInput {
         max_instances_per_agent: 2,
         max_instance_lifetime_hours: 4.0,
         tags: None,
+        environment: None,
     }
 }
 
@@ -144,6 +145,7 @@ fn region_of_reads_environment_region_defensively_and_falls_back_to_the_setting_
     let mut cfg = parse_config(CONFIG_YAML).expect("config");
     let set = |cfg: &mut ratchet_core::config::RatchetConfig, region: Option<&str>| {
         cfg.environment = Some(ratchet_core::config::Environment {
+            scope: None,
             image: None,
             machine: None,
             region: region.map(str::to_owned),
@@ -237,6 +239,7 @@ async fn uses_the_configured_default_region_and_id_scheme_other_regions_get_thei
                     max_instances_per_agent: 1,
                     max_instance_lifetime_hours: 1.0,
                     tags: None,
+                    environment: None,
                 })
             })),
             ..Default::default()
