@@ -17,6 +17,7 @@
 pub mod bench_stats;
 pub mod cost;
 pub mod deps;
+pub mod desktop;
 pub mod engine;
 pub mod errors;
 pub mod kv;
