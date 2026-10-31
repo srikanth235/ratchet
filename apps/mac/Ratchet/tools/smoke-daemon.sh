@@ -8,10 +8,10 @@ fail=0
 note() { echo "SMOKE $*"; }
 
 # Bundle layout.
-for path in Contents/MacOS/Ratchet Contents/Helpers/ratchetd Contents/Helpers/ratchet \
+for rel in Contents/MacOS/Ratchet Contents/Helpers/ratchetd Contents/Helpers/ratchet \
             Contents/Library/LaunchAgents/com.ratchet.ratchetd.plist \
             Contents/Library/LaunchAgents/com.ratchet.ratchetd.demo.plist; do
-  if [[ -e "$app/$path" ]]; then note "ok   $path"; else note "FAIL missing $path"; fail=1; fi
+  if [[ -e "$app/$rel" ]]; then note "ok   $rel"; else note "FAIL missing $rel"; fail=1; fi
 done
 (( fail )) && exit 1
 file "$app/Contents/Helpers/ratchetd"
