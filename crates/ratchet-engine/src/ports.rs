@@ -47,4 +47,8 @@ pub struct EnginePorts {
     /// Billing truth for the cost estimate (Cost Explorer). Optional: without it `reconcile_costs` reports it is
     /// unavailable.
     pub costs: Option<Arc<dyn CostReconciler>>,
+    /// Drafts, revises and approves environments (docs/SIMPLIFIED_MODEL.md, "Dynamic environments"). Optional: without
+    /// it `draft_environment` & co. report `unavailable`. Applying an approved environment needs none of this: the engine
+    /// reads it from the protected ref at run start.
+    pub environment: Option<Arc<dyn ratchet_env::EnvironmentDrafter>>,
 }

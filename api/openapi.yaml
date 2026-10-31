@@ -547,10 +547,29 @@ paths:
         default:
           $ref: '#/components/responses/Failure'
   /v1/environment-drafts:
+    get:
+      tags:
+      - environment drafts
+      summary: Every environment draft, newest first.
+      operationId: listEnvironmentDrafts
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentDraftsVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
     post:
       tags:
-      - environment drafts (provisional)
-      summary: Ask an agent to draft the environment this goal needs (scope none, single or full, resources, checks, cost).
+      - environment drafts
+      summary: |-
+        Ask the setup agent to draft the environment this goal needs (scope none, single or full, resources, checks, cost).
+        Answers at once with the draft in status `drafting`; the agent works in the background and `environment-draft`
+        events say when it is `ready` (or `failed`).
       operationId: createEnvironmentDraft
       requestBody:
         content:
@@ -569,13 +588,25 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Something to set up first (sign in, an agent connector)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '501':
+          description: This engine has no setup agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         default:
           $ref: '#/components/responses/Failure'
   /v1/environment-drafts/{id}:
     get:
       tags:
-      - environment drafts (provisional)
-      summary: One environment draft.
+      - environment drafts
+      summary: One environment draft, with the content of its files ("View files").
       operationId: getEnvironmentDraft
       parameters:
       - name: id
@@ -594,15 +625,18 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
-          $ref: '#/components/responses/NotFound'
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         default:
           $ref: '#/components/responses/Failure'
-  /v1/environment-drafts/{id}/approval:
-    post:
+    delete:
       tags:
-      - environment drafts (provisional)
-      summary: 'Approve and lock the environment: agents change code only, never the environment. 409 unless every check passed.'
-      operationId: approveEnvironmentDraft
+      - environment drafts
+      summary: '"Back": forget a draft that was not approved. 409 once approved.'
+      operationId: discardEnvironmentDraft
       parameters:
       - name: id
         in: path
@@ -611,12 +645,52 @@ paths:
         schema:
           type: string
       responses:
+        '204':
+          description: Discarded
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/environment-drafts/{id}/approval:
+    post:
+      tags:
+      - environment drafts
+      summary: |-
+        Approve and lock the environment: the files are committed to the protected ref (`mode` `commit`) or proposed as a
+        pull request (`pr`, the default), and from then on agents change code only, never the environment. 409 unless
+        every check passed (and unless the base `ratchet.yaml` is still the one the draft was made from).
+      operationId: approveEnvironmentDraft
+      parameters:
+      - name: id
+        in: path
+        description: Draft id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        description: Optional; empty means a pull request
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveEnvironmentDraftInput'
+        required: true
+      responses:
         '200':
           description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/EnvironmentDraftVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -629,63 +703,13 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         default:
           $ref: '#/components/responses/Failure'
-  /v1/environment-drafts/{id}/files:
-    get:
-      tags:
-      - environment drafts (provisional)
-      summary: '"View files": the files the draft adds, with their content.'
-      operationId: listEnvironmentDraftFiles
-      parameters:
-      - name: id
-        in: path
-        description: Draft id
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EnvFilesVm'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        default:
-          $ref: '#/components/responses/Failure'
-  /v1/environment-drafts/{id}/pull-request:
-    post:
-      tags:
-      - environment drafts (provisional)
-      summary: '"Open as PR": add the environment files to the repo through a pull request.'
-      operationId: openEnvironmentDraftPullRequest
-      parameters:
-      - name: id
-        in: path
-        description: Draft id
-        required: true
-        schema:
-          type: string
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EnvironmentDraftVm'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        default:
-          $ref: '#/components/responses/Failure'
   /v1/environment-drafts/{id}/revisions:
     post:
       tags:
-      - environment drafts (provisional)
-      summary: '"Ask for a change" or "Use a smaller setup": the agent revises the draft. 409 once approved.'
+      - environment drafts
+      summary: |-
+        "Ask for a change" or "Use a smaller setup": the same agent session continues and the draft is re-validated and
+        re-costed. Answers with the draft in status `drafting`; 409 once approved or while it is being drafted.
       operationId: reviseEnvironmentDraft
       parameters:
       - name: id
@@ -713,6 +737,12 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: Approved or being drafted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         default:
           $ref: '#/components/responses/Failure'
   /v1/environments:
@@ -2116,16 +2146,28 @@ components:
             enum:
             - sandbox
       - type: object
-        description: 'Provisional: an environment draft changed status.'
+        description: |-
+          An environment draft changed status, or its agent reported progress (`phase` and `text`, the same strings as the
+          TypeScript `EnvironmentDraftProgress`).
         required:
         - draftId
         - status
+        - revision
         - type
         properties:
           draftId:
             type: string
+          phase:
+            $ref: '#/components/schemas/EnvironmentDraftPhase'
+          revision:
+            type: integer
+            format: int32
+            description: 0 while the first draft is being made.
+            minimum: 0
           status:
             $ref: '#/components/schemas/EnvironmentDraftStatus'
+          text:
+            type: string
           type:
             type: string
             enum:
@@ -2160,6 +2202,15 @@ components:
             enum:
             - github
       description: One message of the stream.
+    ApproveEnvironmentDraftInput:
+      type: object
+      description: '`POST /v1/environment-drafts/{id}/approval`. The body is optional.'
+      properties:
+        mode:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/EnvironmentApprovalMode'
+            description: '`pr` (default): a branch and a pull request the user merges. `commit`: straight onto the base ref.'
     AwsAuthKind:
       type: string
       description: '`profile` = a named profile with static keys or an assume-role; `sso` = a profile created by `aws configure sso`.'
@@ -2429,12 +2480,6 @@ components:
           - 'null'
           format: double
           description: Signed % improvement vs the baseline (positive = better).
-    CheckState:
-      type: string
-      enum:
-      - ok
-      - warn
-      - fail
     CompareRow:
       type: object
       description: One row of "Baseline vs best" / "Before and after".
@@ -2825,23 +2870,43 @@ components:
       required:
       - repo
       - goal
+      - agentConnector
       properties:
-        agent:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/AgentKind'
-            description: Which agent drafts it; default the first signed-in one.
+        agentConnector:
+          $ref: '#/components/schemas/AgentKind'
+          description: The user's agent connector that does the drafting (their own login, run on this machine).
+        awsProfile:
+          type:
+          - string
+          - 'null'
+          description: 'The AWS profile selected in Settings: `tofu plan` is checked against that account.'
         baseRef:
-          type: string
+          type:
+          - string
+          - 'null'
+          description: The protected ref the files are committed to / the PR targets. Default `main`.
+        configPath:
+          type:
+          - string
+          - 'null'
+          description: Path of the config inside the repo (default `ratchet.yaml`).
         goal:
           type: string
+          description: What the user wants optimized, in their words.
+        region:
+          type:
+          - string
+          - 'null'
+          description: 'Region of the sandbox (default: `environment.region` of ratchet.yaml, else the default region).'
         repo:
           type: string
-        scope:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/EnvScope'
-            description: Skip the agent's judgement of how much environment is needed.
+          description: 'The repository: `owner/name` or its GitHub URL.'
+        timeLimitSeconds:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: The run's time limit, for the cost estimate (default 2 h).
     CreateOptimizationInput:
       type: object
       description: '`POST /v1/optimizations`.'
@@ -3013,23 +3078,6 @@ components:
       enum:
       - minimize
       - maximize
-    DraftProvenance:
-      type: object
-      description: Who drafted it and what that cost ("Drafted by Claude Code from the repo and your goal, 2 min, $0.31").
-      required:
-      - agent
-      - durationS
-      - costUsd
-      properties:
-        agent:
-          $ref: '#/components/schemas/AgentKind'
-        costUsd:
-          type: number
-          format: double
-        durationS:
-          type: integer
-          format: int32
-          minimum: 0
     EffectiveConnections:
       type: object
       description: |-
@@ -3107,49 +3155,175 @@ components:
       enum:
       - sim
       - real
-    EnvCheck:
+    EnvironmentApprovalMode:
+      type: string
+      enum:
+      - commit
+      - pr
+    EnvironmentApprovalVm:
       type: object
-      description: 'One of Ratchet''s checks on a draft: isolated, results sealed, same hardware every time, full teardown.'
+      description: Where the approved files went.
+      required:
+      - mode
+      - sha
+      - files
+      - locked
+      - at
+      properties:
+        at:
+          type: integer
+          format: int64
+        branch:
+          type: string
+          description: '`pr` only.'
+        files:
+          type: array
+          items:
+            type: string
+          description: Repo paths written.
+        locked:
+          type: boolean
+          description: |-
+            Always true: the environment is locked from here (for `pr`: once the PR is merged), a candidate that touches it
+            is blocked.
+        mode:
+          $ref: '#/components/schemas/EnvironmentApprovalMode'
+        prUrl:
+          type: string
+          description: '`pr` only: "Open as PR".'
+        sha:
+          type: string
+          description: The commit holding the files (on the base ref for `commit`, on `branch` for `pr`).
+    EnvironmentCheckVm:
+      type: object
+      description: 'One of Ratchet''s checks on a draft: isolated, results sealed, same hardware every time, full teardown, ...'
       required:
       - id
       - label
-      - state
+      - ok
       - detail
       properties:
         detail:
           type: string
+          description: Why it passed or failed, one line.
         id:
           type: string
         label:
           type: string
-        state:
-          $ref: '#/components/schemas/CheckState'
-    EnvCost:
+          description: Plain words for the UI.
+        ok:
+          type: boolean
+    EnvironmentCostVm:
       type: object
       required:
-      - hourlyUsd
-      - readyMinutes
-      - runHours
-      - estimatedRunUsd
+      - usdPerHour
+      - startupMinutes
+      - estimateForRunUsd
       properties:
-        estimatedRunUsd:
+        estimateForRunUsd:
           type: number
           format: double
-        hourlyUsd:
-          type: number
-          format: double
-        readyMinutes:
+          description: '`usd_per_hour x (run hours + start-up)` for the run''s time limit.'
+        startupMinutes:
           type: integer
           format: int32
-          description: '"ready in ~6 min"'
+          description: Minutes until the environment is ready to measure.
           minimum: 0
-        runHours:
+        usdPerHour:
           type: number
           format: double
-          description: '"about $1.18 for a 2 h run"'
-    EnvFile:
+          description: Sum of the resources' hourly prices (excludes the sandbox's fixed private-network cost, ~$0.04/h).
+    EnvironmentDraftPhase:
+      type: string
+      description: |-
+        What a machine of the environment does (the `role` of the base module's `machines` map).
+        Which step an environment draft is in while its agent works.
+      enum:
+      - reading
+      - drafting
+      - validating
+      - done
+      - failed
+    EnvironmentDraftStatus:
+      type: string
+      enum:
+      - drafting
+      - ready
+      - failed
+      - approved
+    EnvironmentDraftVm:
       type: object
-      description: A file the draft would add (Terraform, Dockerfile, seed script). The content is for "View files".
+      description: A draft and where it stands in the draft / revise / approve loop.
+      required:
+      - id
+      - repo
+      - baseRef
+      - goal
+      - region
+      - status
+      - revision
+      - draft
+      - messages
+      - createdAt
+      - updatedAt
+      properties:
+        approval:
+          $ref: '#/components/schemas/EnvironmentApprovalVm'
+          description: Set once approved.
+        awsProfile:
+          type: string
+          description: The AWS profile `tofu plan` is checked against.
+        baseRef:
+          type: string
+        createdAt:
+          type: integer
+          format: int64
+        draft:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/EnvironmentProposalVm'
+            description: '`null` until the first draft is ready (and when it failed).'
+        error:
+          type: string
+          description: Why drafting (or the last revision) failed.
+        goal:
+          type: string
+          description: The goal the user typed ("Make checkout p95 faster").
+        id:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentMessageVm'
+          description: The user's change requests and the agent's replies.
+        region:
+          type: string
+        repo:
+          type: string
+        revision:
+          type: integer
+          format: int32
+          description: 1 for the first draft, +1 for every revision; 0 while the first draft is being made.
+          minimum: 0
+        status:
+          $ref: '#/components/schemas/EnvironmentDraftStatus'
+        updatedAt:
+          type: integer
+          format: int64
+    EnvironmentDraftsVm:
+      type: object
+      description: '`GET /v1/environment-drafts`.'
+      required:
+      - drafts
+      properties:
+        drafts:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentDraftVm'
+          description: Newest first.
+    EnvironmentFileVm:
+      type: object
+      description: 'A file of the draft: `ratchet.yaml`, or a file under `infra/ratchet/` (OpenTofu, Dockerfile, seed script).'
       required:
       - path
       - content
@@ -3158,136 +3332,28 @@ components:
           type: string
         path:
           type: string
-    EnvFilesVm:
-      type: object
-      required:
-      - files
-      properties:
-        files:
-          type: array
-          items:
-            $ref: '#/components/schemas/EnvFile'
-    EnvResource:
-      type: object
-      description: One thing the environment creates (a row of "What gets created").
-      required:
-      - id
-      - name
-      - description
-      - machine
-      - hourlyUsd
-      properties:
-        description:
-          type: string
-          description: '"shop-api in the repo''s container".'
-        hourlyUsd:
-          type: number
-          format: double
-        id:
-          type: string
-        machine:
-          type: string
-          description: Instance type, "c7i.2xlarge".
-        name:
-          type: string
-          description: '"API", "Postgres 16".'
-    EnvScope:
-      type: string
-      description: |-
-        How much environment the task needs. `none`: the evaluator runs on the host as is; `single`: one machine;
-        `full`: several services (API + database + cache + load generator).
-      enum:
-      - none
-      - single
-      - full
-    EnvironmentDraftStatus:
+          description: Repo-relative POSIX path.
+    EnvironmentMessageFrom:
       type: string
       enum:
-      - drafting
-      - ready
-      - revising
-      - approved
-      - failed
-    EnvironmentDraftVm:
+      - user
+      - agent
+    EnvironmentMessageVm:
       type: object
+      description: One turn of the revise loop.
       required:
-      - id
-      - status
-      - repo
-      - baseRef
-      - goal
-      - scope
-      - summary
-      - rationale
-      - provenance
-      - resources
-      - filePaths
-      - cost
-      - checks
-      - checksPassed
-      - revision
-      - approvedAt
-      - prUrl
-      - createdAt
+      - from
+      - text
+      - at
       properties:
-        approvedAt:
-          type:
-          - integer
-          - 'null'
-          format: int64
-          description: Set once approved (the environment is locked from then on).
-        baseRef:
-          type: string
-        checks:
-          type: array
-          items:
-            $ref: '#/components/schemas/EnvCheck'
-        checksPassed:
-          type: boolean
-          description: 'All checks passed ("Passed Ratchet''s checks"): required to approve.'
-        cost:
-          $ref: '#/components/schemas/EnvCost'
-        createdAt:
+        at:
           type: integer
           format: int64
-        filePaths:
-          type: array
-          items:
-            type: string
-          description: File paths only; read them with `GET /v1/environment-drafts/{id}/files`.
-        goal:
+          description: Epoch ms.
+        from:
+          $ref: '#/components/schemas/EnvironmentMessageFrom'
+        text:
           type: string
-          description: The goal the user typed ("Make checkout p95 faster").
-        id:
-          type: string
-        prUrl:
-          type:
-          - string
-          - 'null'
-          description: '"Open as PR": the pull request that adds the environment files to the repo.'
-        provenance:
-          $ref: '#/components/schemas/DraftProvenance'
-        rationale:
-          type: string
-          description: 'The note under it: why this much environment, and the "Use a smaller setup" hint.'
-        repo:
-          type: string
-        resources:
-          type: array
-          items:
-            $ref: '#/components/schemas/EnvResource'
-        revision:
-          type: integer
-          format: int32
-          description: Starts at 1, +1 per revision.
-          minimum: 0
-        scope:
-          $ref: '#/components/schemas/EnvScope'
-        status:
-          $ref: '#/components/schemas/EnvironmentDraftStatus'
-        summary:
-          type: string
-          description: 'The serif quote: "This task needs the full stack: the API, Postgres with seeded orders, ...".'
     EnvironmentPhase:
       type: string
       description: 'Phase of an environment (sandbox) as seen from outside. `none`: the ledger has it, nothing reported a phase.'
@@ -3299,6 +3365,96 @@ components:
       - destroying
       - destroyed
       - failed
+    EnvironmentProposalVm:
+      type: object
+      description: What the setup agent proposed, as "New optimization > Environment" shows it.
+      required:
+      - scope
+      - reason
+      - resources
+      - files
+      - checks
+      - cost
+      - agent
+      - durationS
+      - usdSpent
+      properties:
+        agent:
+          $ref: '#/components/schemas/AgentKind'
+          description: Which connector drafted it.
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentCheckVm'
+        cost:
+          $ref: '#/components/schemas/EnvironmentCostVm'
+        durationS:
+          type: integer
+          format: int64
+          description: How long drafting took, seconds (all revisions).
+          minimum: 0
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentFileVm'
+          description: 'What would be committed: `ratchet.yaml` plus the files under `infra/ratchet/`, with their content ("View files").'
+        reason:
+          type: string
+          description: Why this scope, in a sentence or two.
+        resources:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentResourceVm'
+        scope:
+          $ref: '#/components/schemas/EnvironmentScope'
+        usdSpent:
+          type: number
+          format: double
+          description: What the setup agent cost in model tokens, USD (all revisions).
+    EnvironmentResourceVm:
+      type: object
+      description: One row of "What gets created".
+      required:
+      - name
+      - role
+      - machine
+      - detail
+      - usdPerHour
+      properties:
+        detail:
+          type: string
+          description: 'One plain line: "shop-api in the repo''s container".'
+        machine:
+          type: string
+          description: Instance type, "c7i.2xlarge".
+        name:
+          type: string
+          description: '"API", "Postgres 16", "Load generator".'
+        role:
+          $ref: '#/components/schemas/EnvironmentRole'
+        usdPerHour:
+          type: number
+          format: double
+    EnvironmentRole:
+      type: string
+      enum:
+      - app
+      - database
+      - cache
+      - load
+      - evaluator
+      - other
+    EnvironmentScope:
+      type: string
+      description: |-
+        How much infrastructure an optimization's environment needs (`environment.scope`, docs/SIMPLIFIED_MODEL.md,
+        "Dynamic environments"). `none`: pure code / tests, the evaluator's container is all there is; `single`: one
+        machine on pinned hardware; `full`: a stack (app + databases + seeded data + a load generator) written as
+        OpenTofu under `infra/ratchet/` on top of the base module Ratchet ships.
+      enum:
+      - none
+      - single
+      - full
     EnvironmentSummary:
       type: object
       description: '`environment:` of ratchet.yaml (all optional). `image` null = the evaluator runs on the host.'
@@ -4672,15 +4828,11 @@ components:
       type: object
       description: '`POST /v1/environment-drafts/{id}/revisions`: "Ask for a change", or "Use a smaller setup".'
       required:
-      - request
+      - message
       properties:
-        request:
+        message:
           type: string
-          description: 'Plain words: "use RDS instead of a Postgres container".'
-        scope:
-          oneOf:
-          - type: 'null'
-          - $ref: '#/components/schemas/EnvScope'
+          description: 'Plain words: "use a smaller setup", "use RDS instead of a Postgres container".'
     SandboxPhase:
       type: string
       description: |-
@@ -5311,5 +5463,5 @@ tags:
   description: 'Overview: spent, value locked in, return, the value staircase, needs you, the table.'
 - name: connectors
   description: Saved GitHub accounts, AWS profiles and agent credentials, and the choice remembered per repo.
-- name: environment drafts (provisional)
-  description: 'PROVISIONAL. Dynamic environment drafts: draft, revise, approve.'
+- name: environment drafts
+  description: 'Dynamic environments: a setup agent drafts the environment a goal needs, the user asks for changes and approves, the files are committed and locked.'

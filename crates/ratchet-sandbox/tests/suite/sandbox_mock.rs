@@ -18,6 +18,7 @@ fn input() -> SandboxInput {
         max_instances_per_agent: 4,
         max_instance_lifetime_hours: 2.0,
         tags: None,
+        environment: None,
     }
 }
 

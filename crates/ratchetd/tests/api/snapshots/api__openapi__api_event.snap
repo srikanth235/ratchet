@@ -1,5 +1,6 @@
 ---
 source: crates/ratchetd/tests/api/openapi.rs
+assertion_line: 51
 expression: "d[\"components\"][\"schemas\"][\"ApiEvent\"]"
 ---
 {
@@ -278,18 +279,31 @@ expression: "d[\"components\"][\"schemas\"][\"ApiEvent\"]"
     },
     {
       "type": "object",
-      "description": "Provisional: an environment draft changed status.",
+      "description": "An environment draft changed status, or its agent reported progress (`phase` and `text`, the same strings as the\nTypeScript `EnvironmentDraftProgress`).",
       "required": [
         "draftId",
         "status",
+        "revision",
         "type"
       ],
       "properties": {
         "draftId": {
           "type": "string"
         },
+        "phase": {
+          "$ref": "#/components/schemas/EnvironmentDraftPhase"
+        },
+        "revision": {
+          "type": "integer",
+          "format": "int32",
+          "description": "0 while the first draft is being made.",
+          "minimum": 0
+        },
         "status": {
           "$ref": "#/components/schemas/EnvironmentDraftStatus"
+        },
+        "text": {
+          "type": "string"
         },
         "type": {
           "type": "string",

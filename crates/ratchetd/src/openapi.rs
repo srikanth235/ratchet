@@ -29,7 +29,7 @@ use crate::api::API_VERSION;
     (name = "environments", description = "Sandboxes: what is running, end now, receipts."),
     (name = "overview", description = "Overview: spent, value locked in, return, the value staircase, needs you, the table."),
     (name = "connectors", description = "Saved GitHub accounts, AWS profiles and agent credentials, and the choice remembered per repo."),
-    (name = "environment drafts (provisional)", description = "PROVISIONAL. Dynamic environment drafts: draft, revise, approve."),
+    (name = "environment drafts", description = "Dynamic environments: a setup agent drafts the environment a goal needs, the user asks for changes and approves, the files are committed and locked."),
 ))]
 struct ApiDoc;
 

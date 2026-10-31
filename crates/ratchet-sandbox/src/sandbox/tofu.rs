@@ -15,14 +15,20 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use tokio::sync::Mutex as AsyncMutex;
 
+use super::environment::{
+    EnvironmentVarsOptions, assert_drafted_environment, environment_vars, is_drafted,
+    materialize_custom_environment, materialize_drafted_environment, parse_environment_outputs,
+};
 use super::infra_override::{ContractCheckOptions, assert_sandbox_contract};
 use super::process::{ProcessResult, ProcessRunner, ProcessSpec, TokioProcessRunner};
 use crate::error::{Error, Result};
 use crate::util::{assert_valid_sandbox_id, js_number};
 use ratchet_core::ports::{
-    AwsIdentityRef, PlanAction, PlanChange, PortError, PortResult, SandboxInput, SandboxLimits,
-    SandboxNetwork, SandboxOutputs, SandboxPlan, SandboxProvider,
+    AwsIdentityRef, PlanAction, PlanChange, PortError, PortResult, SandboxEnvironment,
+    SandboxEnvironmentKind, SandboxEnvironmentOutputs, SandboxInput, SandboxLimits, SandboxNetwork,
+    SandboxOutputs, SandboxPlan, SandboxProvider,
 };
+use ratchet_env::{EnvironmentFile, ValidateEnvironmentInput, validate_environment};
 
 /// The TypeScript name of [`SandboxOutputs`] in `packages/aws`: core's outputs type is the full AWS shape.
 pub type AwsSandboxOutputs = SandboxOutputs;
@@ -142,6 +148,23 @@ pub struct TofuSandboxProviderOptions {
     /// are read, failing with a `ContractViolationError` that lists every problem. Off (`None`) for the module that
     /// ships with the app (its own tests pin the contract); ON for a custom module (`infra:` in ratchet.yaml).
     pub validate_contract: Option<ContractCheckOptions>,
+    /// Directory of the base module drafted environments are built on (`infra/modules/sandbox`). Default:
+    /// `../modules/sandbox` next to `module_dir` (see [`default_base_module_dir`]).
+    pub base_module_dir: Option<PathBuf>,
+    /// Bench image for the machines of a drafted environment: an explicit AMI id, or (else) the app version to look it
+    /// up by tag.
+    pub machine_image_id: Option<String>,
+    pub image_version: Option<String>,
+}
+
+/// `<infra>/modules/sandbox` for a standard module directory `<infra>/aws`: the layout of the `infra/` directory the app
+/// (and the daemon) ships.
+pub fn default_base_module_dir(module_dir: &Path) -> PathBuf {
+    module_dir
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("modules")
+        .join("sandbox")
 }
 
 impl TofuSandboxProviderOptions {
@@ -159,7 +182,25 @@ impl TofuSandboxProviderOptions {
             runner: Arc::new(TokioProcessRunner),
             env: BTreeMap::new(),
             validate_contract: None,
+            base_module_dir: None,
+            machine_image_id: None,
+            image_version: None,
         }
+    }
+
+    pub fn base_module_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.base_module_dir = Some(dir.into());
+        self
+    }
+
+    pub fn machine_image_id(mut self, id: impl Into<String>) -> Self {
+        self.machine_image_id = Some(id.into());
+        self
+    }
+
+    pub fn image_version(mut self, v: impl Into<String>) -> Self {
+        self.image_version = Some(v.into());
+        self
     }
 
     pub fn runner(mut self, runner: Arc<dyn ProcessRunner>) -> Self {
@@ -186,6 +227,41 @@ struct Ctx {
     vars_path: PathBuf,
     state_path: PathBuf,
     plan_path: PathBuf,
+    /// Where tofu runs for the sandbox's own stage: `infra/aws`, or the materialized custom module.
+    module_cwd: PathBuf,
+    /// The module is a custom one (`infra:`): its outputs are validated against the contract.
+    custom: bool,
+    env: Option<SandboxEnvironment>,
+    sandbox_id: String,
+    tags: Option<BTreeMap<String, String>>,
+}
+
+/// Subdirectories of `<state_root>/<sandbox_id>` that hold a materialized environment.
+const CUSTOM_DIR: &str = "custom-module";
+const ENV_DIR: &str = "env";
+
+struct EnvPaths {
+    root: PathBuf,
+    state: PathBuf,
+    vars: PathBuf,
+    meta: PathBuf,
+    data_dir: PathBuf,
+    plan: PathBuf,
+}
+
+fn env_paths(dir: &Path) -> EnvPaths {
+    EnvPaths {
+        root: dir.join(ENV_DIR),
+        state: dir.join("env.tfstate"),
+        vars: dir.join("env.tfvars.json"),
+        meta: dir.join("env-meta.json"),
+        data_dir: dir.join(".terraform-data-env"),
+        plan: dir.join("env.tfplan"),
+    }
+}
+
+async fn exists(p: &Path) -> bool {
+    tokio::fs::metadata(p).await.is_ok()
 }
 
 fn s(p: &Path) -> String {
@@ -236,6 +312,24 @@ impl TofuSandboxProvider {
         let dir = self.work_dir(&input.sandbox_id)?;
         tokio::fs::create_dir_all(&dir).await?;
         let vars_path = dir.join("vars.tfvars.json");
+        let env = input.environment.clone();
+        let mut module_cwd = self.opts.module_dir.clone();
+        let mut custom = false;
+        match &env {
+            Some(e) if e.kind == SandboxEnvironmentKind::Custom => {
+                // A custom module replaces the standard one; it is written where only this sandbox reads it, and its
+                // outputs are checked.
+                module_cwd = materialize_custom_environment(e, &dir.join(CUSTOM_DIR)).await?;
+                custom = true;
+            }
+            None if exists(&dir.join(CUSTOM_DIR)).await => {
+                // destroy / outputs of a sandbox that was applied with one
+                module_cwd = dir.join(CUSTOM_DIR);
+                custom = true;
+            }
+            Some(e) => assert_drafted_environment(e, None)?, // refuse before anything is created
+            None => {}
+        }
         // Contract inputs only; no secrets ever reach OpenTofu (contract invariant 11).
         let vars = json!({
             "sandbox_id": input.sandbox_id,
@@ -252,7 +346,208 @@ impl TofuSandboxProvider {
             plan_path: dir.join("plan.tfplan"),
             vars_path,
             dir,
+            module_cwd,
+            custom,
+            env,
+            sandbox_id: input.sandbox_id.clone(),
+            tags: input.tags.clone(),
         })
+    }
+
+    // ---- the drafted environment stage (docs/SIMPLIFIED_MODEL.md, "Dynamic environments") ---------------------------
+
+    fn base_module_dir(&self) -> PathBuf {
+        self.opts
+            .base_module_dir
+            .clone()
+            .unwrap_or_else(|| default_base_module_dir(&self.opts.module_dir))
+    }
+
+    async fn read_env_meta(&self, dir: &Path) -> Option<SandboxEnvironment> {
+        let text = tokio::fs::read_to_string(env_paths(dir).meta).await.ok()?;
+        serde_json::from_str(&text).ok()
+    }
+
+    async fn env_tofu(
+        &self,
+        ctx: &Ctx,
+        args: Vec<String>,
+        ok_codes: &[i32],
+    ) -> Result<ProcessResult> {
+        let p = env_paths(&ctx.dir);
+        let mut env = self.base_env();
+        env.insert("TF_DATA_DIR".into(), s(&p.data_dir));
+        self.run(&p.root, env, args, ok_codes).await
+    }
+
+    /// Materialize the drafted module next to the sandbox's state, write its variables (when the sandbox outputs are
+    /// known) and initialise it.
+    async fn prepare_environment(
+        &self,
+        ctx: &Ctx,
+        env: &SandboxEnvironment,
+        out: Option<&SandboxOutputs>,
+    ) -> Result<()> {
+        let p = env_paths(&ctx.dir);
+        materialize_drafted_environment(env, &self.base_module_dir(), &p.root).await?;
+        tokio::fs::write(&p.meta, serde_json::to_string_pretty(env)?).await?;
+        if let Some(out) = out {
+            let vars = environment_vars(
+                out,
+                env,
+                &EnvironmentVarsOptions {
+                    sandbox_id: ctx.sandbox_id.clone(),
+                    tags: ctx.tags.clone(),
+                    machine_image_id: self.opts.machine_image_id.clone(),
+                    image_version: self.opts.image_version.clone(),
+                },
+            );
+            tokio::fs::write(&p.vars, serde_json::to_string_pretty(&vars)?).await?;
+        }
+        self.env_tofu(
+            ctx,
+            args(&["init", COMMON[0], COMMON[1], "-backend=false"], vec![]),
+            &[0],
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn apply_environment(
+        &self,
+        ctx: &Ctx,
+        env: &SandboxEnvironment,
+        out: &SandboxOutputs,
+    ) -> Result<SandboxEnvironmentOutputs> {
+        let p = env_paths(&ctx.dir);
+        self.prepare_environment(ctx, env, Some(out)).await?;
+        self.env_tofu(
+            ctx,
+            args(
+                &["plan", COMMON[0], COMMON[1], "-detailed-exitcode"],
+                vec![
+                    format!("-out={}", s(&p.plan)),
+                    format!("-state={}", s(&p.state)),
+                    format!("-var-file={}", s(&p.vars)),
+                ],
+            ),
+            &[0, 2],
+        )
+        .await?;
+        self.env_tofu(
+            ctx,
+            args(
+                &["apply", COMMON[0], COMMON[1]],
+                vec![format!("-state={}", s(&p.state)), s(&p.plan)],
+            ),
+            &[0],
+        )
+        .await?;
+        let _ = tokio::fs::remove_file(&p.plan).await;
+        self.read_environment_outputs(ctx, env).await
+    }
+
+    async fn read_environment_outputs(
+        &self,
+        ctx: &Ctx,
+        env: &SandboxEnvironment,
+    ) -> Result<SandboxEnvironmentOutputs> {
+        let p = env_paths(&ctx.dir);
+        let outputs = self
+            .env_tofu(
+                ctx,
+                args(
+                    &["output", "-json", "-no-color"],
+                    vec![format!("-state={}", s(&p.state))],
+                ),
+                &[0],
+            )
+            .await?;
+        let list = self
+            .env_tofu(
+                ctx,
+                args(&["state", "list"], vec![format!("-state={}", s(&p.state))]),
+                &[0],
+            )
+            .await?;
+        parse_environment_outputs(env, &outputs.stdout, &list.stdout)
+    }
+
+    async fn destroy_environment(&self, ctx: &Ctx) -> Result<()> {
+        let p = env_paths(&ctx.dir);
+        // Destroy with the files that were applied (the stored copy), whatever the caller passes now.
+        let env = match self.read_env_meta(&ctx.dir).await {
+            Some(e) => e,
+            None => ctx.env.clone().ok_or_else(|| {
+                Error::other(
+                    "the environment stage has state but no record of its files; cannot destroy it safely",
+                )
+            })?,
+        };
+        if !exists(&p.vars).await {
+            return Err(Error::other(
+                "the environment stage has state but no variables file; re-apply the sandbox to converge it",
+            ));
+        }
+        self.prepare_environment(ctx, &env, None).await?;
+        self.env_tofu(
+            ctx,
+            args(
+                &["destroy", COMMON[0], COMMON[1], "-auto-approve"],
+                vec![
+                    format!("-state={}", s(&p.state)),
+                    format!("-var-file={}", s(&p.vars)),
+                ],
+            ),
+            &[0],
+        )
+        .await?;
+        let _ = tokio::fs::remove_file(&p.state).await;
+        let _ = tokio::fs::remove_file(format!("{}.backup", s(&p.state))).await;
+        Ok(())
+    }
+
+    /// `plan` for a drafted environment: the standard sandbox's plan plus the environment's machines, listed from the
+    /// draft (they cannot be planned for real without the sandbox's network; the apply plans the stage with the real
+    /// outputs).
+    fn with_environment_plan(env: &SandboxEnvironment, base: SandboxPlan) -> SandboxPlan {
+        let mut input = ValidateEnvironmentInput::new(
+            env.scope,
+            env.files
+                .iter()
+                .map(|f| {
+                    EnvironmentFile::new(format!("{}/{}", env.path, f.path), f.content.clone())
+                })
+                .collect(),
+        );
+        input.module_only = true;
+        let v = validate_environment(&input);
+        let mut changes = base.changes;
+        for m in &v.machines {
+            let key = m.key.clone().unwrap_or_else(|| m.name.clone());
+            changes.push(PlanChange {
+                action: PlanAction::Create,
+                address: format!("module.sandbox.aws_instance.machine[\"{key}\"]"),
+                resource_type: "aws_instance".into(),
+            });
+            if m.data_volume_gb.unwrap_or(0.0) > 0.0 {
+                changes.push(PlanChange {
+                    action: PlanAction::Create,
+                    address: format!("module.sandbox.aws_ebs_volume.data[\"{key}\"]"),
+                    resource_type: "aws_ebs_volume".into(),
+                });
+            }
+        }
+        let n = |a: PlanAction| changes.iter().filter(|c| c.action == a).count();
+        let machines = v.machines.len();
+        let summary = format!(
+            "Plan: {} to add, {} to change, {} to destroy (includes the environment: {machines} machine{}).",
+            n(PlanAction::Create) + n(PlanAction::Replace),
+            n(PlanAction::Update),
+            n(PlanAction::Delete) + n(PlanAction::Replace),
+            if machines == 1 { "" } else { "s" }
+        );
+        SandboxPlan { changes, summary }
     }
 
     async fn init(&self, ctx: &Ctx) -> Result<()> {
@@ -301,7 +596,13 @@ impl TofuSandboxProvider {
                 &[0],
             )
             .await?;
-        if let Some(v) = &self.opts.validate_contract {
+        // A custom module is always checked (validate_contract defaults to the strict contract for it).
+        let validate = if ctx.custom {
+            Some(self.opts.validate_contract.unwrap_or_default())
+        } else {
+            self.opts.validate_contract
+        };
+        if let Some(v) = &validate {
             let non_empty = serde_json::from_str::<Value>(&res.stdout)?
                 .as_object()
                 .is_some_and(|o| !o.is_empty());
@@ -312,16 +613,31 @@ impl TofuSandboxProvider {
         parse_tofu_outputs(&res.stdout, Some(&ctx.input_region))
     }
 
-    async fn tofu(&self, ctx: &Ctx, args: Vec<String>, ok_codes: &[i32]) -> Result<ProcessResult> {
+    fn base_env(&self) -> BTreeMap<String, String> {
         let mut env = self.opts.env.clone();
-        env.insert("TF_DATA_DIR".into(), s(&ctx.dir.join(".terraform-data")));
         env.insert("TF_IN_AUTOMATION".into(), "1".into());
         env.insert("TF_INPUT".into(), "0".into());
         env.insert("CHECKPOINT_DISABLE".into(), "1".into());
+        env
+    }
+
+    async fn tofu(&self, ctx: &Ctx, args: Vec<String>, ok_codes: &[i32]) -> Result<ProcessResult> {
+        let mut env = self.base_env();
+        env.insert("TF_DATA_DIR".into(), s(&ctx.dir.join(".terraform-data")));
+        self.run(&ctx.module_cwd, env, args, ok_codes).await
+    }
+
+    async fn run(
+        &self,
+        cwd: &Path,
+        env: BTreeMap<String, String>,
+        args: Vec<String>,
+        ok_codes: &[i32],
+    ) -> Result<ProcessResult> {
         let spec = ProcessSpec {
             command: s(&self.opts.tofu_binary),
             args: args.clone(),
-            cwd: self.opts.module_dir.clone(),
+            cwd: cwd.to_path_buf(),
             env,
         };
         tracing::debug!(subcommand = %args.first().map_or("", String::as_str), "tofu");
@@ -339,7 +655,11 @@ impl SandboxProvider for TofuSandboxProvider {
         let _g = self.lock(&input.sandbox_id).await?;
         let ctx = self.prepare(input).await?;
         self.init(&ctx).await?;
-        Ok(self.make_plan(&ctx).await?)
+        let base = self.make_plan(&ctx).await?;
+        Ok(match &ctx.env {
+            Some(e) if is_drafted(e) => Self::with_environment_plan(e, base),
+            _ => base,
+        })
     }
 
     async fn apply(&self, input: &SandboxInput) -> PortResult<SandboxOutputs> {
@@ -358,9 +678,13 @@ impl SandboxProvider for TofuSandboxProvider {
         )
         .await?;
         let _ = tokio::fs::remove_file(&ctx.plan_path).await;
-        self.read_outputs(&ctx).await?.ok_or_else(|| {
+        let mut out = self.read_outputs(&ctx).await?.ok_or_else(|| {
             PortError::failed("tofu apply succeeded but produced no contract outputs")
-        })
+        })?;
+        if let Some(env) = ctx.env.as_ref().filter(|e| is_drafted(e)) {
+            out.environment = Some(self.apply_environment(&ctx, env, &out).await?);
+        }
+        Ok(out)
     }
 
     async fn destroy(&self, input: &SandboxInput) -> PortResult<()> {
@@ -376,6 +700,10 @@ impl SandboxProvider for TofuSandboxProvider {
             ));
         }
         let ctx = self.prepare(input).await?;
+        // The drafted stage goes first: it lives inside the sandbox's network and identities.
+        if exists(&env_paths(&ctx.dir).state).await {
+            self.destroy_environment(&ctx).await?;
+        }
         self.init(&ctx).await?;
         self.tofu(
             &ctx,
@@ -409,15 +737,31 @@ impl SandboxProvider for TofuSandboxProvider {
                 .unwrap_or_default(),
             Err(_) => String::new(),
         };
-        self.read_outputs(&Ctx {
+        let custom = exists(&dir.join(CUSTOM_DIR)).await;
+        let ctx = Ctx {
             input_region: region,
+            module_cwd: if custom {
+                dir.join(CUSTOM_DIR)
+            } else {
+                self.opts.module_dir.clone()
+            },
+            custom,
+            env: None,
+            sandbox_id: sandbox_id.to_owned(),
+            tags: None,
             dir,
             vars_path,
             state_path,
             plan_path: PathBuf::new(),
-        })
-        .await
-        .map_err(PortError::from)
+        };
+        let mut out = self.read_outputs(&ctx).await?;
+        if let Some(o) = out.as_mut()
+            && exists(&env_paths(&ctx.dir).state).await
+            && let Some(meta) = self.read_env_meta(&ctx.dir).await
+        {
+            o.environment = Some(self.read_environment_outputs(&ctx, &meta).await?);
+        }
+        Ok(out)
     }
 }
 
@@ -581,5 +925,6 @@ pub fn parse_tofu_outputs(json: &str, region: Option<&str>) -> Result<Option<San
             max_instances_per_agent: max_instances as u32,
             max_instance_lifetime_hours: max_hours,
         },
+        environment: None,
     }))
 }

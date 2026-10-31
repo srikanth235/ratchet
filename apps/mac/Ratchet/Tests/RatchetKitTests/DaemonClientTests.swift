@@ -330,19 +330,20 @@ struct DaemonClientTests {
     @Test(.timeLimit(.minutes(1))) func aDraftIsAwaitedWhileTheAgentWritesIt() async throws {
         let daemon = daemonWithData()
         let drafting = Fixtures.draft.replacingOccurrences(of: "\"status\":\"ready\"", with: "\"status\":\"drafting\"")
+            .replacingOccurrences(of: #"\"draft\":{"#, with: #"\"draft\":null,\"was\":{"#)
         daemon.route("POST /v1/environment-drafts", 201, drafting)
-        daemon.route("GET /v1/environment-drafts/envd_1", 200, Fixtures.draft)
-        daemon.route("POST /v1/environment-drafts/envd_1/approval", 200, Fixtures.draft.replacingOccurrences(of: "\"status\":\"ready\"", with: "\"status\":\"approved\""))
+        daemon.route("GET /v1/environment-drafts/env-0001", 200, Fixtures.draft)
+        daemon.route("POST /v1/environment-drafts/env-0001/approval", 200, Fixtures.draft.replacingOccurrences(of: "\"status\":\"ready\"", with: "\"status\":\"approved\""))
         let client = make(daemon)
         let draft = try await client.createDraft(DraftRequest(repoID: "acme/shop-api", goal: "Make checkout p95 faster"))
         #expect(draft.state == .draft && draft.resources.count == 4)
-        #expect(daemon.count("GET /v1/environment-drafts/envd_1") == 1)
-        #expect(try await client.approveDraft(id: "envd_1").state == .approved)
+        #expect(daemon.count("GET /v1/environment-drafts/env-0001") == 1)
+        #expect(try await client.approveDraft(id: "env-0001").state == .approved)
     }
 
     @Test func aFailedDraftSaysWhy() async {
         let daemon = daemonWithData()
-        let failed = Fixtures.draft.replacingOccurrences(of: "\"status\":\"ready\"", with: "\"status\":\"failed\"")
+        let failed = Fixtures.draft.replacingOccurrences(of: "\"status\":\"ready\"", with: "\"status\":\"failed\",\"error\":\"claude is not logged in\"")
         daemon.route("POST /v1/environment-drafts", 201, failed)
         await #expect(throws: RatchetClientError.self) {
             _ = try await make(daemon).createDraft(DraftRequest(repoID: "acme/shop-api", goal: "x"))

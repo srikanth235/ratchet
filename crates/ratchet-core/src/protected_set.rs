@@ -7,7 +7,8 @@
 //!  - `ratchet.yaml` itself (the config path in use);
 //!  - the evaluator's files: the template's (`evaluator.template`), plus every `bench/` or `eval/` directory that
 //!    `evaluator.run` references;
-//!  - the environment: `environment.image` (and `.devcontainer/` when the image lives there) and the `infra` module;
+//!  - the environment: `environment.image` (and `.devcontainer/` when the image lives there), the `infra` module, and the
+//!    approved drafted environment (`environment.scope` set: everything under `infra/ratchet/`);
 //!  - lockfiles and install config ([`INSTALL_FILES`]): the bench has no network, so dependencies are those of
 //!    the base ref;
 //!  - the user's own `protected:` list, which only ADDS to the above.
@@ -66,6 +67,8 @@ pub struct ProtectedConfigInput {
     pub evaluator_run: Option<String>,
     pub evaluator_template: Option<String>,
     pub environment_image: Option<String>,
+    /// `environment.scope`: once it is set the approved drafted environment (`infra/ratchet/**`) is locked.
+    pub environment_scope: Option<String>,
     pub infra: Option<String>,
 }
 
@@ -76,6 +79,10 @@ impl From<&RatchetConfig> for ProtectedConfigInput {
             evaluator_run: Some(c.evaluator.run.clone()),
             evaluator_template: c.evaluator.template.clone(),
             environment_image: c.environment.as_ref().and_then(|e| e.image.clone()),
+            environment_scope: c
+                .environment
+                .as_ref()
+                .and_then(|e| e.scope.map(|s| s.to_string())),
             infra: c.infra.clone(),
         }
     }
@@ -280,6 +287,19 @@ pub fn effective_protected(
             &normalize_repo_path(infra),
             ProtectedSource::Environment,
             "the custom infrastructure module",
+        );
+    }
+    // An approved, drafted environment (docs/SIMPLIFIED_MODEL.md "Dynamic environments") is locked: agents change
+    // code only.
+    if config
+        .environment_scope
+        .as_deref()
+        .is_some_and(|s| !s.is_empty())
+    {
+        add(
+            &format!("{}/**", crate::config::DEFAULT_ENVIRONMENT_INFRA_DIR),
+            ProtectedSource::Environment,
+            "the approved environment",
         );
     }
 

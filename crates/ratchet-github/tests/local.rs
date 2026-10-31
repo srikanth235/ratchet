@@ -312,6 +312,7 @@ fn input(branch: &str, base: &str, files: Vec<CommitFile>) -> CommitFilesInput {
         branch: s(branch),
         message: s("m"),
         files,
+        update: false,
     }
 }
 
@@ -325,6 +326,7 @@ async fn commit_files_creates_a_branch_with_one_commit_on_the_base_that_adds_and
             branch: s("ratchet/template-x"),
             message: s("Add template\n\nbody"),
             files: template_files(),
+            update: false,
         })
         .await
         .unwrap()

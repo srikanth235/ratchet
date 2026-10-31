@@ -444,6 +444,7 @@ async fn commit_files_pushes_the_branch_and_opens_the_pr_from_it_no_squash_head_
             branch: s("ratchet/template-gh"),
             message: s("Add template"),
             files: template_files(),
+            update: false,
         })
         .await
         .unwrap()
@@ -508,6 +509,7 @@ async fn commit_files_refuses_a_branch_that_already_exists_on_the_remote() {
             branch: s("ratchet/template-gh"),
             message: s("Add template"),
             files: template_files(),
+            update: false,
         })
         .await
         .unwrap();
@@ -519,6 +521,7 @@ async fn commit_files_refuses_a_branch_that_already_exists_on_the_remote() {
             branch: s("ratchet/template-gh"),
             message: s("again"),
             files: template_files(),
+            update: false,
         })
         .await;
     assert!(again.is_err());

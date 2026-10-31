@@ -5,8 +5,8 @@
 //! the daemon no longer has it (or restarted), the first message is `resync` and the client refetches its
 //! snapshots. The first message on every connection is `hello`.
 //!
-//! It is the union of `EngineEventVM` of the Electron app, plus `hello`, `resync` and the provisional
-//! `environment-draft` (provisional), `connector` and `github`.
+//! It is the union of `EngineEventVM` of the Electron app, plus `hello`, `resync`, `environment-draft`
+//! and the provisional `connector` and `github`.
 
 use ratchet_core::enums::{CandidateVerdict, OptimizationStatus};
 use ratchet_core::ports::{NoticeLevel, SandboxPhase};
@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::connectors::ConnectorStatus;
-use super::env_drafts::EnvironmentDraftStatus;
+use super::env_drafts::{EnvironmentDraftPhase, EnvironmentDraftStatus};
 use super::vm::AgentEventVm;
 
 /// One message of the stream.
@@ -86,11 +86,20 @@ pub enum ApiEvent {
         region: Option<String>,
         text: String,
     },
-    /// Provisional: an environment draft changed status.
+    /// An environment draft changed status, or its agent reported progress (`phase` and `text`, the same strings as the
+    /// TypeScript `EnvironmentDraftProgress`).
     #[serde(rename_all = "camelCase")]
     EnvironmentDraft {
         draft_id: String,
         status: EnvironmentDraftStatus,
+        /// 0 while the first draft is being made.
+        revision: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schema(nullable = false)]
+        phase: Option<EnvironmentDraftPhase>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[schema(nullable = false)]
+        text: Option<String>,
     },
     /// A connector changed (the device flow finished, a probe changed its status, it was removed).
     #[serde(rename_all = "camelCase")]

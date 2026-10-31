@@ -101,22 +101,27 @@ public protocol APIProtocol: Sendable {
     /// - Remark: HTTP `POST /v1/connectors/{id}/test`.
     /// - Remark: Generated from `#/paths//v1/connectors/{id}/test/post(testConnector)`.
     func testConnector(_ input: Operations.TestConnector.Input) async throws -> Operations.TestConnector.Output
-    /// Ask an agent to draft the environment this goal needs (scope none, single or full, resources, checks, cost).
+    /// Ask the setup agent to draft the environment this goal needs (scope none, single or full, resources, checks, cost).
+    /// Answers at once with the draft in status `drafting`; the agent works in the background and `environment-draft`
+    /// events say when it is `ready` (or `failed`).
     ///
     /// - Remark: HTTP `POST /v1/environment-drafts`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/post(createEnvironmentDraft)`.
     func createEnvironmentDraft(_ input: Operations.CreateEnvironmentDraft.Input) async throws -> Operations.CreateEnvironmentDraft.Output
-    /// One environment draft.
+    /// One environment draft, with the content of its files ("View files").
     ///
     /// - Remark: HTTP `GET /v1/environment-drafts/{id}`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/{id}/get(getEnvironmentDraft)`.
     func getEnvironmentDraft(_ input: Operations.GetEnvironmentDraft.Input) async throws -> Operations.GetEnvironmentDraft.Output
-    /// Approve and lock the environment: agents change code only, never the environment. 409 unless every check passed.
+    /// Approve and lock the environment: the files are committed to the protected ref (`mode` `commit`) or proposed as a
+    /// pull request (`pr`, the default), and from then on agents change code only, never the environment. 409 unless
+    /// every check passed (and unless the base `ratchet.yaml` is still the one the draft was made from).
     ///
     /// - Remark: HTTP `POST /v1/environment-drafts/{id}/approval`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/{id}/approval/post(approveEnvironmentDraft)`.
     func approveEnvironmentDraft(_ input: Operations.ApproveEnvironmentDraft.Input) async throws -> Operations.ApproveEnvironmentDraft.Output
-    /// "Ask for a change" or "Use a smaller setup": the agent revises the draft. 409 once approved.
+    /// "Ask for a change" or "Use a smaller setup": the same agent session continues and the draft is re-validated and
+    /// re-costed. Answers with the draft in status `drafting`; 409 once approved or while it is being drafted.
     ///
     /// - Remark: HTTP `POST /v1/environment-drafts/{id}/revisions`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/{id}/revisions/post(reviseEnvironmentDraft)`.
@@ -409,7 +414,9 @@ extension APIProtocol {
             headers: headers
         ))
     }
-    /// Ask an agent to draft the environment this goal needs (scope none, single or full, resources, checks, cost).
+    /// Ask the setup agent to draft the environment this goal needs (scope none, single or full, resources, checks, cost).
+    /// Answers at once with the draft in status `drafting`; the agent works in the background and `environment-draft`
+    /// events say when it is `ready` (or `failed`).
     ///
     /// - Remark: HTTP `POST /v1/environment-drafts`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/post(createEnvironmentDraft)`.
@@ -422,7 +429,7 @@ extension APIProtocol {
             body: body
         ))
     }
-    /// One environment draft.
+    /// One environment draft, with the content of its files ("View files").
     ///
     /// - Remark: HTTP `GET /v1/environment-drafts/{id}`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/{id}/get(getEnvironmentDraft)`.
@@ -435,20 +442,25 @@ extension APIProtocol {
             headers: headers
         ))
     }
-    /// Approve and lock the environment: agents change code only, never the environment. 409 unless every check passed.
+    /// Approve and lock the environment: the files are committed to the protected ref (`mode` `commit`) or proposed as a
+    /// pull request (`pr`, the default), and from then on agents change code only, never the environment. 409 unless
+    /// every check passed (and unless the base `ratchet.yaml` is still the one the draft was made from).
     ///
     /// - Remark: HTTP `POST /v1/environment-drafts/{id}/approval`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/{id}/approval/post(approveEnvironmentDraft)`.
     public func approveEnvironmentDraft(
         path: Operations.ApproveEnvironmentDraft.Input.Path,
-        headers: Operations.ApproveEnvironmentDraft.Input.Headers = .init()
+        headers: Operations.ApproveEnvironmentDraft.Input.Headers = .init(),
+        body: Operations.ApproveEnvironmentDraft.Input.Body
     ) async throws -> Operations.ApproveEnvironmentDraft.Output {
         try await approveEnvironmentDraft(Operations.ApproveEnvironmentDraft.Input(
             path: path,
-            headers: headers
+            headers: headers,
+            body: body
         ))
     }
-    /// "Ask for a change" or "Use a smaller setup": the agent revises the draft. 409 once approved.
+    /// "Ask for a change" or "Use a smaller setup": the same agent session continues and the draft is re-validated and
+    /// re-costed. Answers with the draft in status `drafting`; 409 once approved or while it is being drafted.
     ///
     /// - Remark: HTTP `POST /v1/environment-drafts/{id}/revisions`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/{id}/revisions/post(reviseEnvironmentDraft)`.

@@ -83,16 +83,23 @@ impl GitBackend for LocalBackend {
         "refs/heads/"
     }
 
-    async fn publish(&self, git: &Git<'_>, branch: &str, sha: &str, force: bool) -> Result<()> {
+    async fn publish(
+        &self,
+        git: &Git<'_>,
+        branch: &str,
+        sha: &str,
+        force: bool,
+        expected: Option<&str>,
+    ) -> Result<()> {
         let reference = format!("refs/heads/{branch}");
-        // old value of all zeros = "must not exist yet"
+        // old value of all zeros = "must not exist yet"; `expected` = "must still be at this commit"
         let zeros = "0".repeat(40);
         if force {
             git.run(&["update-ref", &reference, sha], GitRunOptions::default())
                 .await?;
         } else {
             git.run(
-                &["update-ref", &reference, sha, &zeros],
+                &["update-ref", &reference, sha, expected.unwrap_or(&zeros)],
                 GitRunOptions::default(),
             )
             .await?;

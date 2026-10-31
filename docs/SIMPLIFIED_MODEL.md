@@ -157,3 +157,6 @@ The flow (UI: `design/v02.html#s4`):
 In code: `EnvironmentDrafter` (`draft` / `revise` / `approve`) in `@ratchet/core`; `AgentEnvironmentDrafter`
 (real) and `MockEnvironmentDrafter` (deterministic per scope, for simulation, demos and e2e) in
 `@ratchet/engine`; `Engine.draftEnvironment / reviseEnvironment / approveEnvironment`.
+
+The Rust port is `crates/ratchet-env` (types, validator, cost, brief, drafters; `PARITY.md`), applied by `ratchet-engine` and
+`ratchet-sandbox` (drafted stage), and served by `ratchetd` as the `environment-drafts` routes (`api/CONTRACT.md`).

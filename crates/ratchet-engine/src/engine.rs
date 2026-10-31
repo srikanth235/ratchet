@@ -25,8 +25,8 @@ use ratchet_core::ids::{AgentId, OptimizationId};
 use ratchet_core::ports::{
     AgentEvent, AgentEventType, AgentIdentity, BaselineMetrics, BenchJob, BenchJobPhase, Clock,
     EngineApi, EngineCreateOptimizationInput, EngineEvent, GitHost, PortError, PortResult,
-    RunnerConfig, RunnerControl, RunnerHandle, SandboxInput, SandboxOutputs, SandboxPlan,
-    SandboxState, SecretRef,
+    RunnerConfig, RunnerControl, RunnerHandle, SandboxEnvironment, SandboxInput, SandboxOutputs,
+    SandboxPlan, SandboxState, SecretRef,
 };
 use ratchet_core::sandbox::{
     MemorySandboxInputStore, SandboxBlockers, SandboxInputStore, SandboxLifecycle,
@@ -770,6 +770,14 @@ impl Engine {
             // The sandbox is created lazily, at the first run start in a region, and reused while runs are active.
             if !resumable && self.settings.sandbox.auto {
                 self.ensure_sandbox_for(id).await?;
+            } else if !resumable
+                && ratchet_env::environment_module_of(&(&*self.config(id).await?).into()).is_some()
+            {
+                self.emit(EngineEvent::Notice {
+                    optimization_id: oid(id),
+                    level: ratchet_core::ports::NoticeLevel::Warning,
+                    text: "ratchet.yaml declares an environment, but this engine does not manage the sandbox itself (apply it by hand): the environment is not applied.".into(),
+                });
             }
             let fresh = self.require_opt(id).await?;
             self.assert_sandbox_applied(fresh.sandbox_id.as_ref().map(|s| s.as_str()))
@@ -1472,6 +1480,97 @@ impl Engine {
             &ProtectedConfigInput::from(&*config),
             None,
         ))
+    }
+
+    // ------------------------------------------------------------------ dynamic environments
+
+    /// The environment this optimization is measured in (docs/SIMPLIFIED_MODEL.md, "Dynamic environments"), read from a
+    /// checkout of the PROTECTED ref pinned to one commit for the life of the optimization (`base_sha`): the approved
+    /// drafted environment under `infra/ratchet/` when `environment.scope` says so, or the custom module `infra:`
+    /// names. `None` for scope `none` (and `single` without OpenTofu). Candidates cannot change it: their copy is
+    /// never read, and the paths are protected so a candidate touching them is blocked.
+    pub(crate) async fn environment_of(
+        &self,
+        id: &str,
+    ) -> EngineResult<Option<SandboxEnvironment>> {
+        let opt = self.require_opt(id).await?;
+        let config = self.config(id).await?;
+        if ratchet_env::environment_module_of(&(&*config).into()).is_none() {
+            return Ok(None);
+        }
+        let git = self.git_for(&opt.repo);
+        let commit = self.base_sha(&opt).await?;
+        let root = self.scratch_root();
+        tokio::fs::create_dir_all(&root)
+            .await
+            .map_err(|e| EngineError::internal(e.to_string()))?;
+        let dir = tempfile::Builder::new()
+            .prefix("ratchet-env-")
+            .tempdir_in(&root)
+            .map_err(|e| EngineError::internal(e.to_string()))?;
+        git.checkout(&commit, dir.path()).await?;
+        let path = dir.path().to_path_buf();
+        let base_ref = opt.base_ref.clone();
+        let config = config.clone();
+        tokio::task::spawn_blocking(move || {
+            ratchet_env::read_environment(&path, &config, &commit, &base_ref)
+        })
+        .await
+        .map_err(|e| EngineError::internal(e.to_string()))?
+        .map_err(Into::into)
+    }
+
+    /// The environment drafter (the setup agent), or `unavailable` when the engine has none.
+    pub fn environment_drafter(&self) -> EngineResult<Arc<dyn ratchet_env::EnvironmentDrafter>> {
+        self.ports.environment.clone().ok_or_else(|| {
+            EngineError::new(
+                EngineErrorCode::Unavailable,
+                "this engine has no environment drafter (no setup agent is configured)",
+            )
+        })
+    }
+
+    pub async fn draft_environment(
+        &self,
+        input: ratchet_env::DraftEnvironmentInput,
+    ) -> EngineResult<ratchet_env::EnvironmentDraftRecord> {
+        self.ready().await;
+        Ok(self.environment_drafter()?.draft(input).await?)
+    }
+
+    pub async fn revise_environment(
+        &self,
+        draft_id: &str,
+        message: &str,
+    ) -> EngineResult<ratchet_env::EnvironmentDraftRecord> {
+        self.ready().await;
+        Ok(self
+            .environment_drafter()?
+            .revise(draft_id, message)
+            .await?)
+    }
+
+    pub async fn approve_environment(
+        &self,
+        draft_id: &str,
+        options: ratchet_env::ApproveEnvironmentOptions,
+    ) -> EngineResult<ratchet_env::EnvironmentDraftRecord> {
+        self.ready().await;
+        Ok(self
+            .environment_drafter()?
+            .approve(draft_id, options)
+            .await?)
+    }
+
+    pub fn environment_draft(
+        &self,
+        draft_id: &str,
+    ) -> EngineResult<Option<ratchet_env::EnvironmentDraftRecord>> {
+        Ok(self.environment_drafter()?.get(draft_id))
+    }
+
+    pub fn discard_environment_draft(&self, draft_id: &str) -> EngineResult<()> {
+        Ok(self.environment_drafter()?.discard(draft_id)?)
     }
 
     // ------------------------------------------------------------------ helpers

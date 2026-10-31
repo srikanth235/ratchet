@@ -180,7 +180,16 @@ pub trait GitBackend: Send + Sync {
         Ok(())
     }
     /// Make the local `sha` visible as `refs/heads/<branch>` on the remote.
-    async fn publish(&self, git: &Git<'_>, branch: &str, sha: &str, force: bool) -> Result<()>;
+    ///
+    /// With `expected` the branch must still be at that commit (an update of an existing branch, never a force).
+    async fn publish(
+        &self,
+        git: &Git<'_>,
+        branch: &str,
+        sha: &str,
+        force: bool,
+        expected: Option<&str>,
+    ) -> Result<()>;
     async fn create_pull_request(&self, input: &PullRequestInput) -> Result<PullRequestRef>;
 }
 
@@ -239,7 +248,13 @@ impl<B: GitBackend> GitHostCore<B> {
             .await
     }
 
-    async fn publish(&self, branch: &str, sha: &str, force: bool) -> Result<()> {
+    async fn publish(
+        &self,
+        branch: &str,
+        sha: &str,
+        force: bool,
+        expected: Option<&str>,
+    ) -> Result<()> {
         let dir = self.dir().await?;
         self.backend
             .publish(
@@ -250,6 +265,7 @@ impl<B: GitBackend> GitHostCore<B> {
                 branch,
                 sha,
                 force,
+                expected,
             )
             .await
     }
@@ -338,7 +354,7 @@ impl<B: GitBackend> GitHostCore<B> {
             .await?
             .trim()
             .to_string();
-        self.publish(&input.head, &commit, true).await
+        self.publish(&input.head, &commit, true, None).await
     }
 }
 
@@ -352,7 +368,7 @@ impl<B: GitBackend> GitHost for GitHostCore<B> {
     async fn create_branch(&self, from_ref: &str, branch: &str) -> PortResult<()> {
         self.sync().await?;
         let sha = self.resolve(from_ref).await?;
-        Ok(self.publish(branch, &sha, false).await?)
+        Ok(self.publish(branch, &sha, false, None).await?)
     }
 
     async fn list_candidates(
@@ -510,6 +526,7 @@ impl<B: GitBackend> GitHost for GitHostCore<B> {
     /// Branch `input.branch` off `input.base_ref` with one commit that writes `input.files` over the base tree.
     /// Built with plumbing (a scratch index, `hash-object`, `write-tree`, `commit-tree`), so no working tree is needed
     /// and nothing but the new ref is touched. Refuses an existing branch (publish is not forced) and unsafe paths.
+    /// With `update` the branch must exist and be at `base_ref`: the commit is added on top of it (a fast-forward).
     async fn commit_files(&self, input: &CommitFilesInput) -> PortResult<CommitRef> {
         if input.files.is_empty() {
             return Err(Error::invalid("commitFiles: no files").into());
@@ -537,6 +554,22 @@ impl<B: GitBackend> GitHost for GitHostCore<B> {
         }
         self.sync().await?;
         let base = self.resolve(&input.base_ref).await?;
+        if input.update {
+            // Straight onto an existing branch (a protected ref): only on top of the tip the caller based the files on.
+            let tip = self.resolve(&input.branch).await.map_err(|_| {
+                Error::invalid(format!(
+                    "commitFiles: branch {} does not exist",
+                    input.branch
+                ))
+            })?;
+            if tip != base {
+                return Err(Error::invalid(format!(
+                    "commitFiles: {} is not at {}; refusing to move it",
+                    input.branch, input.base_ref
+                ))
+                .into());
+            }
+        }
         let scratch = tempfile::Builder::new()
             .prefix("ratchet-commit-")
             .tempdir()?;
@@ -580,7 +613,8 @@ impl<B: GitBackend> GitHost for GitHostCore<B> {
             .await?
             .trim()
             .to_string();
-        self.publish(&input.branch, &sha, false).await?;
+        let expected = input.update.then_some(base.as_str());
+        self.publish(&input.branch, &sha, false, expected).await?;
         Ok(CommitRef { sha })
     }
 }

@@ -332,9 +332,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Every environment draft, newest first. */
+        get: operations["listEnvironmentDrafts"];
         put?: never;
-        /** Ask an agent to draft the environment this goal needs (scope none, single or full, resources, checks, cost). */
+        /**
+         * Ask the setup agent to draft the environment this goal needs (scope none, single or full, resources, checks, cost).
+         *     Answers at once with the draft in status `drafting`; the agent works in the background and `environment-draft`
+         *     events say when it is `ready` (or `failed`).
+         */
         post: operations["createEnvironmentDraft"];
         delete?: never;
         options?: never;
@@ -349,11 +354,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One environment draft. */
+        /** One environment draft, with the content of its files ("View files"). */
         get: operations["getEnvironmentDraft"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** "Back": forget a draft that was not approved. 409 once approved. */
+        delete: operations["discardEnvironmentDraft"];
         options?: never;
         head?: never;
         patch?: never;
@@ -368,42 +374,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Approve and lock the environment: agents change code only, never the environment. 409 unless every check passed. */
+        /**
+         * Approve and lock the environment: the files are committed to the protected ref (`mode` `commit`) or proposed as a
+         *     pull request (`pr`, the default), and from then on agents change code only, never the environment. 409 unless
+         *     every check passed (and unless the base `ratchet.yaml` is still the one the draft was made from).
+         */
         post: operations["approveEnvironmentDraft"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-drafts/{id}/files": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** "View files": the files the draft adds, with their content. */
-        get: operations["listEnvironmentDraftFiles"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/environment-drafts/{id}/pull-request": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** "Open as PR": add the environment files to the repo through a pull request. */
-        post: operations["openEnvironmentDraftPullRequest"];
         delete?: never;
         options?: never;
         head?: never;
@@ -419,7 +395,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** "Ask for a change" or "Use a smaller setup": the agent revises the draft. 409 once approved. */
+        /**
+         * "Ask for a change" or "Use a smaller setup": the same agent session continues and the draft is re-validated and
+         *     re-costed. Answers with the draft in status `drafting`; 409 once approved or while it is being drafted.
+         */
         post: operations["reviseEnvironmentDraft"];
         delete?: never;
         options?: never;
@@ -1226,7 +1205,14 @@ export interface components {
             type: "sandbox";
         } | {
             draftId: string;
+            phase?: components["schemas"]["EnvironmentDraftPhase"];
+            /**
+             * Format: int32
+             * @description 0 while the first draft is being made.
+             */
+            revision: number;
             status: components["schemas"]["EnvironmentDraftStatus"];
+            text?: string;
             /** @enum {string} */
             type: "environment-draft";
         } | {
@@ -1238,6 +1224,10 @@ export interface components {
             signedIn: boolean;
             /** @enum {string} */
             type: "github";
+        };
+        /** @description `POST /v1/environment-drafts/{id}/approval`. The body is optional. */
+        ApproveEnvironmentDraftInput: {
+            mode?: null | components["schemas"]["EnvironmentApprovalMode"];
         };
         /**
          * @description `profile` = a named profile with static keys or an assume-role; `sso` = a profile created by `aws configure sso`.
@@ -1377,8 +1367,6 @@ export interface components {
              */
             vsBaselinePct: number | null;
         };
-        /** @enum {string} */
-        CheckState: "ok" | "warn" | "fail";
         /** @description One row of "Baseline vs best" / "Before and after". */
         CompareRow: {
             /** Format: double */
@@ -1552,11 +1540,25 @@ export interface components {
         CostReconcileStatus: "reconciled" | "unchanged" | "pending";
         /** @description `POST /v1/environment-drafts`. */
         CreateEnvironmentDraftInput: {
-            agent?: null | components["schemas"]["AgentKind"];
-            baseRef?: string;
+            /** @description The user's agent connector that does the drafting (their own login, run on this machine). */
+            agentConnector: components["schemas"]["AgentKind"];
+            /** @description The AWS profile selected in Settings: `tofu plan` is checked against that account. */
+            awsProfile?: string | null;
+            /** @description The protected ref the files are committed to / the PR targets. Default `main`. */
+            baseRef?: string | null;
+            /** @description Path of the config inside the repo (default `ratchet.yaml`). */
+            configPath?: string | null;
+            /** @description What the user wants optimized, in their words. */
             goal: string;
+            /** @description Region of the sandbox (default: `environment.region` of ratchet.yaml, else the default region). */
+            region?: string | null;
+            /** @description The repository: `owner/name` or its GitHub URL. */
             repo: string;
-            scope?: null | components["schemas"]["EnvScope"];
+            /**
+             * Format: double
+             * @description The run's time limit, for the cost estimate (default 2 h).
+             */
+            timeLimitSeconds?: number | null;
         };
         /** @description `POST /v1/optimizations`. */
         CreateOptimizationInput: {
@@ -1631,14 +1633,6 @@ export interface components {
          * @enum {string}
          */
         Direction: "minimize" | "maximize";
-        /** @description Who drafted it and what that cost ("Drafted by Claude Code from the repo and your goal, 2 min, $0.31"). */
-        DraftProvenance: {
-            agent: components["schemas"]["AgentKind"];
-            /** Format: double */
-            costUsd: number;
-            /** Format: int32 */
-            durationS: number;
-        };
         /**
          * @description What a run would use right now: the saved choice where there is one, else the defaults. `null` = nothing
          *     connected of that kind.
@@ -1674,97 +1668,162 @@ export interface components {
         };
         /** @enum {string} */
         EngineKind: "sim" | "real";
-        /** @description One of Ratchet's checks on a draft: isolated, results sealed, same hardware every time, full teardown. */
-        EnvCheck: {
+        /** @enum {string} */
+        EnvironmentApprovalMode: "commit" | "pr";
+        /** @description Where the approved files went. */
+        EnvironmentApprovalVm: {
+            /** Format: int64 */
+            at: number;
+            /** @description `pr` only. */
+            branch?: string;
+            /** @description Repo paths written. */
+            files: string[];
+            /**
+             * @description Always true: the environment is locked from here (for `pr`: once the PR is merged), a candidate that touches it
+             *     is blocked.
+             */
+            locked: boolean;
+            mode: components["schemas"]["EnvironmentApprovalMode"];
+            /** @description `pr` only: "Open as PR". */
+            prUrl?: string;
+            /** @description The commit holding the files (on the base ref for `commit`, on `branch` for `pr`). */
+            sha: string;
+        };
+        /** @description One of Ratchet's checks on a draft: isolated, results sealed, same hardware every time, full teardown, ... */
+        EnvironmentCheckVm: {
+            /** @description Why it passed or failed, one line. */
             detail: string;
             id: string;
+            /** @description Plain words for the UI. */
             label: string;
-            state: components["schemas"]["CheckState"];
+            ok: boolean;
         };
-        EnvCost: {
-            /** Format: double */
-            estimatedRunUsd: number;
-            /** Format: double */
-            hourlyUsd: number;
-            /**
-             * Format: int32
-             * @description "ready in ~6 min"
-             */
-            readyMinutes: number;
+        EnvironmentCostVm: {
             /**
              * Format: double
-             * @description "about $1.18 for a 2 h run"
+             * @description `usd_per_hour x (run hours + start-up)` for the run's time limit.
              */
-            runHours: number;
-        };
-        /** @description A file the draft would add (Terraform, Dockerfile, seed script). The content is for "View files". */
-        EnvFile: {
-            content: string;
-            path: string;
-        };
-        EnvFilesVm: {
-            files: components["schemas"]["EnvFile"][];
-        };
-        /** @description One thing the environment creates (a row of "What gets created"). */
-        EnvResource: {
-            /** @description "shop-api in the repo's container". */
-            description: string;
-            /** Format: double */
-            hourlyUsd: number;
-            id: string;
-            /** @description Instance type, "c7i.2xlarge". */
-            machine: string;
-            /** @description "API", "Postgres 16". */
-            name: string;
+            estimateForRunUsd: number;
+            /**
+             * Format: int32
+             * @description Minutes until the environment is ready to measure.
+             */
+            startupMinutes: number;
+            /**
+             * Format: double
+             * @description Sum of the resources' hourly prices (excludes the sandbox's fixed private-network cost, ~$0.04/h).
+             */
+            usdPerHour: number;
         };
         /**
-         * @description How much environment the task needs. `none`: the evaluator runs on the host as is; `single`: one machine;
-         *     `full`: several services (API + database + cache + load generator).
+         * @description What a machine of the environment does (the `role` of the base module's `machines` map).
+         *     Which step an environment draft is in while its agent works.
          * @enum {string}
          */
-        EnvScope: "none" | "single" | "full";
+        EnvironmentDraftPhase: "reading" | "drafting" | "validating" | "done" | "failed";
         /** @enum {string} */
-        EnvironmentDraftStatus: "drafting" | "ready" | "revising" | "approved" | "failed";
+        EnvironmentDraftStatus: "drafting" | "ready" | "failed" | "approved";
+        /** @description A draft and where it stands in the draft / revise / approve loop. */
         EnvironmentDraftVm: {
-            /**
-             * Format: int64
-             * @description Set once approved (the environment is locked from then on).
-             */
-            approvedAt: number | null;
+            /** @description Set once approved. */
+            approval?: components["schemas"]["EnvironmentApprovalVm"];
+            /** @description The AWS profile `tofu plan` is checked against. */
+            awsProfile?: string;
             baseRef: string;
-            checks: components["schemas"]["EnvCheck"][];
-            /** @description All checks passed ("Passed Ratchet's checks"): required to approve. */
-            checksPassed: boolean;
-            cost: components["schemas"]["EnvCost"];
             /** Format: int64 */
             createdAt: number;
-            /** @description File paths only; read them with `GET /v1/environment-drafts/{id}/files`. */
-            filePaths: string[];
+            draft: null | components["schemas"]["EnvironmentProposalVm"];
+            /** @description Why drafting (or the last revision) failed. */
+            error?: string;
             /** @description The goal the user typed ("Make checkout p95 faster"). */
             goal: string;
             id: string;
-            /** @description "Open as PR": the pull request that adds the environment files to the repo. */
-            prUrl: string | null;
-            provenance: components["schemas"]["DraftProvenance"];
-            /** @description The note under it: why this much environment, and the "Use a smaller setup" hint. */
-            rationale: string;
+            /** @description The user's change requests and the agent's replies. */
+            messages: components["schemas"]["EnvironmentMessageVm"][];
+            region: string;
             repo: string;
-            resources: components["schemas"]["EnvResource"][];
             /**
              * Format: int32
-             * @description Starts at 1, +1 per revision.
+             * @description 1 for the first draft, +1 for every revision; 0 while the first draft is being made.
              */
             revision: number;
-            scope: components["schemas"]["EnvScope"];
             status: components["schemas"]["EnvironmentDraftStatus"];
-            /** @description The serif quote: "This task needs the full stack: the API, Postgres with seeded orders, ...". */
-            summary: string;
+            /** Format: int64 */
+            updatedAt: number;
+        };
+        /** @description `GET /v1/environment-drafts`. */
+        EnvironmentDraftsVm: {
+            /** @description Newest first. */
+            drafts: components["schemas"]["EnvironmentDraftVm"][];
+        };
+        /** @description A file of the draft: `ratchet.yaml`, or a file under `infra/ratchet/` (OpenTofu, Dockerfile, seed script). */
+        EnvironmentFileVm: {
+            content: string;
+            /** @description Repo-relative POSIX path. */
+            path: string;
+        };
+        /** @enum {string} */
+        EnvironmentMessageFrom: "user" | "agent";
+        /** @description One turn of the revise loop. */
+        EnvironmentMessageVm: {
+            /**
+             * Format: int64
+             * @description Epoch ms.
+             */
+            at: number;
+            from: components["schemas"]["EnvironmentMessageFrom"];
+            text: string;
         };
         /**
          * @description Phase of an environment (sandbox) as seen from outside. `none`: the ledger has it, nothing reported a phase.
          * @enum {string}
          */
         EnvironmentPhase: "none" | "creating" | "ready" | "idle" | "destroying" | "destroyed" | "failed";
+        /** @description What the setup agent proposed, as "New optimization > Environment" shows it. */
+        EnvironmentProposalVm: {
+            /** @description Which connector drafted it. */
+            agent: components["schemas"]["AgentKind"];
+            checks: components["schemas"]["EnvironmentCheckVm"][];
+            cost: components["schemas"]["EnvironmentCostVm"];
+            /**
+             * Format: int64
+             * @description How long drafting took, seconds (all revisions).
+             */
+            durationS: number;
+            /** @description What would be committed: `ratchet.yaml` plus the files under `infra/ratchet/`, with their content ("View files"). */
+            files: components["schemas"]["EnvironmentFileVm"][];
+            /** @description Why this scope, in a sentence or two. */
+            reason: string;
+            resources: components["schemas"]["EnvironmentResourceVm"][];
+            scope: components["schemas"]["EnvironmentScope"];
+            /**
+             * Format: double
+             * @description What the setup agent cost in model tokens, USD (all revisions).
+             */
+            usdSpent: number;
+        };
+        /** @description One row of "What gets created". */
+        EnvironmentResourceVm: {
+            /** @description One plain line: "shop-api in the repo's container". */
+            detail: string;
+            /** @description Instance type, "c7i.2xlarge". */
+            machine: string;
+            /** @description "API", "Postgres 16", "Load generator". */
+            name: string;
+            role: components["schemas"]["EnvironmentRole"];
+            /** Format: double */
+            usdPerHour: number;
+        };
+        /** @enum {string} */
+        EnvironmentRole: "app" | "database" | "cache" | "load" | "evaluator" | "other";
+        /**
+         * @description How much infrastructure an optimization's environment needs (`environment.scope`, docs/SIMPLIFIED_MODEL.md,
+         *     "Dynamic environments"). `none`: pure code / tests, the evaluator's container is all there is; `single`: one
+         *     machine on pinned hardware; `full`: a stack (app + databases + seeded data + a load generator) written as
+         *     OpenTofu under `infra/ratchet/` on top of the base module Ratchet ships.
+         * @enum {string}
+         */
+        EnvironmentScope: "none" | "single" | "full";
         /** @description `environment:` of ratchet.yaml (all optional). `image` null = the evaluator runs on the host. */
         EnvironmentSummary: {
             image: string | null;
@@ -2343,9 +2402,8 @@ export interface components {
         };
         /** @description `POST /v1/environment-drafts/{id}/revisions`: "Ask for a change", or "Use a smaller setup". */
         ReviseEnvironmentDraftInput: {
-            /** @description Plain words: "use RDS instead of a Postgres container". */
-            request: string;
-            scope?: null | components["schemas"]["EnvScope"];
+            /** @description Plain words: "use a smaller setup", "use RDS instead of a Postgres container". */
+            message: string;
         };
         /**
          * @description `creating` -> `ready` -> (`idle` while no run is active) -> `destroying` -> `destroyed`; `failed` when a step
@@ -3195,6 +3253,28 @@ export interface operations {
             default: components["responses"]["Failure"];
         };
     };
+    listEnvironmentDrafts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnvironmentDraftsVm"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            default: components["responses"]["Failure"];
+        };
+    };
     createEnvironmentDraft: {
         parameters: {
             query?: never;
@@ -3219,6 +3299,24 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            /** @description Something to set up first (sign in, an agent connector) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description This engine has no setup agent */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
             default: components["responses"]["Failure"];
         };
     };
@@ -3244,7 +3342,48 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            /** @description OK */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            default: components["responses"]["Failure"];
+        };
+    };
+    discardEnvironmentDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Draft id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Discarded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            /** @description Approved */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
             default: components["responses"]["Failure"];
         };
     };
@@ -3258,7 +3397,12 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        /** @description Optional; empty means a pull request */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveEnvironmentDraftInput"];
+            };
+        };
         responses: {
             /** @description OK */
             200: {
@@ -3269,6 +3413,7 @@ export interface operations {
                     "application/json": components["schemas"]["EnvironmentDraftVm"];
                 };
             };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             /** @description Not ready */
@@ -3280,58 +3425,6 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            default: components["responses"]["Failure"];
-        };
-    };
-    listEnvironmentDraftFiles: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Draft id */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvFilesVm"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            default: components["responses"]["Failure"];
-        };
-    };
-    openEnvironmentDraftPullRequest: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Draft id */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description OK */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnvironmentDraftVm"];
-                };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
             default: components["responses"]["Failure"];
         };
     };
@@ -3363,6 +3456,15 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
+            /** @description Approved or being drafted */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
             default: components["responses"]["Failure"];
         };
     };

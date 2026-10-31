@@ -341,6 +341,7 @@ fn the_effective_protected_set_matches_typescript() {
             evaluator_run: s(i["evaluator"].get("run")),
             evaluator_template: s(i["evaluator"].get("template")),
             environment_image: s(i.get("environment").and_then(|e| e.get("image"))),
+            environment_scope: s(i.get("environment").and_then(|e| e.get("scope"))),
             infra: s(i.get("infra")),
         };
         let path = c["configPath"].as_str();

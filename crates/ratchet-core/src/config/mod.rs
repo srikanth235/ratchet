@@ -12,6 +12,6 @@ pub use guardrails::{
 pub use load::{ConfigResult, format_config_error, load_config, parse_config};
 pub use parse::{ConfigError, PathSegment, format_path};
 pub use schema::{
-    AgentConfig, DEFAULT_AGENT_INSTRUCTIONS, DEFAULT_BENCH_MACHINE, DEFAULT_EVALUATOR_REF,
-    Environment, Evaluator, Objective, RatchetConfig, ValueModel,
+    AgentConfig, DEFAULT_AGENT_INSTRUCTIONS, DEFAULT_BENCH_MACHINE, DEFAULT_ENVIRONMENT_INFRA_DIR,
+    DEFAULT_EVALUATOR_REF, Environment, Evaluator, Objective, RatchetConfig, ValueModel,
 };

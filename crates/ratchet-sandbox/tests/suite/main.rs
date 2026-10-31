@@ -11,6 +11,7 @@ mod identity;
 mod images;
 mod pricing;
 mod reaper;
+mod sandbox_environment;
 mod sandbox_mock;
 mod sandbox_override;
 mod sandbox_tofu;

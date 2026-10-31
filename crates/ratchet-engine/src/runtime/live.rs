@@ -85,6 +85,8 @@ pub struct LiveOptions {
     pub app_version: Option<String>,
     /// The sandbox module is a custom one (`infra:` in ratchet.yaml): validate its outputs against infra/contract.md after apply.
     pub infra_override: bool,
+    /// Directory of the base module drafted environments are built on (`infra/modules/sandbox`); default: next to `module_dir`.
+    pub base_module_dir: Option<PathBuf>,
     /// Candidate setup run on the bench before the guardrails, e.g. `pnpm install --frozen-lockfile && pnpm build`. The bench has
     /// no network: when this is set, dependencies come from a snapshot of the lockfile at `evaluator.ref`.
     pub bench_setup: Option<String>,
@@ -133,6 +135,7 @@ impl LiveOptions {
             bench_image_ref: None,
             app_version: None,
             infra_override: false,
+            base_module_dir: None,
             bench_setup: None,
             tofu_binary: tofu_binary.into(),
             module_dir: module_dir.into(),
@@ -173,6 +176,8 @@ pub struct LiveRuntime {
     pub agents_where: AgentsWhere,
     /// The local agents control (`None` when no `local_agents` were given).
     pub local_runners: Option<Arc<LocalRunnerControl>>,
+    /// The environment drafter; `None` without local agents or a GitHub repository.
+    pub environment: Option<Arc<dyn ratchet_env::EnvironmentDrafter>>,
     /// The harnesses the local agents were built from (empty when none).
     pub harnesses: Vec<HarnessInfo>,
 }
@@ -697,6 +702,10 @@ pub async fn create_live_runtime(opts: LiveOptions) -> EngineResult<LiveRuntime>
         sandbox_opts.env.insert("AWS_PROFILE".into(), p.clone());
     }
     sandbox_opts.env.extend(opts.aws_env.clone());
+    sandbox_opts.base_module_dir = opts.base_module_dir.clone();
+    // The machines of a drafted environment launch from the same bench image the evaluator uses.
+    sandbox_opts.machine_image_id = bench_image.clone();
+    sandbox_opts.image_version = opts.app_version.clone();
     if opts.infra_override {
         sandbox_opts.validate_contract = Some(ContractCheckOptions::default());
     }
@@ -732,6 +741,48 @@ pub async fn create_live_runtime(opts: LiveOptions) -> EngineResult<LiveRuntime>
         }))
     });
 
+    // The setup agent that drafts environments: the user's own Claude Code / Codex on this machine, plus `tofu plan` in
+    // their account. Needs local agents and a GitHub repository to commit to.
+    let environment: Option<Arc<dyn ratchet_env::EnvironmentDrafter>> =
+        match (&opts.local_agents, &github) {
+            (Some(la), Some(g)) => {
+                let mut adapters = la.adapters.clone();
+                if adapters.clock.is_none() {
+                    adapters.clock = Some(clock.clone());
+                }
+                let adapter_for: ratchet_env::AdapterFactory = Arc::new(move |kind| {
+                    ratchet_agents::local_adapter_for(&adapters, kind).map_err(PortError::Failed)
+                });
+                let host: Arc<dyn GitHost> = g.clone();
+                let mut o = ratchet_env::AgentEnvironmentDrafterOptions::new(
+                    ratchet_env::fixed_git(host),
+                    adapter_for,
+                    clock.clone(),
+                );
+                o.prices = Some(prices.clone());
+                o.default_region = Some(opts.region.clone());
+                o.scratch_dir = Some(opts.state_root.join("scratch"));
+                let mut co = ratchet_sandbox::TofuEnvironmentCheckerOptions::new(
+                    opts.tofu_binary.clone(),
+                    opts.module_dir.clone(),
+                );
+                co.base_module_dir = opts.base_module_dir.clone();
+                co.work_root = Some(opts.state_root.join("scratch"));
+                if let Some(r) = &opts.tofu_runner {
+                    co.runner = r.clone();
+                }
+                if let Some(p) = &profile {
+                    co.env.insert("AWS_PROFILE".into(), p.clone());
+                }
+                co.env.extend(opts.aws_env.clone());
+                co.machine_image_id = bench_image.clone();
+                co.image_version = opts.app_version.clone();
+                o.checker = Some(Arc::new(ratchet_sandbox::TofuEnvironmentChecker::new(co)));
+                Some(Arc::new(ratchet_env::AgentEnvironmentDrafter::new(o)))
+            }
+            _ => None,
+        };
+
     let costs = Arc::new(AwsCostReconciler::connect(profile.as_deref()).await);
     let mut base = EngineSettings {
         secrets: opts.secrets.clone(),
@@ -762,6 +813,7 @@ pub async fn create_live_runtime(opts: LiveOptions) -> EngineResult<LiveRuntime>
             local_runners: local_runners.clone().map(|l| l as Arc<dyn RunnerControl>),
             bench,
             costs: Some(costs),
+            environment: environment.clone(),
         },
         settings: base,
     })
@@ -774,6 +826,7 @@ pub async fn create_live_runtime(opts: LiveOptions) -> EngineResult<LiveRuntime>
         missing,
         agents_where,
         local_runners,
+        environment,
         harnesses: opts
             .local_agents
             .as_ref()

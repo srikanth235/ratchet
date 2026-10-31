@@ -269,26 +269,33 @@ enum DaemonMapping {
     // MARK: Environment drafts
 
     static func draft(_ vm: VM.EnvironmentDraftVm) -> EnvironmentDraft {
+        // The proposal is absent only while the first draft is being made; callers wait for it (`settledDraft`).
+        let proposal = vm.draft
         let scope: EnvironmentScope
-        switch vm.scope {
-        case .none: scope = .none
+        switch proposal?.scope {
         case .single: scope = .single
         case .full: scope = .full
+        default: scope = .none
         }
+        // The agent's reason is one text: its first sentence is the headline, the rest is the note under it.
+        let reasonText = proposal?.reason ?? ""
+        let cut = reasonText.firstIndex { ".!?".contains($0) }.map { reasonText.index(after: $0) } ?? reasonText.endIndex
+        let headline = String(reasonText[..<cut])
+        let note = reasonText[cut...].trimmingCharacters(in: .whitespaces)
         let phrases = ["full stack", "one machine", "single machine", "no environment"]
-        let emphasis = phrases.first { vm.summary.lowercased().contains($0) } ?? ""
-        let checks = vm.checks.map { check in
+        let emphasis = phrases.first { headline.lowercased().contains($0) } ?? ""
+        let checks = (proposal?.checks ?? []).map { check in
             check.label.prefix(1).lowercased() + check.label.dropFirst()
         }
         return EnvironmentDraft(
             id: vm.id, repoID: vm.repo, scope: scope, state: vm.status == .approved ? .approved : .draft,
-            revision: Int(vm.revision), headline: vm.summary, emphasis: emphasis, reason: vm.rationale,
-            draftedBy: title(of: vm.provenance.agent), draftSeconds: Double(vm.provenance.durationS),
-            draftCostUSD: vm.provenance.costUsd, readyMinutes: Double(vm.cost.readyMinutes),
-            resources: vm.resources.map {
-                DraftResource(id: $0.id, name: $0.name, detail: $0.description, machine: $0.machine, usdPerHour: $0.hourlyUsd)
+            revision: Int(vm.revision), headline: headline, emphasis: emphasis, reason: note,
+            draftedBy: proposal.map { title(of: $0.agent) } ?? "", draftSeconds: Double(proposal?.durationS ?? 0),
+            draftCostUSD: proposal?.usdSpent ?? 0, readyMinutes: Double(proposal?.cost.startupMinutes ?? 0),
+            resources: (proposal?.resources ?? []).enumerated().map { index, r in
+                DraftResource(id: "\(index)-\(r.name)", name: r.name, detail: r.detail, machine: r.machine, usdPerHour: r.usdPerHour)
             },
-            files: vm.filePaths, checks: checks.joined(separator: ", "))
+            files: (proposal?.files ?? []).map(\.path), checks: checks.joined(separator: ", "))
     }
 
     // MARK: Sandbox

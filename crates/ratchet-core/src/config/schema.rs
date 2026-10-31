@@ -8,7 +8,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::guardrails::Guardrail;
-use crate::enums::{DepsMode, Direction, EvaluatorKind, ValueBasis, ValuePeriod};
+use crate::enums::{DepsMode, Direction, EnvironmentScope, EvaluatorKind, ValueBasis, ValuePeriod};
 
 /// Bench machine used when neither `evaluator.hardware`, `environment.machine` nor a template names one.
 pub const DEFAULT_BENCH_MACHINE: &str = "c7i.large";
@@ -78,10 +78,19 @@ pub struct Evaluator {
     pub confirm_trace: Option<String>,
 }
 
+/// Where a drafted (setup-agent written, user approved) environment lives in the repo. Protected once
+/// `environment.scope` is set.
+pub const DEFAULT_ENVIRONMENT_INFRA_DIR: &str = "infra/ratchet";
+
 /// `environment:` what the repo needs; how it is isolated stays with Ratchet. Every key is optional.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct Environment {
+    /// How much infrastructure the task needs, decided by the setup agent and approved by the user. `full` (and
+    /// `single` with OpenTofu files) means a drafted module under `infra/ratchet/` that the engine applies as the
+    /// sandbox.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<EnvironmentScope>,
     /// Dockerfile or devcontainer.json in the repo (a protected path).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,

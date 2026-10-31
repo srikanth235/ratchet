@@ -26,6 +26,7 @@ ratchet-agents = { path = "../ratchet-agents" }
 ratchet-bench = { path = "../ratchet-bench" }
 ratchet-connectors = { path = "../ratchet-connectors" }
 ratchet-core = { path = "../ratchet-core" }
+ratchet-env = { path = "../ratchet-env" }
 ratchet-github = { path = "../ratchet-github" }
 ratchet-ledger = { path = "../ratchet-ledger" }
 ratchet-sandbox = { path = "../ratchet-sandbox" }

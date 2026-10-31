@@ -66,6 +66,18 @@ string_enum!(
 );
 
 string_enum!(
+    /// How much infrastructure an optimization's environment needs (`environment.scope`, docs/SIMPLIFIED_MODEL.md,
+    /// "Dynamic environments"). `none`: pure code / tests, the evaluator's container is all there is; `single`: one
+    /// machine on pinned hardware; `full`: a stack (app + databases + seeded data + a load generator) written as
+    /// OpenTofu under `infra/ratchet/` on top of the base module Ratchet ships.
+    EnvironmentScope {
+        None => "none",
+        Single => "single",
+        Full => "full",
+    }
+);
+
+string_enum!(
     /// What kind of trusted evaluation produces the objective metric.
     EvaluatorKind {
         Benchmark => "benchmark",

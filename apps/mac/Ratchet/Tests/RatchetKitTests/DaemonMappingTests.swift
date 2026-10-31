@@ -189,7 +189,7 @@ struct DaemonMappingTests {
 
     @Test func anEnvironmentDraftReadsLikeTheMock() throws {
         let draft = DaemonMapping.draft(try decode(VM.EnvironmentDraftVm.self, Fixtures.draft))
-        #expect(draft.id == "envd_1")
+        #expect(draft.id == "env-0001")
         #expect(draft.repoID == "acme/shop-api")
         #expect(draft.scope == .full)
         #expect(draft.state == .draft)
@@ -201,8 +201,8 @@ struct DaemonMappingTests {
         #expect(draft.resources.count == 4)
         #expect(draft.resources[0].machine == "c7i.2xlarge")
         #expect(draft.resources[0].detail == "shop-api in the repo's container")
-        #expect(draft.files == ["main.tf", "Dockerfile", "seed.sh"])
-        #expect(draft.checks == "isolated, results sealed, same hardware every time, full teardown")
+        #expect(draft.files == ["ratchet.yaml", "infra/ratchet/main.tf", "infra/ratchet/seed.sh"])
+        #expect(draft.checks == "isolated: no internet on the measuring hosts, results sealed: agents can't read results or the holdout, same hardware every time, full teardown")
         #expect(abs(draft.usdPerHour - 0.59) < 1e-9)
     }
 

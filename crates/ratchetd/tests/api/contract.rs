@@ -797,82 +797,123 @@ async fn every_route_round_trips_its_types() {
         )
         .await;
 
-    let draft: EnvironmentDraftVm = c
+    let began: EnvironmentDraftVm = c
         .rt(
             "POST",
             "/v1/environment-drafts",
             "/v1/environment-drafts",
-            Some(json!({"repo": "acme-org/shop-api", "goal": "Make checkout p95 faster"})),
+            Some(json!({"repo": "acme-org/shop-api", "goal": "Make checkout p95 faster", "agentConnector": "claude-code"})),
             201,
         )
         .await;
-    assert_eq!(draft.scope, EnvScope::Full);
-    assert_eq!(draft.resources.len(), 4);
-    assert!((draft.cost.hourly_usd - 0.59).abs() < 1e-9);
-    assert!(draft.checks_passed);
-    let did = draft.id.clone();
-    let _: EnvironmentDraftVm = c
+    assert_eq!(began.status, EnvironmentDraftStatus::Drafting);
+    let did = began.id.clone();
+    let mut draft = began;
+    for _ in 0..500 {
+        if draft.status != EnvironmentDraftStatus::Drafting {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        draft = c
+            .rt(
+                "GET",
+                "/v1/environment-drafts/{id}",
+                &format!("/v1/environment-drafts/{did}"),
+                None,
+                200,
+            )
+            .await;
+    }
+    assert_eq!(draft.status, EnvironmentDraftStatus::Ready);
+    let p = draft.draft.as_ref().unwrap();
+    assert_eq!(p.scope, ratchet_core::enums::EnvironmentScope::Full);
+    assert_eq!(p.resources.len(), 4);
+    assert!(p.checks.iter().all(|c| c.ok));
+    assert_eq!(p.files[0].path, "ratchet.yaml");
+    let listed: EnvironmentDraftsVm = c
         .rt(
             "GET",
-            "/v1/environment-drafts/{id}",
-            &format!("/v1/environment-drafts/{did}"),
+            "/v1/environment-drafts",
+            "/v1/environment-drafts",
             None,
             200,
         )
         .await;
-    let files: EnvFilesVm = c
-        .rt(
-            "GET",
-            "/v1/environment-drafts/{id}/files",
-            &format!("/v1/environment-drafts/{did}/files"),
-            None,
-            200,
-        )
-        .await;
-    assert_eq!(
-        files
-            .files
-            .iter()
-            .map(|f| f.path.as_str())
-            .collect::<Vec<_>>(),
-        ["main.tf", "Dockerfile", "seed.sh"]
-    );
+    assert_eq!(listed.drafts.len(), 1);
     let revised: EnvironmentDraftVm = c
         .rt(
             "POST",
             "/v1/environment-drafts/{id}/revisions",
             &format!("/v1/environment-drafts/{did}/revisions"),
-            Some(json!({"request": "Use a smaller setup"})),
+            Some(json!({"message": "Use a smaller setup"})),
             200,
         )
         .await;
-    assert_eq!((revised.scope, revised.revision), (EnvScope::Single, 2));
-    let pr: EnvironmentDraftVm = c
-        .rt(
-            "POST",
-            "/v1/environment-drafts/{id}/pull-request",
-            &format!("/v1/environment-drafts/{did}/pull-request"),
-            None,
-            200,
-        )
-        .await;
-    assert!(pr.pr_url.is_some());
+    assert_eq!(revised.status, EnvironmentDraftStatus::Drafting);
+    for _ in 0..500 {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let d: EnvironmentDraftVm = c
+            .rt(
+                "GET",
+                "/v1/environment-drafts/{id}",
+                &format!("/v1/environment-drafts/{did}"),
+                None,
+                200,
+            )
+            .await;
+        if d.status == EnvironmentDraftStatus::Ready {
+            assert_eq!(
+                (d.draft.unwrap().scope, d.revision),
+                (ratchet_core::enums::EnvironmentScope::Single, 2)
+            );
+            break;
+        }
+    }
     let approved: EnvironmentDraftVm = c
         .rt(
             "POST",
             "/v1/environment-drafts/{id}/approval",
             &format!("/v1/environment-drafts/{did}/approval"),
-            None,
+            Some(json!({"mode": "commit"})),
             200,
         )
         .await;
     assert_eq!(approved.status, EnvironmentDraftStatus::Approved);
+    assert_eq!(
+        approved.approval.unwrap().mode,
+        EnvironmentApprovalMode::Commit
+    );
     c.fails(
         "POST",
         &format!("/v1/environment-drafts/{did}/revisions"),
-        Some(json!({"request": "more"})),
+        Some(json!({"message": "more"})),
         409,
         ErrorCode::Conflict,
+    )
+    .await;
+    // "Back" on a second draft; an approved one cannot be discarded
+    let second: EnvironmentDraftVm = c
+        .rt(
+            "POST",
+            "/v1/environment-drafts",
+            "/v1/environment-drafts",
+            Some(json!({"repo": "acme-org/shop-api", "goal": "unit tests", "agentConnector": "codex"})),
+            201,
+        )
+        .await;
+    c.fails(
+        "DELETE",
+        &format!("/v1/environment-drafts/{did}"),
+        None,
+        409,
+        ErrorCode::Conflict,
+    )
+    .await;
+    c.no_content(
+        "DELETE",
+        "/v1/environment-drafts/{id}",
+        &format!("/v1/environment-drafts/{}", second.id),
+        None,
     )
     .await;
 

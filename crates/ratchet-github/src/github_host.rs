@@ -250,7 +250,15 @@ impl GitBackend for GitHubBackend {
         Ok(())
     }
 
-    async fn publish(&self, git: &Git<'_>, branch: &str, sha: &str, force: bool) -> Result<()> {
+    async fn publish(
+        &self,
+        git: &Git<'_>,
+        branch: &str,
+        sha: &str,
+        force: bool,
+        // a plain push without `+` is a fast-forward only: it fails when the remote moved since the tip was read
+        _expected: Option<&str>,
+    ) -> Result<()> {
         let refspec = format!("{}{sha}:refs/heads/{branch}", if force { "+" } else { "" });
         git.run(&["push", "-q", &self.url, &refspec], self.auth_env())
             .await?;

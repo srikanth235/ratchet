@@ -5,12 +5,16 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
+use super::environment::{assert_drafted_environment, is_drafted};
 use super::tofu::{RuntimeRoleLister, TeardownBlockedError};
 use crate::util::assert_valid_sandbox_id;
 use ratchet_core::ports::{
-    AwsIdentityRef, PlanAction, PlanChange, PortError, PortResult, SandboxInput, SandboxLimits,
+    AwsIdentityRef, PlanAction, PlanChange, PortError, PortResult, SandboxEnvironment,
+    SandboxEnvironmentMachine, SandboxEnvironmentOutputs, SandboxInput, SandboxLimits,
     SandboxNetwork, SandboxOutputs, SandboxPlan, SandboxProvider,
 };
+use ratchet_env::{EnvironmentFile, ValidateEnvironmentInput, validate_environment};
+use std::collections::BTreeMap;
 
 /// The headline resources of infra/aws (docs/V0_ARCHITECTURE.md §7), with real addresses.
 pub const SANDBOX_RESOURCES: &[(&str, &str)] = &[
@@ -54,6 +58,46 @@ pub const SANDBOX_RESOURCES: &[(&str, &str)] = &[
     ("aws_security_group.bench", "aws_security_group"),
     ("aws_security_group.endpoints", "aws_security_group"),
 ];
+
+/// What a drafted environment would create, from its files (the simulation's stand-in for the second tofu stage).
+fn mock_environment_outputs(env: &SandboxEnvironment) -> SandboxEnvironmentOutputs {
+    let mut input = ValidateEnvironmentInput::new(
+        env.scope,
+        env.files
+            .iter()
+            .map(|f| EnvironmentFile::new(format!("{}/{}", env.path, f.path), f.content.clone()))
+            .collect(),
+    );
+    input.module_only = true;
+    let v = validate_environment(&input);
+    let mut machines = BTreeMap::new();
+    let mut resources = Vec::new();
+    for (i, m) in v.machines.iter().enumerate() {
+        let key = m.key.clone().unwrap_or_else(|| m.name.clone());
+        machines.insert(
+            key.clone(),
+            SandboxEnvironmentMachine {
+                id: format!("i-0mockenv{i:04}"),
+                role: m.role.to_string(),
+                private_ip: format!("10.42.1.{}", 10 + i),
+            },
+        );
+        resources.push(format!("module.sandbox.aws_instance.machine[\"{key}\"]"));
+        if m.data_volume_gb.unwrap_or(0.0) > 0.0 {
+            resources.push(format!("module.sandbox.aws_ebs_volume.data[\"{key}\"]"));
+            resources.push(format!(
+                "module.sandbox.aws_volume_attachment.data[\"{key}\"]"
+            ));
+        }
+    }
+    SandboxEnvironmentOutputs {
+        kind: env.kind,
+        scope: env.scope,
+        hash: env.hash.clone(),
+        resources,
+        machines,
+    }
+}
 
 #[derive(Default)]
 pub struct MockSandboxProviderOptions {
@@ -123,7 +167,7 @@ impl SandboxProvider for MockSandboxProvider {
         } else {
             PlanAction::Create
         };
-        let changes: Vec<PlanChange> = SANDBOX_RESOURCES
+        let mut changes: Vec<PlanChange> = SANDBOX_RESOURCES
             .iter()
             .map(|(address, ty)| PlanChange {
                 action,
@@ -131,6 +175,23 @@ impl SandboxProvider for MockSandboxProvider {
                 resource_type: (*ty).to_string(),
             })
             .collect();
+        if let Some(env) = input.environment.as_ref().filter(|e| is_drafted(e)) {
+            assert_drafted_environment(env, None)?;
+            for address in mock_environment_outputs(env).resources {
+                let ty = if address.contains("ebs_volume") {
+                    "aws_ebs_volume"
+                } else if address.contains("volume_attachment") {
+                    "aws_volume_attachment"
+                } else {
+                    "aws_instance"
+                };
+                changes.push(PlanChange {
+                    action,
+                    address,
+                    resource_type: ty.to_string(),
+                });
+            }
+        }
         let n = if exists { 0 } else { changes.len() };
         Ok(SandboxPlan {
             changes,
@@ -141,6 +202,10 @@ impl SandboxProvider for MockSandboxProvider {
     async fn apply(&self, input: &SandboxInput) -> PortResult<SandboxOutputs> {
         self.record("apply", &input.sandbox_id);
         assert_valid_sandbox_id(&input.sandbox_id)?;
+        // the same refusal as the real provider
+        if let Some(env) = input.environment.as_ref().filter(|e| is_drafted(e)) {
+            assert_drafted_environment(env, None)?;
+        }
         if let Some(existing) = self
             .applied
             .lock()
@@ -176,6 +241,19 @@ impl SandboxProvider for MockSandboxProvider {
                 max_instances_per_agent: input.max_instances_per_agent,
                 max_instance_lifetime_hours: input.max_instance_lifetime_hours,
             },
+            environment: input.environment.as_ref().map(|env| {
+                if is_drafted(env) {
+                    mock_environment_outputs(env)
+                } else {
+                    SandboxEnvironmentOutputs {
+                        kind: env.kind,
+                        scope: env.scope,
+                        hash: env.hash.clone(),
+                        resources: vec![],
+                        machines: BTreeMap::new(),
+                    }
+                }
+            }),
         };
         self.applied
             .lock()

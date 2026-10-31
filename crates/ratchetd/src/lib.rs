@@ -17,6 +17,8 @@ pub mod auth;
 #[cfg(feature = "server")]
 pub mod connectors_hub;
 #[cfg(feature = "server")]
+pub mod drafts;
+#[cfg(feature = "server")]
 pub mod hub;
 #[cfg(feature = "server")]
 pub mod launchagent;

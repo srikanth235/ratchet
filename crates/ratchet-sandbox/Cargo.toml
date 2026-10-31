@@ -21,11 +21,13 @@ aws-smithy-types = "1.9.1"
 base64 = "0.22.1"
 futures = "0.3.31"
 ratchet-core = { path = "../ratchet-core" }
+ratchet-env = { path = "../ratchet-env" }
 rand = "0.9.0"
 regex = "1.11.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.140", features = ["preserve_order"] }
 sha1 = "0.10.6"
+tempfile = "3.20.0"
 thiserror = "2.0.12"
 tokio = { version = "1.54.1", features = ["fs", "io-util", "macros", "process", "rt", "sync", "time"] }
 tracing = "0.1.41"

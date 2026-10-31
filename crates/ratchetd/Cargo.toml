@@ -13,6 +13,7 @@ default = ["server", "engine"]
 # all a client such as the `ratchet` CLI needs.
 server = [
     "dep:axum",
+    "dep:ratchet-env",
     "dep:ratchet-ledger",
     "dep:sqlx",
     "dep:clap",
@@ -45,6 +46,7 @@ required-features = ["server", "engine"]
 [dependencies]
 ratchet-core = { path = "../ratchet-core", features = ["utoipa"] }
 ratchet-connectors = { path = "../ratchet-connectors", default-features = false, features = ["utoipa"] }
+ratchet-env = { path = "../ratchet-env", optional = true }
 ratchet-agents = { path = "../ratchet-agents", optional = true }
 ratchet-engine = { path = "../ratchet-engine", optional = true }
 ratchet-github = { path = "../ratchet-github", optional = true }

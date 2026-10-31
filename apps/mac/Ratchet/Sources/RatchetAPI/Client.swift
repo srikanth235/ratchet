@@ -1986,7 +1986,9 @@ public struct Client: APIProtocol {
             }
         )
     }
-    /// Ask an agent to draft the environment this goal needs (scope none, single or full, resources, checks, cost).
+    /// Ask the setup agent to draft the environment this goal needs (scope none, single or full, resources, checks, cost).
+    /// Answers at once with the draft in status `drafting`; the agent works in the background and `environment-draft`
+    /// events say when it is `ready` (or `failed`).
     ///
     /// - Remark: HTTP `POST /v1/environment-drafts`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/post(createEnvironmentDraft)`.
@@ -2087,6 +2089,50 @@ public struct Client: APIProtocol {
                         preconditionFailure("bestContentType chose an invalid content type.")
                     }
                     return .unauthorized(.init(body: body))
+                case 409:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.CreateEnvironmentDraft.Output.Conflict.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .conflict(.init(body: body))
+                case 501:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.CreateEnvironmentDraft.Output.NotImplemented.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .notImplemented(.init(body: body))
                 default:
                     let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
                     let body: Components.Responses.Failure.Body
@@ -2116,7 +2162,7 @@ public struct Client: APIProtocol {
             }
         )
     }
-    /// One environment draft.
+    /// One environment draft, with the content of its files ("View files").
     ///
     /// - Remark: HTTP `GET /v1/environment-drafts/{id}`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/{id}/get(getEnvironmentDraft)`.
@@ -2190,7 +2236,7 @@ public struct Client: APIProtocol {
                     return .unauthorized(.init(body: body))
                 case 404:
                     let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
-                    let body: Components.Responses.NotFound.Body
+                    let body: Operations.GetEnvironmentDraft.Output.NotFound.Body
                     let chosenContentType = try converter.bestContentType(
                         received: contentType,
                         options: [
@@ -2239,7 +2285,9 @@ public struct Client: APIProtocol {
             }
         )
     }
-    /// Approve and lock the environment: agents change code only, never the environment. 409 unless every check passed.
+    /// Approve and lock the environment: the files are committed to the protected ref (`mode` `commit`) or proposed as a
+    /// pull request (`pr`, the default), and from then on agents change code only, never the environment. 409 unless
+    /// every check passed (and unless the base `ratchet.yaml` is still the one the draft was made from).
     ///
     /// - Remark: HTTP `POST /v1/environment-drafts/{id}/approval`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/{id}/approval/post(approveEnvironmentDraft)`.
@@ -2263,7 +2311,16 @@ public struct Client: APIProtocol {
                     in: &request.headerFields,
                     contentTypes: input.headers.accept
                 )
-                return (request, nil)
+                let body: OpenAPIRuntime.HTTPBody?
+                switch input.body {
+                case let .json(value):
+                    body = try converter.setRequiredRequestBodyAsJSON(
+                        value,
+                        headerFields: &request.headerFields,
+                        contentType: "application/json; charset=utf-8"
+                    )
+                }
+                return (request, body)
             },
             deserializer: { response, responseBody in
                 switch response.status.code {
@@ -2289,6 +2346,28 @@ public struct Client: APIProtocol {
                         preconditionFailure("bestContentType chose an invalid content type.")
                     }
                     return .ok(.init(body: body))
+                case 400:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Components.Responses.BadRequest.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .badRequest(.init(body: body))
                 case 401:
                     let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
                     let body: Components.Responses.Unauthorized.Body
@@ -2384,7 +2463,8 @@ public struct Client: APIProtocol {
             }
         )
     }
-    /// "Ask for a change" or "Use a smaller setup": the agent revises the draft. 409 once approved.
+    /// "Ask for a change" or "Use a smaller setup": the same agent session continues and the draft is re-validated and
+    /// re-costed. Answers with the draft in status `drafting`; 409 once approved or while it is being drafted.
     ///
     /// - Remark: HTTP `POST /v1/environment-drafts/{id}/revisions`.
     /// - Remark: Generated from `#/paths//v1/environment-drafts/{id}/revisions/post(reviseEnvironmentDraft)`.
@@ -2509,6 +2589,28 @@ public struct Client: APIProtocol {
                         preconditionFailure("bestContentType chose an invalid content type.")
                     }
                     return .notFound(.init(body: body))
+                case 409:
+                    let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
+                    let body: Operations.ReviseEnvironmentDraft.Output.Conflict.Body
+                    let chosenContentType = try converter.bestContentType(
+                        received: contentType,
+                        options: [
+                            "application/json"
+                        ]
+                    )
+                    switch chosenContentType {
+                    case "application/json":
+                        body = try await converter.getResponseBodyAsJSON(
+                            Components.Schemas.ApiError.self,
+                            from: responseBody,
+                            transforming: { value in
+                                .json(value)
+                            }
+                        )
+                    default:
+                        preconditionFailure("bestContentType chose an invalid content type.")
+                    }
+                    return .conflict(.init(body: body))
                 default:
                     let contentType = converter.extractContentTypeIfPresent(in: response.headerFields)
                     let body: Components.Responses.Failure.Body

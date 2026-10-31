@@ -2375,15 +2375,31 @@ mod connectors {
     }
 }
 
-mod provisional_groups {
+mod environment_drafts_group {
     use super::*;
 
     #[tokio::test]
-    async fn environment_drafts_are_not_supported_yet() {
+    async fn environment_drafts_need_the_sign_in() {
         let s = setup(Opts::default()).await;
+        // environment drafts are supported: an unknown id is a 404, and drafting needs the GitHub sign-in
         assert!(matches!(
             s.service.get_environment_draft("x").await,
-            Err(ServiceError::Unsupported(_))
+            Err(ServiceError::NotFound(_))
+        ));
+        assert!(matches!(
+            s.service
+                .create_environment_draft(CreateEnvironmentDraftInput {
+                    repo: "acme/web".into(),
+                    base_ref: None,
+                    goal: "faster".into(),
+                    agent_connector: ratchet_core::AgentKind::ClaudeCode,
+                    aws_profile: None,
+                    region: None,
+                    time_limit_seconds: None,
+                    config_path: None,
+                })
+                .await,
+            Err(ServiceError::NotReady(_))
         ));
         assert_eq!(s.service.engine().kind, EngineKind::Real);
     }

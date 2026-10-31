@@ -12,6 +12,7 @@
 mod common;
 mod core_loop;
 mod desktop_product;
+mod environment_apply;
 mod local_agents;
 mod reconcile;
 mod runtime_bench_contract;
