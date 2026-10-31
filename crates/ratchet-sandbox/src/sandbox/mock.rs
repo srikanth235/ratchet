@@ -6,13 +6,11 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 
 use super::tofu::{RuntimeRoleLister, TeardownBlockedError};
-use crate::domain::{
-    AwsIdentityRef, PlanAction, PlanChange, SandboxInput, SandboxLimits, SandboxNetwork,
-    SandboxOutputs, SandboxPlan,
-};
-use crate::error::Result;
-use crate::ports::SandboxProvider;
 use crate::util::assert_valid_sandbox_id;
+use ratchet_core::ports::{
+    AwsIdentityRef, PlanAction, PlanChange, PortError, PortResult, SandboxInput, SandboxLimits,
+    SandboxNetwork, SandboxOutputs, SandboxPlan, SandboxProvider,
+};
 
 /// The headline resources of infra/aws (docs/V0_ARCHITECTURE.md §7), with real addresses.
 pub const SANDBOX_RESOURCES: &[(&str, &str)] = &[
@@ -112,7 +110,7 @@ fn identity(acct: &str, name: &str) -> AwsIdentityRef {
 
 #[async_trait]
 impl SandboxProvider for MockSandboxProvider {
-    async fn plan(&self, input: &SandboxInput) -> Result<SandboxPlan> {
+    async fn plan(&self, input: &SandboxInput) -> PortResult<SandboxPlan> {
         self.record("plan", &input.sandbox_id);
         assert_valid_sandbox_id(&input.sandbox_id)?;
         let exists = self
@@ -140,7 +138,7 @@ impl SandboxProvider for MockSandboxProvider {
         })
     }
 
-    async fn apply(&self, input: &SandboxInput) -> Result<SandboxOutputs> {
+    async fn apply(&self, input: &SandboxInput) -> PortResult<SandboxOutputs> {
         self.record("apply", &input.sandbox_id);
         assert_valid_sandbox_id(&input.sandbox_id)?;
         if let Some(existing) = self
@@ -186,14 +184,16 @@ impl SandboxProvider for MockSandboxProvider {
         Ok(out)
     }
 
-    async fn destroy(&self, input: &SandboxInput) -> Result<()> {
+    async fn destroy(&self, input: &SandboxInput) -> PortResult<()> {
         self.record("destroy", &input.sandbox_id);
         let roles = match &self.opts.role_lister {
             Some(l) => l.list_runtime_agent_roles(input).await?,
             None => vec![],
         };
         if !roles.is_empty() {
-            return Err(TeardownBlockedError { roles }.into());
+            return Err(PortError::TeardownBlocked(
+                TeardownBlockedError { roles }.to_string(),
+            ));
         }
         self.applied
             .lock()
@@ -202,7 +202,7 @@ impl SandboxProvider for MockSandboxProvider {
         Ok(())
     }
 
-    async fn outputs(&self, sandbox_id: &str) -> Result<Option<SandboxOutputs>> {
+    async fn outputs(&self, sandbox_id: &str) -> PortResult<Option<SandboxOutputs>> {
         Ok(self
             .applied
             .lock()

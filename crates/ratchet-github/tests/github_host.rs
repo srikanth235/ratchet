@@ -9,10 +9,11 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use common::*;
+use ratchet_core::ports::{CommitFile, CommitFilesInput, FileDiff, GitHost, PullRequestInput};
 use ratchet_github::testing::{FakeGithubConfig, FakeGithubServer, RecordingRunner, test_client};
 use ratchet_github::{
-    BaseGitHostOptions, CommandGitRunner, CommitFile, CommitFilesInput, FileDiff, GitHost,
-    GitHubGitHost, GitHubGitHostOptions, GitRunOptions, GitRunner, PullRequestInput,
+    BaseGitHostOptions, CommandGitRunner, GitHubGitHost, GitHubGitHostOptions, GitRunOptions,
+    GitRunner,
 };
 
 const TOKEN: &str = "ghp_SuperSecretToken1234567890";
@@ -445,7 +446,8 @@ async fn commit_files_pushes_the_branch_and_opens_the_pr_from_it_no_squash_head_
             files: template_files(),
         })
         .await
-        .unwrap();
+        .unwrap()
+        .sha;
     assert_eq!(
         e.fix
             .remote_git(&["rev-parse", "refs/heads/ratchet/template-gh"]),

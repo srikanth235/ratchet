@@ -2,12 +2,13 @@
 
 use std::sync::Arc;
 
-use ratchet_sandbox::ports::SandboxProvider;
+use ratchet_core::ports::PortError;
+use ratchet_core::ports::SandboxProvider;
+use ratchet_core::ports::{PlanAction, SandboxInput};
 use ratchet_sandbox::sandbox::tofu::SharedRoles;
 use ratchet_sandbox::sandbox::{
     MockSandboxProvider, MockSandboxProviderOptions, SANDBOX_RESOURCES,
 };
-use ratchet_sandbox::{Error, PlanAction, SandboxInput};
 
 fn input() -> SandboxInput {
     SandboxInput {
@@ -84,7 +85,7 @@ async fn destroy_honours_the_teardown_guard_like_the_real_provider() {
     p.apply(&input()).await.unwrap();
     assert!(matches!(
         p.destroy(&input()).await.unwrap_err(),
-        Error::TeardownBlocked(_)
+        PortError::TeardownBlocked(_)
     ));
     assert!(p.outputs("sim").await.unwrap().is_some());
     roles.set(vec![]);

@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use ratchet_sandbox::domain::{PlanAction, SandboxInput};
-use ratchet_sandbox::ports::SandboxProvider;
+use ratchet_core::ports::SandboxProvider;
+use ratchet_core::ports::{PlanAction, PortError, SandboxInput};
 use ratchet_sandbox::sandbox::tofu::{
     SharedRoles, map_actions, parse_tofu_outputs, summarize_plan,
 };
@@ -270,7 +270,7 @@ async fn plan_exit_code_0_no_changes_is_fine_1_is_an_error_with_stderr() {
     r.tofu.plan(&input()).await.unwrap();
     *r.runner.plan_exit.lock().unwrap() = 1;
     let e = r.tofu.plan(&input()).await.unwrap_err();
-    assert!(matches!(e, Error::Tofu(_)), "{e:?}");
+    assert!(matches!(e, PortError::Failed(_)), "{e:?}");
     assert!(e.to_string().contains("tofu plan failed (exit 1)"), "{e}");
 }
 
@@ -319,15 +319,17 @@ async fn rejects_bad_sandbox_ids_at_every_provider_entry_point() {
     ] {
         let mut i = input();
         i.sandbox_id = bad.into();
-        let has = |e: Error| assert!(e.to_string().contains("invalid sandbox id"), "{bad:?}: {e}");
-        has(r.tofu.plan(&i).await.unwrap_err());
-        has(r.tofu.apply(&i).await.unwrap_err());
-        has(r.tofu.destroy(&i).await.unwrap_err());
-        has(r.tofu.outputs(bad).await.unwrap_err());
-        has(r.tofu.work_dir(bad).unwrap_err());
+        let has = |e: &dyn std::fmt::Display| {
+            assert!(e.to_string().contains("invalid sandbox id"), "{bad:?}: {e}")
+        };
+        has(&r.tofu.plan(&i).await.unwrap_err());
+        has(&r.tofu.apply(&i).await.unwrap_err());
+        has(&r.tofu.destroy(&i).await.unwrap_err());
+        has(&r.tofu.outputs(bad).await.unwrap_err());
+        has(&r.tofu.work_dir(bad).unwrap_err());
         let mock = MockSandboxProvider::default();
-        has(mock.plan(&i).await.unwrap_err());
-        has(mock.apply(&i).await.unwrap_err());
+        has(&mock.plan(&i).await.unwrap_err());
+        has(&mock.apply(&i).await.unwrap_err());
     }
     assert_eq!(r.runner.count(), 0);
 }
@@ -480,7 +482,10 @@ async fn destroy_refuses_while_runtime_agent_roles_exist_and_runs_nothing() {
     r.roles.set(vec!["ratchet-agent-opt1-a1".into()]);
     let e = r.tofu.destroy(&input()).await.unwrap_err();
     match &e {
-        Error::TeardownBlocked(t) => assert_eq!(t.roles, ["ratchet-agent-opt1-a1"]),
+        PortError::TeardownBlocked(m) => assert!(
+            m.contains("1 runtime agent role(s) still exist (ratchet-agent-opt1-a1)"),
+            "{m}"
+        ),
         other => panic!("expected TeardownBlocked, got {other:?}"),
     }
     assert!(e.to_string().contains("kill switch"), "{e}");
@@ -509,7 +514,7 @@ async fn destroy_surfaces_tofu_failures() {
     *r.runner.fail_on.lock().unwrap() = Some("destroy");
     assert!(matches!(
         r.tofu.destroy(&input()).await.unwrap_err(),
-        Error::Tofu(_)
+        PortError::Failed(m) if m.starts_with("tofu destroy failed")
     ));
 }
 
@@ -582,7 +587,7 @@ fn the_outputs_round_trip_through_json_in_the_typescript_shape() {
         json!({ "maxInstancesPerAgent": 4, "maxInstanceLifetimeHours": 2 })
     );
     assert_eq!(
-        serde_json::from_value::<ratchet_sandbox::SandboxOutputs>(v).unwrap(),
+        serde_json::from_value::<ratchet_core::ports::SandboxOutputs>(v).unwrap(),
         out
     );
 }

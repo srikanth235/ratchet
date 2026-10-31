@@ -5,8 +5,8 @@ use aws_sdk_s3::operation::put_object::{PutObjectInput, PutObjectOutput};
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::{Object, ServerSideEncryption};
 use aws_smithy_mocks::{RuleMode, mock, mock_client};
+use ratchet_core::ports::ArtifactStore;
 use ratchet_sandbox::artifacts::{FsArtifactStore, S3ArtifactStore};
-use ratchet_sandbox::ports::ArtifactStore;
 
 fn store(client: aws_sdk_s3::Client) -> S3ArtifactStore {
     S3ArtifactStore::new(client, "b").with_prefix("artifacts/")

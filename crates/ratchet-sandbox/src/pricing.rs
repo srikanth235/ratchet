@@ -8,10 +8,9 @@ use aws_sdk_pricing::types::{Filter, FilterType};
 use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 
-use crate::domain::Clock;
 use crate::error::{Error, Result, sdk};
-use crate::ports::Pricing;
-use crate::util::SystemClock;
+use ratchet_core::ports::mock::SystemClock;
+use ratchet_core::ports::{Clock, PortError, PortResult, PriceBook};
 
 /// Approximate us-east-1 Linux on-demand USD/hour. For simulation and as a fallback; the live number comes from
 /// [`AwsPriceBook`].
@@ -68,10 +67,10 @@ impl StaticPriceBook {
 }
 
 #[async_trait]
-impl Pricing for StaticPriceBook {
-    async fn hourly_usd(&self, instance_type: &str) -> Result<f64> {
+impl PriceBook for StaticPriceBook {
+    async fn hourly_usd(&self, instance_type: &str) -> PortResult<f64> {
         self.table.get(instance_type).copied().ok_or_else(|| {
-            Error::other(format!("no static price for instance type {instance_type}"))
+            PortError::failed(format!("no static price for instance type {instance_type}"))
         })
     }
 }
@@ -83,7 +82,7 @@ struct Inner {
     region: String,
     clock: Arc<dyn Clock>,
     ttl_ms: i64,
-    fallback: Option<Arc<dyn Pricing>>,
+    fallback: Option<Arc<dyn PriceBook>>,
     cache: Mutex<HashMap<String, (f64, i64)>>,
     inflight: Mutex<HashMap<String, Inflight>>,
 }
@@ -101,7 +100,7 @@ pub struct AwsPriceBookBuilder {
     client: aws_sdk_pricing::Client,
     clock: Arc<dyn Clock>,
     ttl_ms: i64,
-    fallback: Option<Arc<dyn Pricing>>,
+    fallback: Option<Arc<dyn PriceBook>>,
 }
 
 impl AwsPriceBookBuilder {
@@ -117,7 +116,7 @@ impl AwsPriceBookBuilder {
     }
 
     /// Used when the Pricing API fails or has no match (e.g. offline).
-    pub fn fallback(mut self, fallback: Arc<dyn Pricing>) -> Self {
+    pub fn fallback(mut self, fallback: Arc<dyn PriceBook>) -> Self {
         self.fallback = Some(fallback);
         self
     }
@@ -209,8 +208,8 @@ fn share_error(e: &Error) -> Error {
 }
 
 #[async_trait]
-impl Pricing for AwsPriceBook {
-    async fn hourly_usd(&self, instance_type: &str) -> Result<f64> {
+impl PriceBook for AwsPriceBook {
+    async fn hourly_usd(&self, instance_type: &str) -> PortResult<f64> {
         let inner = &self.inner;
         if let Some((usd, at)) = inner
             .cache
@@ -218,7 +217,7 @@ impl Pricing for AwsPriceBook {
             .expect("price cache poisoned")
             .get(instance_type)
             .copied()
-            && inner.clock.now_ms() - at < inner.ttl_ms
+            && inner.clock.now() - at < inner.ttl_ms
         {
             return Ok(usd);
         }
@@ -236,11 +235,14 @@ impl Pricing for AwsPriceBook {
                                     .cache
                                     .lock()
                                     .expect("price cache poisoned")
-                                    .insert(t.clone(), (usd, inner.clock.now_ms()));
+                                    .insert(t.clone(), (usd, inner.clock.now()));
                                 Ok(usd)
                             }
                             Err(e) => match &inner.fallback {
-                                Some(fb) => fb.hourly_usd(&t).await.map_err(Arc::new),
+                                Some(fb) => fb
+                                    .hourly_usd(&t)
+                                    .await
+                                    .map_err(|e| Arc::new(Error::from(e))),
                                 None => Err(Arc::new(e)),
                             },
                         };
@@ -256,7 +258,7 @@ impl Pricing for AwsPriceBook {
                 })
                 .clone()
         };
-        fut.await.map_err(|e| share_error(&e))
+        fut.await.map_err(|e| PortError::from(share_error(&e)))
     }
 }
 

@@ -1,6 +1,6 @@
 //! GitHub for Ratchet: the Rust port of `packages/github` plus the GitHub parts of the desktop main process.
 //!
-//! - [`GitHost`] (the port) with three implementations: [`LocalGitHost`] (simulation: git CLI against a local bare repo),
+//! - [`ratchet_core::ports::GitHost`] (the port) with three implementations: [`LocalGitHost`] (simulation: git CLI against a local bare repo),
 //!   [`GitHubGitHost`] (a GitHub remote: bare mirror + push + REST pull requests) and [`MockGitHost`] (in-memory).
 //! - [`GithubApi`]: device-flow sign-in, repos, branches, files (real [`HttpGithubApi`], in-memory [`MockGithubApi`]).
 //! - [`GithubSignIn`]: the background device-flow poller.
@@ -27,7 +27,6 @@ pub mod local;
 pub mod local_repo;
 pub mod mock;
 pub mod numfmt;
-pub mod port;
 pub mod report;
 pub mod signin;
 pub mod slug;
@@ -40,10 +39,7 @@ pub use api::{
     DeviceCode, DevicePoll, GITHUB_SCOPE, GithubApi, GithubApiOptions, GithubUser, HttpGithubApi,
     MockGithubApi, PLACEHOLDER_GITHUB_CLIENT_ID, RepoInspection, inspect_github_repo,
 };
-pub use domain::{
-    AgentKind, BenchStats, CandidateCommit, CandidateVerdict, CommitFile, CommitFilesInput,
-    Direction, FileDiff, PullRequestInput, PullRequestUrl, Repo, gain_percent,
-};
+pub use domain::Repo;
 pub use error::{Error, Result};
 pub use git::{
     BaseGitHostOptions, CANDIDATE_TRAILER, CommandGitRunner, GitHostCore, GitRunOptions, GitRunner,
@@ -55,7 +51,6 @@ pub use local::{
 };
 pub use local_repo::{LocalRepoInfo, inspect_local_folder};
 pub use mock::MockGitHost;
-pub use port::GitHost;
 pub use report::{
     ReportInput, ResultReport, ResultReportData, build_result_report,
     build_squash_plan_from_report_input,

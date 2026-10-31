@@ -13,7 +13,7 @@ pub use infra_override::{
 pub use mock::{MockSandboxProvider, MockSandboxProviderOptions, SANDBOX_RESOURCES};
 pub use process::{ProcessResult, ProcessRunner, ProcessSpec, TokioProcessRunner};
 pub use tofu::{
-    IamRoleLister, RuntimeRoleLister, SharedRoles, TeardownBlockedError, TofuError,
-    TofuSandboxProvider, TofuSandboxProviderOptions, map_actions, parse_tofu_outputs,
+    AwsSandboxOutputs, IamRoleLister, RuntimeRoleLister, SharedRoles, TeardownBlockedError,
+    TofuError, TofuSandboxProvider, TofuSandboxProviderOptions, map_actions, parse_tofu_outputs,
     summarize_plan,
 };

@@ -3,13 +3,11 @@
 //! `start` returns the code to show and keeps polling in the background; on success the token goes to the keychain-backed
 //! [`AccountStore`] (never to the UI) and the account login is kept.
 
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
+use ratchet_core::ports::mock::SystemClock;
+use ratchet_core::ports::{CancellationToken, Clock};
 use serde::{Deserialize, Serialize};
-use tokio_util::sync::CancellationToken;
 
 use crate::api::GithubApi;
 use crate::error::Result;
@@ -23,8 +21,7 @@ pub enum FlowState {
     Error,
 }
 
-/// The sign-in in progress. Same JSON as the TS `GithubFlowVM`.
-// TODO(core): a view-model type; moves to the API crate with the other VMs.
+/// The sign-in in progress. Same JSON as the TS `GithubFlowVM` (a view-model: core has none, see PARITY.md).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubFlow {
@@ -44,21 +41,6 @@ pub trait AccountStore: Send + Sync {
     fn set_account(&self, login: &str, source: &str);
 }
 
-pub type SleepFn =
-    Arc<dyn Fn(u64, CancellationToken) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
-
-/// A real timer that cancellation interrupts.
-pub fn real_sleep() -> SleepFn {
-    Arc::new(|ms, cancel| {
-        Box::pin(async move {
-            tokio::select! {
-                _ = tokio::time::sleep(std::time::Duration::from_millis(ms)) => {}
-                _ = cancel.cancelled() => {}
-            }
-        })
-    })
-}
-
 /// Called with the verification URL; must not fail (a panic is swallowed: the code is shown in the app anyway).
 pub type OpenExternalFn = Arc<dyn Fn(&str) + Send + Sync>;
 
@@ -67,10 +49,8 @@ pub struct SignInDeps {
     pub store: Arc<dyn AccountStore>,
     /// Open the verification page in the system browser.
     pub open_external: Option<OpenExternalFn>,
-    /// Injectable for tests (default: a real timer that `cancel` can interrupt).
-    pub sleep: Option<SleepFn>,
-    /// Milliseconds since the epoch (default: the system clock).
-    pub now: Option<Arc<dyn Fn() -> i64 + Send + Sync>>,
+    /// Time and the poll timer, injectable for tests (default: the system clock; `cancel` interrupts a sleep).
+    pub clock: Arc<dyn Clock>,
     /// Called after the token is stored (the service rebuilds what depends on it).
     pub on_signed_in: Option<Arc<dyn Fn() + Send + Sync>>,
 }
@@ -81,20 +61,13 @@ impl SignInDeps {
             api,
             store,
             open_external: None,
-            sleep: None,
-            now: None,
+            clock: Arc::new(SystemClock),
             on_signed_in: None,
         }
     }
 
     fn now(&self) -> i64 {
-        match &self.now {
-            Some(f) => f(),
-            None => SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_millis() as i64)
-                .unwrap_or(0),
-        }
+        self.clock.now()
     }
 }
 
@@ -194,10 +167,14 @@ impl Poller {
 
     async fn run(self, device_code: String, start_interval: u64) {
         use crate::api::DevicePoll;
-        let sleep = self.deps.sleep.clone().unwrap_or_else(real_sleep);
         let mut interval = start_interval.max(1);
         while !self.cancel.is_cancelled() {
-            sleep(interval * 1000, self.cancel.clone()).await;
+            // a cancelled sleep returns early; the check right below ends the loop
+            let _ = self
+                .deps
+                .clock
+                .sleep(interval * 1000, Some(&self.cancel))
+                .await;
             if self.cancel.is_cancelled() || !self.is_current() {
                 return;
             }

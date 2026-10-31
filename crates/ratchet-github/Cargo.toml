@@ -16,6 +16,7 @@ testing = ["dep:axum"]
 async-trait = "0.1"
 base64 = "0.22"
 indexmap = { version = "2", features = ["serde"] }
+ratchet-core = { path = "../ratchet-core" }
 regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "form", "query"] }
 serde = { version = "1", features = ["derive"] }

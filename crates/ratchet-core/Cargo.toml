@@ -15,7 +15,8 @@ utoipa = ["dep:utoipa"]
 [dependencies]
 async-trait = "0.1"
 include_dir = "0.7"
-schemars = { version = "1", features = ["preserve_order"] }
+indexmap = { version = "2", features = ["serde"] }
+schemars = { version = "1", features = ["preserve_order", "indexmap2"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
 serde_norway = "0.9"

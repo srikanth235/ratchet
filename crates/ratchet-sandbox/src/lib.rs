@@ -7,18 +7,15 @@
 //! - [`reaper`]: lifetime and quota enforcement.
 //! - [`sandbox`]: `TofuSandboxProvider` (the `tofu` binary as a subprocess), the `infra:` override, the mock.
 //!
-//! Every external capability is a trait in [`ports`] with a real and a mock implementation, so simulation mode runs the
-//! whole product without AWS. Real AWS is never called by the tests.
-//!
-//! The domain types in [`domain`] are local stand-ins for ratchet-core (`TODO(core)`), JSON-compatible with the
-//! TypeScript shapes.
+//! Every external capability is a [`ratchet_core::ports`] trait with a real and a mock implementation here (see
+//! [`ports`]), so simulation mode runs the whole product without AWS. Real AWS is never called by the tests. The data
+//! types (`SandboxOutputs`, `InstanceInfo`, ...) are `ratchet-core`'s.
 
 pub mod artifacts;
 mod civil;
 pub mod compute;
 pub mod cost;
 pub mod cost_explorer;
-pub mod domain;
 pub mod error;
 pub mod identity;
 pub mod images;
@@ -36,16 +33,16 @@ pub use compute::{
 };
 pub use cost::{BudgetGuard, BudgetStatus, CostMeter, CostMeterOptions, CostSnapshot, SpendDelta};
 pub use cost_explorer::{AwsCostReconciler, MockCostReconciler, billed, category_for_tags};
-pub use domain::*;
 pub use error::{Error, Result};
 pub use identity::{CallerIdentity, CheckAwsCredentialsOptions, check_aws_credentials};
 pub use images::{
     Ec2ImageLookup, FoundImages, ImageLookupError, MockImageLookup, ResolveImageArgs,
     ResolvedImages, resolve_image_refs,
 };
-pub use ports::{ArtifactStore, Compute, CostSource, ImageLookup, Pricing, SandboxProvider};
+pub use ports::ImageLookup;
 pub use pricing::{AwsPriceBook, StaticPriceBook};
 pub use reaper::{Reaper, ReaperOptions, ReaperPolicy, ReaperReport};
 pub use region::{DEFAULT_REGION, environment_region, region_for_optimization};
-pub use sandbox::{MockSandboxProvider, TofuSandboxProvider, TofuSandboxProviderOptions};
-pub use util::{ManualClock, SystemClock};
+pub use sandbox::{
+    AwsSandboxOutputs, MockSandboxProvider, TofuSandboxProvider, TofuSandboxProviderOptions,
+};

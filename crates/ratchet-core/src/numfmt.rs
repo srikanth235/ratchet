@@ -37,6 +37,16 @@ fn digits_to_string(d: &[u8]) -> String {
     d.iter().map(|d| char::from(b'0' + d)).collect()
 }
 
+/// `serialize_with` for `f64` fields that are JSON numbers in TypeScript: whole values print without a fraction
+/// (`2`, not `2.0`), the way `JSON.stringify` does.
+pub fn serialize_js_number<S: serde::Serializer>(v: &f64, s: S) -> Result<S::Ok, S::Error> {
+    if v.is_finite() && v.fract() == 0.0 && v.abs() < 9.0e15 {
+        s.serialize_i64(*v as i64)
+    } else {
+        s.serialize_f64(*v)
+    }
+}
+
 /// `Number.prototype.toFixed(digits)` for finite numbers below 1e21 (larger ones print in exponent form, as in
 /// JavaScript, via [`js_number_to_string`]).
 pub fn to_fixed(x: f64, digits: usize) -> String {

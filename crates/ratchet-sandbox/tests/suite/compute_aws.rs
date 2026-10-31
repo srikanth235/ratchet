@@ -55,18 +55,21 @@ use aws_sdk_sts::operation::get_caller_identity::GetCallerIdentityOutput;
 use aws_smithy_mocks::{Rule, RuleMode, mock, mock_client};
 use aws_smithy_types::DateTime;
 use base64::Engine as _;
+use ratchet_core::enums::{AgentKind, InstanceRole};
+use ratchet_core::ids::{AgentId, OptimizationId};
+use ratchet_core::ports::SandboxInput;
+use ratchet_core::ports::mock::ManualClock;
+use ratchet_core::ports::{
+    AgentIdentity, BenchLaunchPurpose, BenchLaunchSpec, Clock, InstanceState, PortError,
+    PortResult, RemoteCommand, RunnerLaunchSpec, SecretRef,
+};
+use ratchet_core::ports::{CloudCompute, SandboxProvider};
 use ratchet_sandbox::compute::aws::{
     AGENT_POLICY_NAME, AwsClients, AwsCloudCompute, AwsCloudComputeOptions, AwsComputeConfig,
     KILL_SWITCH_POLICY_NAME, agent_role_name, bench_profile_for, list_agent_roles, secret_prefix,
     to_instance_info,
 };
-use ratchet_sandbox::domain::{
-    AgentIdentity, AgentKind, BenchLaunchSpec, BenchPurpose, Clock, InstanceRole, InstanceState,
-    RemoteCommand, RunnerLaunchSpec, SecretRef,
-};
-use ratchet_sandbox::ports::{Compute, SandboxProvider};
 use ratchet_sandbox::sandbox::MockSandboxProvider;
-use ratchet_sandbox::{ManualClock, SandboxInput};
 
 const NO_RULES: &[Rule] = &[];
 
@@ -173,7 +176,7 @@ fn runner_spec() -> RunnerLaunchSpec {
     }
 }
 
-fn bench_spec(purpose: BenchPurpose) -> BenchLaunchSpec {
+fn bench_spec(purpose: BenchLaunchPurpose) -> BenchLaunchSpec {
     BenchLaunchSpec {
         optimization_id: "opt1".into(),
         instance_type: "c7i.2xlarge".into(),
@@ -278,37 +281,47 @@ async fn rejects_injection_at_every_id_entry_point() {
     let c = &r.compute;
     for bad in cases {
         let ctx = |what: &str| format!("{what} with id {bad:?}");
-        let must = |res: Result<(), ratchet_sandbox::Error>, needle: &str, what: &str| {
+        let must = |res: PortResult<()>, needle: &str, what: &str| {
             let e = res.expect_err(&ctx(what));
             assert!(e.to_string().contains(needle), "{}: {e}", ctx(what));
         };
         must(
-            c.create_agent_identity(bad, "a1").await.map(|_| ()),
+            c.create_agent_identity(&OptimizationId::from(bad), &AgentId::from("a1"))
+                .await
+                .map(|_| ()),
             "invalid optimization id",
             "createAgentIdentity opt",
         );
         must(
-            c.create_agent_identity("opt1", bad).await.map(|_| ()),
+            c.create_agent_identity(&OptimizationId::from("opt1"), &AgentId::from(bad))
+                .await
+                .map(|_| ()),
             "invalid agent id",
             "createAgentIdentity agent",
         );
         must(
-            c.put_secret(bad, "a1", "K", "v").await.map(|_| ()),
+            c.put_secret(&OptimizationId::from(bad), &AgentId::from("a1"), "K", "v")
+                .await
+                .map(|_| ()),
             "invalid optimization id",
             "putSecret opt",
         );
         must(
-            c.put_secret("opt1", bad, "K", "v").await.map(|_| ()),
+            c.put_secret(&OptimizationId::from("opt1"), &AgentId::from(bad), "K", "v")
+                .await
+                .map(|_| ()),
             "invalid agent id",
             "putSecret agent",
         );
         must(
-            c.delete_secrets(bad, "a1").await,
+            c.delete_secrets(&OptimizationId::from(bad), &AgentId::from("a1"))
+                .await,
             "invalid optimization id",
             "deleteSecrets opt",
         );
         must(
-            c.delete_secrets("opt1", bad).await,
+            c.delete_secrets(&OptimizationId::from("opt1"), &AgentId::from(bad))
+                .await,
             "invalid agent id",
             "deleteSecrets agent",
         );
@@ -327,9 +340,9 @@ async fn rejects_injection_at_every_id_entry_point() {
             "launchRunner agent",
         );
         for purpose in [
-            BenchPurpose::Bench,
-            BenchPurpose::Confirm,
-            BenchPurpose::Deps,
+            BenchLaunchPurpose::Bench,
+            BenchLaunchPurpose::Confirm,
+            BenchLaunchPurpose::Deps,
         ] {
             let mut spec = bench_spec(purpose);
             spec.optimization_id = bad.into();
@@ -340,27 +353,37 @@ async fn rejects_injection_at_every_id_entry_point() {
             );
         }
         must(
-            c.list_tagged(Some(bad)).await.map(|_| ()),
+            c.list_tagged(Some(&OptimizationId::from(bad)))
+                .await
+                .map(|_| ()),
             "invalid optimization id",
             "listTagged",
         );
         must(
-            agent_role_name(bad, "a1").map(|_| ()),
+            agent_role_name(bad, "a1")
+                .map(|_| ())
+                .map_err(PortError::from),
             "invalid optimization id",
             "agentRoleName opt",
         );
         must(
-            agent_role_name("opt1", bad).map(|_| ()),
+            agent_role_name("opt1", bad)
+                .map(|_| ())
+                .map_err(PortError::from),
             "invalid agent id",
             "agentRoleName agent",
         );
         must(
-            secret_prefix(bad, "a1").map(|_| ()),
+            secret_prefix(bad, "a1")
+                .map(|_| ())
+                .map_err(PortError::from),
             "invalid optimization id",
             "secretPrefix opt",
         );
         must(
-            secret_prefix("opt1", bad).map(|_| ()),
+            secret_prefix("opt1", bad)
+                .map(|_| ())
+                .map_err(PortError::from),
             "invalid agent id",
             "secretPrefix agent",
         );
@@ -403,7 +426,12 @@ async fn rejects_bad_secret_names_including_dotdot_slash_and_wildcards() {
     for bad in ["../../x", "..", "a/b", "a*", "a?", "", "a b"] {
         let e = r
             .compute
-            .put_secret("opt1", "a1", bad, "v")
+            .put_secret(
+                &OptimizationId::from("opt1"),
+                &AgentId::from("a1"),
+                bad,
+                "v",
+            )
             .await
             .unwrap_err();
         assert!(
@@ -421,7 +449,12 @@ async fn accepts_well_formed_ids() {
         .then_output(|| AddTagsToResourceOutput::builder().build());
     let r = rig(NO_RULES, NO_RULES, &[put, tag]);
     r.compute
-        .put_secret("opt-1", "claude-code-2", "ANTHROPIC_API_KEY", "v")
+        .put_secret(
+            &OptimizationId::from("opt-1"),
+            &AgentId::from("claude-code-2"),
+            "ANTHROPIC_API_KEY",
+            "v",
+        )
         .await
         .unwrap();
 }
@@ -470,7 +503,11 @@ async fn creates_role_under_path_with_boundary_tags_policy_and_profile() {
             .then_output(|| AddRoleToInstanceProfileOutput::builder().build()),
     ];
     let r = rig(NO_RULES, &rules, NO_RULES);
-    let got = r.compute.create_agent_identity("opt1", "a1").await.unwrap();
+    let got = r
+        .compute
+        .create_agent_identity(&OptimizationId::from("opt1"), &AgentId::from("a1"))
+        .await
+        .unwrap();
     assert_eq!(got, id);
 
     let role = roles.first();
@@ -542,7 +579,10 @@ async fn create_agent_identity_is_idempotent_when_role_and_profile_already_exist
     ];
     let r = rig(NO_RULES, &rules, NO_RULES);
     assert_eq!(
-        r.compute.create_agent_identity("opt1", "a1").await.unwrap(),
+        r.compute
+            .create_agent_identity(&OptimizationId::from("opt1"), &AgentId::from("a1"))
+            .await
+            .unwrap(),
         identity()
     );
 }
@@ -554,7 +594,7 @@ async fn create_agent_identity_propagates_unexpected_iam_errors() {
     let r = rig(NO_RULES, &rules, NO_RULES);
     let e = r
         .compute
-        .create_agent_identity("opt1", "a1")
+        .create_agent_identity(&OptimizationId::from("opt1"), &AgentId::from("a1"))
         .await
         .unwrap_err();
     assert!(e.to_string().contains("AccessDenied"), "{e}");
@@ -819,7 +859,12 @@ async fn puts_a_secure_string_under_the_agent_path_and_tags_it() {
     let r = rig(NO_RULES, NO_RULES, &rules);
     let got = r
         .compute
-        .put_secret("opt1", "a1", "ANTHROPIC_API_KEY", "sk-secret")
+        .put_secret(
+            &OptimizationId::from("opt1"),
+            &AgentId::from("a1"),
+            "ANTHROPIC_API_KEY",
+            "sk-secret",
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -882,7 +927,10 @@ async fn deletes_all_secrets_under_the_agent_path_paging_and_batching_by_10() {
             .then_output(|| DeleteParametersOutput::builder().build()),
     ];
     let r = rig(NO_RULES, NO_RULES, &rules);
-    r.compute.delete_secrets("opt1", "a1").await.unwrap();
+    r.compute
+        .delete_secrets(&OptimizationId::from("opt1"), &AgentId::from("a1"))
+        .await
+        .unwrap();
     let g = gets.all();
     assert_eq!(g[0].path(), Some("/ratchet/opt1/a1/"));
     assert_eq!(g[0].recursive(), Some(true));
@@ -900,7 +948,10 @@ async fn delete_secrets_with_none_present_does_not_call_delete() {
     let rule = mock!(aws_sdk_ssm::Client::get_parameters_by_path)
         .then_output(|| GetParametersByPathOutput::builder().build());
     let r = rig(NO_RULES, NO_RULES, &[rule]);
-    r.compute.delete_secrets("opt1", "a1").await.unwrap();
+    r.compute
+        .delete_secrets(&OptimizationId::from("opt1"), &AgentId::from("a1"))
+        .await
+        .unwrap();
 }
 
 // ---- launch -------------------------------------------------------------------------------------------
@@ -925,7 +976,7 @@ async fn launch_runner_tags_imdsv2_terminate_on_shutdown_profile_network_user_da
     assert_eq!(info.id, "i-1");
     assert_eq!(info.role, InstanceRole::AgentRunner);
     assert_eq!(info.optimization_id, "opt1");
-    assert_eq!(info.agent_id.as_deref(), Some("a1"));
+    assert_eq!(info.agent_id.as_ref().map(AgentId::as_str), Some("a1"));
     assert_eq!(info.instance_type, "c7i.large");
     assert_eq!(info.state, InstanceState::Pending);
     assert_eq!(info.launched_at, 5000);
@@ -984,7 +1035,7 @@ async fn launch_bench_instance_confirm_uses_the_confirm_profile_the_private_benc
     let r = rig(&[run_instances_ok(&log, "i-b")], NO_RULES, NO_RULES);
     let info = r
         .compute
-        .launch_bench_instance(&bench_spec(BenchPurpose::Confirm))
+        .launch_bench_instance(&bench_spec(BenchLaunchPurpose::Confirm))
         .await
         .unwrap();
     assert_eq!(info.role, InstanceRole::Bench);
@@ -1016,7 +1067,7 @@ async fn launch_bench_instance_confirm_uses_the_confirm_profile_the_private_benc
 
 #[tokio::test]
 async fn launch_bench_instance_baseline_and_bench_never_get_the_sealed_capable_profile() {
-    for purpose in [BenchPurpose::Baseline, BenchPurpose::Bench] {
+    for purpose in [BenchLaunchPurpose::Baseline, BenchLaunchPurpose::Bench] {
         let log: Log<RunInstancesInput> = Log::new();
         let r = rig(&[run_instances_ok(&log, "i-b")], NO_RULES, NO_RULES);
         r.compute
@@ -1040,29 +1091,29 @@ async fn launch_bench_instance_baseline_and_bench_never_get_the_sealed_capable_p
 fn picks_the_profile_by_purpose_and_fails_closed() {
     let c = cfg();
     assert_eq!(
-        bench_profile_for(&c, BenchPurpose::Baseline).unwrap(),
+        bench_profile_for(&c, BenchLaunchPurpose::Baseline).unwrap(),
         c.bench_instance_profile
     );
     assert_eq!(
-        bench_profile_for(&c, BenchPurpose::Bench).unwrap(),
+        bench_profile_for(&c, BenchLaunchPurpose::Bench).unwrap(),
         c.bench_instance_profile
     );
     assert_eq!(
-        bench_profile_for(&c, BenchPurpose::Confirm).unwrap(),
+        bench_profile_for(&c, BenchLaunchPurpose::Confirm).unwrap(),
         c.confirm_instance_profile.as_deref().unwrap()
     );
     let only_bench = AwsComputeConfig {
         bench_instance_profile: "b".into(),
         ..Default::default()
     };
-    let e = bench_profile_for(&only_bench, BenchPurpose::Confirm).unwrap_err();
+    let e = bench_profile_for(&only_bench, BenchLaunchPurpose::Confirm).unwrap_err();
     assert!(
         e.to_string()
             .contains("confirmInstanceProfile is not configured"),
         "{e}"
     );
     // An unknown purpose cannot be built: the type is closed, and the JSON form is rejected.
-    assert!(serde_json::from_str::<BenchPurpose>("\"confirm-ish\"").is_err());
+    assert!(serde_json::from_str::<BenchLaunchPurpose>("\"confirm-ish\"").is_err());
 }
 
 #[tokio::test]
@@ -1074,7 +1125,7 @@ async fn refuses_a_confirm_launch_without_a_confirm_profile_instead_of_falling_b
     let r = rig_with(c, &[run_instances_ok(&log, "i-b")], NO_RULES, NO_RULES);
     let e = r
         .compute
-        .launch_bench_instance(&bench_spec(BenchPurpose::Confirm))
+        .launch_bench_instance(&bench_spec(BenchLaunchPurpose::Confirm))
         .await
         .unwrap_err();
     assert!(
@@ -1085,7 +1136,7 @@ async fn refuses_a_confirm_launch_without_a_confirm_profile_instead_of_falling_b
     assert!(log.is_empty());
     // bench phases need no sealed identity
     r.compute
-        .launch_bench_instance(&bench_spec(BenchPurpose::Bench))
+        .launch_bench_instance(&bench_spec(BenchLaunchPurpose::Bench))
         .await
         .unwrap();
 }
@@ -1107,7 +1158,7 @@ async fn refuses_to_launch_bench_instances_without_a_bench_subnet_no_fallback_to
     let r = rig_with(c, &[run_instances_ok(&log, "i-b")], NO_RULES, NO_RULES);
     let e = r
         .compute
-        .launch_bench_instance(&bench_spec(BenchPurpose::Bench))
+        .launch_bench_instance(&bench_spec(BenchLaunchPurpose::Bench))
         .await
         .unwrap_err();
     assert!(
@@ -1132,7 +1183,7 @@ async fn accepts_a_bare_profile_name_for_bench() {
     c.bench_instance_profile = "bench-profile".into();
     let r = rig_with(c, &[run_instances_ok(&log, "i-b")], NO_RULES, NO_RULES);
     r.compute
-        .launch_bench_instance(&bench_spec(BenchPurpose::Bench))
+        .launch_bench_instance(&bench_spec(BenchLaunchPurpose::Bench))
         .await
         .unwrap();
     let p = log.first().iam_instance_profile().cloned().unwrap();
@@ -1147,7 +1198,7 @@ mod deps {
         let r = rig_with(c, &[run_instances_ok(&log, "i-d")], NO_RULES, NO_RULES);
         let info = r
             .compute
-            .launch_bench_instance(&bench_spec(BenchPurpose::Deps))
+            .launch_bench_instance(&bench_spec(BenchLaunchPurpose::Deps))
             .await
             .unwrap();
         assert_eq!(info.role, InstanceRole::Bench);
@@ -1208,7 +1259,7 @@ mod deps {
         let r = rig_with(c, &[run_instances_ok(&log, "i-d")], NO_RULES, NO_RULES);
         let e = r
             .compute
-            .launch_bench_instance(&bench_spec(BenchPurpose::Deps))
+            .launch_bench_instance(&bench_spec(BenchLaunchPurpose::Deps))
             .await
             .unwrap_err();
         assert!(
@@ -1227,7 +1278,7 @@ mod deps {
         assert_eq!(input.subnet_id(), Some("subnet-agent"));
         let e = r
             .compute
-            .launch_bench_instance(&bench_spec(BenchPurpose::Bench))
+            .launch_bench_instance(&bench_spec(BenchLaunchPurpose::Bench))
             .await
             .unwrap_err();
         assert!(
@@ -1262,13 +1313,13 @@ mod deps {
     fn picks_the_deps_profile_for_deps_and_for_nothing_else() {
         let c = cfg();
         assert_eq!(
-            bench_profile_for(&c, BenchPurpose::Deps).unwrap(),
+            bench_profile_for(&c, BenchLaunchPurpose::Deps).unwrap(),
             c.deps_instance_profile.as_deref().unwrap()
         );
         for p in [
-            BenchPurpose::Baseline,
-            BenchPurpose::Bench,
-            BenchPurpose::Confirm,
+            BenchLaunchPurpose::Baseline,
+            BenchLaunchPurpose::Bench,
+            BenchLaunchPurpose::Confirm,
         ] {
             assert_ne!(
                 bench_profile_for(&c, p).unwrap(),
@@ -1280,7 +1331,7 @@ mod deps {
             confirm_instance_profile: Some("c".into()),
             ..Default::default()
         };
-        let e = bench_profile_for(&partial, BenchPurpose::Deps).unwrap_err();
+        let e = bench_profile_for(&partial, BenchLaunchPurpose::Deps).unwrap_err();
         assert!(
             e.to_string()
                 .contains("depsInstanceProfile is not configured"),
@@ -1375,11 +1426,11 @@ async fn retries_while_the_fresh_instance_profile_propagates_then_succeeds() {
         .output(|| running("i-2"))
         .build();
     let r = rig(&[rule], NO_RULES, NO_RULES);
-    let t0 = r.clock.now_ms();
+    let t0 = r.clock.now();
     let info = r.compute.launch_runner(&runner_spec()).await.unwrap();
     assert_eq!(info.id, "i-2");
     assert_eq!(log.len(), 3);
-    assert_eq!(r.clock.now_ms() - t0, 2000 + 4000);
+    assert_eq!(r.clock.now() - t0, 2000 + 4000);
 }
 
 #[tokio::test]
@@ -1530,7 +1581,11 @@ async fn list_tagged_filters_by_tag_pages_infers_roles_and_skips_untagged() {
         })
         .build();
     let r = rig(&[rule], NO_RULES, NO_RULES);
-    let list = r.compute.list_tagged(Some("o")).await.unwrap();
+    let list = r
+        .compute
+        .list_tagged(Some(&OptimizationId::from("o")))
+        .await
+        .unwrap();
     let calls = log.all();
     let f = &calls[0].filters()[0];
     assert_eq!(
@@ -1552,7 +1607,7 @@ async fn list_tagged_filters_by_tag_pages_infers_roles_and_skips_untagged() {
         ]
     );
     assert_eq!(list[3].terminated_at, Some(1_767_323_045_000)); // 2026-01-02T03:04:05Z
-    assert_eq!(list[0].agent_id.as_deref(), Some("a"));
+    assert_eq!(list[0].agent_id.as_ref().map(AgentId::as_str), Some("a"));
     assert_eq!(list[2].agent_id, None);
     assert_eq!(list[0].launched_at, 1000);
 }

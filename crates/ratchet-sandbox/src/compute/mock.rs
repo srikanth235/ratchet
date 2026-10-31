@@ -1,4 +1,4 @@
-//! In-memory `Compute` with the same observable behaviour as `AwsCloudCompute`: id validation, tagged instances, kill
+//! In-memory `CloudCompute` with the same observable behaviour as `AwsCloudCompute`: id validation, tagged instances, kill
 //! switch, ordered delete, idempotent terminate. (TS `compute/mock.ts`)
 
 use std::collections::BTreeMap;
@@ -9,15 +9,17 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use async_trait::async_trait;
 
 use super::aws::{agent_role_name, secret_prefix};
-use crate::domain::{
-    AgentIdentity, BenchLaunchSpec, Clock, InstanceInfo, InstanceRole, InstanceState,
+use crate::error::Error;
+use crate::util::{DEFAULT_AGENT_ROLE_PATH, assert_valid_id, json_str};
+use ratchet_core::enums::InstanceRole;
+use ratchet_core::ids::{AgentId, OptimizationId};
+use ratchet_core::ports::mock::SystemClock;
+use ratchet_core::ports::{
+    AgentIdentity, BenchLaunchSpec, Clock, CloudCompute, InstanceInfo, InstanceState, PortResult,
     RemoteCommand, RemoteCommandResult, RunnerLaunchSpec, SecretRef,
 };
-use crate::error::{Error, Result};
-use crate::ports::Compute;
-use crate::util::{DEFAULT_AGENT_ROLE_PATH, SystemClock, assert_valid_id, json_str};
 
-type CommandFuture = Pin<Box<dyn Future<Output = Result<RemoteCommandResult>> + Send>>;
+type CommandFuture = Pin<Box<dyn Future<Output = PortResult<RemoteCommandResult>> + Send>>;
 
 /// Executes `run_command` scripts; lets a local bench/runner stand in for the instance.
 pub type MockCommandHandler =
@@ -141,7 +143,7 @@ impl MockCloudCompute {
 
     /// Simulation helper: an instance that ended up merely stopped (e.g. launched without terminate-on-shutdown).
     pub fn simulate_stopped(&self, instance_id: &str) {
-        let now = self.opts.clock.now_ms();
+        let now = self.opts.clock.now();
         let mut st = self.st();
         if let Some(i) = st.instances.iter_mut().find(|i| i.info.id == instance_id)
             && i.info.state != InstanceState::Terminated
@@ -178,15 +180,15 @@ impl MockCloudCompute {
         agent_id: Option<&str>,
         instance_type: &str,
     ) -> InstanceInfo {
-        let now = self.opts.clock.now_ms();
+        let now = self.opts.clock.now();
         let mut st = self.st();
         st.seq += 1;
         let id = format!("i-mock{:012x}", st.seq);
         let info = InstanceInfo {
             id,
             role,
-            optimization_id: optimization_id.to_string(),
-            agent_id: agent_id.map(str::to_string),
+            optimization_id: optimization_id.into(),
+            agent_id: agent_id.map(AgentId::from),
             instance_type: instance_type.to_string(),
             state: InstanceState::Pending,
             launched_at: now,
@@ -201,7 +203,7 @@ impl MockCloudCompute {
     }
 
     fn terminate_now(&self, ids: &[String]) {
-        let now = self.opts.clock.now_ms();
+        let now = self.opts.clock.now();
         let mut st = self.st();
         for id in ids {
             if let Some(i) = st.instances.iter_mut().find(|i| &i.info.id == id) {
@@ -215,7 +217,7 @@ impl MockCloudCompute {
     }
 
     fn view(&self, i: &mut MockInstance) -> InstanceInfo {
-        if i.info.state == InstanceState::Pending && self.opts.clock.now_ms() >= i.booted_at {
+        if i.info.state == InstanceState::Pending && self.opts.clock.now() >= i.booted_at {
             i.info.state = InstanceState::Running;
         }
         i.info.clone()
@@ -229,20 +231,21 @@ impl Default for MockCloudCompute {
 }
 
 #[async_trait]
-impl Compute for MockCloudCompute {
+impl CloudCompute for MockCloudCompute {
     async fn create_agent_identity(
         &self,
-        optimization_id: &str,
-        agent_id: &str,
-    ) -> Result<AgentIdentity> {
+        optimization_id: &OptimizationId,
+        agent_id: &AgentId,
+    ) -> PortResult<AgentIdentity> {
+        let (optimization_id, agent_id) = (optimization_id.as_str(), agent_id.as_str());
         assert_valid_id("optimization", optimization_id)?;
         assert_valid_id("agent", agent_id)?;
         let name = agent_role_name(optimization_id, agent_id)?;
         let path = &self.opts.agent_role_path;
         let acct = &self.opts.account_id;
         let identity = AgentIdentity {
-            optimization_id: optimization_id.to_string(),
-            agent_id: agent_id.to_string(),
+            optimization_id: optimization_id.into(),
+            agent_id: agent_id.into(),
             role_ref: format!("arn:aws:iam::{acct}:role{path}{name}"),
             instance_profile_ref: format!("arn:aws:iam::{acct}:instance-profile{path}{name}"),
         };
@@ -261,7 +264,7 @@ impl Compute for MockCloudCompute {
         Ok(identity)
     }
 
-    async fn revoke_agent_identity(&self, identity: &AgentIdentity) -> Result<()> {
+    async fn revoke_agent_identity(&self, identity: &AgentIdentity) -> PortResult<()> {
         let mut st = self.st();
         match st
             .roles
@@ -272,14 +275,11 @@ impl Compute for MockCloudCompute {
                 r.revoked = true;
                 Ok(())
             }
-            None => Err(Error::aws(
-                "NoSuchEntity",
-                format!("role {}", identity.role_ref),
-            )),
+            None => Err(Error::aws("NoSuchEntity", format!("role {}", identity.role_ref)).into()),
         }
     }
 
-    async fn delete_agent_identity(&self, identity: &AgentIdentity) -> Result<()> {
+    async fn delete_agent_identity(&self, identity: &AgentIdentity) -> PortResult<()> {
         self.st()
             .roles
             .retain(|r| r.identity.role_ref != identity.role_ref); // missing is fine (idempotent)
@@ -288,11 +288,12 @@ impl Compute for MockCloudCompute {
 
     async fn put_secret(
         &self,
-        optimization_id: &str,
-        agent_id: &str,
+        optimization_id: &OptimizationId,
+        agent_id: &AgentId,
         name: &str,
         value: &str,
-    ) -> Result<SecretRef> {
+    ) -> PortResult<SecretRef> {
+        let (optimization_id, agent_id) = (optimization_id.as_str(), agent_id.as_str());
         assert_valid_id("optimization", optimization_id)?;
         assert_valid_id("agent", agent_id)?;
         if name.is_empty()
@@ -300,10 +301,7 @@ impl Compute for MockCloudCompute {
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
         {
-            return Err(Error::invalid(format!(
-                "invalid secret name {}",
-                json_str(name)
-            )));
+            return Err(Error::invalid(format!("invalid secret name {}", json_str(name))).into());
         }
         let reference = format!("{}{name}", secret_prefix(optimization_id, agent_id)?);
         self.st()
@@ -315,15 +313,19 @@ impl Compute for MockCloudCompute {
         })
     }
 
-    async fn delete_secrets(&self, optimization_id: &str, agent_id: &str) -> Result<()> {
-        let prefix = secret_prefix(optimization_id, agent_id)?;
+    async fn delete_secrets(
+        &self,
+        optimization_id: &OptimizationId,
+        agent_id: &AgentId,
+    ) -> PortResult<()> {
+        let prefix = secret_prefix(optimization_id.as_str(), agent_id.as_str())?;
         self.st().secrets.retain(|k, _| !k.starts_with(&prefix));
         Ok(())
     }
 
-    async fn launch_runner(&self, spec: &RunnerLaunchSpec) -> Result<InstanceInfo> {
-        assert_valid_id("optimization", &spec.optimization_id)?;
-        assert_valid_id("agent", &spec.agent_id)?;
+    async fn launch_runner(&self, spec: &RunnerLaunchSpec) -> PortResult<InstanceInfo> {
+        assert_valid_id("optimization", spec.optimization_id.as_str())?;
+        assert_valid_id("agent", spec.agent_id.as_str())?;
         if !self
             .st()
             .roles
@@ -336,36 +338,41 @@ impl Compute for MockCloudCompute {
                     "Invalid IAM Instance Profile {}",
                     spec.identity.instance_profile_ref
                 ),
-            ));
+            )
+            .into());
         }
         Ok(self.add(
             InstanceRole::AgentRunner,
-            &spec.optimization_id,
-            Some(&spec.agent_id),
+            spec.optimization_id.as_str(),
+            Some(spec.agent_id.as_str()),
             &spec.instance_type,
         ))
     }
 
-    async fn launch_bench_instance(&self, spec: &BenchLaunchSpec) -> Result<InstanceInfo> {
-        assert_valid_id("optimization", &spec.optimization_id)?;
+    async fn launch_bench_instance(&self, spec: &BenchLaunchSpec) -> PortResult<InstanceInfo> {
+        assert_valid_id("optimization", spec.optimization_id.as_str())?;
         Ok(self.add(
             InstanceRole::Bench,
-            &spec.optimization_id,
+            spec.optimization_id.as_str(),
             None,
             &spec.instance_type,
         ))
     }
 
-    async fn terminate(&self, instance_ids: &[String]) -> Result<()> {
+    async fn terminate(&self, instance_ids: &[String]) -> PortResult<()> {
         self.terminate_now(instance_ids);
         Ok(())
     }
 
-    async fn list_tagged(&self, optimization_id: Option<&str>) -> Result<Vec<InstanceInfo>> {
+    async fn list_tagged(
+        &self,
+        optimization_id: Option<&OptimizationId>,
+    ) -> PortResult<Vec<InstanceInfo>> {
         let mut st = self.st();
         let mut out = vec![];
         for i in st.instances.iter_mut() {
-            if optimization_id.is_none_or(|o| o.is_empty() || i.info.optimization_id == o) {
+            if optimization_id.is_none_or(|o| o.as_str().is_empty() || i.info.optimization_id == *o)
+            {
                 out.push(self.view(i));
             }
         }
@@ -376,11 +383,11 @@ impl Compute for MockCloudCompute {
         &self,
         instance_id: &str,
         command: &RemoteCommand,
-    ) -> Result<RemoteCommandResult> {
+    ) -> PortResult<RemoteCommandResult> {
         let view = {
             let mut st = self.st();
             let Some(i) = st.instances.iter_mut().find(|i| i.info.id == instance_id) else {
-                return Err(Error::aws("InvalidInstanceId", instance_id));
+                return Err(Error::aws("InvalidInstanceId", instance_id).into());
             };
             let view = self.view(i);
             if view.state != InstanceState::Running {
@@ -390,7 +397,8 @@ impl Compute for MockCloudCompute {
                         "{instance_id} is {}, not running / not SSM-managed",
                         state_name(view.state)
                     ),
-                ));
+                )
+                .into());
             }
             st.commands.push((instance_id.to_string(), command.clone()));
             view

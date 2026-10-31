@@ -12,11 +12,11 @@ use regex::Regex;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-use crate::domain::{
-    CandidateCommit, CommitFilesInput, FileDiff, PullRequestInput, PullRequestUrl,
-};
 use crate::error::{Error, Result};
-use crate::port::GitHost;
+use ratchet_core::ports::{
+    CandidateCommit, CommitFilesInput, CommitRef, FileDiff, GitHost, PortResult, PullRequestInput,
+    PullRequestRef,
+};
 
 /// The commit trailer that marks a candidate.
 pub const CANDIDATE_TRAILER: &str = "Ratchet-Candidate";
@@ -181,7 +181,7 @@ pub trait GitBackend: Send + Sync {
     }
     /// Make the local `sha` visible as `refs/heads/<branch>` on the remote.
     async fn publish(&self, git: &Git<'_>, branch: &str, sha: &str, force: bool) -> Result<()>;
-    async fn create_pull_request(&self, input: &PullRequestInput) -> Result<PullRequestUrl>;
+    async fn create_pull_request(&self, input: &PullRequestInput) -> Result<PullRequestRef>;
 }
 
 #[derive(Clone, Default)]
@@ -344,22 +344,22 @@ impl<B: GitBackend> GitHostCore<B> {
 
 #[async_trait]
 impl<B: GitBackend> GitHost for GitHostCore<B> {
-    async fn resolve_ref(&self, reference: &str) -> Result<String> {
+    async fn resolve_ref(&self, reference: &str) -> PortResult<String> {
         self.sync().await?;
-        self.resolve(reference).await
+        Ok(self.resolve(reference).await?)
     }
 
-    async fn create_branch(&self, from_ref: &str, branch: &str) -> Result<()> {
+    async fn create_branch(&self, from_ref: &str, branch: &str) -> PortResult<()> {
         self.sync().await?;
         let sha = self.resolve(from_ref).await?;
-        self.publish(branch, &sha, false).await
+        Ok(self.publish(branch, &sha, false).await?)
     }
 
     async fn list_candidates(
         &self,
         branch: &str,
         since_sha: Option<&str>,
-    ) -> Result<Vec<CandidateCommit>> {
+    ) -> PortResult<Vec<CandidateCommit>> {
         self.sync().await?;
         let tip = self.resolve(branch).await?;
         let range = match since_sha {
@@ -418,7 +418,7 @@ impl<B: GitBackend> GitHost for GitHostCore<B> {
         Ok(commits)
     }
 
-    async fn changed_files(&self, base_ref: &str, sha: &str) -> Result<Vec<String>> {
+    async fn changed_files(&self, base_ref: &str, sha: &str) -> PortResult<Vec<String>> {
         self.sync().await?;
         let base = self.resolve(base_ref).await?;
         let head = self.resolve(sha).await?;
@@ -435,7 +435,7 @@ impl<B: GitBackend> GitHost for GitHostCore<B> {
             .collect())
     }
 
-    async fn diff(&self, base_ref: &str, sha: &str) -> Result<Vec<FileDiff>> {
+    async fn diff(&self, base_ref: &str, sha: &str) -> PortResult<Vec<FileDiff>> {
         self.sync().await?;
         let base = self.resolve(base_ref).await?;
         let head = self.resolve(sha).await?;
@@ -473,7 +473,7 @@ impl<B: GitBackend> GitHost for GitHostCore<B> {
     }
 
     /// Materialize the tree of `sha` into `dir` (no `.git`, no side effects on the repo).
-    async fn checkout(&self, sha: &str, dir: &Path) -> Result<()> {
+    async fn checkout(&self, sha: &str, dir: &Path) -> PortResult<()> {
         self.sync().await?;
         let commit = self.resolve(sha).await?;
         tokio::fs::create_dir_all(dir).await?;
@@ -495,12 +495,12 @@ impl<B: GitBackend> GitHost for GitHostCore<B> {
         Ok(())
     }
 
-    async fn open_pull_request(&self, input: &PullRequestInput) -> Result<PullRequestUrl> {
+    async fn open_pull_request(&self, input: &PullRequestInput) -> PortResult<PullRequestRef> {
         self.sync().await?;
         if !input.shas.is_empty() {
             self.write_squash(input).await?;
         }
-        self.backend.create_pull_request(input).await
+        Ok(self.backend.create_pull_request(input).await?)
     }
 
     fn remote_url(&self) -> String {
@@ -510,9 +510,9 @@ impl<B: GitBackend> GitHost for GitHostCore<B> {
     /// Branch `input.branch` off `input.base_ref` with one commit that writes `input.files` over the base tree.
     /// Built with plumbing (a scratch index, `hash-object`, `write-tree`, `commit-tree`), so no working tree is needed
     /// and nothing but the new ref is touched. Refuses an existing branch (publish is not forced) and unsafe paths.
-    async fn commit_files(&self, input: &CommitFilesInput) -> Result<String> {
+    async fn commit_files(&self, input: &CommitFilesInput) -> PortResult<CommitRef> {
         if input.files.is_empty() {
-            return Err(Error::invalid("commitFiles: no files"));
+            return Err(Error::invalid("commitFiles: no files").into());
         }
         let mut seen = std::collections::HashSet::new();
         for f in &input.files {
@@ -526,13 +526,13 @@ impl<B: GitBackend> GitHost for GitHostCore<B> {
                 return Err(Error::invalid(format!(
                     "commitFiles: unsafe path {}",
                     serde_json::to_string(&f.path).unwrap_or_default()
-                )));
+                ))
+                .into());
             }
             if !seen.insert(f.path.as_str()) {
-                return Err(Error::invalid(format!(
-                    "commitFiles: duplicate path {}",
-                    f.path
-                )));
+                return Err(
+                    Error::invalid(format!("commitFiles: duplicate path {}", f.path)).into(),
+                );
             }
         }
         self.sync().await?;
@@ -550,7 +550,11 @@ impl<B: GitBackend> GitHost for GitHostCore<B> {
                     with_index().input(f.content.clone()),
                 )
                 .await?;
-            let mode = if f.executable { "100755" } else { "100644" };
+            let mode = if f.is_executable() {
+                "100755"
+            } else {
+                "100644"
+            };
             self.git(
                 &[
                     "update-index",
@@ -577,7 +581,7 @@ impl<B: GitBackend> GitHost for GitHostCore<B> {
             .trim()
             .to_string();
         self.publish(&input.branch, &sha, false).await?;
-        Ok(sha)
+        Ok(CommitRef { sha })
     }
 }
 
@@ -590,8 +594,8 @@ pub fn parse_git_diff(numstat: &str, patch: &str) -> Vec<FileDiff> {
 
     struct Stat {
         path: String,
-        additions: u32,
-        deletions: u32,
+        additions: u64,
+        deletions: u64,
         binary: bool,
     }
     let stats: Vec<Stat> = numstat

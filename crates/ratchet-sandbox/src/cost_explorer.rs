@@ -11,10 +11,10 @@ use aws_sdk_costexplorer::types::{
 };
 
 use crate::civil::{DAY_MS, ymd};
-use crate::domain::{CostActuals, CostActualsQuery, SpendCategory};
 use crate::error::{Error, Result, sdk};
-use crate::ports::CostSource;
 use crate::util::{TAG_AGENT, TAG_OPT, TAG_ROLE, TAG_SANDBOX, assert_valid_id, json_str};
+use ratchet_core::enums::SpendCategory;
+use ratchet_core::ports::{CostActuals, CostActualsQuery, CostReconciler, PortError, PortResult};
 
 /// Map the value of the `ratchet:role` / `ratchet:agent` tags of a billed resource to a ledger category.
 /// Runners and bench instances carry `ratchet:role`; agent-launched experiments carry only `ratchet:opt` +
@@ -36,7 +36,7 @@ fn tag_value<'a>(key: Option<&'a String>, tag: &str) -> &'a str {
         .unwrap_or("")
 }
 
-/// `CostSource` backed by AWS Cost Explorer `GetCostAndUsage`: unblended cost of everything tagged `ratchet:opt=<id>`,
+/// `CostReconciler` backed by AWS Cost Explorer `GetCostAndUsage`: unblended cost of everything tagged `ratchet:opt=<id>`,
 /// grouped by the `ratchet:role` and `ratchet:agent` tags and mapped to ledger categories. Requires
 /// `ce:GetCostAndUsage` and the `ratchet:*` tags activated as cost-allocation tags (docs/real-env/aws.md). Each request
 /// costs $0.01.
@@ -131,20 +131,20 @@ fn add_day(
 }
 
 #[async_trait]
-impl CostSource for AwsCostReconciler {
-    async fn actuals(&self, q: &CostActualsQuery) -> Result<CostActuals> {
-        assert_valid_id("optimization", &q.optimization_id)?;
+impl CostReconciler for AwsCostReconciler {
+    async fn actuals(&self, q: &CostActualsQuery) -> PortResult<CostActuals> {
+        assert_valid_id("optimization", q.optimization_id.as_str())?;
         if let Some(s) = &self.sandbox_id {
             assert_valid_id("sandbox", s)?;
         }
         if q.end_ms < q.start_ms {
-            return Err(Error::other("cost window ends before it starts"));
+            return Err(PortError::failed("cost window ends before it starts"));
         }
 
         // End is exclusive: the day after the one containing end_ms.
         let start = ymd(q.start_ms);
         let end = ymd(q.end_ms.div_euclid(DAY_MS) * DAY_MS + DAY_MS);
-        let opt_filter = Self::tag_filter(TAG_OPT, &q.optimization_id);
+        let opt_filter = Self::tag_filter(TAG_OPT, q.optimization_id.as_str());
         let filter = match &self.sandbox_id {
             None => opt_filter,
             Some(s) => Expression::builder()
@@ -234,7 +234,7 @@ enum Canned {
     Computed(ActualsFn),
 }
 
-/// In-memory `CostSource` for tests and simulation mode; records every query. Default answer: complete, no cost.
+/// In-memory `CostReconciler` for tests and simulation mode; records every query. Default answer: complete, no cost.
 #[derive(Default)]
 pub struct MockCostReconciler {
     canned: Option<Canned>,
@@ -275,11 +275,11 @@ impl MockCostReconciler {
 }
 
 #[async_trait]
-impl CostSource for MockCostReconciler {
-    async fn actuals(&self, q: &CostActualsQuery) -> Result<CostActuals> {
+impl CostReconciler for MockCostReconciler {
+    async fn actuals(&self, q: &CostActualsQuery) -> PortResult<CostActuals> {
         self.calls.lock().expect("calls poisoned").push(q.clone());
         if let Some(e) = &self.error {
-            return Err(Error::other(e.clone()));
+            return Err(PortError::failed(e.clone()));
         }
         Ok(match &self.canned {
             Some(Canned::Fixed(a)) => a.clone(),

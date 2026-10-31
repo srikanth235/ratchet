@@ -1,14 +1,10 @@
-//! Shared helpers: reserved tags, id validation, shell quoting, clocks. (TS `util.ts`)
+//! Shared helpers: reserved tags, id validation, shell quoting. (TS `util.ts`)
 
 use std::sync::LazyLock;
-use std::sync::atomic::{AtomicI64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use async_trait::async_trait;
 use regex::Regex;
 use sha1::{Digest, Sha1};
 
-use crate::domain::Clock;
 use crate::error::{Error, Result};
 
 /// Reserved tag keys (infra/contract.md identity model).
@@ -91,51 +87,12 @@ pub fn sh_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
-// ---------------------------------------------------------------- clocks
-
-/// Wall-clock time and real sleeping.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct SystemClock;
-
-#[async_trait]
-impl Clock for SystemClock {
-    fn now_ms(&self) -> i64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_millis() as i64)
-    }
-    async fn sleep(&self, ms: u64) {
-        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
-    }
-}
-
-/// Deterministic clock for tests and simulation: `sleep` advances time instantly.
-#[derive(Debug, Default)]
-pub struct ManualClock {
-    t: AtomicI64,
-}
-
-impl ManualClock {
-    pub fn new(t: i64) -> Self {
-        Self {
-            t: AtomicI64::new(t),
-        }
-    }
-    pub fn advance(&self, ms: i64) {
-        self.t.fetch_add(ms, Ordering::SeqCst);
-    }
-    pub fn set(&self, t: i64) {
-        self.t.store(t, Ordering::SeqCst);
-    }
-}
-
-#[async_trait]
-impl Clock for ManualClock {
-    fn now_ms(&self) -> i64 {
-        self.t.load(Ordering::SeqCst)
-    }
-    async fn sleep(&self, ms: u64) {
-        self.t.fetch_add(ms as i64, Ordering::SeqCst);
+/// A JSON number the way JavaScript would print `v`: whole values without a fraction (`2`, not `2.0`).
+pub(crate) fn js_number(v: f64) -> serde_json::Value {
+    if v.is_finite() && v.fract() == 0.0 && v.abs() < 9.0e15 {
+        serde_json::Value::from(v as i64)
+    } else {
+        serde_json::Number::from_f64(v).map_or(serde_json::Value::Null, serde_json::Value::Number)
     }
 }
 
@@ -170,15 +127,5 @@ mod tests {
     fn sh_quote_escapes_single_quotes() {
         assert_eq!(sh_quote("a'b"), r"'a'\''b'");
         assert_eq!(sh_quote(""), "''");
-    }
-
-    #[tokio::test]
-    async fn manual_clock_sleep_advances_time() {
-        let c = ManualClock::new(10);
-        c.sleep(5).await;
-        c.advance(1);
-        assert_eq!(c.now_ms(), 16);
-        c.set(0);
-        assert_eq!(c.now_ms(), 0);
     }
 }

@@ -41,21 +41,78 @@ pub enum PortError {
     /// The operation was cancelled through its [`CancellationToken`].
     #[error("cancelled")]
     Cancelled,
+    /// A remote service (a code host's REST API, say) answered with an HTTP error status.
+    #[error("{message}")]
+    Http { status: u16, message: String },
+    /// An agent CLI turn did not complete (non-zero exit, error result, missing session). `exit_code` and `stderr`
+    /// are the process's, when there was one.
+    #[error("{message}")]
+    AgentFailed {
+        message: String,
+        exit_code: Option<i32>,
+        stderr: Option<String>,
+    },
     /// Anything else, with the message the underlying system gave.
     #[error("{0}")]
     Failed(String),
+}
+
+impl From<std::io::Error> for PortError {
+    fn from(e: std::io::Error) -> Self {
+        PortError::Failed(e.to_string())
+    }
+}
+
+impl From<serde_json::Error> for PortError {
+    fn from(e: serde_json::Error) -> Self {
+        PortError::Failed(e.to_string())
+    }
 }
 
 impl PortError {
     pub fn failed(msg: impl Into<String>) -> Self {
         PortError::Failed(msg.into())
     }
+
+    /// An agent turn failed without a process exit to report.
+    pub fn agent_failed(msg: impl Into<String>) -> Self {
+        PortError::AgentFailed {
+            message: msg.into(),
+            exit_code: None,
+            stderr: None,
+        }
+    }
+
+    /// The HTTP status of a remote failure, if that is what this is (the TypeScript code read `err.status`).
+    pub fn status(&self) -> Option<u16> {
+        match self {
+            PortError::Http { status, .. } => Some(*status),
+            _ => None,
+        }
+    }
+
+    /// True for [`PortError::Cancelled`].
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, PortError::Cancelled)
+    }
 }
 
 pub type PortResult<T> = Result<T, PortError>;
 
-/// Where a stream of agent events goes (`onEvent` in TypeScript).
-pub type EventSink = mpsc::UnboundedSender<AgentEvent>;
+/// Where a stream of agent events goes (`onEvent` in TypeScript): a synchronous callback, so that events stay in
+/// order and a sink can react to each one (budget tracking, artifact batching) before the adapter goes on. To
+/// feed a channel use [`channel_sink`].
+pub type EventSink = dyn Fn(AgentEvent) + Send + Sync;
+
+/// An [`EventSink`] that can be shared and stored.
+pub type SharedEventSink = std::sync::Arc<EventSink>;
+
+/// A sink that sends every event into `tx` (events sent after the receiver is gone are dropped).
+pub fn channel_sink(tx: mpsc::UnboundedSender<AgentEvent>) -> SharedEventSink {
+    std::sync::Arc::new(move |event| {
+        let _ = tx.send(event);
+    })
+}
 
 // ---------------------------------------------------------------- clock
 
@@ -70,6 +127,7 @@ pub trait Clock: Send + Sync {
 
 // ---------------------------------------------------------------- sandbox (OpenTofu)
 
+/// The contract inputs of a sandbox (`infra/contract.md`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
@@ -78,9 +136,24 @@ pub struct SandboxInput {
     pub region: String,
     pub allowed_instance_types: Vec<String>,
     pub max_instances_per_agent: u32,
-    pub max_instance_lifetime_hours: u32,
+    /// A JSON number, not necessarily whole (`0.5` is half an hour). Whole values serialize without a fraction
+    /// (`2`, not `2.0`), like JavaScript numbers.
+    #[serde(serialize_with = "crate::numfmt::serialize_js_number")]
+    pub max_instance_lifetime_hours: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<BTreeMap<String, String>>,
+}
+
+/// AWS-side identity of a role + instance profile pair (`eval_identity_ref`, `confirm_identity_ref`,
+/// `deps_identity_ref` of the contract).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct AwsIdentityRef {
+    pub role_arn: String,
+    pub role_name: String,
+    pub instance_profile_arn: String,
+    pub instance_profile_name: String,
 }
 
 /// The network part of the sandbox outputs.
@@ -91,19 +164,49 @@ pub struct SandboxNetwork {
     pub subnet_id: String,
     pub agent_runner_security_group_id: String,
     pub bench_security_group_id: String,
+    /// Private bench subnet: no route to the internet.
+    pub bench_subnet_id: String,
+    /// `None` when the egress proxy is disabled.
+    pub egress_proxy_url: Option<String>,
 }
 
-/// Mirrors infra/contract.md outputs.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// Limits echoed by the sandbox (the app reaper enforces them).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct SandboxLimits {
+    pub max_instances_per_agent: u32,
+    #[serde(serialize_with = "crate::numfmt::serialize_js_number")]
+    pub max_instance_lifetime_hours: f64,
+}
+
+/// Mirrors the `infra/contract.md` outputs. (The TypeScript has the base `SandboxOutputs` in core and the
+/// `AwsSandboxOutputs` extension in `packages/aws`; a Rust port trait cannot return a subtype, and the engine only
+/// ever stores and reads the full shape, so they are one type here.)
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct SandboxOutputs {
     pub artifacts_bucket: String,
     pub sealed_bucket: String,
     pub agent_boundary_ref: String,
+    /// The bench instance profile ARN (the TS port carried a single string for `eval_identity_ref`).
     pub eval_identity_ref: String,
     pub agent_role_path: String,
     pub network: SandboxNetwork,
+    pub region: String,
+    pub vpc_id: String,
+    /// Bench runner for baseline/bench phases (`eval_identity_ref`): NO sealed access.
+    pub eval_identity: AwsIdentityRef,
+    /// Confirm runner (`confirm_identity_ref`): the only identity that reads the sealed bucket. Confirm runs only.
+    pub confirm_identity: AwsIdentityRef,
+    /// Dependency-snapshot builder (`deps_identity_ref`). Absent in sandboxes applied before dependency snapshots
+    /// existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deps_identity: Option<AwsIdentityRef>,
+    /// Key prefix of the confirm traces in the sealed bucket.
+    pub sealed_confirm_prefix: String,
+    pub limits: SandboxLimits,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -218,6 +321,18 @@ pub enum BenchLaunchPurpose {
     Deps,
 }
 
+impl BenchLaunchPurpose {
+    /// The wire / tag string.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Baseline => "baseline",
+            Self::Bench => "bench",
+            Self::Confirm => "confirm",
+            Self::Deps => "deps",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
@@ -228,7 +343,7 @@ pub struct BenchLaunchSpec {
     pub purpose: BenchLaunchPurpose,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteCommand {
@@ -240,7 +355,18 @@ pub struct RemoteCommand {
     pub timeout_seconds: Option<u64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+impl RemoteCommand {
+    /// A command with no extra environment and the default timeout.
+    pub fn new(script: impl Into<String>) -> Self {
+        Self {
+            script: script.into(),
+            env: None,
+            timeout_seconds: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteCommandResult {
@@ -295,8 +421,15 @@ pub trait PriceBook: Send + Sync {
 #[async_trait]
 pub trait ArtifactStore: Send + Sync {
     async fn put(&self, key: &str, body: &[u8]) -> PortResult<()>;
+    /// `None` when the key does not exist.
     async fn get(&self, key: &str) -> PortResult<Option<String>>;
+    /// Sorted keys starting with `prefix`.
     async fn list(&self, prefix: &str) -> PortResult<Vec<String>>;
+
+    /// [`ArtifactStore::put`] for text.
+    async fn put_str(&self, key: &str, body: &str) -> PortResult<()> {
+        self.put(key, body.as_bytes()).await
+    }
 }
 
 // ---------------------------------------------------------------- cost reconciliation
@@ -424,6 +557,28 @@ pub struct CommitFile {
     pub executable: Option<bool>,
 }
 
+impl CommitFile {
+    /// A regular (mode 100644) file.
+    pub fn new(path: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            path: path.into(),
+            content: content.into(),
+            executable: None,
+        }
+    }
+
+    /// The same file with mode 100755.
+    pub fn executable(mut self) -> Self {
+        self.executable = Some(true);
+        self
+    }
+
+    /// Whether the file gets mode 100755.
+    pub fn is_executable(&self) -> bool {
+        self.executable.unwrap_or(false)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
@@ -437,7 +592,7 @@ pub struct CommitFilesInput {
     pub files: Vec<CommitFile>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequestInput {
@@ -446,6 +601,9 @@ pub struct PullRequestInput {
     pub title: String,
     pub body: String,
     pub shas: Vec<String>,
+    /// Squash commit message; defaults to `title`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -493,7 +651,7 @@ pub trait GitHost: Send + Sync {
 // ---------------------------------------------------------------- agents
 
 /// Incremental usage (tokens / cost for one event only, not cumulative).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentUsage {
@@ -520,6 +678,8 @@ pub enum AgentEventType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AgentEvent {
+    /// Epoch ms. Optional on read: older writers omitted it.
+    #[serde(default)]
     pub at: i64,
     #[serde(rename = "type")]
     pub event_type: AgentEventType,
@@ -532,7 +692,46 @@ pub struct AgentEvent {
     pub usage: Option<AgentUsage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+impl AgentEvent {
+    /// An event with no text, data or usage.
+    pub fn new(at: i64, event_type: AgentEventType) -> Self {
+        Self {
+            at,
+            event_type,
+            text: None,
+            data: None,
+            usage: None,
+        }
+    }
+
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.text = Some(text.into());
+        self
+    }
+
+    /// Attach `data` (an object). Top-level `null` entries are dropped, like `JSON.stringify` drops `undefined`
+    /// fields; anything that is not an object is ignored.
+    pub fn with_data(mut self, data: Value) -> Self {
+        if let Value::Object(map) = data {
+            self.data = Some(Value::Object(
+                map.into_iter().filter(|(_, v)| !v.is_null()).collect(),
+            ));
+        }
+        self
+    }
+
+    pub fn with_usage(mut self, usage: AgentUsage) -> Self {
+        self.usage = Some(usage);
+        self
+    }
+
+    /// `data[key]` as a string.
+    pub fn data_str(&self, key: &str) -> Option<&str> {
+        self.data.as_ref()?.get(key)?.as_str()
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct AgentSpec {
@@ -573,9 +772,11 @@ pub trait AgentAdapter: Send + Sync {
         cancel: Option<&CancellationToken>,
     ) -> PortResult<AgentSession>;
     /// Continue the same session with a new message; returns when the turn ends.
+    ///
+    /// The session is `&mut` because a CLI may fork a new session id on resume; the adapter updates it.
     async fn resume(
         &self,
-        session: &AgentSession,
+        session: &mut AgentSession,
         spec: &AgentSpec,
         message: &str,
         events: &EventSink,
@@ -611,6 +812,10 @@ pub enum RunnerMessage {
     Pause,
     Resume,
     Stop,
+    /// A message with a `type` this version does not know (an engine newer than the runner). Never sent; the
+    /// runner reports it and carries on.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1108,20 +1313,6 @@ pub trait RunnerInbox: Send + Sync {
     async fn next(&self, cancel: Option<&CancellationToken>) -> PortResult<Option<RunnerMessage>>;
 }
 
-/// What `run_runner_loop` (in `ratchet-agents`) needs. The loop owns one agent on one branch: prompt, agent
-/// turn, commit with the `Ratchet-Candidate: true` trailer, push, wait for verdict, rebase onto the ratchet best
-/// when it moved, resume the agent with the verdict, repeat, until stop / deadline / budget.
-pub struct RunnerLoopOptions {
-    pub config: RunnerConfig,
-    pub adapter: std::sync::Arc<dyn AgentAdapter>,
-    /// A git clone of `config.repo_url` checked out on `config.branch`, with push access.
-    pub workdir: std::path::PathBuf,
-    pub inbox: std::sync::Arc<dyn RunnerInbox>,
-    pub emit: EventSink,
-    pub clock: std::sync::Arc<dyn Clock>,
-    pub cancel: Option<CancellationToken>,
-}
-
 // ---------------------------------------------------------------- in-process implementations
 
 /// Real clock and simple in-memory mocks of the ports that `ratchet-core` itself exercises in tests. The mocks of
@@ -1195,6 +1386,46 @@ pub mod mock {
             }
             self.advance(ms as i64);
             Ok(())
+        }
+    }
+
+    /// Contract outputs for tests and simulation: well-formed ARNs and ids, account `123456789012`, no egress
+    /// proxy, no dependency identity.
+    pub fn sample_sandbox_outputs(sandbox_id: &str) -> SandboxOutputs {
+        let identity = |name: &str| AwsIdentityRef {
+            role_arn: format!("arn:aws:iam::123456789012:role/ratchet/{name}-{sandbox_id}"),
+            role_name: format!("{name}-{sandbox_id}"),
+            instance_profile_arn: format!(
+                "arn:aws:iam::123456789012:instance-profile/ratchet/{name}-{sandbox_id}"
+            ),
+            instance_profile_name: format!("{name}-{sandbox_id}"),
+        };
+        let eval_identity = identity("eval");
+        SandboxOutputs {
+            artifacts_bucket: format!("ratchet-artifacts-{sandbox_id}"),
+            sealed_bucket: format!("ratchet-sealed-{sandbox_id}"),
+            agent_boundary_ref: format!(
+                "arn:aws:iam::123456789012:policy/ratchet-agent-boundary-{sandbox_id}"
+            ),
+            eval_identity_ref: eval_identity.instance_profile_arn.clone(),
+            agent_role_path: "/ratchet/agent/".into(),
+            network: SandboxNetwork {
+                subnet_id: "subnet-0a1".into(),
+                agent_runner_security_group_id: "sg-0a1".into(),
+                bench_security_group_id: "sg-0b1".into(),
+                bench_subnet_id: "subnet-0b1".into(),
+                egress_proxy_url: None,
+            },
+            region: "us-east-1".into(),
+            vpc_id: "vpc-0a1".into(),
+            eval_identity,
+            confirm_identity: identity("confirm"),
+            deps_identity: None,
+            sealed_confirm_prefix: "confirm/".into(),
+            limits: SandboxLimits {
+                max_instances_per_agent: 4,
+                max_instance_lifetime_hours: 2.0,
+            },
         }
     }
 
@@ -1486,20 +1717,49 @@ mod tests {
 
     #[test]
     fn sandbox_outputs_match_the_contract_names() {
-        let o = SandboxOutputs {
-            artifacts_bucket: "a".into(),
-            sealed_bucket: "s".into(),
-            agent_boundary_ref: "b".into(),
-            eval_identity_ref: "e".into(),
-            agent_role_path: "/ratchet/agent/".into(),
-            network: SandboxNetwork {
-                subnet_id: "subnet-1".into(),
-                agent_runner_security_group_id: "sg-1".into(),
-                bench_security_group_id: "sg-2".into(),
-            },
-        };
+        let o = sample_sandbox_outputs("sbx");
         let v = serde_json::to_value(&o).unwrap();
         assert_eq!(v["agentRolePath"], "/ratchet/agent/");
-        assert_eq!(v["network"]["agentRunnerSecurityGroupId"], "sg-1");
+        assert_eq!(v["network"]["agentRunnerSecurityGroupId"], "sg-0a1");
+        assert_eq!(v["network"]["egressProxyUrl"], serde_json::Value::Null);
+        assert_eq!(v["evalIdentity"]["roleName"], "eval-sbx");
+        assert!(v.get("depsIdentity").is_none());
+        // whole numbers print like JavaScript numbers
+        assert_eq!(v["limits"]["maxInstanceLifetimeHours"].to_string(), "2");
+        let back: SandboxOutputs = serde_json::from_value(v).unwrap();
+        assert_eq!(back, o);
+    }
+
+    #[test]
+    fn sandbox_input_hours_keep_their_fraction() {
+        let i: SandboxInput = serde_json::from_value(serde_json::json!({
+            "sandboxId": "s", "region": "r", "allowedInstanceTypes": [],
+            "maxInstancesPerAgent": 4, "maxInstanceLifetimeHours": 0.5
+        }))
+        .unwrap();
+        assert_eq!(i.max_instance_lifetime_hours, 0.5);
+        assert_eq!(
+            serde_json::to_value(&i).unwrap()["maxInstanceLifetimeHours"].to_string(),
+            "0.5"
+        );
+    }
+
+    #[test]
+    fn unknown_runner_messages_decode_instead_of_failing() {
+        let m: RunnerMessage = serde_json::from_str(r#"{"type":"from-the-future","x":1}"#).unwrap();
+        assert_eq!(m, RunnerMessage::Unknown);
+    }
+
+    #[test]
+    fn agent_events_parse_without_at_and_drop_null_data() {
+        let e: AgentEvent = serde_json::from_str(r#"{"type":"status","text":"one"}"#).unwrap();
+        assert_eq!((e.at, e.text.as_deref()), (0, Some("one")));
+        let e = AgentEvent::new(5, AgentEventType::Tool)
+            .with_data(serde_json::json!({"name": "x", "exitCode": null}));
+        assert_eq!(e.data_str("name"), Some("x"));
+        assert_eq!(
+            serde_json::to_string(&e).unwrap(),
+            r#"{"at":5,"type":"tool","data":{"name":"x"}}"#
+        );
     }
 }

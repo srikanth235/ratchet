@@ -3,8 +3,7 @@
 //! Field names are camelCase on the wire, as the Drizzle rows were. Timestamps are integer epoch milliseconds;
 //! money is USD as `f64`.
 
-use std::collections::BTreeMap;
-
+use indexmap::IndexMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -17,21 +16,22 @@ use crate::enums::{
 use crate::ids::{AgentId, CandidateId, OptimizationId, SandboxId};
 
 /// Summary statistics of a benchmark run set. `value` is the headline number the ratchet compares; the other
-/// entries (`mean`, `stddev`, `p95`, ...) are whatever the evaluator reported.
+/// entries (`mean`, `stddev`, `p95`, ...) are whatever the evaluator reported, in the order it reported them (a JS
+/// object keeps insertion order, and so does the JSON stored in the ledger).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct BenchStats {
     pub value: f64,
     #[serde(flatten)]
     #[cfg_attr(feature = "utoipa", schema(additional_properties = true, value_type = HashMap<String, f64>))]
-    pub extra: BTreeMap<String, f64>,
+    pub extra: IndexMap<String, f64>,
 }
 
 impl BenchStats {
     pub fn new(value: f64) -> Self {
         Self {
             value,
-            extra: BTreeMap::new(),
+            extra: IndexMap::new(),
         }
     }
 

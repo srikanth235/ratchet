@@ -33,10 +33,26 @@ pub enum Error {
     /// Anything else the TypeScript code threw as a plain `Error`.
     #[error("{0}")]
     Other(String),
+    /// A failure reported by a port implementation (the reaper and the cost meter call ports).
+    #[error(transparent)]
+    Port(#[from] ratchet_core::ports::PortError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+}
+
+/// Port implementations return core's [`PortError`](ratchet_core::ports::PortError): the message is kept verbatim, a
+/// refused teardown keeps its own variant so callers can tell "nothing changed" from a failure.
+impl From<Error> for ratchet_core::ports::PortError {
+    fn from(e: Error) -> Self {
+        use ratchet_core::ports::PortError;
+        match e {
+            Error::Port(p) => p,
+            Error::TeardownBlocked(t) => PortError::TeardownBlocked(t.to_string()),
+            other => PortError::Failed(other.to_string()),
+        }
+    }
 }
 
 fn aws_display(code: &str, message: &str) -> String {

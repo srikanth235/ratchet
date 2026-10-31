@@ -2,12 +2,15 @@
 //! `ReportInput` the engine will build from the ledger. The expected Markdown and JSON are the TS snapshots, byte for byte
 //! (`tests/fixtures/report.md`, `report.json`, extracted from `__snapshots__/report.test.ts.snap`).
 
-use ratchet_github::report::{
-    AgentInfo, BaselineInfo, CandidateInfo, OptimizationInfo, RatchetMove, ReportInput,
-    SpendCategory, SpendEvent, build_squash_plan_from_report_input,
+use ratchet_core::enums::{
+    AgentKind, CandidateVerdict, Direction, OptimizationStatus, SpendCategory,
 };
-use ratchet_github::{
-    AgentKind, BenchStats, CandidateVerdict, Direction, build_result_report, gain_percent,
+use ratchet_core::ids::AgentId;
+use ratchet_core::{BenchStats, gain_percent};
+use ratchet_github::build_result_report;
+use ratchet_github::report::{
+    AgentInfo, BaselineInfo, CandidateInfo, OptimizationInfo, RatchetMove, ReportInput, SpendEvent,
+    build_squash_plan_from_report_input,
 };
 
 const BENCH_RUN: &str = "k6 run bench/k6/search.js";
@@ -16,8 +19,12 @@ fn sha(c: char) -> String {
     c.to_string().repeat(40)
 }
 
+/// `value` first, then the other statistics in the given order.
 fn stats(pairs: &[(&'static str, f64)]) -> BenchStats {
-    BenchStats::new(pairs.iter().copied())
+    let mut it = pairs.iter();
+    let (k, v) = it.next().expect("a value");
+    assert_eq!(*k, "value");
+    it.fold(BenchStats::new(*v), |s, (k, v)| s.with(k, *v))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -51,7 +58,7 @@ fn ev(
     at: i64,
 ) -> SpendEvent {
     SpendEvent {
-        agent_id: agent.map(String::from),
+        agent_id: agent.map(AgentId::from),
         category,
         usd,
         estimated,
@@ -70,7 +77,7 @@ fn seed() -> ReportInput {
             base_ref: "main".into(),
             metric: "http_req_duration.p95".into(),
             direction: Direction::Minimize,
-            status: "draft".into(),
+            status: OptimizationStatus::Draft,
             bench_run: Some(BENCH_RUN.into()),
         },
         best_value: Some(180.0),
@@ -266,7 +273,7 @@ fn handles_an_optimization_with_no_wins() {
             base_ref: "main".into(),
             metric: "m".into(),
             direction: Direction::Maximize,
-            status: "draft".into(),
+            status: OptimizationStatus::Draft,
             bench_run: None, // the TS config was "not: valid"
         },
         best_value: None,
@@ -336,7 +343,7 @@ fn renders_a_throughput_gain_as_plus_percent() {
             base_ref: "main".into(),
             metric: "rps".into(),
             direction: Direction::Maximize,
-            status: "draft".into(),
+            status: OptimizationStatus::Draft,
             bench_run: Some(BENCH_RUN.into()),
         },
         best_value: Some(110.0),

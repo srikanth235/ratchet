@@ -4,13 +4,14 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+use ratchet_core::enums::AgentKind;
+use ratchet_core::ports::{
+    AgentIdentity, BenchLaunchPurpose, BenchLaunchSpec, RunnerLaunchSpec, SecretRef,
+};
 use ratchet_sandbox::compute::user_data::{
     BENCH_OS_USER, CANDIDATE_EXEC_PATH, CANDIDATE_EXEC_SCRIPT, CANDIDATE_LAUNCHER_PATH,
     CANDIDATE_LAUNCHER_SCRIPT, CANDIDATE_SUDOERS, DEPS_OS_USER, HOLDOUT_OS_USER,
     RunnerNetworkOptions, bench_user_data, deps_user_data, runner_user_data,
-};
-use ratchet_sandbox::domain::{
-    AgentIdentity, AgentKind, BenchLaunchSpec, BenchPurpose, RunnerLaunchSpec, SecretRef,
 };
 
 fn runner_spec() -> RunnerLaunchSpec {
@@ -44,7 +45,7 @@ fn two_secrets() -> RunnerLaunchSpec {
     s
 }
 
-fn bench(purpose: BenchPurpose) -> BenchLaunchSpec {
+fn bench(purpose: BenchLaunchPurpose) -> BenchLaunchSpec {
     BenchLaunchSpec {
         optimization_id: "opt1".into(),
         instance_type: "c7i.2xlarge".into(),
@@ -105,23 +106,23 @@ fn snapshots() {
     );
     insta::assert_snapshot!(
         "bench_confirm",
-        bench_user_data(&bench(BenchPurpose::Confirm), 2.0).unwrap()
+        bench_user_data(&bench(BenchLaunchPurpose::Confirm), 2.0).unwrap()
     );
     insta::assert_snapshot!(
         "bench_baseline_3h",
-        bench_user_data(&bench(BenchPurpose::Baseline), 3.0).unwrap()
+        bench_user_data(&bench(BenchLaunchPurpose::Baseline), 3.0).unwrap()
     );
     insta::assert_snapshot!(
         "deps_no_proxy",
-        deps_user_data(&bench(BenchPurpose::Deps), 2.0, None).unwrap()
+        deps_user_data(&bench(BenchLaunchPurpose::Deps), 2.0, None).unwrap()
     );
     insta::assert_snapshot!(
         "deps_proxy",
-        deps_user_data(&bench(BenchPurpose::Deps), 2.0, Some(&proxy())).unwrap()
+        deps_user_data(&bench(BenchLaunchPurpose::Deps), 2.0, Some(&proxy())).unwrap()
     );
     insta::assert_snapshot!(
         "deps_half_hour",
-        deps_user_data(&bench(BenchPurpose::Deps), 0.5, None).unwrap()
+        deps_user_data(&bench(BenchLaunchPurpose::Deps), 0.5, None).unwrap()
     );
     insta::assert_snapshot!("candidate_exec_script", CANDIDATE_EXEC_SCRIPT);
     insta::assert_snapshot!("candidate_launcher_script", CANDIDATE_LAUNCHER_SCRIPT);
@@ -216,7 +217,7 @@ mod deps {
     use super::*;
 
     fn ud() -> String {
-        deps_user_data(&bench(BenchPurpose::Deps), 2.0, None).unwrap()
+        deps_user_data(&bench(BenchLaunchPurpose::Deps), 2.0, None).unwrap()
     }
 
     #[test]
@@ -256,7 +257,7 @@ mod deps {
     fn has_a_shorter_lifetime_guard_than_a_bench_a_snapshot_build_is_minutes() {
         assert!(ud().contains("shutdown -h +60"));
         assert!(
-            deps_user_data(&bench(BenchPurpose::Deps), 0.5, None)
+            deps_user_data(&bench(BenchLaunchPurpose::Deps), 0.5, None)
                 .unwrap()
                 .contains("shutdown -h +30")
         );
@@ -267,7 +268,8 @@ mod deps {
      {
         let plain = ud();
         assert!(!plain.contains("PROXY") && !plain.contains("proxy"));
-        let proxied = deps_user_data(&bench(BenchPurpose::Deps), 2.0, Some(&proxy())).unwrap();
+        let proxied =
+            deps_user_data(&bench(BenchLaunchPurpose::Deps), 2.0, Some(&proxy())).unwrap();
         assert!(proxied.contains("HTTPS_PROXY='http://10.42.3.10:3128'"));
         assert!(
             proxied.contains(
@@ -277,7 +279,7 @@ mod deps {
         assert!(proxied.contains("RATCHET_BENCH_PURPOSE='deps'"));
         let hostile =
             RunnerNetworkOptions::new("us-east-1", Some("http://10.0.0.1:3128'; rm -rf /".into()));
-        let e = deps_user_data(&bench(BenchPurpose::Deps), 2.0, Some(&hostile)).unwrap_err();
+        let e = deps_user_data(&bench(BenchLaunchPurpose::Deps), 2.0, Some(&hostile)).unwrap_err();
         assert!(e.to_string().contains("invalid egress proxy url"), "{e}");
     }
 
@@ -295,7 +297,8 @@ mod deps {
     #[test]
     fn gives_the_docker_daemon_the_allow_list_proxy_only_when_there_is_one() {
         assert!(!ud().contains("docker.service.d"));
-        let proxied = deps_user_data(&bench(BenchPurpose::Deps), 2.0, Some(&proxy())).unwrap();
+        let proxied =
+            deps_user_data(&bench(BenchLaunchPurpose::Deps), 2.0, Some(&proxy())).unwrap();
         assert!(proxied.contains("/etc/systemd/system/docker.service.d/ratchet-proxy.conf"));
         assert!(proxied.contains("Environment=\"HTTPS_PROXY=http://10.42.3.10:3128\""));
         assert!(
@@ -312,7 +315,7 @@ mod bench_split {
     use super::*;
 
     fn ud() -> String {
-        bench_user_data(&bench(BenchPurpose::Confirm), 2.0).unwrap()
+        bench_user_data(&bench(BenchLaunchPurpose::Confirm), 2.0).unwrap()
     }
 
     fn idx(ud: &str, needle: &str) -> usize {

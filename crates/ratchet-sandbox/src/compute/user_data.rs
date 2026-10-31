@@ -7,9 +7,9 @@
 //! file is single-quoted with [`sh_quote`] or validated first. The output is byte-identical to the TypeScript
 //! `packages/aws/src/compute/aws.ts`; the snapshot tests pin it.
 
-use crate::domain::{BenchLaunchSpec, RunnerLaunchSpec};
 use crate::error::{Error, Result};
 use crate::util::{json_str, sh_quote};
+use ratchet_core::ports::{BenchLaunchSpec, RunnerLaunchSpec};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -133,8 +133,8 @@ pub fn runner_user_data(
         .join(",");
     let proxy = proxy_env(net)?;
     let mut vars = vec![
-        kv("RATCHET_OPTIMIZATION_ID", spec.optimization_id.clone()),
-        kv("RATCHET_AGENT_ID", spec.agent_id.clone()),
+        kv("RATCHET_OPTIMIZATION_ID", spec.optimization_id.to_string()),
+        kv("RATCHET_AGENT_ID", spec.agent_id.to_string()),
         kv("RATCHET_AGENT_KIND", spec.kind.as_str()),
         kv("RATCHET_REPO_URL", spec.repo_url.clone()),
         kv("RATCHET_BRANCH", spec.branch.clone()),
@@ -265,7 +265,7 @@ pub fn bench_user_data(spec: &BenchLaunchSpec, max_lifetime_hours: f64) -> Resul
         "mv {CANDIDATE_SUDOERS_PATH}.tmp {CANDIDATE_SUDOERS_PATH}\n"
     ));
     out.push_str(&env_file(&[
-        kv("RATCHET_OPTIMIZATION_ID", spec.optimization_id.clone()),
+        kv("RATCHET_OPTIMIZATION_ID", spec.optimization_id.to_string()),
         kv("RATCHET_BENCH_PURPOSE", spec.purpose.as_str()),
     ]));
     out.push_str("set -a; . /etc/ratchet/runner.env; set +a\n");
@@ -290,7 +290,7 @@ pub fn deps_user_data(
 ) -> Result<String> {
     let u = DEPS_OS_USER;
     let mut vars = vec![
-        kv("RATCHET_OPTIMIZATION_ID", spec.optimization_id.clone()),
+        kv("RATCHET_OPTIMIZATION_ID", spec.optimization_id.to_string()),
         kv("RATCHET_BENCH_PURPOSE", spec.purpose.as_str()),
     ];
     vars.extend(proxy_env(net)?);

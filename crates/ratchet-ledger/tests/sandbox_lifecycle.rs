@@ -8,10 +8,10 @@ use async_trait::async_trait;
 use common::*;
 use ratchet_core::enums::{OptimizationStatus, SandboxProviderKind, SandboxStatus};
 use ratchet_core::ledger::RecordSandboxInput;
-use ratchet_core::ports::mock::MockSandboxProvider;
+use ratchet_core::ports::mock::{MockSandboxProvider, sample_sandbox_outputs};
 use ratchet_core::ports::{
-    PortError, PortResult, SandboxInput, SandboxNetwork, SandboxOutputs, SandboxPlan,
-    SandboxProvider, SandboxStateStatus,
+    PortError, PortResult, SandboxInput, SandboxOutputs, SandboxPlan, SandboxProvider,
+    SandboxStateStatus,
 };
 use ratchet_core::rows::Optimization;
 use ratchet_core::sandbox::{
@@ -27,24 +27,16 @@ fn input() -> SandboxInput {
         region: "us-east-1".into(),
         allowed_instance_types: vec!["c7i.large".into()],
         max_instances_per_agent: 2,
-        max_instance_lifetime_hours: 4,
+        max_instance_lifetime_hours: 4.0,
         tags: None,
     }
 }
 
 fn outputs() -> SandboxOutputs {
-    SandboxOutputs {
-        artifacts_bucket: "a".into(),
-        sealed_bucket: "s".into(),
-        agent_boundary_ref: "arn:aws:iam::123456789012:policy/b".into(),
-        eval_identity_ref: "arn:aws:iam::123456789012:instance-profile/e".into(),
-        agent_role_path: "/ratchet/agent/".into(),
-        network: SandboxNetwork {
-            subnet_id: "subnet-1".into(),
-            agent_runner_security_group_id: "sg-1".into(),
-            bench_security_group_id: "sg-2".into(),
-        },
-    }
+    let mut o = sample_sandbox_outputs("sbx");
+    o.artifacts_bucket = "a".into();
+    o.sealed_bucket = "s".into();
+    o
 }
 
 /// A ledger to peek at while `apply` runs, and where to record the status it saw.
