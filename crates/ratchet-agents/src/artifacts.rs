@@ -15,7 +15,9 @@ use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::clock::SystemClock;
-use crate::domain::{AgentEvent, ArtifactStore, Clock, PollResult, RunnerInbox, RunnerMessage, StoreError};
+use crate::domain::{
+    AgentEvent, ArtifactStore, Clock, PollResult, RunnerInbox, RunnerMessage, StoreError,
+};
 use crate::process::{RunProcessOptions, SharedSpawner, TokioSpawner, run_process};
 
 /// Where one agent's runner state lives in the artifacts bucket (IAM allows exactly this prefix).
@@ -46,7 +48,11 @@ pub fn seq_of(key: &str) -> Option<u64> {
         return None;
     }
     let (_, digits) = head.rsplit_once('/')?;
-    if digits.len() == 8 && digits.bytes().all(|b| b.is_ascii_digit()) { digits.parse().ok() } else { None }
+    if digits.len() == 8 && digits.bytes().all(|b| b.is_ascii_digit()) {
+        digits.parse().ok()
+    } else {
+        None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,15 +61,26 @@ struct Numbered {
     seq: u64,
 }
 
-async fn list_seqs(store: &dyn ArtifactStore, dir_prefix: &str) -> Result<Vec<Numbered>, StoreError> {
-    let mut items: Vec<Numbered> = store.list(dir_prefix).await?.into_iter().filter_map(|key| seq_of(&key).map(|seq| Numbered { key, seq })).collect();
+async fn list_seqs(
+    store: &dyn ArtifactStore,
+    dir_prefix: &str,
+) -> Result<Vec<Numbered>, StoreError> {
+    let mut items: Vec<Numbered> = store
+        .list(dir_prefix)
+        .await?
+        .into_iter()
+        .filter_map(|key| seq_of(&key).map(|seq| Numbered { key, seq }))
+        .collect();
     items.sort_by_key(|n| n.seq);
     Ok(items)
 }
 
 /// Highest sequence number under `dir_prefix` (0 when empty).
 pub async fn last_seq(store: &dyn ArtifactStore, dir_prefix: &str) -> Result<u64, StoreError> {
-    Ok(list_seqs(store, dir_prefix).await?.last().map_or(0, |n| n.seq))
+    Ok(list_seqs(store, dir_prefix)
+        .await?
+        .last()
+        .map_or(0, |n| n.seq))
 }
 
 // ---------------------------------------------------------------- inbox (engine -> runner)
@@ -89,7 +106,10 @@ impl ArtifactInbox {
             prefix: prefix.into(),
             clock: Arc::new(SystemClock),
             poll_interval: Duration::from_millis(2000),
-            state: AsyncMutex::new(InboxState { last: 0, buffered: Vec::new() }),
+            state: AsyncMutex::new(InboxState {
+                last: 0,
+                buffered: Vec::new(),
+            }),
         }
     }
 
@@ -181,7 +201,11 @@ pub struct ArtifactEventSink {
 }
 
 impl ArtifactEventSink {
-    pub fn new(store: Arc<dyn ArtifactStore>, prefix: impl Into<String>, options: EventSinkOptions) -> Self {
+    pub fn new(
+        store: Arc<dyn ArtifactStore>,
+        prefix: impl Into<String>,
+        options: EventSinkOptions,
+    ) -> Self {
         let inner = Arc::new(SinkInner {
             store,
             prefix: prefix.into(),
@@ -191,7 +215,9 @@ impl ArtifactEventSink {
             errors: Mutex::new(Vec::new()),
             stop: CancellationToken::new(),
         });
-        let interval = options.flush_interval.unwrap_or(Duration::from_millis(2000));
+        let interval = options
+            .flush_interval
+            .unwrap_or(Duration::from_millis(2000));
         let timer = inner.clone();
         tokio::spawn(async move {
             loop {
@@ -235,7 +261,8 @@ impl ArtifactEventSink {
         }
         let current = match *seq {
             Some(n) => n,
-            None => match last_seq(inner.store.as_ref(), &format!("{}events/", inner.prefix)).await {
+            None => match last_seq(inner.store.as_ref(), &format!("{}events/", inner.prefix)).await
+            {
                 Ok(n) => n,
                 Err(err) => {
                     inner.errors.lock().unwrap().push(err.to_string());
@@ -244,9 +271,17 @@ impl ArtifactEventSink {
             },
         };
         let batch: Vec<AgentEvent> = std::mem::take(&mut *inner.buffer.lock().unwrap());
-        let mut body = batch.iter().map(|e| serde_json::to_string(e).unwrap_or_default()).collect::<Vec<_>>().join("\n");
+        let mut body = batch
+            .iter()
+            .map(|e| serde_json::to_string(e).unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join("\n");
         body.push('\n');
-        match inner.store.put(&event_key(&inner.prefix, current + 1), body.as_bytes()).await {
+        match inner
+            .store
+            .put(&event_key(&inner.prefix, current + 1), body.as_bytes())
+            .await
+        {
             Ok(()) => *seq = Some(current + 1),
             Err(err) => {
                 *seq = Some(current);
@@ -272,15 +307,25 @@ impl ArtifactEventSink {
 
 /// Parse every event line from the batches after `cursor`. Returns the new cursor (highest seq read). Stops before a batch that is
 /// listed but not readable yet, so the next poll retries it instead of skipping it for good.
-pub async fn read_events(store: &dyn ArtifactStore, prefix: &str, cursor: Option<&str>) -> Result<PollResult, StoreError> {
+pub async fn read_events(
+    store: &dyn ArtifactStore,
+    prefix: &str,
+    cursor: Option<&str>,
+) -> Result<PollResult, StoreError> {
     let after: u64 = cursor.and_then(|c| c.parse().ok()).unwrap_or(0);
-    let batches: Vec<Numbered> = list_seqs(store, &format!("{prefix}events/")).await?.into_iter().filter(|k| k.seq > after).collect();
+    let batches: Vec<Numbered> = list_seqs(store, &format!("{prefix}events/"))
+        .await?
+        .into_iter()
+        .filter(|k| k.seq > after)
+        .collect();
     let mut events = Vec::new();
     let mut last = after;
     for Numbered { key, seq } in batches {
         let body = store.get(&key).await?;
         // Not readable yet (or empty): stop before it so the next poll retries it, rather than skipping it for good.
-        let Some(body) = body.filter(|b| !b.is_empty()) else { break };
+        let Some(body) = body.filter(|b| !b.is_empty()) else {
+            break;
+        };
         for line in body.split('\n') {
             if line.trim().is_empty() {
                 continue;
@@ -292,7 +337,10 @@ pub async fn read_events(store: &dyn ArtifactStore, prefix: &str, cursor: Option
         }
         last = seq;
     }
-    Ok(PollResult { events, cursor: last.to_string() })
+    Ok(PollResult {
+        events,
+        cursor: last.to_string(),
+    })
 }
 
 // ---------------------------------------------------------------- stores
@@ -311,15 +359,22 @@ impl FsArtifactStore {
 }
 
 fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
             walk(&path, root, out);
-        } else if !entry.file_name().to_string_lossy().starts_with(TMP_PREFIX) {
-            if let Ok(rel) = path.strip_prefix(root) {
-                out.push(rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/"));
-            }
+        } else if !entry.file_name().to_string_lossy().starts_with(TMP_PREFIX)
+            && let Ok(rel) = path.strip_prefix(root)
+        {
+            out.push(
+                rel.components()
+                    .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+                    .join("/"),
+            );
         }
     }
 }
@@ -329,12 +384,21 @@ impl ArtifactStore for FsArtifactStore {
     async fn put(&self, key: &str, body: &[u8]) -> Result<(), StoreError> {
         let file = self.root.join(key);
         let dir = file.parent().unwrap_or(&self.root).to_path_buf();
-        tokio::fs::create_dir_all(&dir).await.map_err(|e| StoreError(e.to_string()))?;
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(|e| StoreError(e.to_string()))?;
         // write-then-rename: a reader never sees a half-written object
-        let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = file
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let tmp = dir.join(format!("{TMP_PREFIX}{}-{name}", std::process::id()));
-        tokio::fs::write(&tmp, body).await.map_err(|e| StoreError(e.to_string()))?;
-        tokio::fs::rename(&tmp, &file).await.map_err(|e| StoreError(e.to_string()))
+        tokio::fs::write(&tmp, body)
+            .await
+            .map_err(|e| StoreError(e.to_string()))?;
+        tokio::fs::rename(&tmp, &file)
+            .await
+            .map_err(|e| StoreError(e.to_string()))
     }
 
     async fn get(&self, key: &str) -> Result<Option<String>, StoreError> {
@@ -372,7 +436,12 @@ struct AwsOutput {
 }
 
 impl AwsCliArtifactStore {
-    pub fn new(bucket: impl Into<String>, spawner: Option<SharedSpawner>, env: Option<HashMap<String, String>>, region: Option<String>) -> Self {
+    pub fn new(
+        bucket: impl Into<String>,
+        spawner: Option<SharedSpawner>,
+        env: Option<HashMap<String, String>>,
+        region: Option<String>,
+    ) -> Self {
         Self {
             bucket: bucket.into(),
             spawner: spawner.unwrap_or_else(|| Arc::new(TokioSpawner)),
@@ -391,11 +460,18 @@ impl AwsCliArtifactStore {
             out.push_str(l);
             out.push('\n');
         };
-        let mut options = RunProcessOptions::new(std::env::current_dir().unwrap_or_else(|_| ".".into()), self.env.clone());
+        let mut options = RunProcessOptions::new(
+            std::env::current_dir().unwrap_or_else(|_| ".".into()),
+            self.env.clone(),
+        );
         options.stdin = stdin;
         options.on_stdout_line = Some(&mut collect);
         let res = run_process(self.spawner.as_ref(), "aws", &all, options).await;
-        AwsOutput { code: res.code(), out, err: res.stderr_tail }
+        AwsOutput {
+            code: res.code(),
+            out,
+            err: res.stderr_tail,
+        }
     }
 }
 
@@ -404,7 +480,12 @@ impl ArtifactStore for AwsCliArtifactStore {
     async fn put(&self, key: &str, body: &[u8]) -> Result<(), StoreError> {
         let text = String::from_utf8_lossy(body).into_owned();
         let target = format!("s3://{}/{key}", self.bucket);
-        let r = self.aws(&["s3", "cp", "-", &target, "--only-show-errors"], Some(text)).await;
+        let r = self
+            .aws(
+                &["s3", "cp", "-", &target, "--only-show-errors"],
+                Some(text),
+            )
+            .await;
         if r.code != Some(0) {
             return Err(StoreError(format!("aws s3 cp failed for {key}: {}", r.err)));
         }
@@ -413,11 +494,16 @@ impl ArtifactStore for AwsCliArtifactStore {
 
     async fn get(&self, key: &str) -> Result<Option<String>, StoreError> {
         let source = format!("s3://{}/{key}", self.bucket);
-        let r = self.aws(&["s3", "cp", &source, "-", "--only-show-errors"], None).await;
+        let r = self
+            .aws(&["s3", "cp", &source, "-", "--only-show-errors"], None)
+            .await;
         if r.code == Some(0) {
             return Ok(Some(r.out)); // line-oriented: blank lines are not preserved (fine for JSON / JSONL)
         }
-        if ["NoSuchKey", "Not Found", "404"].iter().any(|m| r.err.contains(m)) {
+        if ["NoSuchKey", "Not Found", "404"]
+            .iter()
+            .any(|m| r.err.contains(m))
+        {
             return Ok(None);
         }
         Err(StoreError(format!("aws s3 cp failed for {key}: {}", r.err)))
@@ -425,13 +511,32 @@ impl ArtifactStore for AwsCliArtifactStore {
 
     async fn list(&self, prefix: &str) -> Result<Vec<String>, StoreError> {
         let r = self
-            .aws(&["s3api", "list-objects-v2", "--bucket", &self.bucket, "--prefix", prefix, "--query", "Contents[].Key", "--output", "json"], None)
+            .aws(
+                &[
+                    "s3api",
+                    "list-objects-v2",
+                    "--bucket",
+                    &self.bucket,
+                    "--prefix",
+                    prefix,
+                    "--query",
+                    "Contents[].Key",
+                    "--output",
+                    "json",
+                ],
+                None,
+            )
             .await;
         if r.code != Some(0) {
-            return Err(StoreError(format!("aws s3api list-objects-v2 failed: {}", r.err)));
+            return Err(StoreError(format!(
+                "aws s3api list-objects-v2 failed: {}",
+                r.err
+            )));
         }
         let text = r.out.trim();
-        let parsed: Option<Vec<String>> = serde_json::from_str(if text.is_empty() { "null" } else { text }).map_err(|e| StoreError(e.to_string()))?;
+        let parsed: Option<Vec<String>> =
+            serde_json::from_str(if text.is_empty() { "null" } else { text })
+                .map_err(|e| StoreError(e.to_string()))?;
         Ok(parsed.unwrap_or_default())
     }
 }

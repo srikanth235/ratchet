@@ -51,10 +51,16 @@ pub struct ProcessExit {
 
 impl ProcessExit {
     pub fn code(code: i32) -> Self {
-        Self { code: Some(code), ..Self::default() }
+        Self {
+            code: Some(code),
+            ..Self::default()
+        }
     }
     pub fn spawn_failed(message: impl Into<String>) -> Self {
-        Self { spawn_error: Some(message.into()), ..Self::default() }
+        Self {
+            spawn_error: Some(message.into()),
+            ..Self::default()
+        }
     }
 }
 
@@ -78,7 +84,12 @@ pub trait ProcessHandle: Send {
 }
 
 pub trait Spawner: Send + Sync {
-    fn spawn(&self, command: &str, args: &[String], options: &SpawnOptions) -> Box<dyn ProcessHandle>;
+    fn spawn(
+        &self,
+        command: &str,
+        args: &[String],
+        options: &SpawnOptions,
+    ) -> Box<dyn ProcessHandle>;
 }
 
 pub type SharedSpawner = Arc<dyn Spawner>;
@@ -134,7 +145,11 @@ fn spawn_error_text(command: &str, err: &std::io::Error) -> String {
 }
 
 /// Streams a pipe as UTF-8 text chunks; a multi-byte character split across reads is held back until it is complete.
-async fn pump_pipe<R: AsyncReadExt + Unpin>(mut reader: R, tx: mpsc::UnboundedSender<Output>, wrap: fn(String) -> Output) {
+async fn pump_pipe<R: AsyncReadExt + Unpin>(
+    mut reader: R,
+    tx: mpsc::UnboundedSender<Output>,
+    wrap: fn(String) -> Output,
+) {
     let mut buf = vec![0u8; 16 * 1024];
     let mut carry: Vec<u8> = Vec::new();
     loop {
@@ -162,7 +177,12 @@ async fn pump_pipe<R: AsyncReadExt + Unpin>(mut reader: R, tx: mpsc::UnboundedSe
 }
 
 impl Spawner for TokioSpawner {
-    fn spawn(&self, command: &str, args: &[String], options: &SpawnOptions) -> Box<dyn ProcessHandle> {
+    fn spawn(
+        &self,
+        command: &str,
+        args: &[String],
+        options: &SpawnOptions,
+    ) -> Box<dyn ProcessHandle> {
         let (out_tx, out_rx) = mpsc::unbounded_channel();
         let (exit_tx, exit_rx) = oneshot::channel();
         let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<StdinMsg>();
@@ -180,7 +200,12 @@ impl Spawner for TokioSpawner {
             Ok(child) => child,
             Err(err) => {
                 let _ = exit_tx.send(ProcessExit::spawn_failed(spawn_error_text(command, &err)));
-                return Box::new(TokioProcess { output: Some(out_rx), exit: Some(exit_rx), stdin: stdin_tx, pid: None });
+                return Box::new(TokioProcess {
+                    output: Some(out_rx),
+                    exit: Some(exit_rx),
+                    stdin: stdin_tx,
+                    pid: None,
+                });
             }
         };
         let pid = child.id();
@@ -193,10 +218,10 @@ impl Spawner for TokioSpawner {
             while let Some(msg) = stdin_rx.recv().await {
                 match msg {
                     StdinMsg::Data(data) => {
-                        if let Some(s) = stdin.as_mut() {
-                            if s.write_all(data.as_bytes()).await.is_err() {
-                                stdin = None;
-                            }
+                        if let Some(s) = stdin.as_mut()
+                            && s.write_all(data.as_bytes()).await.is_err()
+                        {
+                            stdin = None;
                         }
                     }
                     StdinMsg::End => {
@@ -210,8 +235,10 @@ impl Spawner for TokioSpawner {
         });
 
         tokio::spawn(async move {
-            let out_task = stdout.map(|r| tokio::spawn(pump_pipe(r, out_tx.clone(), Output::Stdout)));
-            let err_task = stderr.map(|r| tokio::spawn(pump_pipe(r, out_tx.clone(), Output::Stderr)));
+            let out_task =
+                stdout.map(|r| tokio::spawn(pump_pipe(r, out_tx.clone(), Output::Stdout)));
+            let err_task =
+                stderr.map(|r| tokio::spawn(pump_pipe(r, out_tx.clone(), Output::Stderr)));
             let status = child.wait().await;
             // like node's `close`: the exit is reported once stdio is drained
             if let Some(t) = out_task {
@@ -224,14 +251,23 @@ impl Spawner for TokioSpawner {
             let exit = match status {
                 Ok(status) => {
                     use std::os::unix::process::ExitStatusExt;
-                    ProcessExit { code: status.code(), signal: status.signal().map(signal_name), spawn_error: None }
+                    ProcessExit {
+                        code: status.code(),
+                        signal: status.signal().map(signal_name),
+                        spawn_error: None,
+                    }
                 }
                 Err(err) => ProcessExit::spawn_failed(err.to_string()),
             };
             let _ = exit_tx.send(exit);
         });
 
-        Box::new(TokioProcess { output: Some(out_rx), exit: Some(exit_rx), stdin: stdin_tx, pid })
+        Box::new(TokioProcess {
+            output: Some(out_rx),
+            exit: Some(exit_rx),
+            stdin: stdin_tx,
+            pid,
+        })
     }
 }
 
@@ -290,7 +326,11 @@ impl LineSplitter {
     pub fn flush(&mut self) -> Vec<String> {
         let last = std::mem::take(&mut self.rest);
         let last = last.trim();
-        if last.is_empty() { Vec::new() } else { vec![last.to_string()] }
+        if last.is_empty() {
+            Vec::new()
+        } else {
+            vec![last.to_string()]
+        }
     }
 }
 
@@ -308,7 +348,14 @@ pub struct RunProcessOptions<'a> {
 
 impl RunProcessOptions<'_> {
     pub fn new(cwd: impl Into<PathBuf>, env: HashMap<String, String>) -> Self {
-        Self { cwd: cwd.into(), env, stdin: None, cancel: None, kill_grace: Duration::from_millis(5000), on_stdout_line: None }
+        Self {
+            cwd: cwd.into(),
+            env,
+            stdin: None,
+            cancel: None,
+            kill_grace: Duration::from_millis(5000),
+            on_stdout_line: None,
+        }
     }
 }
 
@@ -344,8 +391,20 @@ fn keep_tail(text: &mut String, max: usize) {
     }
 }
 
-pub async fn run_process(spawner: &dyn Spawner, command: &str, args: &[String], options: RunProcessOptions<'_>) -> RunProcessResult {
-    let RunProcessOptions { cwd, env, stdin, cancel, kill_grace, mut on_stdout_line } = options;
+pub async fn run_process(
+    spawner: &dyn Spawner,
+    command: &str,
+    args: &[String],
+    options: RunProcessOptions<'_>,
+) -> RunProcessResult {
+    let RunProcessOptions {
+        cwd,
+        env,
+        stdin,
+        cancel,
+        kill_grace,
+        mut on_stdout_line,
+    } = options;
     let mut child = spawner.spawn(command, args, &SpawnOptions { cwd, env });
     let mut output = child.take_output();
     let exit = child.take_exit();
@@ -360,7 +419,9 @@ pub async fn run_process(spawner: &dyn Spawner, command: &str, args: &[String], 
     let cancel = cancel.unwrap_or(&never);
     let mut aborted = false;
     let mut kill_at: Option<tokio::time::Instant> = None;
-    let begin_abort = |child: &dyn ProcessHandle, aborted: &mut bool, kill_at: &mut Option<tokio::time::Instant>| {
+    let begin_abort = |child: &dyn ProcessHandle,
+                       aborted: &mut bool,
+                       kill_at: &mut Option<tokio::time::Instant>| {
         *aborted = true;
         child.kill(KillSignal::Term);
         *kill_at = Some(tokio::time::Instant::now() + kill_grace);
@@ -400,13 +461,19 @@ pub async fn run_process(spawner: &dyn Spawner, command: &str, args: &[String], 
             },
         }
     }
-    let exit = exit.await.unwrap_or_else(|_| ProcessExit::spawn_failed("process handle dropped"));
+    let exit = exit
+        .await
+        .unwrap_or_else(|_| ProcessExit::spawn_failed("process handle dropped"));
     for line in lines.flush() {
         if let Some(cb) = on_stdout_line.as_mut() {
             cb(&line);
         }
     }
-    RunProcessResult { exit, aborted, stderr_tail: stderr_tail.trim().to_string() }
+    RunProcessResult {
+        exit,
+        aborted,
+        stderr_tail: stderr_tail.trim().to_string(),
+    }
 }
 
 #[cfg(test)]

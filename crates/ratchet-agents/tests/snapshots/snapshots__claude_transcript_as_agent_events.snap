@@ -1,0 +1,91 @@
+---
+source: crates/ratchet-agents/tests/snapshots.rs
+expression: events
+---
+[
+  {
+    "at": 1000,
+    "type": "status",
+    "text": "claude-code session started (claude-sonnet-5-5)",
+    "data": {
+      "sessionId": "5f1c1b8e-2d7a-4a37-9c0e-7b6f3b1d0a11",
+      "model": "claude-sonnet-5-5",
+      "permissionMode": "acceptEdits",
+      "apiKeySource": "ANTHROPIC_API_KEY",
+      "tools": 8
+    }
+  },
+  {
+    "at": 1000,
+    "type": "message",
+    "text": "I'll start by profiling the search endpoint to see where the time goes."
+  },
+  {
+    "at": 1000,
+    "type": "tool",
+    "text": "Bash: node --cpu-prof dist/src/main.js",
+    "data": {
+      "phase": "call",
+      "id": "toolu_01X",
+      "name": "Bash",
+      "input": {
+        "command": "node --cpu-prof dist/src/main.js",
+        "description": "Profile the server"
+      }
+    }
+  },
+  {
+    "at": 1000,
+    "type": "tool",
+    "text": "Profile written to CPU.1234.cpuprofile",
+    "data": {
+      "phase": "result",
+      "id": "toolu_01X",
+      "isError": false
+    }
+  },
+  {
+    "at": 1000,
+    "type": "tool",
+    "text": "Edit: /work/agent-1/src/search.ts",
+    "data": {
+      "phase": "call",
+      "id": "toolu_01Y",
+      "name": "Edit",
+      "input": {
+        "file_path": "/work/agent-1/src/search.ts",
+        "old_string": "matches = JSON.parse(JSON.stringify(matches))",
+        "new_string": ""
+      }
+    }
+  },
+  {
+    "at": 1000,
+    "type": "tool",
+    "text": "The file /work/agent-1/src/search.ts has been updated.",
+    "data": {
+      "phase": "result",
+      "id": "toolu_01Y",
+      "isError": false
+    }
+  },
+  {
+    "at": 1000,
+    "type": "message",
+    "text": "Removed the defensive deep clone; p95 dropped from 18.5 ms to 5.8 ms locally. Committing."
+  },
+  {
+    "at": 1000,
+    "type": "usage",
+    "data": {
+      "cacheCreationInputTokens": 12385,
+      "cacheReadInputTokens": 36131,
+      "numTurns": 4
+    },
+    "usage": {
+      "inputTokens": 48532,
+      "outputTokens": 308,
+      "costUsd": 0.0841
+    }
+  }
+]

@@ -85,7 +85,10 @@ mod tests {
         cancel.cancel();
         assert_eq!(waiting.await.unwrap(), None);
         inbox.push(RunnerMessage::Stop);
-        assert_eq!(inbox.next(&CancellationToken::new()).await, Some(RunnerMessage::Stop));
+        assert_eq!(
+            inbox.next(&CancellationToken::new()).await,
+            Some(RunnerMessage::Stop)
+        );
         // an already-aborted token still drains what is queued, then reports None
         inbox.push(RunnerMessage::Pause);
         assert_eq!(inbox.next(&cancel).await, Some(RunnerMessage::Pause));

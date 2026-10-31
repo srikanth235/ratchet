@@ -9,17 +9,22 @@ use std::time::Duration;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-use crate::artifacts::{ArtifactEventSink, ArtifactInbox, AwsCliArtifactStore, EventSinkOptions, FsArtifactStore, config_key, done_key, runner_prefix};
+use crate::artifacts::{
+    ArtifactEventSink, ArtifactInbox, AwsCliArtifactStore, EventSinkOptions, FsArtifactStore,
+    config_key, done_key, runner_prefix,
+};
 use crate::claude_code::{ClaudeCodeAdapter, ClaudeCodeOptions, ClaudePermissionMode};
-use crate::clock::{AcceleratedClock, SystemClock};
 use crate::cli_agent::CliAgentOptions;
+use crate::clock::{AcceleratedClock, SystemClock};
 use crate::codex::{CodexAdapter, CodexOptions};
 use crate::context::to_fixed;
 use crate::demo_scripts::{DemoVariant, load_demo_search_script, load_script};
 use crate::domain::{AgentAdapter, AgentKind, ArtifactStore, Clock, RunnerConfig};
 use crate::git::{SharedGit, exec_git};
 use crate::process::{RunProcessOptions, SharedSpawner, TokioSpawner, run_process};
-use crate::runner_loop::{LoopTuning, RunnerLoopOptions, RunnerLoopResult, RunnerStopReason, run_runner_loop};
+use crate::runner_loop::{
+    LoopTuning, RunnerLoopOptions, RunnerLoopResult, RunnerStopReason, run_runner_loop,
+};
 use crate::scripted::{ScriptedAgent, ScriptedAgentOptions};
 use crate::workdir::{PrepareWorkdirOptions, git_auth_env, prepare_workdir};
 
@@ -34,7 +39,11 @@ impl RunnerMainError {
     }
 }
 
-pub type AdapterFactory = Arc<dyn Fn(&RunnerConfig, &HashMap<String, String>) -> Arc<dyn AgentAdapter> + Send + Sync>;
+/// Where progress lines go (default: stderr).
+pub type LogFn = Arc<dyn Fn(&str) + Send + Sync>;
+
+pub type AdapterFactory =
+    Arc<dyn Fn(&RunnerConfig, &HashMap<String, String>) -> Arc<dyn AgentAdapter> + Send + Sync>;
 
 #[derive(Default)]
 pub struct RunnerMainOptions {
@@ -47,7 +56,7 @@ pub struct RunnerMainOptions {
     pub signal: Option<CancellationToken>,
     /// Replaces the adapter chosen from `config.kind` (tests).
     pub adapter_factory: Option<AdapterFactory>,
-    pub log: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    pub log: Option<LogFn>,
 }
 
 /// Env passed through to the agent CLI; deliberately small. The git token never goes in.
@@ -77,10 +86,17 @@ pub const AGENT_ENV_PASSTHROUGH: [&str; 17] = [
 /// `NAME=ref,NAME2=ref2` of SSM parameter names, fetched with `aws ssm get-parameter --with-decryption`. Returned in the order given.
 pub fn parse_secret_refs(spec: Option<&str>) -> Result<Vec<(String, String)>, RunnerMainError> {
     let mut refs: Vec<(String, String)> = Vec::new();
-    for part in spec.unwrap_or("").split(',').map(str::trim).filter(|s| !s.is_empty()) {
+    for part in spec
+        .unwrap_or("")
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         let eq = part.find('=').filter(|eq| *eq > 0);
         let Some(eq) = eq else {
-            return Err(RunnerMainError::new(format!("bad RATCHET_SECRET_REFS entry '{part}' (want NAME=/ssm/parameter/name)")));
+            return Err(RunnerMainError::new(format!(
+                "bad RATCHET_SECRET_REFS entry '{part}' (want NAME=/ssm/parameter/name)"
+            )));
         };
         let (name, reference) = (part[..eq].to_string(), part[eq + 1..].to_string());
         match refs.iter_mut().find(|(n, _)| *n == name) {
@@ -91,16 +107,38 @@ pub fn parse_secret_refs(spec: Option<&str>) -> Result<Vec<(String, String)>, Ru
     Ok(refs)
 }
 
-async fn fetch_secret(spawner: &SharedSpawner, env: &HashMap<String, String>, name: &str, reference: &str) -> Result<String, RunnerMainError> {
+async fn fetch_secret(
+    spawner: &SharedSpawner,
+    env: &HashMap<String, String>,
+    name: &str,
+    reference: &str,
+) -> Result<String, RunnerMainError> {
     let mut out = String::new();
     let mut collect = |l: &str| out.push_str(l);
-    let mut options = RunProcessOptions::new(std::env::current_dir().unwrap_or_else(|_| ".".into()), env.clone());
+    let mut options = RunProcessOptions::new(
+        std::env::current_dir().unwrap_or_else(|_| ".".into()),
+        env.clone(),
+    );
     options.on_stdout_line = Some(&mut collect);
-    let args: Vec<String> =
-        ["ssm", "get-parameter", "--with-decryption", "--name", reference, "--query", "Parameter.Value", "--output", "text"].map(String::from).to_vec();
+    let args: Vec<String> = [
+        "ssm",
+        "get-parameter",
+        "--with-decryption",
+        "--name",
+        reference,
+        "--query",
+        "Parameter.Value",
+        "--output",
+        "text",
+    ]
+    .map(String::from)
+    .to_vec();
     let res = run_process(spawner.as_ref(), "aws", &args, options).await;
     if res.code() != Some(0) {
-        return Err(RunnerMainError::new(format!("cannot read secret {name} from SSM {reference}: {}", res.stderr_tail)));
+        return Err(RunnerMainError::new(format!(
+            "cannot read secret {name} from SSM {reference}: {}",
+            res.stderr_tail
+        )));
     }
     Ok(out)
 }
@@ -114,14 +152,33 @@ fn required(env: &HashMap<String, String>, name: &str) -> Result<String, RunnerM
 
 /// Check that the config JSON has every required field, then decode it.
 pub fn validate_config(value: &Value) -> Result<RunnerConfig, RunnerMainError> {
-    const REQUIRED: [&str; 11] =
-        ["optimizationId", "agentId", "kind", "repoUrl", "branch", "baseRef", "config", "brief", "baselineValue", "budgetUsd", "deadlineAt"];
+    const REQUIRED: [&str; 11] = [
+        "optimizationId",
+        "agentId",
+        "kind",
+        "repoUrl",
+        "branch",
+        "baseRef",
+        "config",
+        "brief",
+        "baselineValue",
+        "budgetUsd",
+        "deadlineAt",
+    ];
     let object = value.as_object();
-    let missing: Vec<&str> = REQUIRED.iter().copied().filter(|k| object.is_none_or(|o| !o.contains_key(*k))).collect();
+    let missing: Vec<&str> = REQUIRED
+        .iter()
+        .copied()
+        .filter(|k| object.is_none_or(|o| !o.contains_key(*k)))
+        .collect();
     if !missing.is_empty() {
-        return Err(RunnerMainError::new(format!("runner config is missing: {}", missing.join(", "))));
+        return Err(RunnerMainError::new(format!(
+            "runner config is missing: {}",
+            missing.join(", ")
+        )));
     }
-    serde_json::from_value(value.clone()).map_err(|e| RunnerMainError::new(format!("runner config is invalid: {e}")))
+    serde_json::from_value(value.clone())
+        .map_err(|e| RunnerMainError::new(format!("runner config is invalid: {e}")))
 }
 
 pub fn default_adapter(
@@ -141,18 +198,33 @@ pub fn default_adapter(
     Ok(match config.kind {
         AgentKind::ClaudeCode => Arc::new(ClaudeCodeAdapter::new(ClaudeCodeOptions {
             cli: cli("RATCHET_CLAUDE_BIN"),
-            permission_mode: env.get("RATCHET_CLAUDE_PERMISSION_MODE").filter(|m| !m.is_empty()).map(|m| ClaudePermissionMode::parse(m)),
+            permission_mode: env
+                .get("RATCHET_CLAUDE_PERMISSION_MODE")
+                .filter(|m| !m.is_empty())
+                .map(|m| ClaudePermissionMode::parse(m)),
             ..ClaudeCodeOptions::default()
         })),
-        AgentKind::Codex => Arc::new(CodexAdapter::new(CodexOptions { cli: cli("RATCHET_CODEX_BIN"), ..CodexOptions::default() })),
+        AgentKind::Codex => Arc::new(CodexAdapter::new(CodexOptions {
+            cli: cli("RATCHET_CODEX_BIN"),
+            ..CodexOptions::default()
+        })),
         AgentKind::Mock => {
-            let which = env.get("RATCHET_MOCK_SCRIPT").map(String::as_str).unwrap_or("cc");
+            let which = env
+                .get("RATCHET_MOCK_SCRIPT")
+                .map(String::as_str)
+                .unwrap_or("cc");
             let script = match DemoVariant::parse(which) {
                 Some(variant) => load_demo_search_script(variant, None),
                 None => load_script(std::path::Path::new(which), None),
             }
             .map_err(|e| RunnerMainError::new(e.to_string()))?;
-            Arc::new(ScriptedAgent::with_options(script, ScriptedAgentOptions { clock: Some(clock), ..ScriptedAgentOptions::default() }))
+            Arc::new(ScriptedAgent::with_options(
+                script,
+                ScriptedAgentOptions {
+                    clock: Some(clock),
+                    ..ScriptedAgentOptions::default()
+                },
+            ))
         }
     })
 }
@@ -160,15 +232,25 @@ pub fn default_adapter(
 fn number_env(env: &HashMap<String, String>, name: &str) -> Result<Option<f64>, RunnerMainError> {
     match env.get(name) {
         None => Ok(None),
-        Some(v) => v.trim().parse::<f64>().map(Some).map_err(|_| RunnerMainError::new(format!("{name} must be a number, got '{v}'"))),
+        Some(v) => v
+            .trim()
+            .parse::<f64>()
+            .map(Some)
+            .map_err(|_| RunnerMainError::new(format!("{name} must be a number, got '{v}'"))),
     }
 }
 
 /// The body of the `ratchet-runner` binary. Returns the process exit code (0 done, 1 failed or agent unavailable).
 pub async fn runner_main(options: RunnerMainOptions) -> Result<i32, RunnerMainError> {
     let env = &options.env;
-    let log: Arc<dyn Fn(&str) + Send + Sync> = options.log.clone().unwrap_or_else(|| Arc::new(|l: &str| eprintln!("{l}")));
-    let spawner: SharedSpawner = options.spawner.clone().unwrap_or_else(|| Arc::new(TokioSpawner));
+    let log: Arc<dyn Fn(&str) + Send + Sync> = options
+        .log
+        .clone()
+        .unwrap_or_else(|| Arc::new(|l: &str| eprintln!("{l}")));
+    let spawner: SharedSpawner = options
+        .spawner
+        .clone()
+        .unwrap_or_else(|| Arc::new(TokioSpawner));
     let clock: Arc<dyn Clock> = match &options.clock {
         Some(c) => c.clone(),
         None => {
@@ -188,29 +270,52 @@ pub async fn runner_main(options: RunnerMainOptions) -> Result<i32, RunnerMainEr
     let store: Arc<dyn ArtifactStore> = match &options.store {
         Some(s) => s.clone(),
         None => {
-            if let Some(bucket) = env.get("RATCHET_ARTIFACTS_BUCKET").filter(|b| !b.is_empty()) {
-                Arc::new(AwsCliArtifactStore::new(bucket.clone(), Some(spawner.clone()), Some(env.clone()), env.get("AWS_REGION").cloned()))
+            if let Some(bucket) = env
+                .get("RATCHET_ARTIFACTS_BUCKET")
+                .filter(|b| !b.is_empty())
+            {
+                Arc::new(AwsCliArtifactStore::new(
+                    bucket.clone(),
+                    Some(spawner.clone()),
+                    Some(env.clone()),
+                    env.get("AWS_REGION").cloned(),
+                ))
             } else if let Some(dir) = env.get("RATCHET_ARTIFACT_DIR").filter(|d| !d.is_empty()) {
                 Arc::new(FsArtifactStore::new(dir))
             } else {
-                return Err(RunnerMainError::new("set RATCHET_ARTIFACTS_BUCKET (S3) or RATCHET_ARTIFACT_DIR (local directory)"));
+                return Err(RunnerMainError::new(
+                    "set RATCHET_ARTIFACTS_BUCKET (S3) or RATCHET_ARTIFACT_DIR (local directory)",
+                ));
             }
         }
     };
 
     // secrets from SSM: model API keys and the repo token
     let mut secrets: Vec<(String, String)> = Vec::new();
-    for (name, reference) in parse_secret_refs(env.get("RATCHET_SECRET_REFS").map(String::as_str))? {
+    for (name, reference) in parse_secret_refs(env.get("RATCHET_SECRET_REFS").map(String::as_str))?
+    {
         let value = fetch_secret(&spawner, env, &name, &reference).await?;
         secrets.push((name, value));
     }
-    let secret = |name: &str| secrets.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone());
+    let secret = |name: &str| {
+        secrets
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.clone())
+    };
 
     let raw_config: Option<String> = match env.get("RATCHET_RUNNER_CONFIG") {
         Some(c) => Some(c.clone()),
         None => match env.get("RATCHET_RUNNER_CONFIG_FILE") {
-            Some(file) => Some(tokio::fs::read_to_string(file).await.map_err(|e| RunnerMainError::new(format!("cannot read {file}: {e}")))?),
-            None => store.get(&config_key(&prefix)).await.map_err(|e| RunnerMainError::new(e.to_string()))?,
+            Some(file) => Some(
+                tokio::fs::read_to_string(file)
+                    .await
+                    .map_err(|e| RunnerMainError::new(format!("cannot read {file}: {e}")))?,
+            ),
+            None => store
+                .get(&config_key(&prefix))
+                .await
+                .map_err(|e| RunnerMainError::new(e.to_string()))?,
         },
     };
     let Some(raw_config) = raw_config.filter(|c| !c.is_empty()) else {
@@ -219,10 +324,13 @@ pub async fn runner_main(options: RunnerMainOptions) -> Result<i32, RunnerMainEr
             config_key(&prefix)
         )));
     };
-    let parsed: Value = serde_json::from_str(&raw_config).map_err(|e| RunnerMainError::new(format!("runner config is not valid JSON: {e}")))?;
+    let parsed: Value = serde_json::from_str(&raw_config)
+        .map_err(|e| RunnerMainError::new(format!("runner config is not valid JSON: {e}")))?;
     let config = validate_config(&parsed)?;
     if config.optimization_id != optimization_id || config.agent_id != agent_id {
-        return Err(RunnerMainError::new("runner config does not match RATCHET_OPTIMIZATION_ID / RATCHET_AGENT_ID"));
+        return Err(RunnerMainError::new(
+            "runner config does not match RATCHET_OPTIMIZATION_ID / RATCHET_AGENT_ID",
+        ));
     }
 
     let git_env: HashMap<String, String> = match secret("GITHUB_TOKEN").filter(|t| !t.is_empty()) {
@@ -269,14 +377,30 @@ pub async fn runner_main(options: RunnerMainOptions) -> Result<i32, RunnerMainEr
     };
     let flush_ms = number_env(env, "RATCHET_EVENT_FLUSH_MS")?.unwrap_or(2000.0);
     let poll_ms = number_env(env, "RATCHET_INBOX_POLL_MS")?.unwrap_or(2000.0);
-    let sink = ArtifactEventSink::new(store.clone(), prefix.clone(), EventSinkOptions { flush_interval: Some(Duration::from_millis(flush_ms as u64)), max_buffered: None });
-    let inbox = ArtifactInbox::new(store.clone(), prefix.clone()).with_clock(clock.clone()).with_poll_interval(Duration::from_millis(poll_ms as u64));
+    let sink = ArtifactEventSink::new(
+        store.clone(),
+        prefix.clone(),
+        EventSinkOptions {
+            flush_interval: Some(Duration::from_millis(flush_ms as u64)),
+            max_buffered: None,
+        },
+    );
+    let inbox = ArtifactInbox::new(store.clone(), prefix.clone())
+        .with_clock(clock.clone())
+        .with_poll_interval(Duration::from_millis(poll_ms as u64));
 
-    log(&format!("ratchet-runner {optimization_id}/{agent_id} kind={} workdir={}", config.kind, workdir.display()));
+    log(&format!(
+        "ratchet-runner {optimization_id}/{agent_id} kind={} workdir={}",
+        config.kind,
+        workdir.display()
+    ));
     let tuning = LoopTuning {
         git: Some(git),
         git_env: Some(git_env),
-        best_ref: env.get("RATCHET_BEST_REF").filter(|b| !b.is_empty()).cloned(),
+        best_ref: env
+            .get("RATCHET_BEST_REF")
+            .filter(|b| !b.is_empty())
+            .cloned(),
         model: env.get("RATCHET_MODEL").filter(|m| !m.is_empty()).cloned(),
         max_idle_turns: number_env(env, "RATCHET_MAX_IDLE_TURNS")?.map(|n| n as u32),
         ..LoopTuning::default()
@@ -294,11 +418,29 @@ pub async fn runner_main(options: RunnerMainOptions) -> Result<i32, RunnerMainEr
     .await;
     sink.close().await;
 
-    let mut done = serde_json::to_value(&result).map_err(|e| RunnerMainError::new(e.to_string()))?;
+    let mut done =
+        serde_json::to_value(&result).map_err(|e| RunnerMainError::new(e.to_string()))?;
     if let Some(obj) = done.as_object_mut() {
         obj.insert("finishedAt".to_string(), Value::from(clock.now()));
     }
-    store.put(&done_key(&prefix), done.to_string().as_bytes()).await.map_err(|e| RunnerMainError::new(e.to_string()))?;
-    log(&format!("ratchet-runner finished: {} ({} candidates, ${})", result.reason, result.candidates, to_fixed(result.spend_usd, 2)));
-    Ok(if matches!(result.reason, RunnerStopReason::Failed | RunnerStopReason::AgentUnavailable) { 1 } else { 0 })
+    store
+        .put(&done_key(&prefix), done.to_string().as_bytes())
+        .await
+        .map_err(|e| RunnerMainError::new(e.to_string()))?;
+    log(&format!(
+        "ratchet-runner finished: {} ({} candidates, ${})",
+        result.reason,
+        result.candidates,
+        to_fixed(result.spend_usd, 2)
+    ));
+    Ok(
+        if matches!(
+            result.reason,
+            RunnerStopReason::Failed | RunnerStopReason::AgentUnavailable
+        ) {
+            1
+        } else {
+            0
+        },
+    )
 }

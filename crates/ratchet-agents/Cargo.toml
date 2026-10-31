@@ -31,5 +31,6 @@ url = "2"
 
 [dev-dependencies]
 insta = { version = "1", features = ["json"] }
+regex = "1"
 tempfile = "3"
 

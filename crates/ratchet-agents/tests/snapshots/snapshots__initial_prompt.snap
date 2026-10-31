@@ -1,0 +1,38 @@
+---
+source: crates/ratchet-agents/tests/snapshots.rs
+expression: "build_initial_prompt(&c, &context)"
+---
+# Brief
+
+Make it faster. Do not touch bench/**.
+
+---
+
+You are running under Ratchet. The generated context below is also written to `.ratchet/context.md` and refreshed before every turn; re-read it when you resume.
+Work in this repository, make one improvement, verify it with the tests and your own measurements, commit it, and end your turn. Ratchet will submit the commit to the trusted benchmark and resume you with the verdict.
+
+# Ratchet context (generated; refreshed before every turn)
+
+## Objective
+- Metric: `http_req_duration.p95` (minimize). A candidate must beat the current best by more than 3.0% and more than the benchmark noise floor.
+- Baseline: 20
+- Current ratchet best: 20; improvement so far 0.0%
+
+## Limits
+- Time remaining: 58m
+- Budget remaining: $20.00 of $20.00
+- Turn: 1; candidates submitted: 0
+
+## History of your candidates
+None yet.
+
+## Rules
+- Protected paths (a candidate touching them is blocked): `ratchet.yaml`, `bench/**`, and lockfiles / install config (`pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `bun.lock`, `bun.lockb`, `.npmrc`, `.yarnrc`, `.yarnrc.yml`, `pnpm-workspace.yaml`, `.pnpmfile.cjs`) at any depth
+- Guardrails checked on every candidate: `pnpm test` must pass; `error_rate` < 0.001
+- Dependencies are fixed: the trusted benchmark has no network and installs from the lockfile of the base ref. A candidate that changes the lockfile (pnpm-lock.yaml, package-lock.json) is blocked, so do not add or upgrade packages.
+- The trusted benchmark runs on pinned hardware and a hidden trace; your own measurements only guide you.
+
+## How to submit
+- Commit one idea per commit. The runner submits your newest commit (or commits a dirty tree for you) with the trailer `Ratchet-Candidate: true`; do not push yourself.
+- After each verdict you are resumed with the result. When another agent moves the ratchet best, the runner rebases your branch onto it (conflicts resolved in favour of the best).
+- To abandon rejected work and start from the last accepted tree: `git reset --hard refs/ratchet/accepted`.

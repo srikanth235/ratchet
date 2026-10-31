@@ -10,7 +10,10 @@ use tokio_util::sync::CancellationToken;
 pub use crate::domain::Clock;
 
 fn epoch_ms() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
 }
 
 /// Sleeps for `duration`; returns early (never errors) when `cancel` fires. A zero duration or an already-cancelled token returns at once.
@@ -57,11 +60,19 @@ impl AcceleratedClock {
 
     pub fn starting_at(speed: f64, virtual_start: i64) -> Self {
         assert!(speed > 0.0 && speed.is_finite(), "speed must be > 0");
-        Self { speed, real_start: Instant::now(), virtual_start }
+        Self {
+            speed,
+            real_start: Instant::now(),
+            virtual_start,
+        }
     }
 
     pub fn try_new(speed: f64) -> Result<Self, String> {
-        if speed > 0.0 && speed.is_finite() { Ok(Self::new(speed)) } else { Err("speed must be > 0".to_string()) }
+        if speed > 0.0 && speed.is_finite() {
+            Ok(Self::new(speed))
+        } else {
+            Err("speed must be > 0".to_string())
+        }
     }
 }
 
@@ -95,7 +106,12 @@ struct ManualState {
 
 impl ManualClock {
     pub fn new(time: i64) -> Self {
-        Self { state: Mutex::new(ManualState { time, sleepers: Vec::new() }) }
+        Self {
+            state: Mutex::new(ManualState {
+                time,
+                sleepers: Vec::new(),
+            }),
+        }
     }
 
     /// Move time forward, waking every sleeper that comes due (in time order).
@@ -104,7 +120,13 @@ impl ManualClock {
         loop {
             let due = {
                 let mut st = self.state.lock().unwrap();
-                let next = st.sleepers.iter().enumerate().filter(|(_, s)| s.at <= target).min_by_key(|(_, s)| s.at).map(|(i, _)| i);
+                let next = st
+                    .sleepers
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, s)| s.at <= target)
+                    .min_by_key(|(_, s)| s.at)
+                    .map(|(i, _)| i);
                 next.map(|i| {
                     let s = st.sleepers.remove(i);
                     st.time = st.time.max(s.at);
@@ -160,7 +182,9 @@ mod tests {
         let clock = AcceleratedClock::new(1000.0);
         let t0 = clock.now();
         let started = Instant::now();
-        clock.sleep(Duration::from_secs(5), &CancellationToken::new()).await; // 5 ms real
+        clock
+            .sleep(Duration::from_secs(5), &CancellationToken::new())
+            .await; // 5 ms real
         assert!(started.elapsed() < Duration::from_secs(1));
         assert!(clock.now() - t0 >= 4_000);
     }
@@ -193,7 +217,8 @@ mod tests {
         for (name, ms) in [("late", 300u64), ("early", 100)] {
             let (c, l) = (clock.clone(), log.clone());
             tasks.push(tokio::spawn(async move {
-                c.sleep(Duration::from_millis(ms), &CancellationToken::new()).await;
+                c.sleep(Duration::from_millis(ms), &CancellationToken::new())
+                    .await;
                 l.lock().unwrap().push((name, c.now()));
             }));
         }

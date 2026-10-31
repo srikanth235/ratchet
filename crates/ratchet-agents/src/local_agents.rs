@@ -8,7 +8,9 @@ use std::time::Duration;
 use crate::claude_code::{ClaudeCodeAdapter, ClaudeCodeOptions};
 use crate::cli_agent::CliAgentOptions;
 use crate::codex::{CodexAdapter, CodexOptions};
-use crate::control::local::{AdapterFor, LocalRunnerControl, LocalRunnerControlOptions, WorkdirMode};
+use crate::control::local::{
+    AdapterFor, LocalRunnerControl, LocalRunnerControlOptions, WorkdirMode,
+};
 use crate::detect::{HarnessAuth, HarnessInfo, HarnessKind, local_agent_env};
 use crate::domain::{AgentAdapter, AgentKind, Clock, RunnerConfig};
 use crate::process::SharedSpawner;
@@ -40,7 +42,9 @@ pub fn local_agent_problem(harnesses: &[HarnessInfo], kind: HarnessKind) -> Opti
         HarnessKind::ClaudeCode => "Claude Code",
         HarnessKind::Codex => "Codex",
     };
-    let Some(info) = harnesses.iter().find(|h| h.kind == kind) else { return Some(format!("{label} was not probed on this machine")) };
+    let Some(info) = harnesses.iter().find(|h| h.kind == kind) else {
+        return Some(format!("{label} was not probed on this machine"));
+    };
     if !info.installed || info.path.is_none() {
         return Some(info.hint.clone());
     }
@@ -56,7 +60,11 @@ fn merge_cli(common: CliAgentOptions, over: &CliAgentOptions) -> CliAgentOptions
         env: over.env.clone().or(common.env),
         spawner: over.spawner.clone().or(common.spawner),
         clock: over.clock.clone().or(common.clock),
-        extra_args: if over.extra_args.is_empty() { common.extra_args } else { over.extra_args.clone() },
+        extra_args: if over.extra_args.is_empty() {
+            common.extra_args
+        } else {
+            over.extra_args.clone()
+        },
         kill_grace: over.kill_grace.or(common.kill_grace),
     }
 }
@@ -64,21 +72,35 @@ fn merge_cli(common: CliAgentOptions, over: &CliAgentOptions) -> CliAgentOptions
 /// `adapter_for` for `LocalRunnerControl`. Each adapter runs the binary found by detection with the user's login: no API key is
 /// passed unless the harness reported `api-key` auth and the key is set. Fails (so the launch fails with the hint) when the harness
 /// is missing or signed out.
-pub fn local_adapter_factory(opts: LocalAdapterOptions) -> impl Fn(&RunnerConfig) -> Result<Arc<dyn AgentAdapter>, String> + Send + Sync {
-    let base_env = opts.base_env.clone().unwrap_or_else(|| std::env::vars().collect());
+pub fn local_adapter_factory(
+    opts: LocalAdapterOptions,
+) -> impl Fn(&RunnerConfig) -> Result<Arc<dyn AgentAdapter>, String> + Send + Sync {
+    let base_env = opts
+        .base_env
+        .clone()
+        .unwrap_or_else(|| std::env::vars().collect());
     move |config: &RunnerConfig| {
         let kind = match config.kind {
             AgentKind::Mock => {
-                let Some(mock) = &opts.mock else { return Err("mock agents are not available in this runtime".to_string()) };
+                let Some(mock) = &opts.mock else {
+                    return Err("mock agents are not available in this runtime".to_string());
+                };
                 return Ok(mock(config));
             }
             AgentKind::ClaudeCode => HarnessKind::ClaudeCode,
             AgentKind::Codex => HarnessKind::Codex,
         };
         if let Some(problem) = local_agent_problem(&opts.harnesses, kind) {
-            return Err(format!("cannot run {} on this machine: {problem}", config.kind));
+            return Err(format!(
+                "cannot run {} on this machine: {problem}",
+                config.kind
+            ));
         }
-        let info = opts.harnesses.iter().find(|h| h.kind == kind).expect("checked by local_agent_problem");
+        let info = opts
+            .harnesses
+            .iter()
+            .find(|h| h.kind == kind)
+            .expect("checked by local_agent_problem");
         let env = local_agent_env(kind, info.auth, &base_env, &opts.login_path);
         let common = CliAgentOptions {
             binary: info.path.clone(),
@@ -90,11 +112,19 @@ pub fn local_adapter_factory(opts: LocalAdapterOptions) -> impl Fn(&RunnerConfig
         Ok(match kind {
             HarnessKind::ClaudeCode => {
                 let over = opts.claude.clone().unwrap_or_default();
-                Arc::new(ClaudeCodeAdapter::new(ClaudeCodeOptions { cli: merge_cli(common, &over.cli), allow_subscription_auth: true, ..over })) as Arc<dyn AgentAdapter>
+                Arc::new(ClaudeCodeAdapter::new(ClaudeCodeOptions {
+                    cli: merge_cli(common, &over.cli),
+                    allow_subscription_auth: true,
+                    ..over
+                })) as Arc<dyn AgentAdapter>
             }
             HarnessKind::Codex => {
                 let over = opts.codex.clone().unwrap_or_default();
-                Arc::new(CodexAdapter::new(CodexOptions { cli: merge_cli(common, &over.cli), allow_subscription_auth: true, ..over })) as Arc<dyn AgentAdapter>
+                Arc::new(CodexAdapter::new(CodexOptions {
+                    cli: merge_cli(common, &over.cli),
+                    allow_subscription_auth: true,
+                    ..over
+                })) as Arc<dyn AgentAdapter>
             }
         })
     }

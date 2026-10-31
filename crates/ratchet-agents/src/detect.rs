@@ -112,7 +112,13 @@ impl DetectFs for NodeDetectFs {
         Path::new(path).exists()
     }
     fn list_dir(&self, path: &str) -> Vec<String> {
-        std::fs::read_dir(path).map(|rd| rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default()
+        std::fs::read_dir(path)
+            .map(|rd| {
+                rd.flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 
@@ -155,21 +161,38 @@ struct Ctx {
 }
 
 fn home_dir() -> String {
-    std::env::var("HOME").ok().filter(|h| !h.is_empty()).unwrap_or_else(|| "/".to_string())
+    std::env::var("HOME")
+        .ok()
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "/".to_string())
 }
 
 fn ctx_of(opts: &DetectOptions) -> Ctx {
-    let env = opts.env.clone().unwrap_or_else(|| std::env::vars().collect());
+    let env = opts
+        .env
+        .clone()
+        .unwrap_or_else(|| std::env::vars().collect());
     let platform = opts.platform.unwrap_or_else(Platform::current);
-    let shell = opts.shell.clone().or_else(|| env.get("SHELL").cloned()).or(match platform {
-        Platform::Darwin => Some("/bin/zsh".to_string()),
-        Platform::Win32 => None,
-        Platform::Linux => Some("/bin/sh".to_string()),
-    });
+    let shell = opts
+        .shell
+        .clone()
+        .or_else(|| env.get("SHELL").cloned())
+        .or(match platform {
+            Platform::Darwin => Some("/bin/zsh".to_string()),
+            Platform::Win32 => None,
+            Platform::Linux => Some("/bin/sh".to_string()),
+        });
     Ctx {
-        spawner: opts.spawner.clone().unwrap_or_else(|| Arc::new(TokioSpawner)),
+        spawner: opts
+            .spawner
+            .clone()
+            .unwrap_or_else(|| Arc::new(TokioSpawner)),
         fs: opts.fs.clone().unwrap_or_else(|| Arc::new(NodeDetectFs)),
-        home: opts.home.clone().or_else(|| env.get("HOME").cloned()).unwrap_or_else(home_dir),
+        home: opts
+            .home
+            .clone()
+            .or_else(|| env.get("HOME").cloned())
+            .unwrap_or_else(home_dir),
         env,
         platform,
         timeout: opts.timeout.unwrap_or(DEFAULT_TIMEOUT),
@@ -199,7 +222,13 @@ struct ProbeResult {
     stderr: String,
 }
 
-async fn probe(ctx: &Ctx, command: &str, args: &[&str], env: HashMap<String, String>, timeout: Duration) -> ProbeResult {
+async fn probe(
+    ctx: &Ctx,
+    command: &str,
+    args: &[&str],
+    env: HashMap<String, String>,
+    timeout: Duration,
+) -> ProbeResult {
     let cancel = CancellationToken::new();
     let timed_out = Arc::new(AtomicBool::new(false));
     let timer = {
@@ -233,7 +262,11 @@ async fn probe(ctx: &Ctx, command: &str, args: &[&str], env: HashMap<String, Str
 // ---------------------------------------------------------------- PATH
 
 /// Directories where the CLIs usually live, that exist on this machine. Exported for tests.
-pub fn fallback_path_dirs(fs: &dyn DetectFs, env: &HashMap<String, String>, home: &str) -> Vec<String> {
+pub fn fallback_path_dirs(
+    fs: &dyn DetectFs,
+    env: &HashMap<String, String>,
+    home: &str,
+) -> Vec<String> {
     let mut dirs: Vec<String> = vec![
         "/opt/homebrew/bin".into(),
         "/opt/homebrew/sbin".into(),
@@ -328,7 +361,10 @@ fn parse_marked(stdout: &str) -> Option<String> {
 }
 
 fn split_path(path: &str) -> Vec<String> {
-    path.split(DELIMITER).filter(|p| !p.is_empty()).map(str::to_string).collect()
+    path.split(DELIMITER)
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect()
 }
 
 /// The PATH the user's terminal would have. Runs `$SHELL -lc 'echo $PATH'` (markers around the value, so noise that rc files
@@ -338,30 +374,55 @@ pub async fn resolve_login_path(opts: &DetectOptions) -> LoginPath {
     let ctx = ctx_of(opts);
     let process_path = split_path(ctx.env.get("PATH").map(String::as_str).unwrap_or(""));
     let mut login: Vec<String> = Vec::new();
-    if ctx.platform != Platform::Win32 {
-        if let Some(shell) = &ctx.shell {
-            let fish = Path::new(shell).file_name().is_some_and(|n| n == "fish");
-            let script = if fish { format!("printf '%s%s%s' {MARK} (string join : $PATH) {MARK}") } else { format!("printf '%s' \"{MARK}$PATH{MARK}\"") };
-            let res = probe(&ctx, shell, &["-lc", &script], ctx.env.clone(), ctx.shell_timeout).await;
-            let value = if res.timed_out || res.spawn_failed { None } else { parse_marked(&res.stdout) };
-            if let Some(value) = value {
-                login = split_path(&value);
-            }
+    if ctx.platform != Platform::Win32
+        && let Some(shell) = &ctx.shell
+    {
+        let fish = Path::new(shell).file_name().is_some_and(|n| n == "fish");
+        let script = if fish {
+            format!("printf '%s%s%s' {MARK} (string join : $PATH) {MARK}")
+        } else {
+            format!("printf '%s' \"{MARK}$PATH{MARK}\"")
+        };
+        let res = probe(
+            &ctx,
+            shell,
+            &["-lc", &script],
+            ctx.env.clone(),
+            ctx.shell_timeout,
+        )
+        .await;
+        let value = if res.timed_out || res.spawn_failed {
+            None
+        } else {
+            parse_marked(&res.stdout)
+        };
+        if let Some(value) = value {
+            login = split_path(&value);
         }
     }
     let from_login_shell = !login.is_empty();
     let mut merged: Vec<String> = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    for dir in login.into_iter().chain(process_path).chain(fallback_path_dirs(ctx.fs.as_ref(), &ctx.env, &ctx.home)) {
+    for dir in login
+        .into_iter()
+        .chain(process_path)
+        .chain(fallback_path_dirs(ctx.fs.as_ref(), &ctx.env, &ctx.home))
+    {
         if seen.insert(dir.clone()) {
             merged.push(dir);
         }
     }
-    LoginPath { path: merged.join(&DELIMITER.to_string()), from_login_shell }
+    LoginPath {
+        path: merged.join(&DELIMITER.to_string()),
+        from_login_shell,
+    }
 }
 
 fn find_on_path(name: &str, path: &str, fs: &dyn DetectFs) -> Option<String> {
-    path.split(DELIMITER).filter(|d| !d.is_empty()).map(|dir| join(dir, &[name])).find(|candidate| fs.is_executable(candidate))
+    path.split(DELIMITER)
+        .filter(|d| !d.is_empty())
+        .map(|dir| join(dir, &[name]))
+        .find(|candidate| fs.is_executable(candidate))
 }
 
 // ---------------------------------------------------------------- version + auth
@@ -369,7 +430,12 @@ fn find_on_path(name: &str, path: &str, fs: &dyn DetectFs) -> Option<String> {
 /// Leftmost match of `\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?`.
 fn find_semver(text: &str) -> Option<&str> {
     let bytes = text.as_bytes();
-    let digits = |from: usize| bytes[from..].iter().take_while(|b| b.is_ascii_digit()).count();
+    let digits = |from: usize| {
+        bytes[from..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count()
+    };
     'outer: for start in 0..bytes.len() {
         if !bytes[start].is_ascii_digit() {
             continue;
@@ -389,7 +455,10 @@ fn find_semver(text: &str) -> Option<&str> {
             }
         }
         if matches!(bytes.get(pos), Some(b'-' | b'+')) {
-            let n = bytes[pos + 1..].iter().take_while(|b| b.is_ascii_alphanumeric() || **b == b'.' || **b == b'-').count();
+            let n = bytes[pos + 1..]
+                .iter()
+                .take_while(|b| b.is_ascii_alphanumeric() || **b == b'.' || **b == b'-')
+                .count();
             if n > 0 {
                 pos += 1 + n;
             }
@@ -400,7 +469,10 @@ fn find_semver(text: &str) -> Option<&str> {
 }
 
 pub fn parse_version(output: &str) -> Option<String> {
-    let first = output.split('\n').find(|l| !l.trim().is_empty()).unwrap_or("");
+    let first = output
+        .split('\n')
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("");
     if let Some(v) = find_semver(first).or_else(|| find_semver(output)) {
         return Some(v.to_string());
     }
@@ -425,7 +497,9 @@ pub fn model_key_vars(kind: HarnessKind) -> &'static [&'static str] {
 }
 
 fn has_key(env: &HashMap<String, String>, kind: HarnessKind) -> bool {
-    key_vars(kind).iter().any(|k| env.get(*k).is_some_and(|v| !v.is_empty()))
+    key_vars(kind)
+        .iter()
+        .any(|k| env.get(*k).is_some_and(|v| !v.is_empty()))
 }
 
 fn without_keys(env: &HashMap<String, String>, kind: HarnessKind) -> HashMap<String, String> {
@@ -459,45 +533,66 @@ fn parse_json_object(text: &str) -> Option<Map<String, Value>> {
 
 fn mentions_api_key(method: &str) -> bool {
     let m = method.to_lowercase();
-    ["apikey", "api-key", "api_key", "api key"].iter().any(|p| m.contains(p))
+    ["apikey", "api-key", "api_key", "api key"]
+        .iter()
+        .any(|p| m.contains(p))
 }
 
 async fn claude_auth(ctx: &Ctx, binary: &str, env: &HashMap<String, String>) -> Option<AuthSignal> {
     // 1. The CLI itself (`claude auth status` prints JSON and exits non-zero when signed out). Key variables are removed so the
     //    answer is about the stored login, not about the environment.
-    let status = probe(ctx, binary, &["auth", "status"], without_keys(env, HarnessKind::ClaudeCode), ctx.timeout).await;
-    if !status.spawn_failed && !status.timed_out {
-        if let Some(parsed) = parse_json_object(&status.stdout) {
-            if let Some(logged_in) = parsed.get("loggedIn").and_then(Value::as_bool) {
-                if logged_in {
-                    let method = match parsed.get("authMethod") {
-                        None | Some(Value::Null) => String::new(),
-                        Some(Value::String(s)) => s.clone(),
-                        Some(other) => other.to_string(),
-                    };
-                    return if mentions_api_key(&method) {
-                        signal(HarnessAuth::ApiKey, "claude auth status")
-                    } else {
-                        signal(HarnessAuth::SignedIn, "claude auth status")
-                    };
-                }
-                // Definitive: the CLI says there is no login. An API key in the environment may still work.
-                return if has_key(&ctx.env, HarnessKind::ClaudeCode) {
-                    signal(HarnessAuth::ApiKey, "ANTHROPIC_API_KEY")
-                } else {
-                    signal(HarnessAuth::SignedOut, "claude auth status")
-                };
-            }
+    let status = probe(
+        ctx,
+        binary,
+        &["auth", "status"],
+        without_keys(env, HarnessKind::ClaudeCode),
+        ctx.timeout,
+    )
+    .await;
+    if !status.spawn_failed
+        && !status.timed_out
+        && let Some(parsed) = parse_json_object(&status.stdout)
+        && let Some(logged_in) = parsed.get("loggedIn").and_then(Value::as_bool)
+    {
+        if logged_in {
+            let method = match parsed.get("authMethod") {
+                None | Some(Value::Null) => String::new(),
+                Some(Value::String(s)) => s.clone(),
+                Some(other) => other.to_string(),
+            };
+            return if mentions_api_key(&method) {
+                signal(HarnessAuth::ApiKey, "claude auth status")
+            } else {
+                signal(HarnessAuth::SignedIn, "claude auth status")
+            };
         }
+        // Definitive: the CLI says there is no login. An API key in the environment may still work.
+        return if has_key(&ctx.env, HarnessKind::ClaudeCode) {
+            signal(HarnessAuth::ApiKey, "ANTHROPIC_API_KEY")
+        } else {
+            signal(HarnessAuth::SignedOut, "claude auth status")
+        };
     }
     // 2. Credential presence, the way the CLI stores them.
-    let config_dir = ctx.env.get("CLAUDE_CONFIG_DIR").filter(|d| !d.is_empty()).cloned().unwrap_or_else(|| join(&ctx.home, &[".claude"]));
+    let config_dir = ctx
+        .env
+        .get("CLAUDE_CONFIG_DIR")
+        .filter(|d| !d.is_empty())
+        .cloned()
+        .unwrap_or_else(|| join(&ctx.home, &[".claude"]));
     if ctx.fs.exists(&join(&config_dir, &[".credentials.json"])) {
         return signal(HarnessAuth::SignedIn, "credentials file");
     }
     if ctx.platform == Platform::Darwin {
         // Without -w / -g `security` prints the item's attributes and never fetches the secret (no keychain prompt).
-        let kc = probe(ctx, "/usr/bin/security", &["find-generic-password", "-s", "Claude Code-credentials"], env.clone(), ctx.timeout).await;
+        let kc = probe(
+            ctx,
+            "/usr/bin/security",
+            &["find-generic-password", "-s", "Claude Code-credentials"],
+            env.clone(),
+            ctx.timeout,
+        )
+        .await;
         if kc.ok {
             return signal(HarnessAuth::SignedIn, "keychain");
         }
@@ -511,7 +606,14 @@ async fn claude_auth(ctx: &Ctx, binary: &str, env: &HashMap<String, String>) -> 
 
 async fn codex_auth(ctx: &Ctx, binary: &str, env: &HashMap<String, String>) -> Option<AuthSignal> {
     // 1. `codex login status`: "Logged in using ChatGPT" / "API key configured - sk-***" / "Not logged in" (on stderr, exit 1).
-    let status = probe(ctx, binary, &["login", "status"], without_keys(env, HarnessKind::Codex), ctx.timeout).await;
+    let status = probe(
+        ctx,
+        binary,
+        &["login", "status"],
+        without_keys(env, HarnessKind::Codex),
+        ctx.timeout,
+    )
+    .await;
     if !status.spawn_failed && !status.timed_out {
         let text = format!("{}\n{}", status.stdout, status.stderr).to_lowercase();
         if text.contains("not logged in") {
@@ -532,7 +634,12 @@ async fn codex_auth(ctx: &Ctx, binary: &str, env: &HashMap<String, String>) -> O
         }
     }
     // 2. ~/.codex/auth.json present (its contents are not read, so ChatGPT login and stored key look the same).
-    let home = ctx.env.get("CODEX_HOME").filter(|d| !d.is_empty()).cloned().unwrap_or_else(|| join(&ctx.home, &[".codex"]));
+    let home = ctx
+        .env
+        .get("CODEX_HOME")
+        .filter(|d| !d.is_empty())
+        .cloned()
+        .unwrap_or_else(|| join(&ctx.home, &[".codex"]));
     if ctx.fs.exists(&join(&home, &["auth.json"])) {
         return signal(HarnessAuth::SignedIn, "auth.json");
     }
@@ -570,7 +677,9 @@ fn spec_of(kind: HarnessKind) -> HarnessSpec {
 
 fn auth_note(auth: HarnessAuth, label: &str, via: &str) -> String {
     match auth {
-        HarnessAuth::SignedIn => format!("{label} is signed in on this machine ({via}); agents use your own login."),
+        HarnessAuth::SignedIn => {
+            format!("{label} is signed in on this machine ({via}); agents use your own login.")
+        }
         HarnessAuth::ApiKey => format!("{label} will use the API key from {via}."),
         HarnessAuth::SignedOut => format!("{label} is not signed in."),
     }
@@ -596,17 +705,34 @@ async fn detect_one(kind: HarnessKind, ctx: &Ctx, search_path: &str) -> HarnessI
         let why = if v.timed_out {
             "timed out".to_string()
         } else if v.spawn_failed {
-            format!("cannot run it ({})", if v.stderr.is_empty() { "spawn failed" } else { &v.stderr })
+            format!(
+                "cannot run it ({})",
+                if v.stderr.is_empty() {
+                    "spawn failed"
+                } else {
+                    &v.stderr
+                }
+            )
         } else {
             let code = v.code.map_or("null".to_string(), |c| c.to_string());
             let first = v.stderr.split('\n').next().unwrap_or("");
-            format!("exited with {code}{}", if v.stderr.is_empty() { String::new() } else { format!(": {first}") })
+            format!(
+                "exited with {code}{}",
+                if v.stderr.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {first}")
+                }
+            )
         };
         return HarnessInfo {
             kind,
             installed: false,
             version: None,
-            hint: format!("Found {} at {path} but `--version` {why}. Reinstall it. {}", spec.label, spec.install),
+            hint: format!(
+                "Found {} at {path} but `--version` {why}. Reinstall it. {}",
+                spec.label, spec.install
+            ),
             path: Some(path),
             auth: HarnessAuth::SignedOut,
         };
@@ -619,9 +745,20 @@ async fn detect_one(kind: HarnessKind, ctx: &Ctx, search_path: &str) -> HarnessI
     let auth = found.as_ref().map_or(HarnessAuth::SignedOut, |s| s.auth);
     let hint = match &found {
         Some(s) if auth != HarnessAuth::SignedOut => auth_note(auth, spec.label, s.via),
-        _ => format!("{} {}", auth_note(HarnessAuth::SignedOut, spec.label, ""), spec.sign_in),
+        _ => format!(
+            "{} {}",
+            auth_note(HarnessAuth::SignedOut, spec.label, ""),
+            spec.sign_in
+        ),
     };
-    HarnessInfo { kind, installed: true, version, path: Some(path), auth, hint }
+    HarnessInfo {
+        kind,
+        installed: true,
+        version,
+        path: Some(path),
+        auth,
+        hint,
+    }
 }
 
 /// Probe this machine for the Claude Code and Codex CLIs. Never fails: a probe that fails or times out yields a result with a hint.
@@ -632,10 +769,18 @@ pub async fn detect_harnesses(opts: &DetectOptions) -> Vec<HarnessInfo> {
         Some(p) => p.clone(),
         None => resolve_login_path(opts).await.path,
     };
-    let kinds = opts.kinds.clone().unwrap_or_else(|| vec![HarnessKind::ClaudeCode, HarnessKind::Codex]);
+    let kinds = opts
+        .kinds
+        .clone()
+        .unwrap_or_else(|| vec![HarnessKind::ClaudeCode, HarnessKind::Codex]);
     let order = [HarnessKind::ClaudeCode, HarnessKind::Codex];
     let wanted: Vec<HarnessKind> = order.into_iter().filter(|k| kinds.contains(k)).collect();
-    futures::future::join_all(wanted.into_iter().map(|k| detect_one(k, &ctx, &search_path))).await
+    futures::future::join_all(
+        wanted
+            .into_iter()
+            .map(|k| detect_one(k, &ctx, &search_path)),
+    )
+    .await
 }
 
 // ---------------------------------------------------------------- environment for local agents
@@ -645,10 +790,24 @@ pub async fn detect_harnesses(opts: &DetectOptions) -> Vec<HarnessInfo> {
 /// model keys.
 fn is_secret_name(name: &str) -> bool {
     let upper = name.to_uppercase();
-    if upper.starts_with("AWS_") || upper.starts_with("AZURE_") || upper == "GOOGLE_APPLICATION_CREDENTIALS" || upper.starts_with("NPM_CONFIG__AUTH") {
+    if upper.starts_with("AWS_")
+        || upper.starts_with("AZURE_")
+        || upper == "GOOGLE_APPLICATION_CREDENTIALS"
+        || upper.starts_with("NPM_CONFIG__AUTH")
+    {
         return true;
     }
-    const WORDS: [&str; 9] = ["APIKEY", "API_KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "CREDENTIALS", "AUTH"];
+    const WORDS: [&str; 9] = [
+        "APIKEY",
+        "API_KEY",
+        "TOKEN",
+        "SECRET",
+        "PASSWORD",
+        "PASSWD",
+        "CREDENTIAL",
+        "CREDENTIALS",
+        "AUTH",
+    ];
     WORDS.iter().any(|word| {
         upper.match_indices(word).any(|(i, _)| {
             let before_ok = i == 0 || upper.as_bytes()[i - 1] == b'_';
@@ -663,8 +822,17 @@ fn is_secret_name(name: &str) -> bool {
 /// PATH, minus anything that looks like a credential (AWS, GitHub and registry tokens, every `*_API_KEY`). The model key of the
 /// harness is added back only when it reports auth `api-key` and the key is set; with a `signed-in` harness no key is passed, so
 /// the CLI uses the user's login rather than an API key that happens to be in the environment.
-pub fn local_agent_env(kind: HarnessKind, auth: HarnessAuth, base: &HashMap<String, String>, path: &str) -> HashMap<String, String> {
-    let mut env: HashMap<String, String> = base.iter().filter(|(k, _)| !is_secret_name(k)).map(|(k, v)| (k.clone(), v.clone())).collect();
+pub fn local_agent_env(
+    kind: HarnessKind,
+    auth: HarnessAuth,
+    base: &HashMap<String, String>,
+    path: &str,
+) -> HashMap<String, String> {
+    let mut env: HashMap<String, String> = base
+        .iter()
+        .filter(|(k, _)| !is_secret_name(k))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
     env.insert("PATH".to_string(), path.to_string());
     if auth == HarnessAuth::ApiKey {
         for k in model_key_vars(kind) {
@@ -713,7 +881,15 @@ mod tests {
         ] {
             assert!(is_secret_name(name), "{name}");
         }
-        for name in ["HOME", "PATH", "LANG", "HTTPS_PROXY", "AUTHOR_NAME", "TOKENIZERS_PARALLELISM", "KEYBOARD"] {
+        for name in [
+            "HOME",
+            "PATH",
+            "LANG",
+            "HTTPS_PROXY",
+            "AUTHOR_NAME",
+            "TOKENIZERS_PARALLELISM",
+            "KEYBOARD",
+        ] {
             assert!(!is_secret_name(name), "{name}");
         }
     }

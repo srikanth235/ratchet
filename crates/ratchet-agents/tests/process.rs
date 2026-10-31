@@ -21,7 +21,13 @@ async fn streams_stdout_lines_feeds_stdin_and_captures_the_stderr_tail() {
     let mut options = RunProcessOptions::new(std::env::temp_dir(), env());
     options.stdin = Some("hello\n".to_string());
     options.on_stdout_line = Some(&mut collect);
-    let res = run_process(&TokioSpawner, "sh", &args(&["-c", "read x; echo \"got $x\"; echo oops >&2; exit 3"]), options).await;
+    let res = run_process(
+        &TokioSpawner,
+        "sh",
+        &args(&["-c", "read x; echo \"got $x\"; echo oops >&2; exit 3"]),
+        options,
+    )
+    .await;
     assert_eq!(lines, vec!["got hello"]);
     assert_eq!(res.code(), Some(3));
     assert!(!res.aborted);
@@ -30,8 +36,17 @@ async fn streams_stdout_lines_feeds_stdin_and_captures_the_stderr_tail() {
 
 #[tokio::test]
 async fn reports_a_missing_binary_as_a_spawn_error() {
-    let res = run_process(&TokioSpawner, "definitely-not-a-binary", &[], RunProcessOptions::new(std::env::temp_dir(), env())).await;
-    assert!(res.spawn_error().is_some_and(|e| e.contains("ENOENT")), "{res:?}");
+    let res = run_process(
+        &TokioSpawner,
+        "definitely-not-a-binary",
+        &[],
+        RunProcessOptions::new(std::env::temp_dir(), env()),
+    )
+    .await;
+    assert!(
+        res.spawn_error().is_some_and(|e| e.contains("ENOENT")),
+        "{res:?}"
+    );
     assert_eq!(res.code(), None);
 }
 
@@ -45,7 +60,10 @@ async fn abort_kills_the_whole_process_group_including_grandchildren_that_ignore
     let dir = tempfile::tempdir().unwrap();
     let pid_file = dir.path().join("grandchild.pid");
     // the shell starts a grandchild that ignores SIGTERM, records its pid, then both sleep
-    let script = format!("(trap '' TERM; echo $$ > {}; sleep 60) & sleep 60", pid_file.display());
+    let script = format!(
+        "(trap '' TERM; echo $$ > {}; sleep 60) & sleep 60",
+        pid_file.display()
+    );
     let cancel = CancellationToken::new();
     let task = {
         let (cancel, cwd) = (cancel.clone(), dir.path().to_path_buf());
@@ -57,12 +75,21 @@ async fn abort_kills_the_whole_process_group_including_grandchildren_that_ignore
         })
     };
     for _ in 0..100 {
-        if pid_file.exists() && !std::fs::read_to_string(&pid_file).unwrap_or_default().trim().is_empty() {
+        if pid_file.exists()
+            && !std::fs::read_to_string(&pid_file)
+                .unwrap_or_default()
+                .trim()
+                .is_empty()
+        {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    let grandchild: i32 = std::fs::read_to_string(&pid_file).unwrap().trim().parse().unwrap();
+    let grandchild: i32 = std::fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
     assert!(alive(grandchild));
     cancel.cancel();
     let res = task.await.unwrap();

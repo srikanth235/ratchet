@@ -31,30 +31,64 @@ pub mod testing;
 pub mod workdir;
 
 pub use artifacts::{
-    ArtifactEventSink, ArtifactInbox, AwsCliArtifactStore, EventSinkOptions, FsArtifactStore, config_key, done_key, event_key, inbox_key, last_seq,
-    read_events, runner_prefix, seq_of,
+    ArtifactEventSink, ArtifactInbox, AwsCliArtifactStore, EventSinkOptions, FsArtifactStore,
+    config_key, done_key, event_key, inbox_key, last_seq, read_events, runner_prefix, seq_of,
 };
-pub use claude_code::{ClaudeCodeAdapter, ClaudeCodeOptions, ClaudePermissionMode, ClaudeResult, ClaudeStreamParser, DEFAULT_CLAUDE_TOOLS, PromptVia};
+pub use claude_code::{
+    ClaudeCodeAdapter, ClaudeCodeOptions, ClaudePermissionMode, ClaudeResult, ClaudeStreamParser,
+    DEFAULT_CLAUDE_TOOLS, PromptVia,
+};
 pub use cli_agent::{CliAgent, CliAgentOptions};
 pub use clock::{AcceleratedClock, ManualClock, SystemClock};
-pub use codex::{CodexAdapter, CodexOptions, CodexPricing, CodexSandbox, CodexStreamParser, CodexTurnResult};
-pub use context::{ContextInput, HistoryEntry, ResumeInput, build_context, build_initial_prompt, build_resume_message, format_duration, improvement_pct};
-pub use control::{LocalRunnerControl, LocalRunnerControlOptions, SsmRunnerControl, SsmRunnerControlOptions, WorkdirMode};
-pub use demo_scripts::{DemoVariant, load_demo_cli_script, load_demo_forecast_script, load_demo_search_script, load_script};
+pub use codex::{
+    CodexAdapter, CodexOptions, CodexPricing, CodexSandbox, CodexStreamParser, CodexTurnResult,
+};
+pub use context::{
+    ContextInput, HistoryEntry, ResumeInput, build_context, build_initial_prompt,
+    build_resume_message, format_duration, improvement_pct,
+};
+pub use control::{
+    LocalRunnerControl, LocalRunnerControlOptions, SsmRunnerControl, SsmRunnerControlOptions,
+    WorkdirMode,
+};
+pub use demo_scripts::{
+    DemoVariant, load_demo_cli_script, load_demo_forecast_script, load_demo_search_script,
+    load_script,
+};
 pub use detect::{
-    DetectFs, DetectOptions, HarnessAuth, HarnessInfo, HarnessKind, LoginPath, NodeDetectFs, Platform, detect_harnesses, fallback_path_dirs, local_agent_env,
-    parse_version, resolve_login_path,
+    DetectFs, DetectOptions, HarnessAuth, HarnessInfo, HarnessKind, LoginPath, NodeDetectFs,
+    Platform, detect_harnesses, fallback_path_dirs, local_agent_env, parse_version,
+    resolve_login_path,
 };
 pub use domain::{
-    AgentAdapter, AgentError, AgentEvent, AgentEventType, AgentKind, AgentSession, AgentSpec, AgentUsage, ArtifactStore, CandidateVerdict, Clock,
-    CloudCompute, ControlError, PollResult, Preflight, RunnerConfig, RunnerControl, RunnerHandle, RunnerInbox, RunnerMessage, StoreError,
+    AgentAdapter, AgentError, AgentEvent, AgentEventType, AgentKind, AgentSession, AgentSpec,
+    AgentUsage, ArtifactStore, CandidateVerdict, Clock, CloudCompute, ControlError, PollResult,
+    Preflight, RunnerConfig, RunnerControl, RunnerHandle, RunnerInbox, RunnerMessage, StoreError,
 };
-pub use git::{CANDIDATE_TRAILER, ExecGit, Git, GitCall, GitError, GitResult, GitRunner, exec_git, has_candidate_trailer, with_candidate_trailer};
+pub use git::{
+    CANDIDATE_TRAILER, ExecGit, Git, GitCall, GitError, GitResult, GitRunner, exec_git,
+    has_candidate_trailer, with_candidate_trailer,
+};
 pub use inbox::MemoryInbox;
-pub use local_agents::{LocalAdapterOptions, LocalAgentControlOptions, create_local_agent_control, local_adapter_factory, local_agent_problem};
-pub use process::{LineSplitter, RunProcessOptions, RunProcessResult, Spawner, TokioSpawner, run_process};
-pub use runner_loop::{LoopTuning, RunnerLoopOptions, RunnerLoopResult, RunnerStopReason, run_runner_loop};
-pub use runner_main::{AGENT_ENV_PASSTHROUGH, RunnerMainError, RunnerMainOptions, parse_secret_refs, runner_main, validate_config};
-pub use scripted::{AgentScript, ScriptAttempt, ScriptStep, ScriptedAgent, ScriptedAgentOptions, StepCondition, price_usage};
+pub use local_agents::{
+    LocalAdapterOptions, LocalAgentControlOptions, create_local_agent_control,
+    local_adapter_factory, local_agent_problem,
+};
+pub use process::{
+    LineSplitter, RunProcessOptions, RunProcessResult, Spawner, TokioSpawner, run_process,
+};
+pub use runner_loop::{
+    LoopTuning, RunnerLoopOptions, RunnerLoopResult, RunnerStopReason, run_runner_loop,
+};
+pub use runner_main::{
+    AGENT_ENV_PASSTHROUGH, RunnerMainError, RunnerMainOptions, parse_secret_refs, runner_main,
+    validate_config,
+};
+pub use scripted::{
+    AgentScript, ScriptAttempt, ScriptStep, ScriptedAgent, ScriptedAgentOptions, StepCondition,
+    price_usage,
+};
 pub use testing::{FakeCall, FakeProcessSpec, FakeSpawner};
-pub use workdir::{add_worktree, ensure_local_clone, git_auth_env, prepare_workdir, remove_worktree};
+pub use workdir::{
+    add_worktree, ensure_local_clone, git_auth_env, prepare_workdir, remove_worktree,
+};

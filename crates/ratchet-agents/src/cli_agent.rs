@@ -9,7 +9,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::clock::SystemClock;
 use crate::domain::{AgentSpec, Clock};
-use crate::process::{RunProcessOptions, RunProcessResult, SharedSpawner, TokioSpawner, run_process};
+use crate::process::{
+    RunProcessOptions, RunProcessResult, SharedSpawner, TokioSpawner, run_process,
+};
 
 pub use crate::domain::{AgentError, AgentSession};
 
@@ -55,7 +57,10 @@ pub fn str_of<'a>(v: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
 }
 
 /// The base environment with the spec's layered on top.
-pub fn build_env(base: &HashMap<String, String>, spec: Option<&HashMap<String, String>>) -> HashMap<String, String> {
+pub fn build_env(
+    base: &HashMap<String, String>,
+    spec: Option<&HashMap<String, String>>,
+) -> HashMap<String, String> {
     let mut env = base.clone();
     if let Some(spec) = spec {
         env.extend(spec.iter().map(|(k, v)| (k.clone(), v.clone())));
@@ -97,7 +102,10 @@ impl CliAgent {
         on_line: &mut (dyn FnMut(&str) + Send),
         cancel: &CancellationToken,
     ) -> RunProcessResult {
-        let mut options = RunProcessOptions::new(spec.workdir.clone(), build_env(&self.base_env, spec.env.as_ref()));
+        let mut options = RunProcessOptions::new(
+            spec.workdir.clone(),
+            build_env(&self.base_env, spec.env.as_ref()),
+        );
         options.stdin = stdin;
         options.cancel = Some(cancel);
         if let Some(grace) = self.kill_grace {
@@ -114,17 +122,33 @@ impl CliAgent {
             out.push_str(line);
             out.push('\n');
         };
-        let mut options = RunProcessOptions::new(std::env::current_dir().unwrap_or_else(|_| ".".into()), self.base_env.clone());
+        let mut options = RunProcessOptions::new(
+            std::env::current_dir().unwrap_or_else(|_| ".".into()),
+            self.base_env.clone(),
+        );
         options.kill_grace = Duration::from_millis(1000);
         options.on_stdout_line = Some(&mut collect);
-        let res = run_process(self.spawner.as_ref(), &self.binary, &["--version".to_string()], options).await;
+        let res = run_process(
+            self.spawner.as_ref(),
+            &self.binary,
+            &["--version".to_string()],
+            options,
+        )
+        .await;
         if let Some(err) = res.spawn_error() {
             return Some(format!("cannot run '{}': {}", self.binary, err));
         }
         if res.code() != Some(0) {
             let code = res.code().map_or("null".to_string(), |c| c.to_string());
-            let detail = if res.stderr_tail.is_empty() { out.trim().to_string() } else { res.stderr_tail.clone() };
-            return Some(format!("'{} --version' exited with {code}: {detail}", self.binary));
+            let detail = if res.stderr_tail.is_empty() {
+                out.trim().to_string()
+            } else {
+                res.stderr_tail.clone()
+            };
+            return Some(format!(
+                "'{} --version' exited with {code}: {detail}",
+                self.binary
+            ));
         }
         None
     }

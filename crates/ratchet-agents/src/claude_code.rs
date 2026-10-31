@@ -8,7 +8,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::cli_agent::{CliAgent, CliAgentOptions, as_record, num, str_of, truncate};
 use crate::domain::{
-    AgentAdapter, AgentError, AgentEvent, AgentEventType, AgentKind, AgentSession, AgentSpec, AgentUsage, EventCallback, Preflight,
+    AgentAdapter, AgentError, AgentEvent, AgentEventType, AgentKind, AgentSession, AgentSpec,
+    AgentUsage, EventCallback, Preflight,
 };
 use crate::process::LineSplitter;
 
@@ -24,7 +25,14 @@ pub struct ClaudeResult {
 
 fn tool_summary(name: &str, input: Option<&Value>) -> String {
     if let Some(input) = input.and_then(as_record) {
-        for key in ["command", "file_path", "path", "pattern", "url", "description"] {
+        for key in [
+            "command",
+            "file_path",
+            "path",
+            "pattern",
+            "url",
+            "description",
+        ] {
             if let Some(v) = str_of(input, key) {
                 return format!("{name}: {}", truncate(v, 200));
             }
@@ -105,10 +113,10 @@ impl ClaudeStreamParser {
             self.malformed_lines += 1;
             return Vec::new();
         };
-        if let Some(id) = str_of(obj, "session_id") {
-            if self.session_id.as_deref().is_none_or(str::is_empty) {
-                self.session_id = Some(id.to_string());
-            }
+        if let Some(id) = str_of(obj, "session_id")
+            && self.session_id.as_deref().is_none_or(str::is_empty)
+        {
+            self.session_id = Some(id.to_string());
         }
         let at = (self.now)();
         match kind {
@@ -132,7 +140,12 @@ impl ClaudeStreamParser {
             if let Some(model) = str_of(raw, "model") {
                 self.model = Some(model.to_string());
             }
-            let model_note = self.model.as_deref().filter(|m| !m.is_empty()).map(|m| format!(" ({m})")).unwrap_or_default();
+            let model_note = self
+                .model
+                .as_deref()
+                .filter(|m| !m.is_empty())
+                .map(|m| format!(" ({m})"))
+                .unwrap_or_default();
             return vec![
                 AgentEvent::new(at, AgentEventType::Status)
                     .with_text(format!("claude-code session started{model_note}"))
@@ -147,7 +160,11 @@ impl ClaudeStreamParser {
         }
         match subtype.and_then(Value::as_str) {
             Some(s @ ("api_retry" | "compact_boundary")) => {
-                vec![AgentEvent::new(at, AgentEventType::Status).with_text(format!("claude-code {s}")).with_data(Value::Object(raw.clone()))]
+                vec![
+                    AgentEvent::new(at, AgentEventType::Status)
+                        .with_text(format!("claude-code {s}"))
+                        .with_data(Value::Object(raw.clone())),
+                ]
             }
             Some(other) => {
                 self.unknown_types.insert(format!("system:{other}"));
@@ -158,17 +175,25 @@ impl ClaudeStreamParser {
     }
 
     fn assistant(&mut self, raw: &Map<String, Value>, at: i64) -> Vec<AgentEvent> {
-        let content = raw.get("message").and_then(as_record).and_then(|m| m.get("content")).and_then(Value::as_array);
-        let Some(content) = content else { return Vec::new() };
+        let content = raw
+            .get("message")
+            .and_then(as_record)
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_array);
+        let Some(content) = content else {
+            return Vec::new();
+        };
         let mut events = Vec::new();
         for block in content {
-            let Some(block) = block.as_object() else { continue };
+            let Some(block) = block.as_object() else {
+                continue;
+            };
             let block_type = str_of(block, "type");
             if block_type == Some("text") {
-                if let Some(text) = str_of(block, "text") {
-                    if !text.trim().is_empty() {
-                        events.push(AgentEvent::new(at, AgentEventType::Message).with_text(text));
-                    }
+                if let Some(text) = str_of(block, "text")
+                    && !text.trim().is_empty()
+                {
+                    events.push(AgentEvent::new(at, AgentEventType::Message).with_text(text));
                 }
             } else if block_type == Some("tool_use") {
                 let name = str_of(block, "name").unwrap_or("unknown");
@@ -177,18 +202,25 @@ impl ClaudeStreamParser {
                         .with_text(tool_summary(name, block.get("input")))
                         .with_data(json!({"phase": "call", "id": set(block, "id"), "name": name, "input": set(block, "input")})),
                 );
-            } else if let Some(t) = block_type {
-                if t != "thinking" && t != "text" {
-                    self.unknown_types.insert(format!("block:{t}"));
-                }
+            } else if let Some(t) = block_type
+                && t != "thinking"
+                && t != "text"
+            {
+                self.unknown_types.insert(format!("block:{t}"));
             }
         }
         events
     }
 
     fn user(&mut self, raw: &Map<String, Value>, at: i64) -> Vec<AgentEvent> {
-        let content = raw.get("message").and_then(as_record).and_then(|m| m.get("content")).and_then(Value::as_array);
-        let Some(content) = content else { return Vec::new() };
+        let content = raw
+            .get("message")
+            .and_then(as_record)
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_array);
+        let Some(content) = content else {
+            return Vec::new();
+        };
         content
             .iter()
             .filter_map(Value::as_object)
@@ -212,9 +244,13 @@ impl ClaudeStreamParser {
             output_tokens: num(u.get("output_tokens")),
             cost_usd: None,
         };
-        usage.cost_usd = raw.get("total_cost_usd").and_then(Value::as_f64).or_else(|| raw.get("cost_usd").and_then(Value::as_f64));
+        usage.cost_usd = raw
+            .get("total_cost_usd")
+            .and_then(Value::as_f64)
+            .or_else(|| raw.get("cost_usd").and_then(Value::as_f64));
         let subtype = str_of(raw, "subtype").unwrap_or("success").to_string();
-        let is_error = raw.get("is_error") == Some(&Value::Bool(true)) || subtype.starts_with("error");
+        let is_error =
+            raw.get("is_error") == Some(&Value::Bool(true)) || subtype.starts_with("error");
         let result = ClaudeResult {
             subtype: subtype.clone(),
             is_error,
@@ -223,14 +259,26 @@ impl ClaudeStreamParser {
             duration_ms: num(raw.get("duration_ms")),
             usage,
         };
-        let mut events = vec![AgentEvent::new(at, AgentEventType::Usage).with_usage(usage).with_data(json!({
-            "cacheCreationInputTokens": cache_create,
-            "cacheReadInputTokens": cache_read,
-            "numTurns": result.num_turns,
-        }))];
+        let mut events = vec![
+            AgentEvent::new(at, AgentEventType::Usage)
+                .with_usage(usage)
+                .with_data(json!({
+                    "cacheCreationInputTokens": cache_create,
+                    "cacheReadInputTokens": cache_read,
+                    "numTurns": result.num_turns,
+                })),
+        ];
         if is_error {
-            let text = if result.text.is_empty() { format!("claude-code turn ended with {subtype}") } else { result.text.clone() };
-            events.push(AgentEvent::new(at, AgentEventType::Error).with_text(text).with_data(json!({"subtype": subtype})));
+            let text = if result.text.is_empty() {
+                format!("claude-code turn ended with {subtype}")
+            } else {
+                result.text.clone()
+            };
+            events.push(
+                AgentEvent::new(at, AgentEventType::Error)
+                    .with_text(text)
+                    .with_data(json!({"subtype": subtype})),
+            );
         }
         self.result = Some(result);
         events
@@ -304,7 +352,8 @@ impl ClaudeCodeAdapter {
     pub fn new(options: ClaudeCodeOptions) -> Self {
         let mut cli = CliAgent::new("claude", options.cli.clone());
         if let Some(key) = &options.api_key {
-            cli.base_env.insert("ANTHROPIC_API_KEY".to_string(), key.clone());
+            cli.base_env
+                .insert("ANTHROPIC_API_KEY".to_string(), key.clone());
         }
         Self { cli, options }
     }
@@ -312,14 +361,28 @@ impl ClaudeCodeAdapter {
     /// Argument list for one invocation (exported for tests and docs).
     pub fn build_args(&self, spec: &AgentSpec, resume_id: Option<&str>) -> Vec<String> {
         let o = &self.options;
-        let mut args: Vec<String> = ["-p", "--output-format", "stream-json", "--verbose"].map(String::from).to_vec();
-        args.extend(["--permission-mode".to_string(), o.permission_mode.as_ref().map_or("acceptEdits", ClaudePermissionMode::as_str).to_string()]);
-        let allowed: Vec<String> = o.allowed_tools.clone().unwrap_or_else(|| DEFAULT_CLAUDE_TOOLS.map(String::from).to_vec());
+        let mut args: Vec<String> = ["-p", "--output-format", "stream-json", "--verbose"]
+            .map(String::from)
+            .to_vec();
+        args.extend([
+            "--permission-mode".to_string(),
+            o.permission_mode
+                .as_ref()
+                .map_or("acceptEdits", ClaudePermissionMode::as_str)
+                .to_string(),
+        ]);
+        let allowed: Vec<String> = o
+            .allowed_tools
+            .clone()
+            .unwrap_or_else(|| DEFAULT_CLAUDE_TOOLS.map(String::from).to_vec());
         if !allowed.is_empty() {
             args.extend(["--allowedTools".to_string(), allowed.join(",")]);
         }
         if !o.disallowed_tools.is_empty() {
-            args.extend(["--disallowedTools".to_string(), o.disallowed_tools.join(",")]);
+            args.extend([
+                "--disallowedTools".to_string(),
+                o.disallowed_tools.join(","),
+            ]);
         }
         if let Some(model) = spec.model.as_ref().filter(|m| !m.is_empty()) {
             args.extend(["--model".to_string(), model.clone()]);
@@ -361,7 +424,15 @@ impl ClaudeCodeAdapter {
                     on_event(e);
                 }
             };
-            self.cli.run(&final_args, spec, (!via_arg).then(|| prompt.to_string()), &mut on_line, cancel).await
+            self.cli
+                .run(
+                    &final_args,
+                    spec,
+                    (!via_arg).then(|| prompt.to_string()),
+                    &mut on_line,
+                    cancel,
+                )
+                .await
         };
         // A resumed session may come back under a new id; keep the handle current.
         if let Some(id) = parser.session_id.as_ref().filter(|id| !id.is_empty()) {
@@ -374,12 +445,21 @@ impl ClaudeCodeAdapter {
                     .with_text(message.clone())
                     .with_data(json!({"exitCode": res.code(), "stderr": res.stderr_tail})),
             );
-            AgentError::Failed { message, exit_code: res.code(), stderr: Some(res.stderr_tail.clone()) }
+            AgentError::Failed {
+                message,
+                exit_code: res.code(),
+                stderr: Some(res.stderr_tail.clone()),
+            }
         };
 
         if res.aborted {
-            on_event(AgentEvent::new(self.cli.clock.now(), AgentEventType::Status).with_text("claude-code turn aborted"));
-            return Err(AgentError::Aborted { session: (!session.id.is_empty()).then(|| session.clone()) });
+            on_event(
+                AgentEvent::new(self.cli.clock.now(), AgentEventType::Status)
+                    .with_text("claude-code turn aborted"),
+            );
+            return Err(AgentError::Aborted {
+                session: (!session.id.is_empty()).then(|| session.clone()),
+            });
         }
         if let Some(err) = res.spawn_error() {
             return Err(fail(format!("cannot run '{}': {err}", self.cli.binary)));
@@ -387,13 +467,30 @@ impl ClaudeCodeAdapter {
         if let Some(result) = &parser.result {
             if result.is_error && result.subtype != "error_max_turns" {
                 // the parser already emitted the error event
-                let message = if result.text.is_empty() { format!("claude-code ended with {}", result.subtype) } else { result.text.clone() };
-                return Err(AgentError::Failed { message, exit_code: res.code(), stderr: Some(res.stderr_tail.clone()) });
+                let message = if result.text.is_empty() {
+                    format!("claude-code ended with {}", result.subtype)
+                } else {
+                    result.text.clone()
+                };
+                return Err(AgentError::Failed {
+                    message,
+                    exit_code: res.code(),
+                    stderr: Some(res.stderr_tail.clone()),
+                });
             }
         } else {
             let message = if res.code() != Some(0) {
-                let how = res.signal().map(str::to_string).unwrap_or_else(|| format!("code {}", res.code().map_or("null".into(), |c| c.to_string())));
-                let tail = if res.stderr_tail.is_empty() { String::new() } else { format!(": {}", res.stderr_tail) };
+                let how = res.signal().map(str::to_string).unwrap_or_else(|| {
+                    format!(
+                        "code {}",
+                        res.code().map_or("null".into(), |c| c.to_string())
+                    )
+                });
+                let tail = if res.stderr_tail.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", res.stderr_tail)
+                };
                 format!("claude exited with {how}{tail}")
             } else {
                 "claude stream ended without a result line".to_string()
@@ -418,15 +515,41 @@ impl AgentAdapter for ClaudeCodeAdapter {
         if let Some(p) = self.cli.probe_binary().await {
             problems.push(p);
         }
-        if !self.options.allow_subscription_auth && self.cli.base_env.get("ANTHROPIC_API_KEY").is_none_or(|k| k.is_empty()) {
+        if !self.options.allow_subscription_auth
+            && self
+                .cli
+                .base_env
+                .get("ANTHROPIC_API_KEY")
+                .is_none_or(|k| k.is_empty())
+        {
             problems.push("ANTHROPIC_API_KEY is not set".to_string());
         }
-        Preflight { ok: problems.is_empty(), problems }
+        Preflight {
+            ok: problems.is_empty(),
+            problems,
+        }
     }
 
-    async fn start(&self, spec: &AgentSpec, on_event: EventCallback<'_>, cancel: &CancellationToken) -> Result<AgentSession, AgentError> {
-        let mut session = AgentSession { id: String::new(), kind: AgentKind::ClaudeCode };
-        self.turn(&mut session, self.build_args(spec, None), spec, &spec.prompt, on_event, cancel, true).await?;
+    async fn start(
+        &self,
+        spec: &AgentSpec,
+        on_event: EventCallback<'_>,
+        cancel: &CancellationToken,
+    ) -> Result<AgentSession, AgentError> {
+        let mut session = AgentSession {
+            id: String::new(),
+            kind: AgentKind::ClaudeCode,
+        };
+        self.turn(
+            &mut session,
+            self.build_args(spec, None),
+            spec,
+            &spec.prompt,
+            on_event,
+            cancel,
+            true,
+        )
+        .await?;
         Ok(session)
     }
 
@@ -439,6 +562,7 @@ impl AgentAdapter for ClaudeCodeAdapter {
         cancel: &CancellationToken,
     ) -> Result<(), AgentError> {
         let args = self.build_args(spec, Some(&session.id));
-        self.turn(session, args, spec, message, on_event, cancel, false).await
+        self.turn(session, args, spec, message, on_event, cancel, false)
+            .await
     }
 }

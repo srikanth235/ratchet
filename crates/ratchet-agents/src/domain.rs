@@ -124,7 +124,13 @@ pub struct AgentEvent {
 
 impl AgentEvent {
     pub fn new(at: i64, kind: AgentEventType) -> Self {
-        Self { at, kind, text: None, data: None, usage: None }
+        Self {
+            at,
+            kind,
+            text: None,
+            data: None,
+            usage: None,
+        }
     }
 
     pub fn with_text(mut self, text: impl Into<String>) -> Self {
@@ -171,7 +177,11 @@ pub struct AgentSession {
 pub enum AgentError {
     /// The agent CLI failed (non-zero exit, error result, missing session). The turn did not complete.
     #[error("{message}")]
-    Failed { message: String, exit_code: Option<i32>, stderr: Option<String> },
+    Failed {
+        message: String,
+        exit_code: Option<i32>,
+        stderr: Option<String>,
+    },
     /// The turn was cut short by the cancellation token (the CLI's process group was killed).
     #[error("agent turn aborted")]
     Aborted { session: Option<AgentSession> },
@@ -179,7 +189,11 @@ pub enum AgentError {
 
 impl AgentError {
     pub fn failed(message: impl Into<String>) -> Self {
-        AgentError::Failed { message: message.into(), exit_code: None, stderr: None }
+        AgentError::Failed {
+            message: message.into(),
+            exit_code: None,
+            stderr: None,
+        }
     }
     pub fn is_aborted(&self) -> bool {
         matches!(self, AgentError::Aborted { .. })
@@ -200,7 +214,12 @@ pub trait AgentAdapter: Send + Sync {
     fn kind(&self) -> AgentKind;
     async fn preflight(&self) -> Preflight;
     /// Run one agent turn to completion, streaming events.
-    async fn start(&self, spec: &AgentSpec, on_event: EventCallback<'_>, cancel: &CancellationToken) -> Result<AgentSession, AgentError>;
+    async fn start(
+        &self,
+        spec: &AgentSpec,
+        on_event: EventCallback<'_>,
+        cancel: &CancellationToken,
+    ) -> Result<AgentSession, AgentError>;
     /// Continue the same session with a new message; resolves when the turn ends. The session id is updated if the CLI forks one.
     async fn resume(
         &self,
@@ -215,12 +234,27 @@ pub trait AgentAdapter: Send + Sync {
 // ---------------------------------------------------------------- runner control (TODO(core))
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
 pub enum RunnerMessage {
-    Verdict { sha: String, verdict: CandidateVerdict, reasons: Vec<String>, current_best: f64 },
+    Verdict {
+        sha: String,
+        verdict: CandidateVerdict,
+        reasons: Vec<String>,
+        current_best: f64,
+    },
     /// The shared ratchet moved (possibly by another agent): rebase onto `sha` from `branch`.
-    Ratchet { sha: String, branch: String, value: f64 },
-    User { text: String },
+    Ratchet {
+        sha: String,
+        branch: String,
+        value: f64,
+    },
+    User {
+        text: String,
+    },
     Pause,
     Resume,
     Stop,
@@ -285,8 +319,16 @@ pub enum Comparator {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Guardrail {
-    Command { run: String },
-    Threshold { metric: String, op: Comparator, value: f64, relative: bool, raw: String },
+    Command {
+        run: String,
+    },
+    Threshold {
+        metric: String,
+        op: Comparator,
+        value: f64,
+        relative: bool,
+        raw: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
@@ -366,10 +408,16 @@ pub struct PollResult {
 /// TODO(core): `ports::RunnerControl`. The engine's only way to reach a runner.
 #[async_trait]
 pub trait RunnerControl: Send + Sync {
-    async fn start(&self, handle: &RunnerHandle, config: &RunnerConfig) -> Result<(), ControlError>;
-    async fn send(&self, handle: &RunnerHandle, message: RunnerMessage) -> Result<(), ControlError>;
+    async fn start(&self, handle: &RunnerHandle, config: &RunnerConfig)
+    -> Result<(), ControlError>;
+    async fn send(&self, handle: &RunnerHandle, message: RunnerMessage)
+    -> Result<(), ControlError>;
     /// Events since `cursor` (opaque); returns the next cursor.
-    async fn poll(&self, handle: &RunnerHandle, cursor: Option<&str>) -> Result<PollResult, ControlError>;
+    async fn poll(
+        &self,
+        handle: &RunnerHandle,
+        cursor: Option<&str>,
+    ) -> Result<PollResult, ControlError>;
     async fn stop(&self, handle: &RunnerHandle) -> Result<(), ControlError>;
     /// Free whatever the control holds on this machine for an optimization (local worktrees and clones).
     async fn release(&self, _optimization_id: &str) -> Result<(), ControlError> {
@@ -422,7 +470,11 @@ pub struct RemoteCommandResult {
 /// TODO(sandbox): `CloudCompute`. Only the SSM command channel is used here.
 #[async_trait]
 pub trait CloudCompute: Send + Sync {
-    async fn run_command(&self, instance_id: &str, command: RemoteCommand) -> Result<RemoteCommandResult, ControlError>;
+    async fn run_command(
+        &self,
+        instance_id: &str,
+        command: RemoteCommand,
+    ) -> Result<RemoteCommandResult, ControlError>;
 }
 
 // ---------------------------------------------------------------- protected set (TODO(core))
@@ -462,7 +514,10 @@ pub struct ProtectedEntry {
 /// `/` joined, no `.` segments, no leading `./`, no trailing `/` (the part of core's `normalizeRepoPath` this needs).
 fn normalize_repo_path(path: &str) -> String {
     let unified = path.replace('\\', "/");
-    let parts: Vec<&str> = unified.split('/').filter(|p| !p.is_empty() && *p != ".").collect();
+    let parts: Vec<&str> = unified
+        .split('/')
+        .filter(|p| !p.is_empty() && *p != ".")
+        .collect();
     parts.join("/")
 }
 
@@ -494,7 +549,11 @@ pub fn evaluator_dirs_from_run(run: &str) -> Vec<String> {
                 if prefix.split('/').any(|s| s == "..") || prefix.starts_with("..") {
                     continue;
                 }
-                let full = if prefix.is_empty() { dir.to_string() } else { format!("{prefix}/{dir}") };
+                let full = if prefix.is_empty() {
+                    dir.to_string()
+                } else {
+                    format!("{prefix}/{dir}")
+                };
                 out.push(format!("{full}/**"));
                 if !prefix.is_empty() {
                     out.push(format!("{dir}/**"));
@@ -510,8 +569,16 @@ pub fn evaluator_dirs_from_run(run: &str) -> Vec<String> {
 
 /// Try to match `(?:\./)?(?:[\w.@-]+/)*?(bench|eval)(?=/)` starting at `start`; returns (prefix text, dir, end of dir).
 fn match_dir_at(chars: &[char], start: usize) -> Option<(String, &'static str, usize)> {
-    let starts_with = |pos: usize, s: &str| s.chars().enumerate().all(|(k, c)| chars.get(pos + k) == Some(&c));
-    let lead_options: Vec<usize> = if starts_with(start, "./") { vec![start + 2, start] } else { vec![start] };
+    let starts_with = |pos: usize, s: &str| {
+        s.chars()
+            .enumerate()
+            .all(|(k, c)| chars.get(pos + k) == Some(&c))
+    };
+    let lead_options: Vec<usize> = if starts_with(start, "./") {
+        vec![start + 2, start]
+    } else {
+        vec![start]
+    };
     for lead in lead_options {
         let mut pos = lead;
         loop {
@@ -537,7 +604,10 @@ fn match_dir_at(chars: &[char], start: usize) -> Option<(String, &'static str, u
 
 /// The effective protected set for a config. `template_protect` returns the globs an evaluator template protects (TODO(core): from
 /// the template registry); pass `|_| vec![]` when templates are not available.
-pub fn effective_protected_with(config: &RatchetConfig, template_protect: &dyn Fn(&str) -> Vec<String>) -> Vec<ProtectedEntry> {
+pub fn effective_protected_with(
+    config: &RatchetConfig,
+    template_protect: &dyn Fn(&str) -> Vec<String>,
+) -> Vec<ProtectedEntry> {
     let mut entries: Vec<ProtectedEntry> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut add = |glob: &str, source: ProtectedSource| {
@@ -550,7 +620,10 @@ pub fn effective_protected_with(config: &RatchetConfig, template_protect: &dyn F
         if g.is_empty() || !seen.insert(g.to_string()) {
             return;
         }
-        entries.push(ProtectedEntry { glob: g.to_string(), source });
+        entries.push(ProtectedEntry {
+            glob: g.to_string(),
+            source,
+        });
     };
 
     add("ratchet.yaml", ProtectedSource::Ratchet);
@@ -596,9 +669,18 @@ mod tests {
 
     #[test]
     fn evaluator_dirs() {
-        assert_eq!(evaluator_dirs_from_run("node dist/bench/x.js"), vec!["dist/bench/**", "bench/**"]);
-        assert_eq!(evaluator_dirs_from_run("k6 run bench/k6/search.js"), vec!["bench/**"]);
-        assert_eq!(evaluator_dirs_from_run("./eval/run.sh && python eval/x.py"), vec!["eval/**"]);
+        assert_eq!(
+            evaluator_dirs_from_run("node dist/bench/x.js"),
+            vec!["dist/bench/**", "bench/**"]
+        );
+        assert_eq!(
+            evaluator_dirs_from_run("k6 run bench/k6/search.js"),
+            vec!["bench/**"]
+        );
+        assert_eq!(
+            evaluator_dirs_from_run("./eval/run.sh && python eval/x.py"),
+            vec!["eval/**"]
+        );
         assert!(evaluator_dirs_from_run("node ../bench/x.js").is_empty());
         assert!(evaluator_dirs_from_run("echo benchmark/x").is_empty());
     }
@@ -609,16 +691,34 @@ mod tests {
             serde_json::from_str(r#"{"type":"verdict","sha":"abc","verdict":"failed_confirm","reasons":["x"],"currentBest":1.5}"#).unwrap();
         assert_eq!(
             m,
-            RunnerMessage::Verdict { sha: "abc".into(), verdict: CandidateVerdict::FailedConfirm, reasons: vec!["x".into()], current_best: 1.5 }
+            RunnerMessage::Verdict {
+                sha: "abc".into(),
+                verdict: CandidateVerdict::FailedConfirm,
+                reasons: vec!["x".into()],
+                current_best: 1.5
+            }
         );
-        assert_eq!(serde_json::to_string(&RunnerMessage::Stop).unwrap(), r#"{"type":"stop"}"#);
-        assert_eq!(serde_json::from_str::<RunnerMessage>(r#"{"type":"from-the-future"}"#).unwrap(), RunnerMessage::Unknown);
+        assert_eq!(
+            serde_json::to_string(&RunnerMessage::Stop).unwrap(),
+            r#"{"type":"stop"}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<RunnerMessage>(r#"{"type":"from-the-future"}"#).unwrap(),
+            RunnerMessage::Unknown
+        );
     }
 
     #[test]
     fn event_wire_shape_matches_ts() {
-        let e = AgentEvent::new(5, AgentEventType::Usage).with_usage(AgentUsage { input_tokens: 1, output_tokens: 2, cost_usd: None });
-        assert_eq!(serde_json::to_string(&e).unwrap(), r#"{"at":5,"type":"usage","usage":{"inputTokens":1,"outputTokens":2}}"#);
+        let e = AgentEvent::new(5, AgentEventType::Usage).with_usage(AgentUsage {
+            input_tokens: 1,
+            output_tokens: 2,
+            cost_usd: None,
+        });
+        assert_eq!(
+            serde_json::to_string(&e).unwrap(),
+            r#"{"at":5,"type":"usage","usage":{"inputTokens":1,"outputTokens":2}}"#
+        );
         // `at` is optional on read (older writers omit it)
         let e: AgentEvent = serde_json::from_str(r#"{"type":"status","text":"one"}"#).unwrap();
         assert_eq!((e.at, e.text.as_deref()), (0, Some("one")));

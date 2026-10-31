@@ -1,0 +1,19 @@
+---
+source: crates/ratchet-agents/tests/snapshots.rs
+expression: "build_resume_message(&ResumeInput\n{\n    entry: Some(&entry), best_value: 12.5, config: &c, now: 10_000_000,\n    spend_usd: 4.5, notes: &notes, user_messages: &users, no_change: false,\n})"
+---
+Verdict for candidate 1 (abcdef12): REJECTED.
+
+- gain 0.4% below the noise floor 4%
+
+The ratchet did not move. Your commit is still in your tree; use `git reset --hard refs/ratchet/accepted` to drop it.
+
+Current ratchet best: 12.5 http_req_duration.p95 (baseline 20).
+
+Time remaining: 58m. Budget remaining: $15.50.
+
+The ratchet best moved (now 11111111).
+
+Message from the user: focus on the filter parser
+
+`.ratchet/context.md` has been refreshed. Continue with your next idea.

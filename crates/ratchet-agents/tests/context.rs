@@ -2,7 +2,8 @@ mod common;
 
 use ratchet_agents::domain::{CandidateVerdict, Direction};
 use ratchet_agents::{
-    ContextInput, HistoryEntry, ResumeInput, build_context, build_initial_prompt, build_resume_message, format_duration, improvement_pct,
+    ContextInput, HistoryEntry, ResumeInput, build_context, build_initial_prompt,
+    build_resume_message, format_duration, improvement_pct,
 };
 
 fn config() -> ratchet_agents::RunnerConfig {
@@ -55,7 +56,15 @@ fn context_text() -> String {
             e.sha = "1111111122222222".into();
         }),
     ];
-    build_context(&ContextInput { config: &c, best_value: 12.5, history: &history, now: 10_000_000, spend_usd: 4.5, turn: 3, best_sha: Some("11111111") })
+    build_context(&ContextInput {
+        config: &c,
+        best_value: 12.5,
+        history: &history,
+        now: 10_000_000,
+        spend_usd: 4.5,
+        turn: 3,
+        best_sha: Some("11111111"),
+    })
 }
 
 #[test]
@@ -64,7 +73,9 @@ fn build_context_states_the_objective_baseline_and_current_best() {
     assert!(text.contains("`http_req_duration.p95` (minimize)"));
     assert!(text.contains("more than 3.0%"));
     assert!(text.contains("Baseline: 20"));
-    assert!(text.contains("Current ratchet best: 12.5 (commit 11111111); improvement so far 37.5%"));
+    assert!(
+        text.contains("Current ratchet best: 12.5 (commit 11111111); improvement so far 37.5%")
+    );
 }
 
 #[test]
@@ -96,14 +107,30 @@ fn build_context_tells_the_agent_that_dependencies_are_fixed_unless_the_evaluato
     assert!(text.contains("lockfile"));
     let mut none = config();
     none.config.evaluator.deps = ratchet_agents::domain::DepsMode::None;
-    let no_deps = build_context(&ContextInput { config: &none, best_value: 20.0, history: &[], now: 0, spend_usd: 0.0, turn: 1, best_sha: None });
+    let no_deps = build_context(&ContextInput {
+        config: &none,
+        best_value: 20.0,
+        history: &[],
+        now: 0,
+        spend_usd: 0.0,
+        turn: 1,
+        best_sha: None,
+    });
     assert!(!no_deps.contains("Dependencies are fixed"));
 }
 
 #[test]
 fn build_context_says_so_when_there_is_no_history_yet() {
     let c = config();
-    let text = build_context(&ContextInput { config: &c, best_value: 20.0, history: &[], now: 0, spend_usd: 0.0, turn: 1, best_sha: None });
+    let text = build_context(&ContextInput {
+        config: &c,
+        best_value: 20.0,
+        history: &[],
+        now: 0,
+        spend_usd: 0.0,
+        turn: 1,
+        best_sha: None,
+    });
     assert!(text.contains("None yet."));
 }
 
@@ -120,8 +147,23 @@ fn resume_message_for_a_verified_rejected_and_no_change_turn() {
     let c = config();
     let notes = vec!["NOTE".to_string()];
     let users = vec!["hi".to_string()];
-    fn input<'a>(entry: Option<&'a HistoryEntry>, no_change: bool, c: &'a ratchet_agents::RunnerConfig, notes: &'a [String], users: &'a [String]) -> ResumeInput<'a> {
-        ResumeInput { entry, best_value: 12.0, config: c, now: 10_000_000, spend_usd: 1.0, notes, user_messages: users, no_change }
+    fn input<'a>(
+        entry: Option<&'a HistoryEntry>,
+        no_change: bool,
+        c: &'a ratchet_agents::RunnerConfig,
+        notes: &'a [String],
+        users: &'a [String],
+    ) -> ResumeInput<'a> {
+        ResumeInput {
+            entry,
+            best_value: 12.0,
+            config: c,
+            now: 10_000_000,
+            spend_usd: 1.0,
+            notes,
+            user_messages: users,
+            no_change,
+        }
     }
     let verified_entry = entry(|e| {
         e.verdict = CandidateVerdict::Verified;
@@ -133,15 +175,29 @@ fn resume_message_for_a_verified_rejected_and_no_change_turn() {
     assert!(verified.contains("The ratchet moved to your commit."));
     assert!(verified.contains("NOTE"));
     assert!(verified.contains("Message from the user: hi"));
-    assert!(build_resume_message(&input(Some(&entry(|_| {})), false, &c, &notes, &users)).contains("refs/ratchet/accepted"));
-    assert!(build_resume_message(&input(None, true, &c, &notes, &users)).contains("No change to the repository"));
+    assert!(
+        build_resume_message(&input(Some(&entry(|_| {})), false, &c, &notes, &users))
+            .contains("refs/ratchet/accepted")
+    );
+    assert!(
+        build_resume_message(&input(None, true, &c, &notes, &users))
+            .contains("No change to the repository")
+    );
 }
 
 #[test]
 fn numbers_are_formatted_like_the_ts_helpers() {
     // exact ties round away from zero like Number.prototype.toFixed, not to even
     let c = common::base_config_with("/x", |c| c["budgetUsd"] = 0.625.into());
-    let text = build_context(&ContextInput { config: &c, best_value: 12.3456, history: &[], now: 0, spend_usd: 0.0, turn: 1, best_sha: None });
+    let text = build_context(&ContextInput {
+        config: &c,
+        best_value: 12.3456,
+        history: &[],
+        now: 0,
+        spend_usd: 0.0,
+        turn: 1,
+        best_sha: None,
+    });
     assert!(text.contains("Budget remaining: $0.63 of $0.63"), "{text}");
     assert!(text.contains("Current ratchet best: 12.346;"), "{text}");
 }

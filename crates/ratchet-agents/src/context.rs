@@ -1,6 +1,9 @@
 //! The text the agent sees: the generated `.ratchet/context.md`, the first prompt and the per-turn resume message.
 
-use crate::domain::{CandidateVerdict, DepsMode, Direction, Guardrail, INSTALL_FILES, ProtectedSource, RunnerConfig, effective_protected};
+use crate::domain::{
+    CandidateVerdict, DepsMode, Direction, Guardrail, INSTALL_FILES, ProtectedSource, RunnerConfig,
+    effective_protected,
+};
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct HistoryEntry {
@@ -30,7 +33,11 @@ pub fn format_duration(ms: i64) -> String {
     }
     let total_min = ms / 60_000;
     let (h, m) = (total_min / 60, total_min % 60);
-    if h > 0 { format!("{h}h {m}m") } else { format!("{m}m") }
+    if h > 0 {
+        format!("{h}h {m}m")
+    } else {
+        format!("{m}m")
+    }
 }
 
 /// `Math.round` (halves toward +infinity).
@@ -51,12 +58,20 @@ pub(crate) fn to_fixed(x: f64, digits: usize) -> String {
     } else {
         format!("{:.*}", digits, ax)
     };
-    if x < 0.0 && magnitude.bytes().any(|b| b != b'0' && b != b'.') { format!("-{magnitude}") } else { magnitude }
+    if x < 0.0 && magnitude.bytes().any(|b| b != b'0' && b != b'.') {
+        format!("-{magnitude}")
+    } else {
+        magnitude
+    }
 }
 
 /// JS `String(number)` for the values this module prints: integers without a fraction, others rounded to 3 decimals.
 fn fmt(n: f64) -> String {
-    if n.fract() == 0.0 && n.is_finite() { format!("{}", n as i64) } else { format!("{}", js_round(n * 1000.0) / 1000.0) }
+    if n.fract() == 0.0 && n.is_finite() {
+        format!("{}", n as i64)
+    } else {
+        format!("{}", js_round(n * 1000.0) / 1000.0)
+    }
 }
 
 fn usd(n: f64) -> String {
@@ -71,13 +86,23 @@ pub fn improvement_pct(config: &RunnerConfig, from: f64, to: f64) -> String {
     if from == 0.0 {
         return "n/a".to_string();
     }
-    let gain = if config.config.objective.direction == Direction::Minimize { (from - to) / from } else { (to - from) / from };
-    format!("{}{}%", if gain >= 0.0 { "" } else { "-" }, percent_1((gain * 100.0).abs()))
+    let gain = if config.config.objective.direction == Direction::Minimize {
+        (from - to) / from
+    } else {
+        (to - from) / from
+    };
+    format!(
+        "{}{}%",
+        if gain >= 0.0 { "" } else { "-" },
+        percent_1((gain * 100.0).abs())
+    )
 }
 
 /// The generated `.ratchet/context.md`: everything the agent needs to know that RATCHET.md cannot say statically.
 pub fn build_context(input: &ContextInput<'_>) -> String {
-    let ContextInput { config, history, .. } = input;
+    let ContextInput {
+        config, history, ..
+    } = input;
     let o = &config.config.objective;
     let remaining_ms = config.deadline_at - input.now;
     let remaining_usd = (config.budget_usd - input.spend_usd).max(0.0);
@@ -90,13 +115,21 @@ pub fn build_context(input: &ContextInput<'_>) -> String {
         None => "the gain calibrated from the baseline noise".to_string(),
         Some(g) => format!("{}%", percent_1(g * 100.0)),
     };
-    let direction = if o.direction == Direction::Minimize { "minimize" } else { "maximize" };
+    let direction = if o.direction == Direction::Minimize {
+        "minimize"
+    } else {
+        "maximize"
+    };
     lines.push(format!(
         "- Metric: `{}` ({direction}). A candidate must beat the current best by more than {gain_text} and more than the benchmark noise floor.",
         o.metric
     ));
     lines.push(format!("- Baseline: {}", fmt(config.baseline_value)));
-    let best_sha = input.best_sha.filter(|s| !s.is_empty()).map(|s| format!(" (commit {s})")).unwrap_or_default();
+    let best_sha = input
+        .best_sha
+        .filter(|s| !s.is_empty())
+        .map(|s| format!(" (commit {s})"))
+        .unwrap_or_default();
     lines.push(format!(
         "- Current ratchet best: {}{best_sha}; improvement so far {}",
         fmt(input.best_value),
@@ -104,9 +137,20 @@ pub fn build_context(input: &ContextInput<'_>) -> String {
     ));
     lines.push(String::new());
     lines.push("## Limits".to_string());
-    lines.push(format!("- Time remaining: {}", format_duration(remaining_ms)));
-    lines.push(format!("- Budget remaining: {} of {}", usd(remaining_usd), usd(config.budget_usd)));
-    lines.push(format!("- Turn: {}; candidates submitted: {}", input.turn, history.len()));
+    lines.push(format!(
+        "- Time remaining: {}",
+        format_duration(remaining_ms)
+    ));
+    lines.push(format!(
+        "- Budget remaining: {} of {}",
+        usd(remaining_usd),
+        usd(config.budget_usd)
+    ));
+    lines.push(format!(
+        "- Turn: {}; candidates submitted: {}",
+        input.turn,
+        history.len()
+    ));
     lines.push(String::new());
     lines.push("## History of your candidates".to_string());
     if history.is_empty() {
@@ -117,14 +161,26 @@ pub fn build_context(input: &ContextInput<'_>) -> String {
         for h in *history {
             let sha: String = h.sha.chars().take(8).collect();
             let notes = h.reasons.join("; ").replace('|', "/");
-            let notes = if notes.is_empty() { "-".to_string() } else { notes };
-            lines.push(format!("| {} | {sha} | {} | {} | {notes} |", h.n, h.verdict, fmt(h.best)));
+            let notes = if notes.is_empty() {
+                "-".to_string()
+            } else {
+                notes
+            };
+            lines.push(format!(
+                "| {} | {sha} | {} | {} | {notes} |",
+                h.n,
+                h.verdict,
+                fmt(h.best)
+            ));
         }
     }
     lines.push(String::new());
     lines.push("## Rules".to_string());
-    let guarded: Vec<String> =
-        effective_protected(&config.config).into_iter().filter(|e| e.source != ProtectedSource::Install).map(|e| format!("`{}`", e.glob)).collect();
+    let guarded: Vec<String> = effective_protected(&config.config)
+        .into_iter()
+        .filter(|e| e.source != ProtectedSource::Install)
+        .map(|e| format!("`{}`", e.glob))
+        .collect();
     let install: Vec<String> = INSTALL_FILES.iter().map(|f| format!("`{f}`")).collect();
     lines.push(format!(
         "- Protected paths (a candidate touching them is blocked): {}, and lockfiles / install config ({}) at any depth",
@@ -140,7 +196,14 @@ pub fn build_context(input: &ContextInput<'_>) -> String {
             Guardrail::Threshold { metric, raw, .. } => format!("`{metric}` {raw}"),
         })
         .collect();
-    lines.push(format!("- Guardrails checked on every candidate: {}", if guardrails.is_empty() { "none".to_string() } else { guardrails.join("; ") }));
+    lines.push(format!(
+        "- Guardrails checked on every candidate: {}",
+        if guardrails.is_empty() {
+            "none".to_string()
+        } else {
+            guardrails.join("; ")
+        }
+    ));
     if config.config.evaluator.deps != DepsMode::None {
         lines.push("- Dependencies are fixed: the trusted benchmark has no network and installs from the lockfile of the base ref. A candidate that changes the lockfile (pnpm-lock.yaml, package-lock.json) is blocked, so do not add or upgrade packages.".to_string());
     }
@@ -185,9 +248,19 @@ pub fn build_resume_message(input: &ResumeInput<'_>) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(e) = input.entry {
         let sha: String = e.sha.chars().take(8).collect();
-        parts.push(format!("Verdict for candidate {} ({sha}): {}.", e.n, e.verdict.as_str().to_uppercase()));
+        parts.push(format!(
+            "Verdict for candidate {} ({sha}): {}.",
+            e.n,
+            e.verdict.as_str().to_uppercase()
+        ));
         if !e.reasons.is_empty() {
-            parts.push(e.reasons.iter().map(|r| format!("- {r}")).collect::<Vec<_>>().join("\n"));
+            parts.push(
+                e.reasons
+                    .iter()
+                    .map(|r| format!("- {r}"))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
         }
         if e.verdict == CandidateVerdict::Verified {
             parts.push("The ratchet moved to your commit.".to_string());
@@ -209,7 +282,14 @@ pub fn build_resume_message(input: &ResumeInput<'_>) -> String {
         usd((config.budget_usd - input.spend_usd).max(0.0))
     ));
     parts.extend(input.notes.iter().cloned());
-    parts.extend(input.user_messages.iter().map(|u| format!("Message from the user: {u}")));
-    parts.push("`.ratchet/context.md` has been refreshed. Continue with your next idea.".to_string());
+    parts.extend(
+        input
+            .user_messages
+            .iter()
+            .map(|u| format!("Message from the user: {u}")),
+    );
+    parts.push(
+        "`.ratchet/context.md` has been refreshed. Continue with your next idea.".to_string(),
+    );
     parts.join("\n\n")
 }

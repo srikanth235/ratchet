@@ -17,10 +17,18 @@ pub struct GitResult {
 
 impl GitResult {
     pub fn ok(stdout: impl Into<String>) -> Self {
-        Self { code: 0, stdout: stdout.into(), stderr: String::new() }
+        Self {
+            code: 0,
+            stdout: stdout.into(),
+            stderr: String::new(),
+        }
     }
     pub fn failed(stderr: impl Into<String>) -> Self {
-        Self { code: 1, stdout: String::new(), stderr: stderr.into() }
+        Self {
+            code: 1,
+            stdout: String::new(),
+            stderr: stderr.into(),
+        }
     }
 }
 
@@ -63,7 +71,11 @@ impl GitRunner for ExecGit {
                 stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
                 stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
             },
-            Err(err) => GitResult { code: 1, stdout: String::new(), stderr: err.to_string() },
+            Err(err) => GitResult {
+                code: 1,
+                stdout: String::new(),
+                stderr: err.to_string(),
+            },
         }
     }
 }
@@ -82,9 +94,17 @@ pub struct GitError {
 
 impl GitError {
     pub fn new(args: Vec<String>, result: GitResult) -> Self {
-        let text = if result.stderr.is_empty() { &result.stdout } else { &result.stderr };
+        let text = if result.stderr.is_empty() {
+            &result.stdout
+        } else {
+            &result.stderr
+        };
         let message = text.trim().to_string();
-        Self { args, result, message }
+        Self {
+            args,
+            result,
+            message,
+        }
     }
 }
 
@@ -97,8 +117,16 @@ pub struct Git {
 }
 
 impl Git {
-    pub fn new(cwd: impl Into<PathBuf>, runner: SharedGit, env: Option<HashMap<String, String>>) -> Self {
-        Self { cwd: cwd.into(), runner, env }
+    pub fn new(
+        cwd: impl Into<PathBuf>,
+        runner: SharedGit,
+        env: Option<HashMap<String, String>>,
+    ) -> Self {
+        Self {
+            cwd: cwd.into(),
+            runner,
+            env,
+        }
     }
 
     pub fn cwd(&self) -> &Path {
@@ -115,13 +143,24 @@ impl Git {
 
     pub async fn try_run(&self, args: &[&str]) -> GitResult {
         let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
-        self.runner.run(&owned, &GitCall { cwd: self.cwd.clone(), env: self.env.clone() }).await
+        self.runner
+            .run(
+                &owned,
+                &GitCall {
+                    cwd: self.cwd.clone(),
+                    env: self.env.clone(),
+                },
+            )
+            .await
     }
 
     pub async fn run(&self, args: &[&str]) -> Result<String, GitError> {
         let res = self.try_run(args).await;
         if res.code != 0 {
-            return Err(GitError::new(args.iter().map(|s| s.to_string()).collect(), res));
+            return Err(GitError::new(
+                args.iter().map(|s| s.to_string()).collect(),
+                res,
+            ));
         }
         Ok(res.stdout)
     }
@@ -131,21 +170,39 @@ impl Git {
     }
 
     pub async fn rev_parse(&self, reference: &str) -> Option<String> {
-        let res = self.try_run(&["rev-parse", "--verify", "--quiet", &format!("{reference}^{{commit}}")]).await;
+        let res = self
+            .try_run(&[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("{reference}^{{commit}}"),
+            ])
+            .await;
         (res.code == 0).then(|| res.stdout.trim().to_string())
     }
 
     pub async fn is_dirty(&self) -> Result<bool, GitError> {
-        Ok(!self.run(&["status", "--porcelain"]).await?.trim().is_empty())
+        Ok(!self
+            .run(&["status", "--porcelain"])
+            .await?
+            .trim()
+            .is_empty())
     }
 
     pub async fn is_ancestor(&self, ancestor: &str, descendant: &str) -> bool {
-        self.try_run(&["merge-base", "--is-ancestor", ancestor, descendant]).await.code == 0
+        self.try_run(&["merge-base", "--is-ancestor", ancestor, descendant])
+            .await
+            .code
+            == 0
     }
 
     pub async fn changed_files(&self, base: &str, head: &str) -> Result<Vec<String>, GitError> {
         let out = self.run(&["diff", "--name-only", base, head]).await?;
-        Ok(out.split('\n').filter(|l| !l.is_empty()).map(str::to_string).collect())
+        Ok(out
+            .split('\n')
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect())
     }
 
     pub async fn message(&self, reference: &str) -> Result<String, GitError> {
@@ -162,9 +219,15 @@ fn is_trailer_line(line: &str) -> bool {
         Some(c) if c.is_ascii_alphabetic() => {}
         _ => return false,
     }
-    let Some(colon) = line.find(": ") else { return false };
+    let Some(colon) = line.find(": ") else {
+        return false;
+    };
     let key = &line[..colon];
-    key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') && line[colon + 2..].chars().next().is_some_and(|c| !c.is_whitespace())
+    key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && line[colon + 2..]
+            .chars()
+            .next()
+            .is_some_and(|c| !c.is_whitespace())
 }
 
 /// Split on blank (whitespace-only) lines, like the regex `\n\s*\n`: returns the last paragraph.
@@ -190,16 +253,23 @@ pub fn with_candidate_trailer(message: &str) -> String {
     if has_candidate_trailer(body) {
         return format!("{body}\n");
     }
-    let is_trailer_block = body.contains("\n\n") && last_paragraph(body).split('\n').all(is_trailer_line);
-    format!("{body}{}{CANDIDATE_TRAILER}\n", if is_trailer_block { "\n" } else { "\n\n" })
+    let is_trailer_block =
+        body.contains("\n\n") && last_paragraph(body).split('\n').all(is_trailer_line);
+    format!(
+        "{body}{}{CANDIDATE_TRAILER}\n",
+        if is_trailer_block { "\n" } else { "\n\n" }
+    )
 }
 
 /// `^Ratchet-Candidate:\s*true\s*$` (case-insensitive) on any line.
 pub fn has_candidate_trailer(message: &str) -> bool {
     message.split('\n').any(|l| {
         let l = l.trim_end();
-        match l.get(..17) {
-            Some(prefix) if prefix.eq_ignore_ascii_case("Ratchet-Candidate:") => l[17..].trim_start().eq_ignore_ascii_case("true"),
+        const KEY: &str = "Ratchet-Candidate:";
+        match l.get(..KEY.len()) {
+            Some(prefix) if prefix.eq_ignore_ascii_case(KEY) => {
+                l[KEY.len()..].trim_start().eq_ignore_ascii_case("true")
+            }
             _ => false,
         }
     })
@@ -211,9 +281,18 @@ mod tests {
 
     #[test]
     fn trailer_is_added_once_after_a_blank_line() {
-        assert_eq!(with_candidate_trailer("subject"), "subject\n\nRatchet-Candidate: true\n");
-        assert_eq!(with_candidate_trailer("subject\n\nbody\n"), "subject\n\nbody\n\nRatchet-Candidate: true\n");
-        assert_eq!(with_candidate_trailer("s\n\nRatchet-Candidate: true\n"), "s\n\nRatchet-Candidate: true\n");
+        assert_eq!(
+            with_candidate_trailer("subject"),
+            "subject\n\nRatchet-Candidate: true\n"
+        );
+        assert_eq!(
+            with_candidate_trailer("subject\n\nbody\n"),
+            "subject\n\nbody\n\nRatchet-Candidate: true\n"
+        );
+        assert_eq!(
+            with_candidate_trailer("s\n\nRatchet-Candidate: true\n"),
+            "s\n\nRatchet-Candidate: true\n"
+        );
     }
 
     #[test]
@@ -235,6 +314,9 @@ mod tests {
     #[test]
     fn a_single_paragraph_is_never_a_trailer_block() {
         // `s: x` alone looks like a trailer line, but with no body before it the TS rule still appends after a blank line
-        assert_eq!(with_candidate_trailer("fix: thing"), "fix: thing\n\nRatchet-Candidate: true\n");
+        assert_eq!(
+            with_candidate_trailer("fix: thing"),
+            "fix: thing\n\nRatchet-Candidate: true\n"
+        );
     }
 }

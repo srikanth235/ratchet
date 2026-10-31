@@ -21,16 +21,28 @@ pub struct FakeProcessSpec {
 
 impl FakeProcessSpec {
     pub fn stdout(text: impl Into<String>) -> Self {
-        Self { stdout: text.into(), ..Self::default() }
+        Self {
+            stdout: text.into(),
+            ..Self::default()
+        }
     }
     pub fn exit(code: i32) -> Self {
-        Self { exit_code: code, ..Self::default() }
+        Self {
+            exit_code: code,
+            ..Self::default()
+        }
     }
     pub fn hang() -> Self {
-        Self { hang: true, ..Self::default() }
+        Self {
+            hang: true,
+            ..Self::default()
+        }
     }
     pub fn spawn_error(message: impl Into<String>) -> Self {
-        Self { spawn_error: Some(message.into()), ..Self::default() }
+        Self {
+            spawn_error: Some(message.into()),
+            ..Self::default()
+        }
     }
     pub fn with_stderr(mut self, text: impl Into<String>) -> Self {
         self.stderr = text.into();
@@ -77,8 +89,13 @@ impl FakeSpawner {
         Self::with_plan(move |_, _| spec.clone())
     }
 
-    pub fn with_plan(plan: impl Fn(&FakeCall, usize) -> FakeProcessSpec + Send + Sync + 'static) -> Self {
-        Self { calls: Arc::new(Mutex::new(Vec::new())), plan: Arc::new(plan) }
+    pub fn with_plan(
+        plan: impl Fn(&FakeCall, usize) -> FakeProcessSpec + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            plan: Arc::new(plan),
+        }
     }
 
     /// Snapshot of the calls so far (including stdin written and signals received).
@@ -95,20 +112,34 @@ impl FakeSpawner {
     }
 }
 
+/// The sending halves of a fake process: its output and its exit.
+type Channels = (mpsc::UnboundedSender<Output>, oneshot::Sender<ProcessExit>);
+
 struct FakeProcess {
     index: usize,
     calls: Arc<Mutex<Vec<FakeCall>>>,
     spec: FakeProcessSpec,
     output: Option<mpsc::UnboundedReceiver<Output>>,
     exit: Option<oneshot::Receiver<ProcessExit>>,
-    play: Mutex<Option<(mpsc::UnboundedSender<Output>, oneshot::Sender<ProcessExit>)>>,
+    play: Mutex<Option<Channels>>,
     /// Shared with the playback task so a kill can finish a hanging process.
-    finish: Arc<Mutex<Option<(mpsc::UnboundedSender<Output>, oneshot::Sender<ProcessExit>)>>>,
+    finish: Arc<Mutex<Option<Channels>>>,
 }
 
 impl Spawner for FakeSpawner {
-    fn spawn(&self, command: &str, args: &[String], options: &SpawnOptions) -> Box<dyn ProcessHandle> {
-        let call = FakeCall { command: command.to_string(), args: args.to_vec(), options: options.clone(), stdin: String::new(), signals: Vec::new() };
+    fn spawn(
+        &self,
+        command: &str,
+        args: &[String],
+        options: &SpawnOptions,
+    ) -> Box<dyn ProcessHandle> {
+        let call = FakeCall {
+            command: command.to_string(),
+            args: args.to_vec(),
+            options: options.clone(),
+            stdin: String::new(),
+            signals: Vec::new(),
+        };
         let (index, spec) = {
             let mut calls = self.calls.lock().unwrap();
             calls.push(call.clone());
@@ -130,7 +161,10 @@ impl Spawner for FakeSpawner {
 }
 
 impl FakeProcess {
-    fn finish_with(finish: &Mutex<Option<(mpsc::UnboundedSender<Output>, oneshot::Sender<ProcessExit>)>>, exit: ProcessExit) {
+    fn finish_with(
+        finish: &Mutex<Option<(mpsc::UnboundedSender<Output>, oneshot::Sender<ProcessExit>)>>,
+        exit: ProcessExit,
+    ) {
         if let Some((out, exit_tx)) = finish.lock().unwrap().take() {
             drop(out);
             let _ = exit_tx.send(exit);
@@ -153,7 +187,9 @@ impl ProcessHandle for FakeProcess {
 
     /// Closing stdin starts the playback, like a real CLI that only answers once it has read its prompt.
     fn end_stdin(&self) {
-        let Some((out_tx, exit_tx)) = self.play.lock().unwrap().take() else { return };
+        let Some((out_tx, exit_tx)) = self.play.lock().unwrap().take() else {
+            return;
+        };
         if let Some(message) = &self.spec.spawn_error {
             let _ = exit_tx.send(ProcessExit::spawn_failed(message.clone()));
             return;
@@ -192,7 +228,10 @@ impl ProcessHandle for FakeProcess {
     fn kill(&self, signal: KillSignal) {
         self.calls.lock().unwrap()[self.index].signals.push(signal);
         if self.spec.hang {
-            let exit = ProcessExit { signal: Some(signal.name().to_string()), ..ProcessExit::default() };
+            let exit = ProcessExit {
+                signal: Some(signal.name().to_string()),
+                ..ProcessExit::default()
+            };
             // Before playback started the senders are still in `play`; either way the process ends now.
             if let Some((out, exit_tx)) = self.play.lock().unwrap().take() {
                 drop(out);

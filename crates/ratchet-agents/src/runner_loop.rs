@@ -15,10 +15,13 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
-use crate::context::{ContextInput, HistoryEntry, ResumeInput, build_context, build_initial_prompt, build_resume_message};
+use crate::context::{
+    ContextInput, HistoryEntry, ResumeInput, build_context, build_initial_prompt,
+    build_resume_message,
+};
 use crate::domain::{
-    AgentAdapter, AgentError, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage, CandidateVerdict, Clock, RunnerConfig,
-    RunnerInbox, RunnerMessage,
+    AgentAdapter, AgentError, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
+    CandidateVerdict, Clock, RunnerConfig, RunnerInbox, RunnerMessage,
 };
 use crate::git::{Git, SharedGit, exec_git, has_candidate_trailer, with_candidate_trailer};
 
@@ -60,6 +63,9 @@ impl fmt::Display for RunnerStopReason {
     }
 }
 
+/// Estimates the dollar cost of usage that carries only token counts.
+pub type CostEstimator = Arc<dyn Fn(&AgentUsage) -> f64 + Send + Sync>;
+
 /// Everything beyond the required wiring; every field is optional and defaults like the TypeScript loop.
 #[derive(Clone, Default)]
 pub struct LoopTuning {
@@ -85,7 +91,7 @@ pub struct LoopTuning {
     /// Base delay for push retries (doubles each attempt). Default 1 s.
     pub push_retry_delay: Option<Duration>,
     /// For adapters that report tokens but no dollars.
-    pub estimate_cost: Option<Arc<dyn Fn(&AgentUsage) -> f64 + Send + Sync>>,
+    pub estimate_cost: Option<CostEstimator>,
     pub model: Option<String>,
     pub max_turns: Option<u32>,
     pub agent_env: Option<HashMap<String, String>>,
@@ -210,7 +216,13 @@ struct Candidate {
 }
 
 fn first_line(s: &str, max: usize) -> String {
-    s.split('\n').next().unwrap_or("").trim().chars().take(max).collect()
+    s.split('\n')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .chars()
+        .take(max)
+        .collect()
 }
 
 fn describe(err: &AgentError) -> String {
@@ -275,21 +287,28 @@ impl Core {
             best_sha: best_sha.as_deref(),
         });
         let dir = self.workdir.join(".ratchet");
-        tokio::fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
-        tokio::fs::write(dir.join("context.md"), &text).await.map_err(|e| e.to_string())?;
+        tokio::fs::create_dir_all(&dir)
+            .await
+            .map_err(|e| e.to_string())?;
+        tokio::fs::write(dir.join("context.md"), &text)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(text)
     }
 
     fn on_agent_event(&self, e: AgentEvent) {
         {
             let mut shared = self.shared.lock().unwrap();
-            if e.kind == AgentEventType::Message {
-                if let Some(text) = e.text.as_ref().filter(|t| !t.is_empty()) {
-                    shared.last_message = text.clone();
-                }
+            if e.kind == AgentEventType::Message
+                && let Some(text) = e.text.as_ref().filter(|t| !t.is_empty())
+            {
+                shared.last_message = text.clone();
             }
             if let (AgentEventType::Usage, Some(usage)) = (e.kind, e.usage.as_ref()) {
-                shared.spend_usd += usage.cost_usd.or_else(|| self.tuning.estimate_cost.as_ref().map(|f| f(usage))).unwrap_or(0.0);
+                shared.spend_usd += usage
+                    .cost_usd
+                    .or_else(|| self.tuning.estimate_cost.as_ref().map(|f| f(usage)))
+                    .unwrap_or(0.0);
                 if shared.spend_usd >= self.config.budget_usd {
                     shared.over_budget = true;
                 }
@@ -298,17 +317,35 @@ impl Core {
         (self.emit_fn)(e);
     }
 
-    async fn commit_if_changed(&self, turn: u32, known: &HashSet<String>) -> Result<Option<Candidate>, String> {
+    async fn commit_if_changed(
+        &self,
+        turn: u32,
+        known: &HashSet<String>,
+    ) -> Result<Option<Candidate>, String> {
         let git = &self.git;
         let g = |e: crate::git::GitError| e.to_string();
         git.run(&["add", "-A"]).await.map_err(g)?;
         let staged = git.try_run(&["diff", "--cached", "--quiet"]).await.code != 0;
         if staged {
             let last_message = self.shared.lock().unwrap().last_message.clone();
-            let subject = Some(first_line(&last_message, 72)).filter(|s| !s.is_empty()).unwrap_or_else(|| format!("candidate {turn}"));
+            let subject = Some(first_line(&last_message, 72))
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| format!("candidate {turn}"));
             let trimmed = last_message.trim();
-            let body = if trimmed.is_empty() { String::new() } else { format!("\n\n{trimmed}") };
-            git.run(&["commit", "--quiet", "--no-verify", "-m", &with_candidate_trailer(&format!("ratchet: {subject}{body}"))]).await.map_err(g)?;
+            let body = if trimmed.is_empty() {
+                String::new()
+            } else {
+                format!("\n\n{trimmed}")
+            };
+            git.run(&[
+                "commit",
+                "--quiet",
+                "--no-verify",
+                "-m",
+                &with_candidate_trailer(&format!("ratchet: {subject}{body}")),
+            ])
+            .await
+            .map_err(g)?;
         } else {
             let head = git.head().await.map_err(g)?;
             if known.contains(&head) {
@@ -316,7 +353,16 @@ impl Core {
             }
             let message = git.message("HEAD").await.map_err(g)?;
             if !has_candidate_trailer(&message) {
-                git.run(&["commit", "--quiet", "--amend", "--no-verify", "-m", &with_candidate_trailer(&message)]).await.map_err(g)?;
+                git.run(&[
+                    "commit",
+                    "--quiet",
+                    "--amend",
+                    "--no-verify",
+                    "-m",
+                    &with_candidate_trailer(&message),
+                ])
+                .await
+                .map_err(g)?;
             }
         }
         let sha = git.head().await.map_err(g)?;
@@ -327,26 +373,46 @@ impl Core {
         let accepted = git.rev_parse(&self.accepted_ref).await.unwrap_or(parent);
         let files = git.changed_files(&accepted, &sha).await.unwrap_or_default();
         let subject = first_line(&git.message("HEAD").await.map_err(g)?, 100);
-        Ok(Some(Candidate { sha, files, subject }))
+        Ok(Some(Candidate {
+            sha,
+            files,
+            subject,
+        }))
     }
 
     async fn push(&self) -> bool {
         let attempts = self.tuning.push_retries.unwrap_or(3) + 1;
-        let delay = self.tuning.push_retry_delay.unwrap_or(Duration::from_millis(1000));
+        let delay = self
+            .tuning
+            .push_retry_delay
+            .unwrap_or(Duration::from_millis(1000));
         let target = format!("HEAD:refs/heads/{}", self.config.branch);
         let mut last = String::new();
         for i in 0..attempts {
             if self.ctl.is_cancelled() {
                 break;
             }
-            let res = self.git.try_run(&["push", "--quiet", "--force-with-lease", &self.remote, &target]).await;
+            let res = self
+                .git
+                .try_run(&[
+                    "push",
+                    "--quiet",
+                    "--force-with-lease",
+                    &self.remote,
+                    &target,
+                ])
+                .await;
             if res.code == 0 {
                 return true;
             }
             last = res.stderr.trim().to_string();
             self.clock.sleep(delay * 2u32.pow(i), &self.ctl).await;
         }
-        self.emit(AgentEventType::Error, Some(format!("push failed: {last}")), Some(json!({"fatal": true})));
+        self.emit(
+            AgentEventType::Error,
+            Some(format!("push failed: {last}")),
+            Some(json!({"fatal": true})),
+        );
         false
     }
 
@@ -359,33 +425,60 @@ impl Core {
         if let Some(a) = announced {
             // Preferred: the engine told us exactly which commit is the best and on which branch it lives.
             let refspec = format!("+refs/heads/{}:{}", a.branch, self.best_tracking);
-            let fetched = git.try_run(&["fetch", "--quiet", &self.remote, &refspec]).await;
-            if fetched.code == 0 && git.try_run(&["cat-file", "-e", &format!("{}^{{commit}}", a.sha)]).await.code == 0 {
+            let fetched = git
+                .try_run(&["fetch", "--quiet", &self.remote, &refspec])
+                .await;
+            if fetched.code == 0
+                && git
+                    .try_run(&["cat-file", "-e", &format!("{}^{{commit}}", a.sha)])
+                    .await
+                    .code
+                    == 0
+            {
                 best_sha = Some(a.sha);
             }
         }
         if best_sha.is_none() {
             // Fallback: a remote branch holding the best (`ratchet/best` by convention).
             let refspec = format!("+refs/heads/{}:{}", self.best_branch, self.best_tracking);
-            let fetched = git.try_run(&["fetch", "--quiet", &self.remote, &refspec]).await;
-            best_sha = if fetched.code == 0 { git.rev_parse(&self.best_tracking).await } else { None };
+            let fetched = git
+                .try_run(&["fetch", "--quiet", &self.remote, &refspec])
+                .await;
+            best_sha = if fetched.code == 0 {
+                git.rev_parse(&self.best_tracking).await
+            } else {
+                None
+            };
         }
-        let Some(best_sha) = best_sha else { return Ok(Vec::new()) };
+        let Some(best_sha) = best_sha else {
+            return Ok(Vec::new());
+        };
         local.best_sha = Some(best_sha.clone());
-        git.run(&["update-ref", &self.accepted_ref, &best_sha]).await.map_err(g)?;
+        git.run(&["update-ref", &self.accepted_ref, &best_sha])
+            .await
+            .map_err(g)?;
         if git.is_ancestor(&best_sha, "HEAD").await {
             return Ok(Vec::new());
         }
         let before = git.head().await.map_err(g)?;
-        let mine = git.run(&["rev-list", "--count", &format!("{best_sha}..HEAD")]).await.map_err(g)?.trim().to_string();
+        let mine = git
+            .run(&["rev-list", "--count", &format!("{best_sha}..HEAD")])
+            .await
+            .map_err(g)?
+            .trim()
+            .to_string();
         let short: String = best_sha.chars().take(8).collect();
         // `-X ours` in a rebase means the branch being rebased onto: conflicts resolve in favour of the best.
-        let rebase = git.try_run(&["rebase", "--quiet", "-X", "ours", &best_sha]).await;
+        let rebase = git
+            .try_run(&["rebase", "--quiet", "-X", "ours", &best_sha])
+            .await;
         if rebase.code == 0 {
             let to = git.head().await.map_err(g)?;
             self.status(
                 format!("rebased onto ratchet best {short}"),
-                Some(json!({"from": before, "to": to, "commits": mine.parse::<u64>().unwrap_or(0)})),
+                Some(
+                    json!({"from": before, "to": to, "commits": mine.parse::<u64>().unwrap_or(0)}),
+                ),
             );
             return Ok(vec![format!(
                 "The ratchet best moved (now {short}, set by an earlier verified candidate). Your {mine} unverified commit(s) were rebased onto it; where they conflicted, the best's version was kept. Re-run the tests and re-measure before trusting your earlier numbers."
@@ -407,9 +500,21 @@ impl Core {
     fn apply(&self, m: RunnerMessage) {
         let mut st = self.mailbox.state.lock().unwrap();
         match m {
-            RunnerMessage::Verdict { sha, verdict, reasons, current_best } => {
+            RunnerMessage::Verdict {
+                sha,
+                verdict,
+                reasons,
+                current_best,
+            } => {
                 if verdict != CandidateVerdict::Pending {
-                    st.verdicts.insert(sha, VerdictMsg { verdict, reasons, current_best });
+                    st.verdicts.insert(
+                        sha,
+                        VerdictMsg {
+                            verdict,
+                            reasons,
+                            current_best,
+                        },
+                    );
                 }
             }
             RunnerMessage::User { text } => {
@@ -425,13 +530,23 @@ impl Core {
             }
             RunnerMessage::Ratchet { sha, branch, value } => {
                 // Another agent's candidate moved the shared ratchet: rebase onto it on the next sync.
-                st.latest_best = Some(LatestBest { sha: sha.clone(), branch: branch.clone() });
+                st.latest_best = Some(LatestBest {
+                    sha: sha.clone(),
+                    branch: branch.clone(),
+                });
                 drop(st);
-                self.status(format!("ratchet moved to {} by {branch}", value), Some(json!({"sha": sha, "branch": branch, "value": value})));
+                self.status(
+                    format!("ratchet moved to {} by {branch}", value),
+                    Some(json!({"sha": sha, "branch": branch, "value": value})),
+                );
             }
             RunnerMessage::Unknown => {
                 drop(st);
-                self.emit(AgentEventType::Error, Some("unknown runner message".to_string()), None);
+                self.emit(
+                    AgentEventType::Error,
+                    Some("unknown runner message".to_string()),
+                    None,
+                );
             }
         }
     }
@@ -441,33 +556,76 @@ impl Core {
 async fn pump(core: Arc<Core>, inbox: Arc<dyn RunnerInbox>) {
     let cancel = core.mailbox.cancel.clone();
     while !cancel.is_cancelled() {
-        let Some(message) = inbox.next(&cancel).await else { return };
+        let Some(message) = inbox.next(&cancel).await else {
+            return;
+        };
         core.apply(message);
         core.mailbox.bump();
     }
 }
 
 async fn append_exclude(workdir: &Path, git: &Git) -> Result<(), String> {
-    let out = git.run(&["rev-parse", "--git-path", "info/exclude"]).await.map_err(|e| e.to_string())?;
+    let out = git
+        .run(&["rev-parse", "--git-path", "info/exclude"])
+        .await
+        .map_err(|e| e.to_string())?;
     let file = workdir.join(out.trim());
     if let Some(dir) = file.parent() {
-        tokio::fs::create_dir_all(dir).await.map_err(|e| e.to_string())?;
+        tokio::fs::create_dir_all(dir)
+            .await
+            .map_err(|e| e.to_string())?;
     }
-    let mut f = tokio::fs::OpenOptions::new().create(true).append(true).open(&file).await.map_err(|e| e.to_string())?;
-    f.write_all(b"\n.ratchet/\n").await.map_err(|e| e.to_string())
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&file)
+        .await
+        .map_err(|e| e.to_string())?;
+    f.write_all(b"\n.ratchet/\n")
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// `ratchet runner`: owns one agent on one branch.
 pub async fn run_runner_loop(opts: RunnerLoopOptions) -> RunnerLoopResult {
-    let RunnerLoopOptions { config, adapter, workdir, inbox, emit, clock, signal, tuning } = opts;
-    let remote = tuning.remote.clone().unwrap_or_else(|| "origin".to_string());
-    let best_branch = tuning.best_ref.clone().unwrap_or_else(|| "ratchet/best".to_string());
-    let best_tracking = tuning.best_tracking_ref.clone().unwrap_or_else(|| format!("refs/remotes/{remote}/{best_branch}"));
-    let accepted_ref = tuning.accepted_ref.clone().unwrap_or_else(|| "refs/ratchet/accepted".to_string());
-    let git = Git::new(&workdir, tuning.git.clone().unwrap_or_else(exec_git), tuning.git_env.clone());
+    let RunnerLoopOptions {
+        config,
+        adapter,
+        workdir,
+        inbox,
+        emit,
+        clock,
+        signal,
+        tuning,
+    } = opts;
+    let remote = tuning
+        .remote
+        .clone()
+        .unwrap_or_else(|| "origin".to_string());
+    let best_branch = tuning
+        .best_ref
+        .clone()
+        .unwrap_or_else(|| "ratchet/best".to_string());
+    let best_tracking = tuning
+        .best_tracking_ref
+        .clone()
+        .unwrap_or_else(|| format!("refs/remotes/{remote}/{best_branch}"));
+    let accepted_ref = tuning
+        .accepted_ref
+        .clone()
+        .unwrap_or_else(|| "refs/ratchet/accepted".to_string());
+    let git = Git::new(
+        &workdir,
+        tuning.git.clone().unwrap_or_else(exec_git),
+        tuning.git_env.clone(),
+    );
 
     let (version, _) = watch::channel(0u64);
-    let mailbox = Arc::new(Mailbox { state: Mutex::new(MailboxState::default()), version, cancel: CancellationToken::new() });
+    let mailbox = Arc::new(Mailbox {
+        state: Mutex::new(MailboxState::default()),
+        version,
+        cancel: CancellationToken::new(),
+    });
     let core = Arc::new(Core {
         config,
         workdir,
@@ -484,7 +642,12 @@ pub async fn run_runner_loop(opts: RunnerLoopOptions) -> RunnerLoopResult {
         best_tracking,
         accepted_ref,
     });
-    let mut local = Local { best: core.config.baseline_value, turns: 0, history: Vec::new(), best_sha: None };
+    let mut local = Local {
+        best: core.config.baseline_value,
+        turns: 0,
+        history: Vec::new(),
+        best_sha: None,
+    };
 
     // ---- control: one cancellation token for stop / deadline / external signal; `reason` says why.
     match &signal {
@@ -505,7 +668,9 @@ pub async fn run_runner_loop(opts: RunnerLoopOptions) -> RunnerLoopResult {
         tokio::spawn(async move {
             while !core.ctl.is_cancelled() && core.clock.now() < core.config.deadline_at {
                 let wait = (core.config.deadline_at - core.clock.now()).max(1) as u64;
-                core.clock.sleep(Duration::from_millis(wait), &core.ctl).await;
+                core.clock
+                    .sleep(Duration::from_millis(wait), &core.ctl)
+                    .await;
             }
             if !core.ctl.is_cancelled() {
                 core.halt(RunnerStopReason::Deadline);
@@ -515,7 +680,11 @@ pub async fn run_runner_loop(opts: RunnerLoopOptions) -> RunnerLoopResult {
     tokio::spawn(pump(core.clone(), inbox));
 
     if let Err(err) = body(&core, &mut local, adapter.as_ref()).await {
-        core.emit(AgentEventType::Error, Some(format!("runner crashed: {err}")), Some(json!({"fatal": true})));
+        core.emit(
+            AgentEventType::Error,
+            Some(format!("runner crashed: {err}")),
+            Some(json!({"fatal": true})),
+        );
         let mut reason = core.reason.lock().unwrap();
         reason.get_or_insert(RunnerStopReason::Failed);
     }
@@ -546,30 +715,66 @@ fn result_of(core: &Core, local: &Local) -> RunnerLoopResult {
     }
 }
 
-async fn body(core: &Arc<Core>, local: &mut Local, adapter: &dyn AgentAdapter) -> Result<(), String> {
+async fn body(
+    core: &Arc<Core>,
+    local: &mut Local,
+    adapter: &dyn AgentAdapter,
+) -> Result<(), String> {
     let git = &core.git;
     let config = &core.config;
     let g = |e: crate::git::GitError| e.to_string();
     let max_idle = core.tuning.max_idle_turns.unwrap_or(2);
     let max_failures = core.tuning.max_consecutive_failures.unwrap_or(3);
-    let retry_delay = core.tuning.retry_delay.unwrap_or(Duration::from_millis(5000));
+    let retry_delay = core
+        .tuning
+        .retry_delay
+        .unwrap_or(Duration::from_millis(5000));
 
     // ---- setup
-    core.status(format!("runner started for {} on {}", config.agent_id, config.branch), Some(json!({"kind": adapter.kind().as_str(), "branch": config.branch})));
-    if git.try_run(&["config", "user.name"]).await.stdout.trim().is_empty() {
-        git.run(&["config", "user.name", &format!("{} (ratchet)", config.agent_id)]).await.map_err(g)?;
-        git.run(&["config", "user.email", &format!("{}@ratchet.local", config.agent_id)]).await.map_err(g)?;
+    core.status(
+        format!(
+            "runner started for {} on {}",
+            config.agent_id, config.branch
+        ),
+        Some(json!({"kind": adapter.kind().as_str(), "branch": config.branch})),
+    );
+    if git
+        .try_run(&["config", "user.name"])
+        .await
+        .stdout
+        .trim()
+        .is_empty()
+    {
+        git.run(&[
+            "config",
+            "user.name",
+            &format!("{} (ratchet)", config.agent_id),
+        ])
+        .await
+        .map_err(g)?;
+        git.run(&[
+            "config",
+            "user.email",
+            &format!("{}@ratchet.local", config.agent_id),
+        ])
+        .await
+        .map_err(g)?;
     }
     append_exclude(&core.workdir, git).await?;
     let base_head = git.head().await.map_err(g)?;
-    git.run(&["update-ref", &core.accepted_ref, &base_head]).await.map_err(g)?;
+    git.run(&["update-ref", &core.accepted_ref, &base_head])
+        .await
+        .map_err(g)?;
     let mut known: HashSet<String> = HashSet::from([base_head]);
 
     let preflight = adapter.preflight().await;
     if !preflight.ok {
         core.emit(
             AgentEventType::Error,
-            Some(format!("agent preflight failed: {}", preflight.problems.join("; "))),
+            Some(format!(
+                "agent preflight failed: {}",
+                preflight.problems.join("; ")
+            )),
             Some(json!({"problems": preflight.problems})),
         );
         core.set_reason(RunnerStopReason::AgentUnavailable);
@@ -605,21 +810,14 @@ async fn body(core: &Arc<Core>, local: &mut Local, adapter: &dyn AgentAdapter) -
         };
 
         // -- agent turn
-        let turn_result: Result<(), AgentError> = if session.is_none() {
-            core.status("agent turn started", Some(json!({"turn": local.turns, "resumed": false})));
-            let start_spec = AgentSpec { prompt: build_initial_prompt(config, &context_text), ..spec };
-            match adapter.start(&start_spec, &callback, &core.ctl).await {
-                Ok(s) => {
-                    session = Some(s);
-                    Ok(())
-                }
-                Err(e) => Err(e),
-            }
-        } else {
-            let s = session.as_mut().expect("checked above");
-            core.status("agent turn started", Some(json!({"turn": local.turns, "resumed": true})));
+        let turn_result: Result<(), AgentError> = if let Some(s) = session.as_mut() {
+            core.status(
+                "agent turn started",
+                Some(json!({"turn": local.turns, "resumed": true})),
+            );
             let spend = core.shared.lock().unwrap().spend_usd;
-            let user_messages: Vec<String> = std::mem::take(&mut core.mailbox.state.lock().unwrap().user_messages);
+            let user_messages: Vec<String> =
+                std::mem::take(&mut core.mailbox.state.lock().unwrap().user_messages);
             let message = build_resume_message(&ResumeInput {
                 entry: entry.as_ref(),
                 best_value: local.best,
@@ -630,29 +828,53 @@ async fn body(core: &Arc<Core>, local: &mut Local, adapter: &dyn AgentAdapter) -
                 user_messages: &user_messages,
                 no_change,
             });
-            adapter.resume(s, &spec, &message, &callback, &core.ctl).await
+            adapter
+                .resume(s, &spec, &message, &callback, &core.ctl)
+                .await
+        } else {
+            core.status(
+                "agent turn started",
+                Some(json!({"turn": local.turns, "resumed": false})),
+            );
+            let start_spec = AgentSpec {
+                prompt: build_initial_prompt(config, &context_text),
+                ..spec
+            };
+            match adapter.start(&start_spec, &callback, &core.ctl).await {
+                Ok(s) => {
+                    session = Some(s);
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
         };
         match turn_result {
             Ok(()) => failures = 0,
             Err(err) => {
                 if err.is_aborted() || core.ctl.is_cancelled() {
-                    if let AgentError::Aborted { session: Some(s) } = err {
-                        if session.is_none() {
-                            session = Some(s);
-                        }
+                    if let AgentError::Aborted { session: Some(s) } = err
+                        && session.is_none()
+                    {
+                        session = Some(s);
                     }
                     break;
                 }
                 failures += 1;
                 let text = describe(&err);
-                core.emit(AgentEventType::Error, Some(format!("agent turn failed: {text}")), Some(json!({"failures": failures})));
+                core.emit(
+                    AgentEventType::Error,
+                    Some(format!("agent turn failed: {text}")),
+                    Some(json!({"failures": failures})),
+                );
                 if failures >= max_failures {
                     core.set_reason(RunnerStopReason::Failed);
                     break;
                 }
                 core.clock.sleep(retry_delay, &core.ctl).await;
                 // retry as a resume if we have a session, else restart; tell the agent what happened
-                notes = vec![format!("Your previous turn crashed ({text}). Check the tree for half-finished edits and continue.")];
+                notes = vec![format!(
+                    "Your previous turn crashed ({text}). Check the tree for half-finished edits and continue."
+                )];
                 entry = None;
                 no_change = false;
                 if session.is_none() {
@@ -668,8 +890,12 @@ async fn body(core: &Arc<Core>, local: &mut Local, adapter: &dyn AgentAdapter) -
         no_change = false;
         let Some(candidate) = candidate else {
             idle_turns += 1;
-            core.status("no change after agent turn", Some(json!({"idleTurns": idle_turns})));
-            if idle_turns >= max_idle && core.mailbox.state.lock().unwrap().user_messages.is_empty() {
+            core.status(
+                "no change after agent turn",
+                Some(json!({"idleTurns": idle_turns})),
+            );
+            if idle_turns >= max_idle && core.mailbox.state.lock().unwrap().user_messages.is_empty()
+            {
                 core.set_reason(RunnerStopReason::Idle);
                 break;
             }
@@ -680,7 +906,10 @@ async fn body(core: &Arc<Core>, local: &mut Local, adapter: &dyn AgentAdapter) -
         };
         idle_turns = 0;
         if !core.push().await {
-            core.reason.lock().unwrap().get_or_insert(RunnerStopReason::Failed);
+            core.reason
+                .lock()
+                .unwrap()
+                .get_or_insert(RunnerStopReason::Failed);
             break;
         }
         known.insert(candidate.sha.clone());
@@ -694,12 +923,29 @@ async fn body(core: &Arc<Core>, local: &mut Local, adapter: &dyn AgentAdapter) -
         core.status("waiting for verdict", Some(json!({"sha": candidate.sha})));
         loop {
             let mut rx = core.mailbox.subscribe();
-            if core.mailbox.state.lock().unwrap().verdicts.contains_key(&candidate.sha) || core.ctl.is_cancelled() {
+            if core
+                .mailbox
+                .state
+                .lock()
+                .unwrap()
+                .verdicts
+                .contains_key(&candidate.sha)
+                || core.ctl.is_cancelled()
+            {
                 break;
             }
             Mailbox::changed(&mut rx, &core.ctl).await;
         }
-        let Some(verdict) = core.mailbox.state.lock().unwrap().verdicts.remove(&candidate.sha) else { break };
+        let Some(verdict) = core
+            .mailbox
+            .state
+            .lock()
+            .unwrap()
+            .verdicts
+            .remove(&candidate.sha)
+        else {
+            break;
+        };
         local.best = verdict.current_best;
         let e = HistoryEntry {
             n: local.history.len() + 1,
@@ -717,8 +963,13 @@ async fn body(core: &Arc<Core>, local: &mut Local, adapter: &dyn AgentAdapter) -
             Some(json!({"sha": candidate.sha, "verdict": verdict.verdict.as_str(), "reasons": verdict.reasons, "currentBest": verdict.current_best})),
         );
         if verdict.verdict == CandidateVerdict::Verified {
-            git.run(&["update-ref", &core.accepted_ref, &candidate.sha]).await.map_err(g)?;
-            core.mailbox.state.lock().unwrap().latest_best = Some(LatestBest { sha: candidate.sha.clone(), branch: config.branch.clone() });
+            git.run(&["update-ref", &core.accepted_ref, &candidate.sha])
+                .await
+                .map_err(g)?;
+            core.mailbox.state.lock().unwrap().latest_best = Some(LatestBest {
+                sha: candidate.sha.clone(),
+                branch: config.branch.clone(),
+            });
         }
 
         notes = core.sync_to_best(local).await?;

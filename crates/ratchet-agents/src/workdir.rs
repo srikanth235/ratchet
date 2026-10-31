@@ -25,7 +25,9 @@ fn io_err(err: std::io::Error) -> WorkdirError {
 }
 
 fn parent_of(dir: &Path) -> PathBuf {
-    dir.parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."))
+    dir.parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 pub struct PrepareWorkdirOptions {
@@ -43,20 +45,39 @@ pub struct PrepareWorkdirOptions {
 pub async fn prepare_workdir(options: PrepareWorkdirOptions) -> Result<Git, WorkdirError> {
     let runner = options.git.clone().unwrap_or_else(exec_git);
     let parent_dir = parent_of(&options.dir);
-    tokio::fs::create_dir_all(&parent_dir).await.map_err(io_err)?;
+    tokio::fs::create_dir_all(&parent_dir)
+        .await
+        .map_err(io_err)?;
     let parent = Git::new(&parent_dir, runner.clone(), options.env.clone());
-    parent.run(&["clone", "--quiet", &options.repo_url, &options.dir.to_string_lossy()]).await?;
+    parent
+        .run(&[
+            "clone",
+            "--quiet",
+            &options.repo_url,
+            &options.dir.to_string_lossy(),
+        ])
+        .await?;
     let git = Git::new(&options.dir, runner, options.env.clone());
     let remote_ref = format!("refs/remotes/origin/{}", options.branch);
     if git.rev_parse(&remote_ref).await.is_some() {
-        git.run(&["checkout", "--quiet", "-B", &options.branch, &remote_ref]).await?;
+        git.run(&["checkout", "--quiet", "-B", &options.branch, &remote_ref])
+            .await?;
     } else {
-        let base = match git.rev_parse(&format!("refs/remotes/origin/{}", options.base_ref)).await {
+        let base = match git
+            .rev_parse(&format!("refs/remotes/origin/{}", options.base_ref))
+            .await
+        {
             Some(b) => Some(b),
             None => git.rev_parse(&options.base_ref).await,
         };
-        let Some(base) = base else { return Err(WorkdirError::BaseRefNotFound(options.base_ref, options.repo_url)) };
-        git.run(&["checkout", "--quiet", "-B", &options.branch, &base]).await?;
+        let Some(base) = base else {
+            return Err(WorkdirError::BaseRefNotFound(
+                options.base_ref,
+                options.repo_url,
+            ));
+        };
+        git.run(&["checkout", "--quiet", "-B", &options.branch, &base])
+            .await?;
     }
     Ok(git)
 }
@@ -68,12 +89,20 @@ pub fn git_auth_env(repo_url: &str, token: &str) -> HashMap<String, String> {
     if !repo_url.starts_with("https://") {
         return env;
     }
-    let Ok(url) = url::Url::parse(repo_url) else { return env };
+    let Ok(url) = url::Url::parse(repo_url) else {
+        return env;
+    };
     let origin = url.origin().ascii_serialization();
     let basic = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
     env.insert("GIT_CONFIG_COUNT".to_string(), "1".to_string());
-    env.insert("GIT_CONFIG_KEY_0".to_string(), format!("http.{origin}/.extraheader"));
-    env.insert("GIT_CONFIG_VALUE_0".to_string(), format!("AUTHORIZATION: basic {basic}"));
+    env.insert(
+        "GIT_CONFIG_KEY_0".to_string(),
+        format!("http.{origin}/.extraheader"),
+    );
+    env.insert(
+        "GIT_CONFIG_VALUE_0".to_string(),
+        format!("AUTHORIZATION: basic {basic}"),
+    );
     env
 }
 
@@ -92,17 +121,32 @@ pub struct LocalCloneOptions {
 pub async fn ensure_local_clone(options: LocalCloneOptions) -> Result<Git, WorkdirError> {
     let runner = options.git.clone().unwrap_or_else(exec_git);
     let parent_dir = parent_of(&options.dir);
-    tokio::fs::create_dir_all(&parent_dir).await.map_err(io_err)?;
+    tokio::fs::create_dir_all(&parent_dir)
+        .await
+        .map_err(io_err)?;
     if options.dir.join(".git").exists() {
         let clone = Git::new(&options.dir, runner, options.env.clone());
-        clone.run(&["fetch", "--quiet", "--prune", "origin"]).await?;
-        clone.run(&["config", "extensions.worktreeConfig", "true"]).await?;
+        clone
+            .run(&["fetch", "--quiet", "--prune", "origin"])
+            .await?;
+        clone
+            .run(&["config", "extensions.worktreeConfig", "true"])
+            .await?;
         return Ok(clone);
     }
     let parent = Git::new(&parent_dir, runner.clone(), options.env.clone());
-    parent.run(&["clone", "--quiet", &options.repo_url, &options.dir.to_string_lossy()]).await?;
+    parent
+        .run(&[
+            "clone",
+            "--quiet",
+            &options.repo_url,
+            &options.dir.to_string_lossy(),
+        ])
+        .await?;
     let clone = Git::new(&options.dir, runner, options.env.clone());
-    clone.run(&["config", "extensions.worktreeConfig", "true"]).await?;
+    clone
+        .run(&["config", "extensions.worktreeConfig", "true"])
+        .await?;
     Ok(clone)
 }
 
@@ -127,32 +171,63 @@ pub struct AddWorktreeOptions {
 /// `git worktree add -B <branch> <dir> <start>`: the agent's branch is the remote's when it exists, else created from `base_ref`
 /// (same rule as `prepare_workdir`). Commit signing is switched off in the worktree: an agent must never wait on a pinentry prompt.
 pub async fn add_worktree(options: AddWorktreeOptions) -> Result<Git, WorkdirError> {
-    let AddWorktreeOptions { clone, dir, branch, base_ref, identity, git, env } = options;
+    let AddWorktreeOptions {
+        clone,
+        dir,
+        branch,
+        base_ref,
+        identity,
+        git,
+        env,
+    } = options;
     if dir.exists() {
         remove_worktree(&clone, &dir).await; // left over from a crashed run
     }
-    let start = match clone.rev_parse(&format!("refs/remotes/origin/{branch}")).await {
+    let start = match clone
+        .rev_parse(&format!("refs/remotes/origin/{branch}"))
+        .await
+    {
         Some(s) => s,
         None => {
-            let base = match clone.rev_parse(&format!("refs/remotes/origin/{base_ref}")).await {
+            let base = match clone
+                .rev_parse(&format!("refs/remotes/origin/{base_ref}"))
+                .await
+            {
                 Some(b) => Some(b),
                 None => clone.rev_parse(&base_ref).await,
             };
             base.ok_or_else(|| WorkdirError::BaseRefNotFoundLocally(base_ref.clone()))?
         }
     };
-    tokio::fs::create_dir_all(parent_of(&dir)).await.map_err(io_err)?;
-    clone.run(&["worktree", "add", "--quiet", "-B", &branch, &dir.to_string_lossy(), &start]).await?;
+    tokio::fs::create_dir_all(parent_of(&dir))
+        .await
+        .map_err(io_err)?;
+    clone
+        .run(&[
+            "worktree",
+            "add",
+            "--quiet",
+            "-B",
+            &branch,
+            &dir.to_string_lossy(),
+            &start,
+        ])
+        .await?;
     let tree = Git::new(&dir, git.unwrap_or_else(exec_git), env);
-    tree.run(&["config", "--worktree", "user.name", &identity.name]).await?;
-    tree.run(&["config", "--worktree", "user.email", &identity.email]).await?;
-    tree.run(&["config", "--worktree", "commit.gpgsign", "false"]).await?;
+    tree.run(&["config", "--worktree", "user.name", &identity.name])
+        .await?;
+    tree.run(&["config", "--worktree", "user.email", &identity.email])
+        .await?;
+    tree.run(&["config", "--worktree", "commit.gpgsign", "false"])
+        .await?;
     Ok(tree)
 }
 
 /// Remove an agent's worktree (and its directory, even if git refuses); never fails.
 pub async fn remove_worktree(clone: &Git, dir: &Path) {
-    let _ = clone.try_run(&["worktree", "remove", "--force", &dir.to_string_lossy()]).await;
+    let _ = clone
+        .try_run(&["worktree", "remove", "--force", &dir.to_string_lossy()])
+        .await;
     let _ = tokio::fs::remove_dir_all(dir).await;
     let _ = clone.try_run(&["worktree", "prune"]).await;
 }
