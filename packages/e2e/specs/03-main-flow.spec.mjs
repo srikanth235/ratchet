@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
-import { ARTIFACTS, fmtNum, goTo, launchApp, openNewOptimization, poll, rpc, screenshotScreen, waitForScreen, waitSettled } from '../harness/launch.mjs';
+import { ARTIFACTS, fmtNum, goTo, launchApp, openNewOptimization, openOptimization, openSandboxPanel, openTab, poll, rpc, screenshotScreen, waitForScreen, waitSettled } from '../harness/launch.mjs';
 
 const NAME = 'Search API latency (demo)'; // the demo's name in the ledger
 const SHOTS = join(ARTIFACTS, 'app-live');
@@ -107,9 +107,7 @@ describe('main flow (real engine, simulation mode)', () => {
     assert.match(await h.win.locator('.page-header .rt-eyebrow').innerText(), /OPTIMIZATIONS\s*\/\s*\S+/i);
     assert.equal((await rpc(h.win, 'getOptimization', id)).summary.budgetUsd, 50);
     assert.equal((await rpc(h.win, 'getOptimization', id)).timeLimitS, 7200);
-    // The sidebar announces it as soon as it is baselining / running.
-    await h.win.locator('.live-card').waitFor({ timeout: 60_000 });
-    assert.match(await h.win.locator('.live-card').innerText(), new RegExp(NAME.slice(0, 12)));
+    assert.equal(await h.win.locator('.live-card').count(), 0, 'the sidebar has no "Live now" card any more');
     assert.equal((await h.win.getByRole('tab', { selected: true }).innerText()).trim(), 'Agents');
     await shot('live-agents-baselining');
   });
@@ -227,65 +225,84 @@ describe('main flow (real engine, simulation mode)', () => {
     await shot('benchmarks');
   });
 
-  test('Optimizations shows the live run, its chart and the table row', async () => {
+  test('Overview shows the live run: spend, value, its row in the table; the range switch follows', async () => {
+    needId();
+    await goTo(h.win, 'Overview');
+    await waitForScreen(h.win, 'overview');
+    await waitSettled(h.win);
+    const row = h.win.locator('[data-testid=optimizations-table] tbody tr', { hasText: NAME });
+    await row.waitFor();
+    assert.match(await row.innerText(), /Running|Baselining/);
+    assert.match(await row.innerText(), /\$\d+(\.\d+)? \/ 50/, 'spend / budget while it runs');
+    assert.match(await h.win.getByTestId('hero-spent').innerText(), /Spent\s*\$\d/);
+    // The demo config has an objective.value, so the value hero is a number (or $0 before the first win), never the "Set a value" hint.
+    const o = await rpc(h.win, 'overview', '90d');
+    assert.ok(o.value, 'the demo has a value model');
+    assert.equal(await h.win.getByTestId('set-a-value').count(), 0);
+    assert.match(await h.win.getByTestId('hero-value').innerText(), /Value locked in\s*\$\d/);
+    assert.equal(o.rows.length, 1);
+    // Range switch: 30 days / 90 days / All time each reload the screen; the live run is in every window.
+    for (const [label, range] of [['30 days', '30d'], ['All time', 'all'], ['90 days', '90d']]) {
+      await h.win.getByRole('radio', { name: label }).click();
+      await poll(`${label} selected`, async () => (await h.win.getByRole('radio', { name: label }).getAttribute('aria-checked')) === 'true', { timeout: 10_000 });
+      assert.equal((await rpc(h.win, 'overview', range)).range, range);
+      await row.waitFor();
+    }
+    assert.doesNotMatch(await h.win.locator('main').innerText(), /NaN|undefined/);
+    assert.equal(await h.win.locator('main .rt-pill').count(), 0, 'status is a dot and a word, not a pill');
+    await shot('overview');
+  });
+
+  test('Optimizations lists the live run in the same table; Running keeps it, Done leaves it out', async () => {
     needId();
     await goTo(h.win, 'Optimizations');
     await waitForScreen(h.win, 'optimizations');
     await waitSettled(h.win);
-    const f = h.win.locator('[data-testid=featured]');
-    await f.waitFor();
-    assert.match(await f.innerText(), new RegExp(NAME.replace(/[()]/g, '\\$&'), 'i'));
-    assert.match(await f.locator('.featured__eyebrow').innerText(), /Live/i);
-    const d = await api();
-    await poll('hero number = best verified', async () => (await f.locator('[data-testid=featured-best]').innerText()).trim() === fmtNum(d.summary.best), { timeout: 30_000 });
     const row = h.win.locator('[data-testid=optimizations-table] tbody tr', { hasText: NAME });
     await row.waitFor();
     assert.match(await row.innerText(), /Running|Baselining/);
-    // four KPIs plus "Value created": the demo config has an objective.value
-    assert.deepEqual(await h.win.locator('.kpi').evaluateAll((ks) => ks.map((k) => k.getAttribute('data-kpi'))), ['wins', 'gain', 'spend', 'cpw', 'value']);
-    // Range switch: the cards follow the window; a fresh ledger has nothing in the window before, so no change chips.
-    for (const range of ['7d', '90d', '30d']) {
-      await h.win.getByRole('radio', { name: range }).click();
-      const snap = await rpc(h.win, 'listOptimizations', { range });
-      const wins = h.win.locator('[data-kpi=wins]');
-      await poll(`wins for ${range}`, async () => (await wins.locator('.kpi__unit').innerText()).trim() === `last ${range}`, { timeout: 15_000 });
-      assert.equal((await wins.locator('.hero-num').innerText()).trim(), snap.kpis[0].value);
-      assert.equal(await h.win.locator('.kpi__badge').count(), 0);
-    }
-    assert.doesNotMatch(await h.win.locator('.kpis').innerText(), /NaN|undefined/);
+    await h.win.getByRole('radio', { name: 'Done' }).click();
+    await h.win.getByText('Nothing has finished yet.').waitFor();
+    await h.win.getByRole('radio', { name: 'Running' }).click();
+    await row.waitFor();
+    await h.win.getByRole('radio', { name: 'All' }).click();
     await shot('optimizations');
   });
 
-  test('Environments shows the automatic environment of the live run: phase, region, cost, no Apply or Destroy', async () => {
+  test('The sandbox line shows the automatic environment of the live run; its panel has phase, region, cost, no Apply or Destroy', async () => {
     needId();
-    await goTo(h.win, 'Environments');
-    await waitForScreen(h.win, 'sandbox');
-    await waitSettled(h.win);
-    const env = h.win.getByTestId('environment');
+    const line = h.win.locator('.sbx__line');
+    await poll('the sandbox line to say it is on', async () => /^Sandbox on · ratchet-sim-search/.test((await line.innerText()).trim()), { timeout: 60_000 });
+    assert.match(await line.innerText(), /\$\d+\.\d\d so far/);
+    const panel = await openSandboxPanel(h.win);
+    const env = panel.getByTestId('environment');
     await env.waitFor({ timeout: 30_000 });
     const info = (await rpc(h.win, 'environments')).environments[0];
     assert.match(info.sandboxId, /^ratchet-sim-search/);
     assert.equal(info.simulated, true);
     assert.equal(info.region, 'us-east-1');
     assert.deepEqual(info.activeRuns, [id]);
+    assert.equal(await env.getAttribute('data-phase'), 'ready');
     const text = await env.innerText();
     assert.match(text, /ratchet-sim-search/);
     assert.match(text, /us-east-1/);
     assert.match(text, /simulated/);
-    assert.match(text, /Ready/);
     assert.match(text, /Runs active\s*1/);
     assert.match(text, /Cost so far\s*\$\d/);
     assert.match(text, /Removed automatically 30 min after the last run ends/);
-    assert.equal(await env.getByRole('button', { name: 'End sandbox now' }).isDisabled(), true, 'cannot end it while a run is active');
-    const buttons = (await h.win.locator('main button').allInnerTexts()).map((t) => t.trim());
+    assert.equal(await env.getByRole('button', { name: 'End now' }).isDisabled(), true, 'cannot end it while a run is active');
+    const buttons = (await panel.getByRole('button').allInnerTexts()).map((t) => t.trim());
     assert.deepEqual(buttons.filter((t) => /plan|apply|destroy sandbox/i.test(t)), []);
-    assert.equal(await h.win.getByTestId('last-receipt').locator('.receipt').count(), 0, 'no receipt while the environment is alive');
+    assert.equal(await panel.getByTestId('receipt').count(), 0, 'no receipt while the environment is alive');
     await shot('sandbox');
+    await h.win.keyboard.press('Escape');
+    assert.equal(await h.win.getByTestId('sandbox-panel').count(), 0);
   });
 
   test('Open pull request stays disabled while the run is live', async () => {
     needId();
-    await goTo(h.win, 'Result');
+    await openOptimization(h.win, NAME);
+    await openTab(h.win, 'Result');
     await waitForScreen(h.win, 'result');
     await waitSettled(h.win);
     assert.equal(await h.win.getByRole('button', { name: /pull request/i }).isDisabled(), true);
@@ -308,7 +325,7 @@ describe('main flow (real engine, simulation mode)', () => {
 
   test('Stop & revoke keys needs confirmation, then stops the run', async () => {
     needId();
-    await goTo(h.win, 'Agents');
+    await openOptimization(h.win, NAME); // a running optimization opens its Agents
     await waitForScreen(h.win, 'agents');
     await h.win.getByRole('button', { name: /Stop & revoke keys/ }).click();
     await h.win.getByRole('button', { name: 'Confirm kill switch' }).waitFor();
@@ -322,13 +339,12 @@ describe('main flow (real engine, simulation mode)', () => {
     await poll('the badge to leave "Live"', async () => !/^Live/.test(await badge().innerText()), { timeout: 30_000 });
     await poll('no running agents', async () => (await api()).agents.every((a) => a.status !== 'running'), { timeout: 60_000 });
     assert.equal(await h.win.getByRole('button', { name: /Stop & revoke keys/ }).count(), 0);
-    await poll('the sidebar "Live now" card to go away', async () => (await h.win.locator('.live-card').count()) === 0, { timeout: 30_000 });
     wins = await winCount();
   });
 
   test('Result shows the outcome; Export report works; Open PR only with a verified win', async () => {
     needId();
-    await goTo(h.win, 'Result');
+    await openOptimization(h.win, NAME); // a finished optimization opens its Result
     await waitForScreen(h.win, 'result');
     await waitSettled(h.win);
     const d = await api();
@@ -389,15 +405,15 @@ describe('main flow (real engine, simulation mode)', () => {
     await shot('result');
   });
 
-  test('the environment goes idle after the run; "End sandbox now" (behind a confirm) removes it and writes the receipt', async () => {
+  test('the sandbox goes idle after the run; "End now" (behind a confirm) removes it and shows the receipt', async () => {
     needId();
-    await goTo(h.win, 'Environments');
-    await waitForScreen(h.win, 'sandbox');
-    const env = h.win.getByTestId('environment');
+    const panel = await openSandboxPanel(h.win);
+    const env = panel.getByTestId('environment');
     await env.waitFor({ timeout: 30_000 });
-    await poll('the environment to be idle', async () => /Idle/.test(await env.innerText()), { timeout: 2 * MIN, interval: 1000 });
-    const end = env.getByRole('button', { name: 'End sandbox now' });
-    await poll('End sandbox now enabled', async () => end.isEnabled(), { timeout: 60_000 });
+    await poll('the sandbox to be idle', async () => (await env.getAttribute('data-phase')) === 'idle', { timeout: 2 * MIN, interval: 1000 });
+    assert.match(await h.win.locator('.sbx__line').innerText(), /^Sandbox idle · ratchet-sim-search[\s\S]*off at \d\d:\d\d/);
+    const end = env.getByRole('button', { name: 'End now' });
+    await poll('End now enabled', async () => end.isEnabled(), { timeout: 60_000 });
     assert.match(await env.innerText(), /Removes itself at \d/);
     await end.click();
     const confirm = h.win.getByRole('group', { name: 'Confirm end sandbox' });
@@ -407,26 +423,28 @@ describe('main flow (real engine, simulation mode)', () => {
     assert.equal((await rpc(h.win, 'environments')).environments.length, 1, 'cancel ends nothing');
     await end.click();
     await h.win.getByRole('button', { name: 'Confirm end sandbox' }).click();
-    const receipt = h.win.getByTestId('last-receipt').getByTestId('receipt');
+    const receipt = panel.getByTestId('receipt');
     await receipt.waitFor({ timeout: 90_000 });
-    assert.equal(await h.win.getByTestId('environment').count(), 0, 'the environment is gone');
+    assert.equal(await h.win.getByTestId('environment').count(), 0, 'the sandbox is gone');
     const text = await receipt.innerText();
     assert.match(text, /Nothing left running/);
     assert.match(text, /ended by you/);
     assert.match(text, /Cost\s+\$\d/i);
     assert.match(text, /instances? terminated/);
+    await poll('the sandbox line to say none is running', async () => /No sandbox running/.test(await h.win.locator('.sbx__line').innerText()), { timeout: 30_000 });
     const vm = (await rpc(h.win, 'environments')).lastReceipt;
     assert.equal(vm.trigger, 'manual');
     assert.equal(vm.nothingRunning, true);
     assert.deepEqual(vm.runs.map((r) => r.optimizationId), [id]);
     assert.deepEqual(vm.orphans, []);
     await shot('sandbox-receipt');
+    await h.win.keyboard.press('Escape');
     assert.deepEqual(h.errors, []);
   });
 
   test('Result now shows the teardown receipt instead of a checklist', async () => {
     needId();
-    await goTo(h.win, 'Result');
+    await openOptimization(h.win, NAME);
     await waitForScreen(h.win, 'result');
     await waitSettled(h.win);
     const receipt = h.win.getByTestId('receipt');
@@ -438,15 +456,30 @@ describe('main flow (real engine, simulation mode)', () => {
     await shot('result-receipt');
   });
 
-  test('Optimizations afterwards lists the finished run; Settings still renders', async () => {
+  test('Optimizations and Overview afterwards list the finished run, waiting on the user when it has wins and no PR; Connectors still renders', async () => {
     needId();
     await goTo(h.win, 'Optimizations');
     await waitForScreen(h.win, 'optimizations');
     const row = h.win.locator('[data-testid=optimizations-table] tbody tr', { hasText: NAME });
     await row.waitFor();
-    assert.match(await row.innerText(), /Stopped|Completed|PR open/);
-    assert.equal(await h.win.locator('.live-card').count(), 0);
-    await goTo(h.win, 'Settings');
+    const pr = (await api()).prUrl;
+    const expected = pr ? /PR open/ : wins > 0 ? /Waiting on you/ : /No win/;
+    await poll('the status word of the finished run', async () => expected.test(await row.innerText()), { timeout: 30_000 });
+    assert.doesNotMatch(await row.innerText(), /Running|Baselining/);
+    await goTo(h.win, 'Overview');
+    await waitForScreen(h.win, 'overview');
+    const needs = h.win.getByTestId('needs-you');
+    if (!pr && wins > 0) {
+      await poll('the run in "Needs you"', async () => /verified wins?/.test(await needs.innerText()), { timeout: 30_000 });
+      await needs.getByRole('button').first().click();
+      await waitForScreen(h.win, 'result');
+      await goTo(h.win, 'Overview');
+      await waitForScreen(h.win, 'overview');
+    } else {
+      await poll('nothing waiting', async () => /Nothing is waiting on you/.test(await needs.innerText()), { timeout: 30_000 });
+    }
+    await shot('overview-finished');
+    await goTo(h.win, 'Connectors');
     await waitForScreen(h.win, 'settings');
     await shot('settings');
     await goTo(h.win, 'Optimizations');

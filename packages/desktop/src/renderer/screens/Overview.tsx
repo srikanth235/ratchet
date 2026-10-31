@@ -90,11 +90,12 @@ export function Overview() {
   const q = useQuery(() => window.ratchet.overview(range), [range], { intervalMs: 10_000 });
   const o = q.data;
 
+  // With no optimization at all the empty state carries the one New optimization button.
   const header = (
     <header className="head">
       <h1 className="serif">Overview</h1>
-      <RangeSwitch value={range} onChange={setRange} />
-      <button type="button" className="btn pri" onClick={() => go('new')}>New optimization</button>
+      {!o?.empty && <RangeSwitch value={range} onChange={setRange} />}
+      {!o?.empty && <button type="button" className="btn pri" onClick={() => go('new')}>New optimization</button>}
     </header>
   );
 

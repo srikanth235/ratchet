@@ -38,7 +38,7 @@ export function Optimizations() {
             ))}
           </div>
         )}
-        <button type="button" className="btn pri" onClick={() => go('new')}>New optimization</button>
+        {rows.length > 0 && <button type="button" className="btn pri" onClick={() => go('new')}>New optimization</button>}
       </header>
       {q.error && !q.data ? (
         <ErrorNote error={`Failed to load optimizations: ${q.error}`} />
