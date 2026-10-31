@@ -2,7 +2,7 @@
 
 Real patches against `examples/demo-forecast` (paths relative to its root; apply with `git apply`, or from the repo root
 with `--directory=examples/demo-forecast`), and two scripts that play them as agent attempts. Regenerate the scripts with
-`node scripts/demo-forecast/build-scripts.mjs` (from `packages/agents`; build the demo first, the overfit trick's constants
+`node scripts/demo-forecast/build-scripts.mjs` (from `crates/ratchet-agents`; build the demo first, the overfit trick's constants
 are read from its generator); load them with `loadDemoForecastScript('cc' | 'cx')`.
 
 | Patch | SOLUTIONS.md item | Needs | Backtest WAPE after (cc order) |

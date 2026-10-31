@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Generates cc.script.json / cx.script.json (ScriptedAgent scripts for examples/demo-forecast).
-// Run: node scripts/demo-forecast/build-scripts.mjs   (from packages/agents; needs `pnpm --filter @ratchet/demo-forecast build`)
+// Run: node scripts/demo-forecast/build-scripts.mjs   (from crates/ratchet-agents; needs `pnpm --filter @ratchet/demo-forecast build`)
 // Step `{type:'patch', file}` references a patch in this directory; loadDemoForecastScript() inlines it.
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

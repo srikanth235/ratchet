@@ -1,6 +1,6 @@
 //! Differential tests against the TypeScript implementation.
 //!
-//! The fixtures in `tests/golden/*.json` were produced by running the TypeScript code (`generate.mjs`) on seeded
+//! The fixtures in `tests/golden/*.json` were produced by running the (since deleted) TypeScript code on seeded
 //! random and hand-picked inputs. Every test feeds the same inputs to the Rust code and requires the same
 //! answer: identical strings, identical errors, identical floating-point numbers. This is what "behaviour
 //! identical" means for statistics, auto-calibration, the ratchet rule, protected-path matching, number

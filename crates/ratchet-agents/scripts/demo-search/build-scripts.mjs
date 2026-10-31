@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Generates cc.script.json / cx.script.json (ScriptedAgent scripts for examples/demo-search).
-// Run: node scripts/demo-search/build-scripts.mjs   (from packages/agents)
+// Run: node scripts/demo-search/build-scripts.mjs   (from crates/ratchet-agents)
 // Step `{type:'patch', file}` references a patch in this directory; loadDemoSearchScript() inlines it.
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';

@@ -1,2 +1,0 @@
-{"type":"system","subtype":"init","session_id":"0b9d4c20-aaaa-bbbb-cccc-111122223333","model":"claude-sonnet-5-5","tools":["Bash"]}
-{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"0b9d4c20-aaaa-bbbb-cccc-111122223333","num_turns":1,"total_cost_usd":0.01,"usage":{"input_tokens":5,"output_tokens":5}}

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Generates cc.script.json / cx.script.json (ScriptedAgent scripts for examples/demo-cli) and snapshot.ts.txt.
-// Run: node scripts/demo-cli/build-scripts.mjs   (from packages/agents; needs `pnpm --filter @ratchet/demo-cli build`)
+// Run: node scripts/demo-cli/build-scripts.mjs   (from crates/ratchet-agents; needs `pnpm --filter @ratchet/demo-cli build`)
 // Step `{type:'patch', file}` references a patch in this directory; loadDemoCliScript() inlines it.
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';

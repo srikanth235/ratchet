@@ -1,4 +1,0 @@
-{"type":"thread.started","thread_id":"thread-fail"}
-{"type":"turn.started"}
-{"type":"error","message":"stream disconnected before completion: 429 Too Many Requests"}
-{"type":"turn.failed","error":{"message":"stream disconnected before completion: 429 Too Many Requests"}}

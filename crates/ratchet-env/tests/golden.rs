@@ -1,4 +1,4 @@
-//! Differential tests against the TypeScript implementation (`tests/golden/generate.mjs` runs it on seeded inputs).
+//! Differential tests against the TypeScript implementation (the since-deleted TypeScript, run on seeded inputs; see docs/CUTOVER.md).
 //!
 //! Every fixture case is fed to the Rust code and must give the same answer: same checks and messages, same numbers
 //! (compared as JavaScript numbers), same strings. `ratchet.yaml` edits are compared by their parsed meaning, not byte

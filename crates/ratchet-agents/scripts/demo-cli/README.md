@@ -2,7 +2,7 @@
 
 Real patches against `examples/demo-cli` (paths relative to its root; apply with `git apply`, or from the repo root with
 `--directory=examples/demo-cli`), and two scripts that play them as agent attempts. Regenerate the scripts with
-`node scripts/demo-cli/build-scripts.mjs` (from `packages/agents`; build the demo first, the overfit table is recorded from
+`node scripts/demo-cli/build-scripts.mjs` (from `crates/ratchet-agents`; build the demo first, the overfit table is recorded from
 its output on the visible invocations); load them with `loadDemoCliScript('cc' | 'cx')`.
 
 | Patch | SOLUTIONS.md item | Needs |

@@ -1,4 +1,4 @@
-//! Golden fixtures from the TypeScript implementation (`tests/golden/generate.mjs` runs `packages/bench/src` with tsx).
+//! Golden fixtures from the TypeScript implementation (produced by running the since-deleted `packages/bench/src` with tsx; see docs/CUTOVER.md).
 //!
 //! The generated shell scripts are the security boundary of the remote bench (user switching, holdout handling, image
 //! restore), so they are compared byte for byte with what the TypeScript produced: a handful of scripts in full, the rest

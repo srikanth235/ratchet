@@ -18,10 +18,11 @@ Spec: `packages/core/src/environment/*` and `packages/engine/src/environment/*` 
 Total for these modules: 97 TypeScript cases (`vitest run src/environment`) against 31 unit + 36 validate + 5 locked = 72
 Rust tests that fold the `it.each` rows into loops, plus the golden differential tests below.
 
-### Golden (differential) tests: `tests/golden.rs`, fixtures from `tests/golden/generate.mjs`
+### Golden (differential) tests: `tests/golden.rs`, fixtures from the TypeScript
 
-The fixtures are produced by running the TypeScript with `tsx` on seeded inputs (regenerate: see the header of
-`generate.mjs`; `@ratchet/core` must be built because the engine's `samples.ts` imports it from `dist`).
+The fixtures were produced by running the TypeScript with `tsx` on seeded inputs. The generator (`generate.mjs`) was deleted with the
+TypeScript at the cut-over, so they are frozen expectations (it is at `fc503b1:crates/ratchet-env/tests/golden/generate.mjs`;
+see docs/CUTOVER.md).
 
 | What | Cases |
 |---|---|
