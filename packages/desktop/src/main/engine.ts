@@ -19,10 +19,12 @@ import type {
 import { GitHubGitHost } from '@ratchet/github';
 import { createHybridRuntime, createSimulationRuntime, type HybridOptions, type LiveRuntime, type SimulationProject, type SimulationRuntime } from '@ratchet/runtime';
 import type { DemoId } from '../shared/types.js';
+import type { ResolvedConnections } from './connectors.js';
 import { createDevEngine, type AppEngine } from './dev-app.js';
 import type { HarnessCache } from './harnesses.js';
 import { friendlyMissing, slugOf } from './repo-slug.js';
 import { effectivePaths, secretSource, type LivePaths } from './live-config.js';
+import type { ConnectorStore } from './connectors.js';
 import type { SettingsStore } from './settings.js';
 
 /** Everything the main process needs from "the engine side". */
@@ -34,6 +36,8 @@ export const DEMO_PROJECTS: Record<DemoId, SimulationProject> = { 'demo-search':
 /** What the production engine is built from: Settings (non-secret values and, in the main process only, the secrets). */
 export interface LiveAppConfig {
   settings: SettingsStore;
+  /** The saved GitHub accounts, AWS profiles and agent credentials; each repo's runtime is built from the ones chosen for it. */
+  connectors: ConnectorStore;
   /** Where per-sandbox OpenTofu state, the git cache, local agent worktrees and scratch dirs live (userData/sandboxes). */
   stateRoot: string;
   /** What empty tofu settings resolve to (bundled infra/aws in a packaged app). */
@@ -86,6 +90,14 @@ export function createEngineForApp(ledger: Ledger, opts: CreateEngineOptions = {
     return createDevEngine(ledger, 'simulation', { ...opts, ...(opts.tickMs === undefined && tick > 0 ? { tickMs: tick } : {}) });
   }
   return new ProductEngine(ledger, opts).asApp();
+}
+
+/** `localAgents` options carrying the API key of a chosen `api-key` connector that runs on this Mac. */
+function localKeys(chosen: ResolvedConnections): Pick<HybridOptions, 'localAgents'> | Record<string, never> {
+  const claude = chosen.agents.find((a) => a.agent === 'claude-code' && a.where === 'local' && a.apiKey);
+  const codex = chosen.agents.find((a) => a.agent === 'codex' && a.where === 'local' && a.apiKey);
+  if (!claude && !codex) return {};
+  return { localAgents: { ...(claude ? { claude: { apiKey: claude.apiKey! } } : {}), ...(codex ? { codex: { apiKey: codex.apiKey! } } : {}) } };
 }
 
 class ProductEngine {
@@ -159,12 +171,15 @@ class ProductEngine {
   private async live(slug: string | null): Promise<LiveRuntime> {
     const cfg = this.opts.live;
     if (!cfg) throw new Error('Real runs are not set up in this build. Use a demo, or start the app normally.');
-    const { settings } = cfg;
-    const s = settings.live;
-    const token = settings.getSecret('githubToken');
-    if (slug && !token) throw new Error('Sign in with GitHub first (Settings).');
-    const region = regionForOptimization(slug ? cfg.configFor?.(slug) : undefined, s.awsRegion || 'us-east-1');
-    const key = [slug ?? '*', region, s.awsProfile, s.runnerImageRef, s.benchImageRef, s.tofuBinary, s.moduleDir, token ? 'tok' : ''].join('|');
+    const s = cfg.settings.live;
+    // The connectors chosen for this repo (its remembered choice, else the defaults).
+    const chosen = await cfg.connectors.resolve(slug);
+    const token = chosen.github?.token ?? null;
+    if (slug && !token) throw new Error('Sign in with GitHub first (Connectors).');
+    const awsProfile = chosen.aws?.profile ?? '';
+    const region = regionForOptimization(slug ? cfg.configFor?.(slug) : undefined, chosen.aws?.region || s.awsRegion || 'us-east-1');
+    const agentsKey = chosen.agents.map((a) => `${a.connectorId}${a.apiKey ? '+k' : ''}`).join(',');
+    const key = [slug ?? '*', region, awsProfile, chosen.github?.id ?? '', agentsKey, s.runnerImageRef, s.benchImageRef, s.tofuBinary, s.moduleDir, token ? 'tok' : ''].join('|');
     const existing = this.lives.get(slug ?? '*');
     if (existing && !existing.stale && existing.key === key) return existing.promise;
     if (existing) {
@@ -172,7 +187,7 @@ class ProductEngine {
       if (old && !old.engine.runActive()) void old.dispose().catch(() => undefined);
       else if (old) return old; // a run is active on it: keep it until it finishes, then the next call rebuilds
     }
-    const promise = this.buildLive(cfg, slug, region, token);
+    const promise = this.buildLive(cfg, slug, region, chosen);
     this.lives.set(slug ?? '*', { promise, stale: false, key });
     promise.then(
       (rt) => {
@@ -184,9 +199,11 @@ class ProductEngine {
     return promise;
   }
 
-  private async buildLive(cfg: LiveAppConfig, slug: string | null, region: string, token: string | null): Promise<LiveRuntime> {
+  private async buildLive(cfg: LiveAppConfig, slug: string | null, region: string, chosen: ResolvedConnections): Promise<LiveRuntime> {
     const { settings } = cfg;
     const s = settings.live;
+    const token = chosen.github?.token ?? null;
+    const awsProfile = chosen.aws?.profile ?? '';
     const paths = effectivePaths(s, cfg.defaults);
     mkdirSync(cfg.stateRoot, { recursive: true });
     const { harnesses, loginPath } = await cfg.harnesses.get();
@@ -194,12 +211,12 @@ class ProductEngine {
     let benchImageRef = s.benchImageRef || undefined;
     // The AMIs are found by tag in the repo's region, never typed. Needs AWS credentials. The evaluator's (bench) image is required;
     // the cloud runner image only for "Cloud (unattended)" runs, so a miss there is noted but does not block local agents.
-    const canLookUp = !!cfg.appVersion && (s.awsProfile !== '' || !!process.env['AWS_ACCESS_KEY_ID']);
+    const canLookUp = !!cfg.appVersion && (awsProfile !== '' || !!process.env['AWS_ACCESS_KEY_ID']);
     let imageProblem: string | undefined;
     let runnerProblem: string | undefined;
     const lookup = cfg.resolveImages ?? resolveImageRefs;
     const find = (need: Array<'bench' | 'runner'>) =>
-      lookup({ appVersion: cfg.appVersion!, region, need, override: { runner: runnerImageRef, bench: benchImageRef }, profile: s.awsProfile || undefined });
+      lookup({ appVersion: cfg.appVersion!, region, need, override: { runner: runnerImageRef, bench: benchImageRef }, profile: awsProfile || undefined });
     if (canLookUp && !benchImageRef) {
       try {
         benchImageRef = (await find(['bench'])).bench;
@@ -227,10 +244,12 @@ class ProductEngine {
       tofuBinary: paths.tofuBinary,
       moduleDir: paths.moduleDir,
       stateRoot: cfg.stateRoot,
-      secrets: secretSource(settings),
-      awsProfile: s.awsProfile || undefined,
+      secrets: secretSource(chosen, (name) => settings.envSecret(name === 'ANTHROPIC_API_KEY' ? 'anthropicApiKey' : 'openaiApiKey')),
+      awsProfile: awsProfile || undefined,
       harnesses,
       loginPath,
+      // An API key chosen for a local agent is handed to that agent's adapter; a login runs with no key at all.
+      ...localKeys(chosen),
     };
     const rt = await (cfg.createRuntime ?? createHybridRuntime)(options);
     if (imageProblem) rt.missing.push(imageProblem);
@@ -376,8 +395,9 @@ class ProductEngine {
       diff: async ({ baseRef, sha, repo }): Promise<FileDiff[] | null> => {
         const slug = slugOf(repo);
         if (slug === null) return (await this.sim(this.simProjectFor(repo))).git.diff(baseRef, sha);
-        const token = this.opts.live?.settings.getSecret('githubToken');
-        if (!token || !this.opts.live) return null;
+        if (!this.opts.live) return null;
+        const token = (await this.opts.live.connectors.resolve(slug)).github?.token;
+        if (!token) return null;
         let git = this.gitHosts.get(slug);
         if (!git) {
           git = new GitHubGitHost({ repo: slug, token, cacheDir: join(this.opts.live.stateRoot, 'git-cache-diff', slug.replace('/', '__')) });

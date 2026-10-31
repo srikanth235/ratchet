@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_CONFIG_YAML } from './default-config.js';
 import { configColumns } from './dev-engine.js';
 import { createEngineForApp, friendlyMissing, slugOf, type AppEngine, type CreateEngineOptions } from './engine.js';
+import { ConnectorStore } from './connectors.js';
 import { HarnessCache } from './harnesses.js';
 import { SettingsStore } from './settings.js';
 
@@ -69,6 +70,7 @@ interface Built {
   app: AppEngine;
   ledger: Ledger;
   settings: SettingsStore;
+  connectors: ConnectorStore;
   live: Array<{ options: HybridOptions; engine: FakeEngine; rt: LiveRuntime; disposed: boolean }>;
   sims: Array<{ project: string; settings: unknown; engine: FakeEngine; disposed: boolean }>;
   imageCalls: unknown[];
@@ -90,8 +92,10 @@ function build(extra: Partial<CreateEngineOptions> = {}, opts: { token?: boolean
   roots.push(stateRoot);
   const ledger = openLedger(':memory:');
   const settings = new SettingsStore(null, cipher, {});
-  if (opts.token ?? true) settings.setSecret('githubToken', 'gho_TOKENTOKENTOKENTOKEN1234');
-  if (opts.aws ?? true) settings.setAwsProfile('sandbox');
+  const harnesses = new HarnessCache({ loginPath: async () => '/login/bin', detect: async () => [harness('claude-code'), { ...harness('codex'), auth: 'signed-out' }] });
+  const connectors = new ConnectorStore(settings, { harnesses });
+  if (opts.token ?? true) connectors.upsertGithub({ login: 'octocat', token: 'gho_TOKENTOKENTOKENTOKEN1234', source: 'token' });
+  if (opts.aws ?? true) connectors.addAws({ profile: 'sandbox' });
   if (opts.seedAwsSandbox) {
     ledger.recordSandbox({ id: 'ratchet-sandbox', provider: 'aws', region: 'us-east-1', status: 'applied', outputs: { artifactsBucket: 'x' } } as never);
   }
@@ -104,13 +108,12 @@ function build(extra: Partial<CreateEngineOptions> = {}, opts: { token?: boolean
     imageCalls.push(a);
     return { bench: 'ami-0bench00000000000a', source: { bench: 'tag' } };
   };
-  const harnesses = new HarnessCache({ loginPath: async () => '/login/bin', detect: async () => [harness('claude-code'), { ...harness('codex'), auth: 'signed-out' }] });
   const app = createEngineForApp(ledger, {
     workRoot: join(stateRoot, 'sim'),
     repoRoot: stateRoot,
     ...extra,
     live: {
-      settings, stateRoot, defaults: { tofuBinary: 'tofu', moduleDir: '/m' }, harnesses, appVersion: '1.2.3', configFor: (s) => configs.get(s),
+      settings, connectors, stateRoot, defaults: { tofuBinary: 'tofu', moduleDir: '/m' }, harnesses, appVersion: '1.2.3', configFor: (s) => configs.get(s),
       createRuntime: async (options) => {
         const engine = new FakeEngine(`live${live.length}`, ledger);
         const entry = { options, engine, disposed: false, rt: null as unknown as LiveRuntime };
@@ -130,7 +133,7 @@ function build(extra: Partial<CreateEngineOptions> = {}, opts: { token?: boolean
       } as unknown as SimulationRuntime;
     }) as never,
   });
-  return { app, ledger, settings, live, sims, imageCalls, stateRoot, configs, setMissing: (m) => { missing = m; }, setResolver: (f) => { resolver = f; } };
+  return { app, ledger, settings, connectors, live, sims, imageCalls, stateRoot, configs, setMissing: (m) => { missing = m; }, setResolver: (f) => { resolver = f; } };
 }
 
 const input = (repoUrl: string) => ({ repoUrl, baseRef: 'main', agents: ['claude-code' as const], budgetUsd: 10, timeLimitSeconds: 600, plateauEvals: 5 });
@@ -270,6 +273,81 @@ describe('the product engine: real runs', () => {
     expect(act.region).toBe('us-east-1');
     await b.app.engine.endSandbox!('ratchet-sandbox');
     expect(b.live[0]!.engine.calls).toEqual(['activity:ratchet-sandbox', 'end:ratchet-sandbox']);
+    b.app.dispose();
+  });
+});
+
+describe('the product engine: the connectors chosen for a repo', () => {
+  const ORG_TOKEN = 'github_pat_ORGTOKENORGTOKENORGTOKEN12';
+  const KEY = 'sk-ant-api03-TEAMKEYTEAMKEYTEAMKEY';
+
+  it('uses the defaults when nothing is remembered for the repo, and the remembered choice when there is one', async () => {
+    const b = build();
+    const org = b.connectors.upsertGithub({ login: 'acme-org', token: ORG_TOKEN, source: 'token' });
+    const dev = b.connectors.addAws({ profile: 'dev-profile', region: 'eu-west-1' });
+    await b.app.engine.createOptimization(input('acme/api'));
+    expect(b.live[0]!.options).toMatchObject({ githubToken: 'gho_TOKENTOKENTOKENTOKEN1234', awsProfile: 'sandbox', region: 'us-east-1' });
+
+    const login = 'agent-claude-code-login';
+    await b.connectors.list();
+    b.connectors.saveRepoConnections('acme/shop', { github: org.id, aws: dev.id, agents: [{ connectorId: login, where: 'local' }] });
+    await b.app.engine.createOptimization(input('acme/shop'));
+    expect(b.live).toHaveLength(2);
+    expect(b.live[1]!.options).toMatchObject({ githubRepo: 'acme/shop', githubToken: ORG_TOKEN, awsProfile: 'dev-profile', region: 'eu-west-1' });
+    expect(b.imageCalls.at(-1)).toMatchObject({ region: 'eu-west-1', profile: 'dev-profile' });
+    // the other repo keeps its own runtime and its own accounts
+    await b.app.engine.createOptimization(input('acme/api'));
+    expect(b.live).toHaveLength(2);
+    b.app.dispose();
+  });
+
+  it('changing the remembered choice rebuilds the repo runtime with the new accounts', async () => {
+    const b = build();
+    const org = b.connectors.upsertGithub({ login: 'acme-org', token: ORG_TOKEN, source: 'token' });
+    await b.connectors.list();
+    await b.app.engine.createOptimization(input('acme/api'));
+    b.connectors.saveRepoConnections('acme/api', { github: org.id, aws: b.connectors.defaultOf('aws')!.id, agents: [{ connectorId: 'agent-claude-code-login', where: 'local' }] });
+    await b.app.engine.createOptimization(input('acme/api'));
+    expect(b.live).toHaveLength(2);
+    expect(b.live[0]!.disposed).toBe(true);
+    expect(b.live[1]!.options.githubToken).toBe(ORG_TOKEN);
+    b.app.dispose();
+  });
+
+  it('refuses a repo whose chosen GitHub account has no token any more', async () => {
+    const b = build({}, { token: false });
+    await expect(b.app.engine.createOptimization(input('acme/api'))).rejects.toThrow(/Sign in with GitHub first/);
+    b.app.dispose();
+  });
+
+  it('hands an API key chosen for a local agent to that agent, and never a key next to a chosen login', async () => {
+    const b = build();
+    const key = await b.connectors.addAgent({ agent: 'claude-code', source: 'api-key', apiKey: KEY });
+    const gh = b.connectors.defaultOf('github')!.id;
+    const aws = b.connectors.defaultOf('aws')!.id;
+    b.connectors.saveRepoConnections('acme/keyed', { github: gh, aws, agents: [{ connectorId: key.id, where: 'local' }] });
+    await b.app.engine.createOptimization(input('acme/keyed'));
+    expect(b.live[0]!.options.localAgents).toMatchObject({ claude: { apiKey: KEY } });
+    expect((b.live[0]!.options.secrets as (k: string, n: string) => string | undefined)('claude-code', 'ANTHROPIC_API_KEY')).toBe(KEY);
+
+    await b.connectors.list();
+    b.connectors.saveRepoConnections('acme/login', { github: gh, aws, agents: [{ connectorId: 'agent-claude-code-login', where: 'local' }] });
+    await b.app.engine.createOptimization(input('acme/login'));
+    const o = b.live[1]!.options;
+    expect(o.localAgents).toBeUndefined();
+    const secrets = o.secrets as (k: string, n: string) => string | undefined;
+    expect(secrets('claude-code', 'ANTHROPIC_API_KEY')).toBeUndefined();
+    expect(secrets('claude-code', 'GITHUB_TOKEN')).toBe('gho_TOKENTOKENTOKENTOKEN1234');
+    b.app.dispose();
+  });
+
+  it('a cloud runner gets the stored key of the chosen API-key connector', async () => {
+    const b = build();
+    b.setResolver(async () => ({ bench: 'ami-0bench00000000000a', runner: 'ami-0runner0000000000b' }));
+    const key = await b.connectors.addAgent({ agent: 'codex', source: 'api-key', apiKey: 'sk-proj-TEAMOPENAIKEYTEAMKEY' });
+    b.connectors.saveRepoConnections('acme/cloud', { github: b.connectors.defaultOf('github')!.id, aws: b.connectors.defaultOf('aws')!.id, agents: [{ connectorId: key.id, where: 'cloud' }] });
+    await b.app.engine.createOptimization({ ...input('acme/cloud'), agentsWhere: 'cloud' });
+    expect((b.live[0]!.options.secrets as (k: string, n: string) => string | undefined)('codex', 'OPENAI_API_KEY')).toBe('sk-proj-TEAMOPENAIKEYTEAMKEY');
     b.app.dispose();
   });
 });

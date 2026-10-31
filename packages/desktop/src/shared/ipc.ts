@@ -13,6 +13,22 @@ const repoSource = z.union([
   z.object({ kind: z.literal('local'), path: z.string().trim().min(1).max(1000) }).strict(),
 ]);
 const secretName = z.enum(['anthropicApiKey', 'openaiApiKey', 'githubToken']);
+const connectorId = z.string().min(1).max(200);
+const connectorAgent = z.enum(['claude-code', 'codex']);
+const connectorName = z.string().trim().min(1).max(80);
+const awsRegion = z.string().trim().max(30).superRefine((v, ctx) => {
+  const problem = validateLiveSetting('awsRegion', v);
+  if (problem || v === '') ctx.addIssue({ code: 'custom', message: problem ?? 'Choose a region such as us-east-1' });
+});
+const monthlyCap = z.number().positive().max(10_000_000).nullable();
+const repoSlug = z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}$/, 'use owner/name');
+const repoConnections = z
+  .object({
+    github: connectorId,
+    aws: connectorId,
+    agents: z.array(z.object({ connectorId, where: agentsWhere }).strict()).min(1).max(8),
+  })
+  .strict();
 
 /** A live setting: a string that passes the same format check the Settings screen shows while typing. */
 const liveField = (key: LiveSettingKey) =>
@@ -32,15 +48,56 @@ export const ARGS = {
   recentActivity: z.tuple([z.object({ optimizationId: id.optional(), limit: z.number().int().min(1).max(200).optional() }).strict().optional()]),
   agentEvents: z.tuple([id, z.number().int().min(0).optional(), z.number().int().min(1).max(1000).optional()]),
   validateConfig: z.tuple([z.string().max(200_000)]),
-  preflight: z.tuple([z.object({ agents: z.array(agentKind).max(8), agentsWhere: agentsWhere, source: z.enum(['github', 'local', 'demo']) }).strict()]),
+  preflight: z.tuple([z.object({ agents: z.array(agentKind).max(8), agentsWhere: agentsWhere, source: z.enum(['github', 'local', 'demo']), repo: repoSlug.optional() }).strict()]),
   getSettings: z.tuple([]),
   environments: z.tuple([]),
   githubStatus: z.tuple([]),
   githubSignIn: z.tuple([]),
   githubSignOut: z.tuple([]),
-  listRepos: z.tuple([z.string().max(200).optional()]),
-  inspectRepo: z.tuple([repoSource]),
+  listRepos: z.tuple([z.string().max(200).optional(), connectorId.optional()]),
+  inspectRepo: z.tuple([repoSource, connectorId.optional()]),
   pickLocalFolder: z.tuple([]),
+  listConnectors: z.tuple([]),
+  refreshConnectors: z.tuple([]),
+  addGithubConnector: z.tuple([
+    z
+      .object({ token: z.string().min(8).max(4096), name: connectorName.optional() })
+      .strict()
+      .superRefine((v, ctx) => {
+        const problem = validateSecretFormat('githubToken', v.token);
+        if (problem) ctx.addIssue({ code: 'custom', path: ['token'], message: problem });
+      }),
+  ]),
+  startGithubConnectorSignIn: z.tuple([z.object({ connectorId: connectorId.optional() }).strict().optional()]),
+  cancelGithubConnectorSignIn: z.tuple([]),
+  addAwsConnector: z.tuple([
+    z
+      .object({
+        profile: z.string().trim().min(1).max(120).regex(/^[A-Za-z0-9_.@:-]+$/, 'profile names may only contain letters, digits and _ . @ : -'),
+        region: awsRegion.optional(),
+        monthlyCapUsd: monthlyCap.optional(),
+        name: connectorName.optional(),
+      })
+      .strict(),
+  ]),
+  addAgentConnector: z.tuple([
+    z.union([
+      z.object({ agent: connectorAgent, source: z.literal('login') }).strict(),
+      z
+        .object({ agent: connectorAgent, source: z.literal('api-key'), apiKey: z.string().min(8).max(4096), name: connectorName.optional() })
+        .strict()
+        .superRefine((v, ctx) => {
+          const problem = validateSecretFormat(v.agent === 'claude-code' ? 'anthropicApiKey' : 'openaiApiKey', v.apiKey);
+          if (problem) ctx.addIssue({ code: 'custom', path: ['apiKey'], message: problem });
+        }),
+    ]),
+  ]),
+  updateConnector: z.tuple([connectorId, z.object({ name: connectorName.optional(), region: awsRegion.optional(), monthlyCapUsd: monthlyCap.optional() }).strict()]),
+  removeConnector: z.tuple([connectorId]),
+  setDefaultConnector: z.tuple([connectorId]),
+  testConnector: z.tuple([connectorId]),
+  getRepoConnections: z.tuple([repoSlug]),
+  saveRepoConnections: z.tuple([repoSlug, repoConnections]),
   awsProfiles: z.tuple([]),
   detectHarnesses: z.tuple([]),
   redetectHarnesses: z.tuple([]),
@@ -64,6 +121,7 @@ export const ARGS = {
         demo: z.enum(['demo-search', 'demo-cli', 'demo-forecast']).optional(),
         agents: z.array(agentKind).min(1).max(8),
         agentsWhere: agentsWhere.optional(),
+        connections: repoConnections.optional(),
         budgetUsd: z.number().positive().max(100_000),
         timeLimitSeconds: z.number().int().positive().max(14 * 24 * 3600),
         plateauEvals: z.number().int().min(1).max(10_000),

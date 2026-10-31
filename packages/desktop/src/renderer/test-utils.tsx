@@ -6,6 +6,7 @@ import { afterEach } from 'vitest';
 import type { AwsProfileList } from '../main/aws-profiles';
 import type { AppEngine } from '../main/dev-app';
 import { createDevEngine } from '../main/dev-app';
+import type { ConnectorStore } from '../main/connectors';
 import type { GithubApi } from '../main/github';
 import { HarnessCache } from '../main/harnesses';
 import { createService, type ConnectionTesterLike, type RatchetService, type ServiceDeps } from '../main/service';
@@ -26,6 +27,8 @@ export interface Harness {
   service: RatchetService;
   ledger: Ledger;
   settings: SettingsStore;
+  /** The saved connectors (GitHub accounts, AWS profiles, agent credentials) behind `window.ratchet`. */
+  connectors: ConnectorStore;
   github: FakeGithub;
   opened: string[];
 }
@@ -57,6 +60,7 @@ export function installApi(opts: InstallOptions = {}): Harness {
   const settings = new SettingsStore(null, { ...cipher, isAvailable: () => opts.encryption ?? true }, opts.settingsEnv ?? {});
   const github = (opts.github as FakeGithub | undefined) ?? new FakeGithub();
   const opened: string[] = [];
+  let connectors!: ConnectorStore;
   const service = createService({
     ledger,
     settings,
@@ -66,7 +70,8 @@ export function installApi(opts: InstallOptions = {}): Harness {
     listAwsProfiles: () => opts.awsProfiles ?? { profiles: [], ssoSessions: [], filesFound: false },
     harnesses: new HarnessCache({ loginPath: async () => '/bin', detect: async () => opts.harnesses ?? [claude(), codex()] }),
     ...(opts.connectionTester ? { connectionTester: opts.connectionTester } : {}),
-    createApp: () => {
+    createApp: (hooks) => {
+      connectors = hooks.connectors;
       const app = createDevEngine(ledger, 'simulation', { tickMs: 3_600_000 });
       const engine = Object.assign(Object.create(app.engine) as EngineApi, opts.engine ?? {});
       return { ...app, engine, dispose: () => app.dispose(), ...opts.app };
@@ -74,7 +79,7 @@ export function installApi(opts: InstallOptions = {}): Harness {
     ...opts.deps,
   });
   window.ratchet = { ...service } as RatchetApi;
-  const h = { service, ledger, settings, github: github as FakeGithub, opened };
+  const h = { service, ledger, settings, connectors, github: github as FakeGithub, opened };
   live.push(h);
   return h;
 }

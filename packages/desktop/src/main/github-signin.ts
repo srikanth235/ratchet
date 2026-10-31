@@ -1,10 +1,10 @@
 import type { GithubFlowVM } from '../shared/types.js';
 import type { GithubApi } from './github.js';
-import type { SettingsStore } from './settings.js';
 
 export interface SignInDeps {
   api: GithubApi;
-  settings: SettingsStore;
+  /** Keep the token of the signed-in account (the connector store: keychain for the token, the login as metadata). */
+  save: (token: string, login: string, connectorId: string | undefined) => void;
   /** Open the verification page in the system browser. */
   openExternal?: (url: string) => void;
   /** Injectable for tests (default: a real timer that `cancel` can interrupt). */
@@ -22,7 +22,8 @@ const defaultSleep = (ms: number, signal: AbortSignal): Promise<void> =>
 
 /**
  * "Sign in with GitHub": the OAuth device flow. `start` returns the code to show and keeps polling in the background;
- * on success the token goes to the keychain-backed settings store (never to the renderer) and the account login is kept.
+ * on success the token goes to the keychain-backed connector store (never to the renderer) and the account login is kept.
+ * `start({ connectorId })` re-signs-in an existing connector.
  */
 export class GithubSignIn {
   private flow: GithubFlowVM | null = null;
@@ -34,7 +35,7 @@ export class GithubSignIn {
     return this.flow;
   }
 
-  async start(): Promise<GithubFlowVM> {
+  async start(opts: { connectorId?: string } = {}): Promise<GithubFlowVM> {
     this.cancel();
     const now = this.d.now ?? Date.now;
     const code = await this.d.api.deviceStart();
@@ -53,7 +54,7 @@ export class GithubSignIn {
     } catch {
       /* the code is shown in the app anyway */
     }
-    void this.poll(code.deviceCode, code.interval, flow, ac);
+    void this.poll(code.deviceCode, code.interval, flow, ac, opts.connectorId);
     return flow;
   }
 
@@ -63,7 +64,7 @@ export class GithubSignIn {
     this.flow = null;
   }
 
-  private async poll(deviceCode: string, startInterval: number, flow: GithubFlowVM, ac: AbortController): Promise<void> {
+  private async poll(deviceCode: string, startInterval: number, flow: GithubFlowVM, ac: AbortController, connectorId: string | undefined): Promise<void> {
     const sleep = this.d.sleep ?? defaultSleep;
     const now = this.d.now ?? Date.now;
     let interval = Math.max(1, startInterval);
@@ -95,8 +96,7 @@ export class GithubSignIn {
         case 'ok': {
           try {
             const { login } = await this.d.api.user(r.token);
-            this.d.settings.setSecret('githubToken', r.token);
-            this.d.settings.setGithubAccount(login, 'device');
+            this.d.save(r.token, login, connectorId);
           } catch (err) {
             return end('error', (err as Error).message);
           }

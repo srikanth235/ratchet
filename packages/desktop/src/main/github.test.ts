@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createGithubApi, PLACEHOLDER_GITHUB_CLIENT_ID, type DevicePoll, type GithubApi } from './github.js';
 import { GithubSignIn } from './github-signin.js';
+import { ConnectorStore } from './connectors.js';
 import { SettingsStore } from './settings.js';
 
 const cipher = { isAvailable: () => true, encrypt: (s: string) => Buffer.from(`enc:${s}`), decrypt: (b: Buffer) => b.toString().slice(4) };
@@ -113,6 +114,10 @@ class FakeApi implements GithubApi {
 const instant = async () => undefined;
 const settle = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); await new Promise((r) => setTimeout(r, 5)); };
 
+const saver = (connectors: ConnectorStore) => (token: string, login: string, connectorId: string | undefined) => {
+  connectors.upsertGithub({ login, token, source: 'device', ...(connectorId ? { connectorId } : {}) });
+};
+
 describe('GithubSignIn (device flow)', () => {
   it('shows the code, opens the browser, polls until approved, then keeps the token in the keychain-backed store', async () => {
     const api = new FakeApi();
@@ -121,14 +126,15 @@ describe('GithubSignIn (device flow)', () => {
     const opened: string[] = [];
     let signedIn = 0;
     const sleeps: number[] = [];
-    const flow = new GithubSignIn({ api, settings, openExternal: (u) => opened.push(u), sleep: async (ms) => { sleeps.push(ms); }, onSignedIn: () => signedIn++ });
+    const connectors = new ConnectorStore(settings);
+    const flow = new GithubSignIn({ api, save: saver(connectors), openExternal: (u) => opened.push(u), sleep: async (ms) => { sleeps.push(ms); }, onSignedIn: () => signedIn++ });
     const f = await flow.start();
     expect(f).toMatchObject({ state: 'pending', userCode: 'WXYZ-9999', verificationUri: 'https://github.com/login/device' });
     expect(opened).toEqual(['https://github.com/login/device']);
     await settle();
-    expect(settings.getSecret('githubToken')).toBe('gho_DEVICEFLOWTOKEN1234567890');
-    expect(settings.githubLogin).toBe('octocat');
-    expect(settings.githubSource).toBe('device');
+    expect(connectors.githubToken()).toBe('gho_DEVICEFLOWTOKEN1234567890');
+    expect(connectors.snapshot()).toMatchObject([{ kind: 'github', login: 'octocat', source: 'device', isDefault: true, status: 'connected' }]);
+    expect(JSON.stringify(connectors.snapshot())).not.toContain('gho_');
     expect(flow.current()).toBeNull();
     expect(signedIn).toBe(1);
     // the interval GitHub asked for (5 s), then slowed down (+5 s at least)
@@ -144,18 +150,19 @@ describe('GithubSignIn (device flow)', () => {
     const api = new FakeApi();
     api.polls = [poll];
     const settings = new SettingsStore(null, cipher, {});
-    const flow = new GithubSignIn({ api, settings, sleep: instant });
+    const connectors = new ConnectorStore(settings);
+    const flow = new GithubSignIn({ api, save: saver(connectors), sleep: instant });
     await flow.start();
     await settle();
     expect(flow.current()).toMatchObject({ state, message: expect.stringMatching(msg) });
-    expect(settings.hasSecret('githubToken')).toBe(false);
+    expect(connectors.snapshot()).toEqual([]);
   });
 
   it('expires on its own when the code outlives its time', async () => {
     const api = new FakeApi();
     let t = 0;
     const settings = new SettingsStore(null, cipher, {});
-    const flow = new GithubSignIn({ api, settings, now: () => t, sleep: async () => { t += 1_000_000; } });
+    const flow = new GithubSignIn({ api, save: saver(new ConnectorStore(settings)), now: () => t, sleep: async () => { t += 1_000_000; } });
     await flow.start();
     await settle();
     expect(flow.current()?.state).toBe('expired');
@@ -164,7 +171,8 @@ describe('GithubSignIn (device flow)', () => {
   it('cancel stops the loop; a second start replaces the first flow', async () => {
     const api = new FakeApi();
     const settings = new SettingsStore(null, cipher, {});
-    const flow = new GithubSignIn({ api, settings, sleep: (ms, signal) => new Promise((r) => signal.addEventListener('abort', () => r(), { once: true })) });
+    const connectors = new ConnectorStore(settings);
+    const flow = new GithubSignIn({ api, save: saver(connectors), sleep: (ms, signal) => new Promise((r) => signal.addEventListener('abort', () => r(), { once: true })) });
     await flow.start();
     flow.cancel();
     expect(flow.current()).toBeNull();
@@ -173,6 +181,21 @@ describe('GithubSignIn (device flow)', () => {
     expect(api.started).toBe(3);
     flow.cancel();
     await settle();
-    expect(settings.hasSecret('githubToken')).toBe(false);
+    expect(connectors.snapshot()).toEqual([]);
+  });
+
+  it('signing in again as the same account replaces its token; a given connector id is re-signed-in', async () => {
+    const api = new FakeApi();
+    const settings = new SettingsStore(null, cipher, {});
+    const connectors = new ConnectorStore(settings);
+    api.polls = [{ status: 'ok', token: 'gho_FIRSTTOKENFIRSTTOKEN1234' }];
+    await new GithubSignIn({ api, save: saver(connectors), sleep: instant }).start();
+    await settle();
+    const [first] = connectors.snapshot();
+    api.polls = [{ status: 'ok', token: 'gho_SECONDTOKENSECONDTOKEN12' }];
+    await new GithubSignIn({ api, save: saver(connectors), sleep: instant }).start({ connectorId: first!.id });
+    await settle();
+    expect(connectors.snapshot()).toHaveLength(1);
+    expect(connectors.githubToken(first!.id)).toBe('gho_SECONDTOKENSECONDTOKEN12');
   });
 });
