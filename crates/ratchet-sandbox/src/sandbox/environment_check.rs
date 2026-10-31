@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use ratchet_core::ports::{
-    PortError, PortResult, SandboxEnvironment, SandboxEnvironmentFile, SandboxEnvironmentKind,
+    PortResult, SandboxEnvironment, SandboxEnvironmentFile, SandboxEnvironmentKind,
 };
 use ratchet_env::{
     EnvironmentChecker, EnvironmentPlanInput, EnvironmentPlanOutcome, hash_environment_files,
@@ -156,10 +156,8 @@ impl TofuEnvironmentChecker {
         let vars_path = root.join("vars.tfvars.json");
         tokio::fs::write(&vars_path, serde_json::to_string(&vars)?).await?;
         let mut tf_env = self.o.env.clone();
-        if let Some(p) = &input.aws_profile {
-            if !p.is_empty() {
-                tf_env.insert("AWS_PROFILE".into(), p.clone());
-            }
+        if let Some(p) = input.aws_profile.as_ref().filter(|p| !p.is_empty()) {
+            tf_env.insert("AWS_PROFILE".into(), p.clone());
         }
         tf_env.insert("AWS_REGION".into(), input.region.clone());
         tf_env.insert(
@@ -240,6 +238,6 @@ fn fail(detail: String) -> EnvironmentPlanOutcome {
 #[async_trait]
 impl EnvironmentChecker for TofuEnvironmentChecker {
     async fn plan(&self, input: &EnvironmentPlanInput) -> PortResult<EnvironmentPlanOutcome> {
-        self.check(input).await.map_err(PortError::from)
+        self.check(input).await
     }
 }

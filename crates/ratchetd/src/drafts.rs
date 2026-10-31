@@ -5,7 +5,6 @@
 //! background (a `POST` answers at once with the draft in status `drafting`), every status change and every progress
 //! line of the agent becomes an `environment-draft` event, and a draft id finds the drafter that made it.
 
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;

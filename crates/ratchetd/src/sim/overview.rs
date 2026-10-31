@@ -1,6 +1,6 @@
 //! The Overview screen (PROVISIONAL API): hero numbers, value staircase, "needs you", the table.
 
-use ratchet_core::enums::{OptimizationStatus, ValueBasis};
+use ratchet_core::enums::{EnvironmentScope, OptimizationStatus, ValueBasis};
 
 use super::Inner;
 use crate::api::*;
