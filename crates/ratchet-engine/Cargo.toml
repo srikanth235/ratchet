@@ -24,6 +24,7 @@ regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 ratchet-agents = { path = "../ratchet-agents" }
 ratchet-bench = { path = "../ratchet-bench" }
+ratchet-connectors = { path = "../ratchet-connectors" }
 ratchet-core = { path = "../ratchet-core" }
 ratchet-github = { path = "../ratchet-github" }
 ratchet-ledger = { path = "../ratchet-ledger" }
@@ -37,8 +38,6 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 tracing = "0.1"
 url = "2"
 
-[target.'cfg(target_os = "macos")'.dependencies]
-security-framework = "3"
 
 [dev-dependencies]
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite"] }

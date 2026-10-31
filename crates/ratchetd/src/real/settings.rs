@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
+use ratchet_connectors::{LegacyAccounts, LegacySource};
 use ratchet_engine::desktop::SecretStore;
 use serde::{Deserialize, Serialize};
 
@@ -61,6 +62,25 @@ impl Default for PersistedLive {
             tofu_binary: d.tofu_binary,
             module_dir: d.module_dir,
         }
+    }
+}
+
+fn connector_secret_name(name: SecretName) -> ratchet_connectors::SecretName {
+    match name {
+        SecretName::AnthropicApiKey => ratchet_connectors::SecretName::AnthropicApiKey,
+        SecretName::OpenaiApiKey => ratchet_connectors::SecretName::OpenaiApiKey,
+        SecretName::GithubToken => ratchet_connectors::SecretName::GithubToken,
+    }
+}
+
+/// The settings file as the connector store's migration source.
+impl LegacySource for SettingsStore {
+    fn read(&self) -> LegacyAccounts {
+        self.legacy_accounts()
+    }
+
+    fn clear(&self) {
+        self.clear_legacy();
     }
 }
 
@@ -126,6 +146,65 @@ impl SettingsStore {
 
     pub fn encryption_available(&self) -> bool {
         self.secrets.available()
+    }
+
+    /// The secret store (the connector store keeps its tokens and keys in the same one).
+    pub fn secret_store(&self) -> Arc<dyn SecretStore> {
+        self.secrets.clone()
+    }
+
+    /// The environment credentials are also read from.
+    pub fn env(&self) -> &HashMap<String, String> {
+        &self.env
+    }
+
+    /// A file next to the settings file (`connectors.json`), `None` when the settings are memory only.
+    pub fn sibling_file(&self, name: &str) -> Option<PathBuf> {
+        self.file.as_ref().map(|f| f.with_file_name(name))
+    }
+
+    /// The single GitHub token / AWS profile / API keys of the first versions, read once to become connectors. `locked` = a
+    /// secret is stored but cannot be read right now (keychain unavailable): migration waits for the next launch instead of
+    /// dropping it.
+    pub fn legacy_accounts(&self) -> LegacyAccounts {
+        let mut secrets = BTreeMap::new();
+        let mut locked = false;
+        for name in SecretName::ALL {
+            match self.secrets.get(name.as_str()) {
+                Ok(Some(v)) => {
+                    secrets.insert(connector_secret_name(name), v);
+                }
+                Ok(None) => {}
+                Err(_) => locked = true,
+            }
+        }
+        let d = self.data();
+        LegacyAccounts {
+            aws_profile: d.aws_profile.clone(),
+            aws_region: d.live.aws_region.clone(),
+            github_login: d.github_login.clone(),
+            github_via_device: match d.github_source.as_str() {
+                "device" => Some(true),
+                "token" => Some(false),
+                _ => None,
+            },
+            secrets,
+            locked,
+        }
+    }
+
+    /// Forget the old single-account fields (they became connectors).
+    pub fn clear_legacy(&self) {
+        for name in SecretName::ALL {
+            let _ = self.secrets.delete(name.as_str());
+        }
+        {
+            let mut d = self.data();
+            d.aws_profile.clear();
+            d.github_login.clear();
+            d.github_source.clear();
+        }
+        self.save();
     }
 
     pub fn set_aws_profile(&self, profile: &str) {
@@ -239,6 +318,11 @@ impl SettingsStore {
 
     fn stored(&self, name: SecretName) -> Option<String> {
         self.secrets.get(name.as_str()).ok().flatten()
+    }
+
+    /// The value of a secret from the process environment only (never the store).
+    pub fn env_secret(&self, name: SecretName) -> Option<String> {
+        self.env_value(name)
     }
 
     fn env_value(&self, name: SecretName) -> Option<String> {

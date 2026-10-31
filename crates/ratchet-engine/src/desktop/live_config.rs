@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use ratchet_connectors::{AgentConnectorSource, ConnectorAgent, ResolvedConnections};
 use ratchet_core::enums::AgentKind;
 
 /// What empty `tofu_binary` / `module_dir` settings resolve to.
@@ -81,11 +82,38 @@ pub fn setting_for_secret_env(name: &str) -> Option<&'static str> {
 pub type SecretLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
 /// The engine's secret source: `(agent kind, runner secret name) -> value`. Resolves in the daemon only; the engine hands
-/// the value to the runner's parameter store and nowhere else.
+/// the value to the runner's parameter store and nowhere else. The GitHub token and the API keys come from the connectors
+/// chosen for the repo; a model key falls back to the environment (`env`, by setting name) only when no connector of that
+/// agent holds one (never next to a chosen login).
 pub fn secret_source(
-    lookup: SecretLookup,
+    resolved: &ResolvedConnections,
+    env: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
 ) -> Arc<dyn Fn(AgentKind, &str) -> Option<String> + Send + Sync> {
-    Arc::new(move |_kind, name| setting_for_secret_env(name).and_then(|k| lookup(k)))
+    let token = resolved.github.as_ref().map(|g| g.token.clone());
+    let keys = resolved.cloud_keys.clone();
+    let logins: Vec<ConnectorAgent> = resolved
+        .agents
+        .iter()
+        .filter(|a| a.source == AgentConnectorSource::Login)
+        .map(|a| a.agent)
+        .collect();
+    Arc::new(move |_kind, name| {
+        if name == "GITHUB_TOKEN" {
+            return token.clone();
+        }
+        let agent = match name {
+            "ANTHROPIC_API_KEY" => ConnectorAgent::ClaudeCode,
+            "OPENAI_API_KEY" => ConnectorAgent::Codex,
+            _ => return None,
+        };
+        if let Some(k) = keys.get(&agent) {
+            return Some(k.clone());
+        }
+        if logins.contains(&agent) {
+            return None;
+        }
+        setting_for_secret_env(name).and_then(|k| env(k))
+    })
 }
 
 #[cfg(test)]
@@ -127,16 +155,66 @@ mod tests {
         );
     }
 
+    fn resolved(
+        token: Option<&str>,
+        keys: &[(ConnectorAgent, &str)],
+        logins: &[ConnectorAgent],
+    ) -> ResolvedConnections {
+        use ratchet_connectors::{ResolvedAgent, ResolvedGithub};
+        ResolvedConnections {
+            github: token.map(|t| ResolvedGithub {
+                id: "g".into(),
+                name: "g".into(),
+                login: None,
+                token: t.into(),
+            }),
+            aws: None,
+            agents: logins
+                .iter()
+                .map(|a| ResolvedAgent {
+                    connector_id: format!("login-{a:?}"),
+                    name: "login".into(),
+                    agent: *a,
+                    source: AgentConnectorSource::Login,
+                    where_: ratchet_core::enums::AgentsWhere::Local,
+                    api_key: None,
+                })
+                .collect(),
+            cloud_keys: keys.iter().map(|(a, k)| (*a, (*k).to_owned())).collect(),
+        }
+    }
+
+    /// live-config.test.ts › the secret source: the GitHub token and the keys come from the chosen connectors; the
+    /// environment only fills in a key when no connector holds one and no login was chosen for that agent
     #[test]
-    fn the_secret_source_maps_runner_names_to_settings() {
-        let src = secret_source(Arc::new(|k| {
-            (k == "anthropicApiKey").then(|| "sk-ant-x".to_owned())
-        }));
+    fn the_secret_source_maps_runner_names_to_the_chosen_connectors() {
+        let env = |k: &str| (k == "openaiApiKey").then(|| "sk-env".to_owned());
+        let src = secret_source(
+            &resolved(
+                Some("ghp_x"),
+                &[(ConnectorAgent::ClaudeCode, "sk-ant-x")],
+                &[],
+            ),
+            env,
+        );
+        assert_eq!(
+            src(AgentKind::ClaudeCode, "GITHUB_TOKEN").as_deref(),
+            Some("ghp_x")
+        );
         assert_eq!(
             src(AgentKind::ClaudeCode, "ANTHROPIC_API_KEY").as_deref(),
             Some("sk-ant-x")
         );
-        assert_eq!(src(AgentKind::Codex, "OPENAI_API_KEY"), None);
+        // no connector holds an OpenAI key: the environment's
+        assert_eq!(
+            src(AgentKind::Codex, "OPENAI_API_KEY").as_deref(),
+            Some("sk-env")
+        );
         assert_eq!(src(AgentKind::Codex, "SOMETHING_ELSE"), None);
+
+        // a chosen login never gets a key from the environment
+        let src = secret_source(&resolved(None, &[], &[ConnectorAgent::Codex]), env);
+        assert_eq!(src(AgentKind::Codex, "OPENAI_API_KEY"), None);
+        assert_eq!(src(AgentKind::ClaudeCode, "GITHUB_TOKEN"), None);
     }
 }

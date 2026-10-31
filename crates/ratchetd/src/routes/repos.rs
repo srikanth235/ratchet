@@ -77,7 +77,11 @@ async fn inspect_repo(
     State(s): State<AppState>,
     ApiJson(input): ApiJson<InspectRepoInput>,
 ) -> ApiResult<Json<RepoInspectVm>> {
-    Ok(Json(s.service.inspect_repo(input.source, input.connector_id).await?))
+    Ok(Json(
+        s.service
+            .inspect_repo(input.source, input.connector_id)
+            .await?,
+    ))
 }
 
 /// The AWS profiles found on this Mac (names only).

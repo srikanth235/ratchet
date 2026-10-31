@@ -39,6 +39,13 @@ pub trait AccountStore: Send + Sync {
     fn set_token(&self, token: &str);
     /// `source` is `"device"` for this flow.
     fn set_account(&self, login: &str, source: &str);
+    /// Keep the token of the signed-in account. `connector_id` re-signs-in that connector (the connector store); the default
+    /// is the single-account behaviour: token and account.
+    fn save(&self, token: &str, login: &str, connector_id: Option<&str>) {
+        let _ = connector_id;
+        self.set_token(token);
+        self.set_account(login, "device");
+    }
 }
 
 /// Called with the verification URL; must not fail (a panic is swallowed: the code is shown in the app anyway).
@@ -98,6 +105,11 @@ impl GithubSignIn {
 
     /// Request a device code, show it (and open the browser), and poll in the background until the user approves.
     pub async fn start(&self) -> Result<GithubFlow> {
+        self.start_for(None).await
+    }
+
+    /// Same, and the token lands on the connector `connector_id` (a re-sign-in) instead of a new or same-login account.
+    pub async fn start_for(&self, connector_id: Option<String>) -> Result<GithubFlow> {
         self.cancel();
         let code = self.deps.api.device_start().await?;
         let flow = GithubFlow {
@@ -127,6 +139,7 @@ impl GithubSignIn {
             generation,
             cancel,
             expires_at: flow.expires_at,
+            connector_id,
         };
         tokio::spawn(task.run(code.device_code, code.interval));
         Ok(flow)
@@ -147,6 +160,7 @@ struct Poller {
     generation: u64,
     cancel: CancellationToken,
     expires_at: i64,
+    connector_id: Option<String>,
 }
 
 impl Poller {
@@ -201,8 +215,9 @@ impl Poller {
                 DevicePoll::Ok { token } => {
                     match self.deps.api.user(&token).await {
                         Ok(user) => {
-                            self.deps.store.set_token(&token);
-                            self.deps.store.set_account(&user.login, "device");
+                            self.deps
+                                .store
+                                .save(&token, &user.login, self.connector_id.as_deref());
                         }
                         Err(e) => return self.end(FlowState::Error, &e.to_string()),
                     }

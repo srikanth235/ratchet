@@ -301,7 +301,7 @@ expression: "d[\"components\"][\"schemas\"][\"ApiEvent\"]"
     },
     {
       "type": "object",
-      "description": "Provisional: a connector changed status (signed in, expired, removed).",
+      "description": "A connector changed (the device flow finished, a probe changed its status, it was removed).",
       "required": [
         "connectorId",
         "status",

@@ -6,14 +6,14 @@
 //! - runs are scripted ([`engine`]): baselines, agent turns, verdicts through the real ratchet rule, spend,
 //!   events; seeded optimizations are resumed at boot;
 //! - everything outside the ledger (settings, GitHub sign-in, connectors, environment drafts, sandboxes) is in
-//!   memory ([`settings`], [`connectors`], [`drafts`], [`environments`]).
+//!   memory ([`settings`], [`drafts`], [`environments`]); the connectors are the real connector store over scripted probes
+//!   ([`connectors`]).
 
 mod connectors;
 mod data;
 mod drafts;
 mod engine;
 mod environments;
-mod overview;
 mod seed;
 mod settings;
 
@@ -41,11 +41,11 @@ use tokio::task::JoinHandle;
 pub use data::{DEFAULT_CONFIG_YAML, Rng};
 pub use seed::DEMO_RUNNING_ID;
 
-use self::connectors::ConnectorsState;
 use self::drafts::DraftsState;
 use self::environments::EnvState;
 use self::settings::SettingsState;
 use crate::api::*;
+use crate::connectors_hub::ConnectorsHub;
 use crate::service::{AppService, ServiceError, ServiceResult};
 use crate::views::{LedgerViews, PrUrlLookup};
 
@@ -106,11 +106,12 @@ pub(crate) struct State {
     pub last_active: Vec<String>,
     pub settings: SettingsState,
     pub env: EnvState,
-    pub connectors: ConnectorsState,
     pub drafts: DraftsState,
 }
 
 pub(crate) struct Inner {
+    pub hub: ConnectorsHub,
+    pub sim_github: Arc<connectors::SimGithub>,
     pub ledger: Ledger,
     pub views: LedgerViews,
     pub tx: broadcast::Sender<ApiEvent>,
@@ -258,7 +259,21 @@ impl SimService {
         };
         let (tx, _) = broadcast::channel(1024);
         let views = LedgerViews::new(ledger.clone(), Arc::clone(&clock), lookup);
+        let (hub, sim_github) = {
+            let tx = tx.clone();
+            connectors::build_hub(
+                &opts,
+                Arc::clone(&clock),
+                Arc::new(move |e| {
+                    let _ = tx.send(e);
+                }),
+                opts.seed_demo,
+            )
+            .await
+        };
         let inner = Arc::new(Inner {
+            hub,
+            sim_github,
             ledger,
             views,
             tx,
@@ -269,7 +284,6 @@ impl SimService {
             opts: opts.clone(),
         });
         inner.st().settings = SettingsState::demo();
-        inner.st().connectors = ConnectorsState::demo();
         if opts.seed_demo && seed::is_ledger_empty(&inner.ledger).await? {
             seed::seed_demo(&inner.ledger, clock.now()).await?;
             inner.seed_environment().await?;
@@ -304,9 +318,16 @@ impl SimService {
         self.0.tick(id).await
     }
 
-    /// Finish a pending simulated GitHub device flow (signed in as the demo account).
+    /// Finish a pending simulated GitHub device flow (signed in as the demo account): both the one of the Settings row and
+    /// the one of a connector (the latter lands on the next poll, within a second).
     pub fn complete_github_flow(&self) {
+        self.0.sim_github.approve();
         self.0.complete_github_flow();
+    }
+
+    /// The connectors of the simulation.
+    pub fn connector_store(&self) -> &Arc<ratchet_connectors::ConnectorStore> {
+        self.0.hub.store()
     }
 
     /// The ledger the simulation writes to (tests, `ratchetd` diagnostics).
@@ -321,6 +342,7 @@ impl SimService {
 
     /// Stop every timer. Ledger state is untouched.
     pub fn shutdown(&self) {
+        self.0.hub.shutdown();
         self.0.halt_all();
     }
 }
@@ -363,6 +385,27 @@ impl AppService for SimService {
         &self,
         input: CreateOptimizationInput,
     ) -> ServiceResult<CreatedOptimization> {
+        // The connectors picked for this run become the repo's remembered choice (the agents follow them).
+        let mut input = input;
+        if input.demo.is_none()
+            && let Some(c) = input.connections.clone()
+            && let Some(slug) = repo_slug(&input.repo_url)
+        {
+            self.0.hub.store().save_repo_connections(&slug, c.clone())?;
+            if let Some(w) = self.0.hub.store().where_of(&c.agents)? {
+                input.agents_where = Some(w);
+            }
+            let mut kinds = Vec::new();
+            for a in &c.agents {
+                if let Some(ConnectorVm::Agent { agent, .. }) =
+                    self.0.hub.store().vm_of(&a.connector_id)
+                    && !kinds.contains(&agent.kind())
+                {
+                    kinds.push(agent.kind());
+                }
+            }
+            input.agents = kinds;
+        }
         self.0.create_optimization(input).await
     }
 
@@ -615,11 +658,19 @@ impl AppService for SimService {
         Ok(self.0.github_sign_out())
     }
 
-    async fn list_repos(&self, query: Option<String>) -> ServiceResult<Vec<RepoVm>> {
+    async fn list_repos(
+        &self,
+        query: Option<String>,
+        _connector_id: Option<String>,
+    ) -> ServiceResult<Vec<RepoVm>> {
         self.0.list_repos(query.as_deref())
     }
 
-    async fn inspect_repo(&self, source: RepoSource) -> ServiceResult<RepoInspectVm> {
+    async fn inspect_repo(
+        &self,
+        source: RepoSource,
+        _connector_id: Option<String>,
+    ) -> ServiceResult<RepoInspectVm> {
         self.0.inspect_repo(source).await
     }
 
@@ -662,51 +713,81 @@ impl AppService for SimService {
         self.0.environments().await
     }
 
-    // ---- overview (provisional) --------------------------------------------------------------------------
+    // ---- overview ----------------------------------------------------------------------------------------
 
     async fn overview(&self, range: OverviewRange) -> ServiceResult<OverviewVm> {
-        self.0.overview(range).await
+        self.0.views.overview(range).await
     }
 
-    // ---- connectors (provisional) ------------------------------------------------------------------------
+    // ---- connectors --------------------------------------------------------------------------------------
 
-    async fn list_connectors(&self) -> ServiceResult<Vec<ConnectorVm>> {
-        Ok(self.0.list_connectors())
+    async fn list_connectors(&self) -> ServiceResult<ConnectorsVm> {
+        Ok(self.0.hub.view().await)
     }
 
-    async fn create_connector(&self, input: CreateConnectorInput) -> ServiceResult<ConnectorVm> {
-        self.0.create_connector(input)
+    async fn refresh_connectors(&self) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.refresh().await
     }
 
-    async fn get_connector(&self, id: &str) -> ServiceResult<ConnectorVm> {
-        self.0.get_connector(id)
+    async fn add_github_connector(
+        &self,
+        input: AddGithubConnectorInput,
+    ) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.add_github(input).await
+    }
+
+    async fn start_github_connector_sign_in(
+        &self,
+        input: StartGithubSignInInput,
+    ) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.start_sign_in(input).await
+    }
+
+    async fn cancel_github_connector_sign_in(&self) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.cancel_sign_in().await
+    }
+
+    async fn add_aws_connector(&self, input: AddAwsConnectorInput) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.add_aws(input).await
+    }
+
+    async fn add_agent_connector(
+        &self,
+        input: AddAgentConnectorInput,
+    ) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.add_agent(input).await
     }
 
     async fn update_connector(
         &self,
         id: &str,
         input: UpdateConnectorInput,
-    ) -> ServiceResult<ConnectorVm> {
-        self.0.update_connector(id, input)
+    ) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.update(id, input).await
     }
 
-    async fn delete_connector(&self, id: &str) -> ServiceResult<()> {
-        self.0.delete_connector(id)
+    async fn remove_connector(&self, id: &str) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.remove(id).await
+    }
+
+    async fn set_default_connector(&self, id: &str) -> ServiceResult<ConnectorsVm> {
+        self.0.hub.set_default(id).await
     }
 
     async fn test_connector(&self, id: &str) -> ServiceResult<ConnectorTestVm> {
-        self.0.test_connector(id)
+        self.0.hub.test(id).await
     }
 
-    async fn connector_selection(&self, repo: &str) -> ServiceResult<ConnectorSelectionVm> {
-        self.0.connector_selection(repo)
+    async fn repo_connections(&self, repo: &str) -> ServiceResult<RepoConnectionsVm> {
+        self.0.hub.repo_connections(repo).await
     }
 
-    async fn save_connector_selection(
+    async fn save_repo_connections(
         &self,
-        input: SaveConnectorSelectionInput,
-    ) -> ServiceResult<ConnectorSelectionVm> {
-        self.0.save_connector_selection(input)
+        repo: &str,
+        selection: RepoConnections,
+    ) -> ServiceResult<RepoConnectionsVm> {
+        self.0.hub.save_repo_connections(repo, selection).await
     }
 
     // ---- environment drafts (provisional) ----------------------------------------------------------------

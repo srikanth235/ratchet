@@ -356,7 +356,7 @@ fn common() -> CreateOptimizationInput {
         budget_usd: 50.0,
         time_limit_seconds: 7200,
         plateau_evals: 25,
-        connectors: None,
+        connections: None,
         environment_draft_id: None,
     }
 }
@@ -434,7 +434,7 @@ mod github_row {
             }
         );
         assert_eq!(
-            s.settings.get_secret(SecretName::GithubToken).as_deref(),
+            s.service.connector_store().github_token(None).as_deref(),
             Some(DEVICE_TOKEN)
         );
         assert!(
@@ -470,8 +470,8 @@ mod github_row {
         );
         let out = s.service.github_sign_out().await.unwrap();
         assert_eq!((out.signed_in, out.login, out.flow), (false, None, None));
-        assert!(!s.settings.has_secret(SecretName::GithubToken));
-        assert_eq!(s.settings.github_login(), "");
+        assert!(!s.service.settings().await.unwrap().secrets.github_token);
+        assert!(s.service.connector_store().snapshot().is_empty());
     }
 
     /// a pasted token (Advanced) is proven against GitHub first, and a rejected one is not kept
@@ -485,18 +485,21 @@ mod github_row {
             .await
             .unwrap_err();
         assert!(e.to_string().contains("rejected the sign-in"), "{e}");
-        assert!(!s.settings.has_secret(SecretName::GithubToken));
+        assert!(!s.service.settings().await.unwrap().secrets.github_token);
         s.gh.with(|g| g.user_fails = false);
         s.service
             .set_secret(SecretName::GithubToken, GH_TOKEN)
             .await
             .unwrap();
-        assert_eq!(s.settings.github_source(), Some(GithubSource::Token));
+        assert_eq!(
+            s.service.github_status().await.unwrap().source,
+            Some(GithubSource::Token)
+        );
         s.service
             .clear_secret(SecretName::GithubToken)
             .await
             .unwrap();
-        assert_eq!(s.settings.github_login(), "");
+        assert!(s.service.connector_store().snapshot().is_empty());
     }
 
     /// a token from the environment counts as signed in; its login is looked up once
@@ -557,7 +560,7 @@ mod repo_picker {
     #[tokio::test]
     async fn lists_the_account_repositories_needs_the_sign_in_and_searches_them() {
         let s = setup(Opts::default()).await;
-        let e = s.service.list_repos(None).await.unwrap_err();
+        let e = s.service.list_repos(None, None).await.unwrap_err();
         assert!(e.to_string().contains("Sign in with GitHub"), "{e}");
         s.service
             .set_secret(SecretName::GithubToken, GH_TOKEN)
@@ -565,11 +568,16 @@ mod repo_picker {
             .unwrap();
         let names = |v: Vec<RepoVm>| v.into_iter().map(|r| r.full_name).collect::<Vec<_>>();
         assert_eq!(
-            names(s.service.list_repos(None).await.unwrap()),
+            names(s.service.list_repos(None, None).await.unwrap()),
             ["acme/api", "acme/web"]
         );
         assert_eq!(
-            names(s.service.list_repos(Some("web".into())).await.unwrap()),
+            names(
+                s.service
+                    .list_repos(Some("web".into()), None)
+                    .await
+                    .unwrap()
+            ),
             ["acme/web"]
         );
     }
@@ -588,9 +596,12 @@ mod repo_picker {
         });
         let r = s
             .service
-            .inspect_repo(RepoSource::Github {
-                repo: "acme/web".into(),
-            })
+            .inspect_repo(
+                RepoSource::Github {
+                    repo: "acme/web".into(),
+                },
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -637,9 +648,12 @@ mod repo_picker {
             .unwrap();
         let none = s
             .service
-            .inspect_repo(RepoSource::Github {
-                repo: "acme/api".into(),
-            })
+            .inspect_repo(
+                RepoSource::Github {
+                    repo: "acme/api".into(),
+                },
+                None,
+            )
             .await
             .unwrap();
         assert!(none.config_yaml.is_none() && none.config.is_none());
@@ -659,9 +673,12 @@ mod repo_picker {
         });
         let bad = s
             .service
-            .inspect_repo(RepoSource::Github {
-                repo: "acme/api".into(),
-            })
+            .inspect_repo(
+                RepoSource::Github {
+                    repo: "acme/api".into(),
+                },
+                None,
+            )
             .await
             .unwrap();
         assert!(bad.config.is_none());
@@ -669,9 +686,12 @@ mod repo_picker {
         assert!(bad.templates.is_empty());
         let e = s
             .service
-            .inspect_repo(RepoSource::Github {
-                repo: "acme/ghost".into(),
-            })
+            .inspect_repo(
+                RepoSource::Github {
+                    repo: "acme/ghost".into(),
+                },
+                None,
+            )
             .await
             .unwrap_err();
         assert!(
@@ -702,9 +722,12 @@ mod repo_picker {
         std::fs::write(dir.path().join("ratchet.yaml"), YAML_OK).unwrap();
         let ok = s
             .service
-            .inspect_repo(RepoSource::Local {
-                path: dir.path().display().to_string(),
-            })
+            .inspect_repo(
+                RepoSource::Local {
+                    path: dir.path().display().to_string(),
+                },
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(ok.repo.as_deref(), Some("acme/api"));
@@ -713,9 +736,12 @@ mod repo_picker {
         let scratch = tempfile::tempdir().unwrap();
         let bad = s
             .service
-            .inspect_repo(RepoSource::Local {
-                path: scratch.path().display().to_string(),
-            })
+            .inspect_repo(
+                RepoSource::Local {
+                    path: scratch.path().display().to_string(),
+                },
+                None,
+            )
             .await
             .unwrap();
         assert!(bad.repo.is_none() && bad.config.is_none() && bad.templates.is_empty());
@@ -955,6 +981,7 @@ mod preflight {
 
     fn input(agents: &[AgentKind], w: AgentsWhere, source: PreflightSource) -> PreflightInput {
         PreflightInput {
+            repo: None,
             agents: agents.to_vec(),
             agents_where: w,
             source,
@@ -1548,7 +1575,7 @@ mod secrets_never_leave {
         dump(&s.service.set_aws_profile("default").await.unwrap());
         dump(&s.service.settings().await.unwrap());
         dump(&s.service.environments().await.unwrap());
-        dump(&s.service.list_repos(None).await.unwrap());
+        dump(&s.service.list_repos(None, None).await.unwrap());
         dump(&s.service.list_templates(None).await.unwrap());
         dump(&s.service.aws_profiles().await.unwrap());
         dump(&s.service.harnesses(false).await.unwrap());
@@ -1573,15 +1600,19 @@ mod secrets_never_leave {
                     agents: vec![AgentKind::ClaudeCode, AgentKind::Codex],
                     agents_where: AgentsWhere::Local,
                     source: PreflightSource::Github,
+                    repo: None,
                 })
                 .await
                 .unwrap(),
         );
         dump(
             &s.service
-                .inspect_repo(RepoSource::Github {
-                    repo: "acme/api".into(),
-                })
+                .inspect_repo(
+                    RepoSource::Github {
+                        repo: "acme/api".into(),
+                    },
+                    None,
+                )
                 .await
                 .unwrap(),
         );
@@ -1605,9 +1636,12 @@ mod secrets_never_leave {
                 .await
                 .map(|_| ()),
             s.service
-                .inspect_repo(RepoSource::Github {
-                    repo: "acme/ghost".into(),
-                })
+                .inspect_repo(
+                    RepoSource::Github {
+                        repo: "acme/ghost".into(),
+                    },
+                    None,
+                )
                 .await
                 .map(|_| ()),
         ];
@@ -1676,20 +1710,677 @@ mod secrets_never_leave {
     }
 }
 
+mod connectors {
+    use ratchet_connectors::SecretName as ConnectorSecret;
+
+    use super::*;
+
+    const ORG: &str = "github_pat_ORGTOKENORGTOKENORGTOKEN12";
+
+    fn aws(profile: &str) -> AddAwsConnectorInput {
+        AddAwsConnectorInput {
+            profile: profile.into(),
+            region: None,
+            monthly_cap_usd: None,
+            name: None,
+        }
+    }
+
+    fn org_token(name: &str) -> AddGithubConnectorInput {
+        AddGithubConnectorInput {
+            token: ORG.into(),
+            name: Some(name.into()),
+        }
+    }
+
+    fn id_of(v: &ConnectorsVm, name: &str) -> String {
+        v.connectors
+            .iter()
+            .find(|c| c.name() == name)
+            .unwrap_or_else(|| panic!("no connector named {name}"))
+            .id()
+            .to_owned()
+    }
+
+    /// connectors › lists detected logins with the saved accounts, grouped by kind, with one default per kind
+    #[tokio::test]
+    async fn lists_detected_logins_with_the_saved_accounts_grouped_by_kind() {
+        let s = setup(Opts::default()).await;
+        s.service
+            .set_secret(SecretName::GithubToken, GH_TOKEN)
+            .await
+            .unwrap();
+        s.gh.with(|g| g.login = "acme-org".into());
+        s.service
+            .add_github_connector(org_token("acme-org"))
+            .await
+            .unwrap();
+        s.service
+            .add_aws_connector(AddAwsConnectorInput {
+                region: Some("us-west-2".into()),
+                monthly_cap_usd: Some(100.0),
+                ..aws("default")
+            })
+            .await
+            .unwrap();
+        let vm = s.service.list_connectors().await.unwrap();
+        assert!(vm.encryption_available && vm.client_id_configured && vm.github_flow.is_none());
+        let rows: Vec<_> = vm
+            .connectors
+            .iter()
+            .map(|c| (c.kind(), c.name().to_owned(), c.is_default(), c.status()))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    ConnectorKind::Github,
+                    "octocat".to_owned(),
+                    true,
+                    ConnectorStatus::Connected
+                ),
+                (
+                    ConnectorKind::Github,
+                    "acme-org".to_owned(),
+                    false,
+                    ConnectorStatus::Connected
+                ),
+                (
+                    ConnectorKind::Aws,
+                    "default".to_owned(),
+                    true,
+                    ConnectorStatus::Connected
+                ),
+                (
+                    ConnectorKind::Agent,
+                    "Claude Code \u{00b7} your login".to_owned(),
+                    true,
+                    ConnectorStatus::Connected
+                ),
+            ]
+        );
+        let json = serde_json::to_string(&vm).unwrap();
+        assert!(!json.contains(GH_TOKEN) && !json.contains(ORG), "{json}");
+    }
+
+    /// connectors › every change rebuilds what depends on the accounts
+    #[tokio::test]
+    async fn every_change_rebuilds_what_depends_on_the_accounts() {
+        let s = setup(Opts::default()).await;
+        let vm = s.service.add_aws_connector(aws("default")).await.unwrap();
+        let id = id_of(&vm, "default");
+        let before = s.service.product().invalidations();
+        s.service
+            .update_connector(
+                &id,
+                UpdateConnectorInput {
+                    name: Some("prod".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        s.service.set_default_connector(&id).await.unwrap();
+        s.service.remove_connector(&id).await.unwrap();
+        assert_eq!(s.service.product().invalidations() - before, 3);
+    }
+
+    /// connectors › adding an AWS connector only offers profiles that exist in ~/.aws, and checks the profile
+    #[tokio::test]
+    async fn adding_an_aws_connector_only_offers_profiles_that_exist_and_checks_the_profile() {
+        let s = setup(Opts::default()).await;
+        let e = s.service.add_aws_connector(aws("nope")).await.unwrap_err();
+        assert!(e.to_string().contains("not in ~/.aws"), "{e}");
+        let vm = s
+            .service
+            .add_aws_connector(AddAwsConnectorInput {
+                region: Some("eu-west-1".into()),
+                ..aws("corp-sso")
+            })
+            .await
+            .unwrap();
+        settle().await; // the probe runs in the background
+        assert_eq!(
+            s.probe.calls.lock().unwrap().last().cloned(),
+            Some(("aws".to_owned(), "eu-west-1/corp-sso".to_owned()))
+        );
+        let c = &vm.connectors[0];
+        assert_eq!(
+            (c.kind(), c.status(), c.detail()),
+            (
+                ConnectorKind::Aws,
+                ConnectorStatus::Connected,
+                "SSO \u{00b7} eu-west-1"
+            )
+        );
+        *s.probe.fail_with.lock().unwrap() = Some("token expired".into());
+        let t = s.service.test_connector(c.id()).await.unwrap();
+        assert_eq!(t.connector.unwrap().status(), ConnectorStatus::Expired);
+        let e = s
+            .service
+            .add_aws_connector(aws("corp-sso"))
+            .await
+            .unwrap_err();
+        assert!(e.to_string().contains("already connected"), "{e}");
+    }
+
+    /// connectors › the device flow adds an account; signing in again with a connector id replaces that account token
+    #[tokio::test]
+    async fn the_device_flow_adds_an_account_and_signing_in_again_replaces_its_token() {
+        let s = setup(Opts::default()).await;
+        let started = s
+            .service
+            .start_github_connector_sign_in(StartGithubSignInInput::default())
+            .await
+            .unwrap();
+        let flow = started.github_flow.unwrap();
+        assert_eq!(
+            (flow.state, flow.user_code.as_str()),
+            (GithubFlowState::Pending, "ABCD-1234")
+        );
+        assert!(
+            s.service
+                .cancel_github_connector_sign_in()
+                .await
+                .unwrap()
+                .github_flow
+                .is_none()
+        );
+        s.gh.with(|g| {
+            g.polls = [DevicePoll::Ok {
+                token: DEVICE_TOKEN.into(),
+            }]
+            .into()
+        });
+        s.service
+            .start_github_connector_sign_in(StartGithubSignInInput::default())
+            .await
+            .unwrap();
+        settle().await;
+        let done = s.service.list_connectors().await.unwrap();
+        assert!(done.github_flow.is_none());
+        let account = &done.connectors[0];
+        match account {
+            ConnectorVm::Github { login, source, .. } => {
+                assert_eq!(login.as_deref(), Some("octocat"));
+                assert_eq!(*source, GithubConnectorSource::Device);
+            }
+            other => panic!("{other:?}"),
+        }
+        let refreshed = "gho_REFRESHEDTOKENREFRESHED123456";
+        s.gh.with(|g| {
+            g.polls = [DevicePoll::Ok {
+                token: refreshed.into(),
+            }]
+            .into()
+        });
+        s.service
+            .start_github_connector_sign_in(StartGithubSignInInput {
+                connector_id: Some(account.id().to_owned()),
+            })
+            .await
+            .unwrap();
+        settle().await;
+        let list = s.service.list_connectors().await.unwrap();
+        assert_eq!(
+            list.connectors
+                .iter()
+                .filter(|c| c.kind() == ConnectorKind::Github)
+                .count(),
+            1
+        );
+        assert_eq!(
+            s.service
+                .connector_store()
+                .github_token(Some(account.id()))
+                .as_deref(),
+            Some(refreshed)
+        );
+        let e = s
+            .service
+            .start_github_connector_sign_in(StartGithubSignInInput {
+                connector_id: Some("ghost".into()),
+            })
+            .await
+            .unwrap_err();
+        assert!(e.to_string().contains("no longer exists"), "{e}");
+    }
+
+    /// connectors › rename, default and remove; a login that is removed can be added back
+    #[tokio::test]
+    async fn rename_default_and_remove_a_login_that_is_removed_can_be_added_back() {
+        let s = setup(Opts::default()).await;
+        let vm = s
+            .service
+            .add_github_connector(AddGithubConnectorInput {
+                token: GH_TOKEN.into(),
+                name: None,
+            })
+            .await
+            .unwrap();
+        s.gh.with(|g| g.login = "acme-org".into());
+        let second = s
+            .service
+            .add_github_connector(org_token("acme-org"))
+            .await
+            .unwrap();
+        let org = id_of(&second, "acme-org");
+        s.service
+            .update_connector(
+                &org,
+                UpdateConnectorInput {
+                    name: Some("Acme organisation".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let v = s.service.set_default_connector(&org).await.unwrap();
+        let default_github = v
+            .connectors
+            .iter()
+            .find(|c| c.is_default() && c.kind() == ConnectorKind::Github)
+            .map(|c| c.name().to_owned());
+        assert_eq!(default_github.as_deref(), Some("Acme organisation"));
+        let e = s
+            .service
+            .update_connector(
+                vm.connectors[0].id(),
+                UpdateConnectorInput {
+                    name: Some("Acme organisation".into()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(e.to_string().contains("already a connector named"), "{e}");
+        let left = s.service.remove_connector(&org).await.unwrap();
+        let github: Vec<_> = left
+            .connectors
+            .iter()
+            .filter(|c| c.kind() == ConnectorKind::Github)
+            .map(|c| (c.name().to_owned(), c.is_default()))
+            .collect();
+        assert_eq!(github, [("octocat".to_owned(), true)]);
+        let login_id = left
+            .connectors
+            .iter()
+            .find(|c| c.kind() == ConnectorKind::Agent)
+            .unwrap()
+            .id()
+            .to_owned();
+        let none = s.service.remove_connector(&login_id).await.unwrap();
+        assert!(
+            !none
+                .connectors
+                .iter()
+                .any(|c| c.kind() == ConnectorKind::Agent)
+        );
+        let back = s
+            .service
+            .add_agent_connector(AddAgentConnectorInput::Login {
+                agent: ConnectorAgent::ClaudeCode,
+            })
+            .await
+            .unwrap();
+        assert!(
+            back.connectors
+                .iter()
+                .any(|c| c.kind() == ConnectorKind::Agent)
+        );
+    }
+
+    /// connectors › remembers the choice per repo and rebuilds that repo runtime
+    #[tokio::test]
+    async fn remembers_the_choice_per_repo_and_rebuilds_that_repo_runtime() {
+        let s = setup(Opts::default()).await;
+        s.service
+            .add_github_connector(AddGithubConnectorInput {
+                token: GH_TOKEN.into(),
+                name: None,
+            })
+            .await
+            .unwrap();
+        s.gh.with(|g| g.login = "acme-org".into());
+        s.service
+            .add_github_connector(org_token("acme-org"))
+            .await
+            .unwrap();
+        s.service.add_aws_connector(aws("default")).await.unwrap();
+        s.service.add_aws_connector(aws("corp-sso")).await.unwrap();
+        let all = s.service.list_connectors().await.unwrap();
+        let empty = s.service.repo_connections("acme/api").await.unwrap();
+        assert_eq!(empty.repo, "acme/api");
+        assert!(empty.saved.is_none());
+        assert_eq!(empty.effective.github, Some(id_of(&all, "octocat")));
+        assert_eq!(empty.effective.aws, Some(id_of(&all, "default")));
+        let sel = RepoConnections {
+            github: id_of(&all, "acme-org"),
+            aws: id_of(&all, "corp-sso"),
+            agents: vec![AgentSelection {
+                connector_id: "agent-claude-code-login".into(),
+                where_: AgentsWhere::Local,
+            }],
+        };
+        let before = s.service.product().invalidations();
+        let saved = s
+            .service
+            .save_repo_connections("acme/api", sel.clone())
+            .await
+            .unwrap();
+        assert_eq!(saved.saved.as_ref(), Some(&sel));
+        assert_eq!(s.service.product().invalidations() - before, 1);
+        let got = s.service.repo_connections("ACME/API").await.unwrap();
+        assert_eq!(
+            got.effective,
+            EffectiveConnections {
+                github: Some(sel.github.clone()),
+                aws: Some(sel.aws.clone()),
+                agents: sel.agents.clone()
+            }
+        );
+        let ghost = RepoConnections {
+            github: "ghost".into(),
+            ..sel
+        };
+        let e = s
+            .service
+            .save_repo_connections("acme/api", ghost)
+            .await
+            .unwrap_err();
+        assert!(e.to_string().contains("GitHub account"), "{e}");
+    }
+
+    /// connectors › createOptimization with connections remembers them and runs the agents where they were chosen
+    #[tokio::test]
+    async fn create_with_connections_remembers_them_and_runs_the_agents_where_they_were_chosen() {
+        let hook: Hook = Arc::new(|e| *e.create_id.lock().unwrap() = Some("opt_x".into()));
+        let s = setup(Opts {
+            on_live: Some(hook),
+            ..Default::default()
+        })
+        .await;
+        s.service
+            .add_github_connector(AddGithubConnectorInput {
+                token: GH_TOKEN.into(),
+                name: None,
+            })
+            .await
+            .unwrap();
+        s.service.add_aws_connector(aws("default")).await.unwrap();
+        s.service
+            .add_agent_connector(AddAgentConnectorInput::ApiKey {
+                agent: ConnectorAgent::ClaudeCode,
+                api_key: ANTHROPIC_KEY.into(),
+                name: None,
+            })
+            .await
+            .unwrap();
+        let v = s.service.list_connectors().await.unwrap();
+        let (github, aws_id) = (id_of(&v, "octocat"), id_of(&v, "default"));
+        let key = id_of(&v, "Claude Code \u{00b7} API key");
+        let mut common = common();
+        common.repo_url = "https://github.com/acme/api.git".into();
+        common.agents = vec![AgentKind::Codex];
+        let chosen = RepoConnections {
+            github: github.clone(),
+            aws: aws_id.clone(),
+            agents: vec![AgentSelection {
+                connector_id: key.clone(),
+                where_: AgentsWhere::Cloud,
+            }],
+        };
+        s.service
+            .create_optimization(CreateOptimizationInput {
+                connections: Some(chosen.clone()),
+                ..common.clone()
+            })
+            .await
+            .unwrap();
+        let created = |s: &Setup| -> Vec<_> {
+            s.live
+                .lock()
+                .unwrap()
+                .iter()
+                .flat_map(|r| r.created.lock().unwrap().clone())
+                .collect()
+        };
+        let seen = created(&s);
+        // the connections win over `agents`
+        assert_eq!(
+            (seen[0].agents.clone(), seen[0].agents_where),
+            (vec![AgentKind::ClaudeCode], Some(AgentsWhere::Cloud))
+        );
+        assert_eq!(
+            s.service
+                .connector_store()
+                .repo_connections("acme/api")
+                .saved,
+            Some(chosen.clone())
+        );
+        // mixing places is refused
+        let mixed = RepoConnections {
+            agents: vec![
+                AgentSelection {
+                    connector_id: key.clone(),
+                    where_: AgentsWhere::Cloud,
+                },
+                AgentSelection {
+                    connector_id: "agent-codex-login".into(),
+                    where_: AgentsWhere::Local,
+                },
+            ],
+            ..chosen
+        };
+        assert!(
+            s.service
+                .create_optimization(CreateOptimizationInput {
+                    connections: Some(mixed),
+                    ..common.clone()
+                })
+                .await
+                .is_err()
+        );
+        // without connections: the remembered choice stays, the request decides the rest
+        s.service
+            .create_optimization(CreateOptimizationInput {
+                agents: vec![AgentKind::ClaudeCode],
+                agents_where: Some(AgentsWhere::Local),
+                ..common
+            })
+            .await
+            .unwrap();
+        let seen = created(&s);
+        assert_eq!(
+            (seen[1].agents.clone(), seen[1].agents_where),
+            (vec![AgentKind::ClaudeCode], Some(AgentsWhere::Local))
+        );
+    }
+
+    /// connectors › preflight checks the connectors remembered for the repo
+    #[tokio::test]
+    async fn preflight_checks_the_connectors_remembered_for_the_repo() {
+        let s = setup(Opts::default()).await;
+        s.service
+            .add_github_connector(AddGithubConnectorInput {
+                token: GH_TOKEN.into(),
+                name: None,
+            })
+            .await
+            .unwrap();
+        s.gh.with(|g| g.login = "acme-org".into());
+        s.service
+            .add_github_connector(org_token("acme-org"))
+            .await
+            .unwrap();
+        s.service.add_aws_connector(aws("default")).await.unwrap();
+        s.service
+            .add_aws_connector(AddAwsConnectorInput {
+                region: Some("eu-west-1".into()),
+                ..aws("corp-sso")
+            })
+            .await
+            .unwrap();
+        let all = s.service.list_connectors().await.unwrap();
+        s.service
+            .save_repo_connections(
+                "acme/api",
+                RepoConnections {
+                    github: id_of(&all, "acme-org"),
+                    aws: id_of(&all, "corp-sso"),
+                    agents: vec![AgentSelection {
+                        connector_id: "agent-claude-code-login".into(),
+                        where_: AgentsWhere::Local,
+                    }],
+                },
+            )
+            .await
+            .unwrap();
+        let input = |repo: Option<&str>| PreflightInput {
+            agents: vec![AgentKind::ClaudeCode],
+            agents_where: AgentsWhere::Local,
+            source: PreflightSource::Github,
+            repo: repo.map(str::to_owned),
+        };
+        let detail = |items: &[PreflightItem], id: &str| {
+            items.iter().find(|i| i.id == id).unwrap().detail.clone()
+        };
+        let r = s.service.preflight(input(Some("acme/api"))).await.unwrap();
+        assert_eq!(detail(&r, "aws"), "corp-sso \u{00b7} eu-west-1");
+        assert_eq!(detail(&r, "github"), "signed in as acme-org");
+        let r = s.service.preflight(input(None)).await.unwrap();
+        assert_eq!(detail(&r, "aws"), "default \u{00b7} us-east-1");
+    }
+
+    /// connectors › the old single-account calls still work on top of the connectors
+    #[tokio::test]
+    async fn the_old_single_account_calls_still_work_on_top_of_the_connectors() {
+        let s = setup(Opts::default()).await;
+        s.service
+            .set_secret(SecretName::GithubToken, GH_TOKEN)
+            .await
+            .unwrap();
+        s.service.set_aws_profile("corp-sso").await.unwrap();
+        s.service
+            .save_advanced_settings(LiveSettingsInput {
+                aws_region: Some("eu-west-2".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let st = s.service.settings().await.unwrap();
+        assert_eq!(
+            (
+                st.aws_profile.as_str(),
+                st.aws_region.as_str(),
+                st.secrets.github_token
+            ),
+            ("corp-sso", "eu-west-2", true)
+        );
+        let aws_rows = |s: &Setup| -> Vec<(String, String)> {
+            s.service
+                .connector_store()
+                .snapshot()
+                .into_iter()
+                .filter_map(|c| match c {
+                    ConnectorVm::Aws {
+                        profile, region, ..
+                    } => Some((profile, region)),
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(
+            aws_rows(&s),
+            [("corp-sso".to_owned(), "eu-west-2".to_owned())]
+        );
+        // another profile: added, and the default moves to it
+        s.service.set_aws_profile("default").await.unwrap();
+        assert_eq!(aws_rows(&s).len(), 2);
+        assert_eq!(s.service.settings().await.unwrap().aws_profile, "default");
+        s.service.set_aws_profile("").await.unwrap();
+        assert_eq!(s.service.settings().await.unwrap().aws_profile, "corp-sso");
+        // the keys of the first Settings are connectors too
+        s.service
+            .set_secret(SecretName::AnthropicApiKey, ANTHROPIC_KEY)
+            .await
+            .unwrap();
+        assert!(
+            s.service
+                .settings()
+                .await
+                .unwrap()
+                .secrets
+                .anthropic_api_key
+        );
+        assert_eq!(
+            s.service
+                .connector_store()
+                .secret_value(ConnectorSecret::AnthropicApiKey)
+                .as_deref(),
+            Some(ANTHROPIC_KEY)
+        );
+        s.service
+            .clear_secret(SecretName::AnthropicApiKey)
+            .await
+            .unwrap();
+        assert!(
+            !s.service
+                .settings()
+                .await
+                .unwrap()
+                .secrets
+                .anthropic_api_key
+        );
+    }
+
+    /// The settings file of the first versions (one token, one profile, one key) becomes connectors at the first start, and the
+    /// daemon's single-account calls see them.
+    #[tokio::test]
+    async fn the_single_account_settings_of_the_first_versions_are_migrated_at_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let secrets = Arc::new(MemorySecretStore::new());
+        let settings = Arc::new(SettingsStore::new(
+            Some(dir.path().join("settings.json")),
+            secrets.clone(),
+            HashMap::new(),
+        ));
+        settings
+            .set_secret(SecretName::GithubToken, GH_TOKEN)
+            .unwrap();
+        settings.set_github_account("octocat", GithubSource::Device);
+        settings.set_aws_profile("corp-sso");
+        let mut opts = RealServiceOptions::new(settings.clone(), dir.path().join("state"));
+        opts.github = Some(Arc::new(MockGithubApi::new()));
+        opts.harnesses = Arc::new(HarnessCache::new(Arc::new(ScriptedProbe {
+            probes: Arc::default(),
+            found: Box::new(|_| vec![claude(|_| {}), codex(|_| {})]),
+        })));
+        let service = RealService::new(opts).await.unwrap();
+        let st = service.settings().await.unwrap();
+        assert_eq!(
+            (st.aws_profile.as_str(), st.secrets.github_token),
+            ("corp-sso", true)
+        );
+        let gh = service.github_status().await.unwrap();
+        assert_eq!(
+            (gh.signed_in, gh.login.as_deref(), gh.source),
+            (true, Some("octocat"), Some(GithubSource::Device))
+        );
+        // the old fields are emptied, the token lives under the connector
+        assert_eq!(settings.aws_profile(), "");
+        assert!(!settings.has_secret(SecretName::GithubToken));
+        assert!(dir.path().join("connectors.json").exists());
+        service.shutdown().await;
+    }
+}
+
 mod provisional_groups {
     use super::*;
 
     #[tokio::test]
-    async fn overview_connectors_and_environment_drafts_are_not_supported_yet() {
+    async fn environment_drafts_are_not_supported_yet() {
         let s = setup(Opts::default()).await;
-        assert!(matches!(
-            s.service.overview(OverviewRange::Days30).await,
-            Err(ServiceError::Unsupported(_))
-        ));
-        assert!(matches!(
-            s.service.list_connectors().await,
-            Err(ServiceError::Unsupported(_))
-        ));
         assert!(matches!(
             s.service.get_environment_draft("x").await,
             Err(ServiceError::Unsupported(_))

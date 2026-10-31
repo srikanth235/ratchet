@@ -114,15 +114,7 @@ pub fn service_error(e: EngineError) -> ServiceError {
     }
 }
 
-pub fn github_error(e: ratchet_github::Error) -> ServiceError {
-    match &e {
-        ratchet_github::Error::Http {
-            status: Some(404), ..
-        } => ServiceError::NotFound(e.to_string()),
-        ratchet_github::Error::Invalid(m) => ServiceError::Invalid(m.clone()),
-        _ => ServiceError::Upstream(e.to_string()),
-    }
-}
+pub use crate::connectors_hub::github_error;
 
 #[cfg(test)]
 mod tests {

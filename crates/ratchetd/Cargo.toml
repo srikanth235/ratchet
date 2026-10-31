@@ -23,13 +23,14 @@ server = [
     "dep:anyhow",
     "dep:async-trait",
     "dep:libc",
+    "dep:ratchet-github",
+    "ratchet-connectors/store",
 ]
 
 # `RealService`: the AppService of the real engine (`ratchet-engine`) and `ratchetd serve --mode real`.
 engine = [
     "server",
     "dep:ratchet-engine",
-    "dep:ratchet-github",
     "dep:ratchet-agents",
 ]
 
@@ -43,6 +44,7 @@ required-features = ["server", "engine"]
 
 [dependencies]
 ratchet-core = { path = "../ratchet-core", features = ["utoipa"] }
+ratchet-connectors = { path = "../ratchet-connectors", default-features = false, features = ["utoipa"] }
 ratchet-agents = { path = "../ratchet-agents", optional = true }
 ratchet-engine = { path = "../ratchet-engine", optional = true }
 ratchet-github = { path = "../ratchet-github", optional = true }

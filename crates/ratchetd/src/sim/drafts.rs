@@ -418,7 +418,9 @@ impl Inner {
         }
     }
 
-    /// Drafts waiting for the user's approval.
+    /// Drafts waiting for the user's approval. (The Overview of the TypeScript spec has no environment approvals yet, so nothing
+    /// reads this for now.)
+    #[allow(dead_code)]
     pub(crate) fn drafts_waiting(&self) -> Vec<EnvironmentDraftVm> {
         let st = self.st();
         let mut v: Vec<_> = st

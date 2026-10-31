@@ -7,6 +7,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use ratchet_agents::detect::{HarnessAuth, HarnessInfo, HarnessKind};
+use ratchet_connectors::{
+    AgentConnectorSource, ConnectorAgent, ResolvedAgent, ResolvedAws, ResolvedConnections,
+    ResolvedGithub,
+};
 use ratchet_core::enums::{AgentKind, AgentsWhere, SandboxStatus};
 use ratchet_core::ids::OptimizationId;
 use ratchet_core::ports::{
@@ -25,12 +29,44 @@ use ratchet_sandbox::{ImageLookupError, ResolvedImages};
 
 use async_trait::async_trait;
 
+type Chosen = Box<dyn Fn(Option<&str>) -> ResolvedConnections + Send + Sync>;
+
 struct TestSettings {
     live: Mutex<LiveSnapshot>,
     token: Mutex<Option<String>>,
+    /// Connectors the daemon resolved for a repo (the default: the single token and profile of `live` / `token`).
+    chosen: Mutex<Option<Chosen>>,
+    env_keys: Mutex<HashMap<String, String>>,
 }
 
+#[async_trait]
 impl LiveSettingsSource for TestSettings {
+    async fn connections(&self, repo: Option<&str>) -> ResolvedConnections {
+        if let Some(f) = self.chosen.lock().unwrap().as_ref() {
+            return f(repo);
+        }
+        let l = self.live();
+        ResolvedConnections {
+            github: self.secret("githubToken").map(|token| ResolvedGithub {
+                id: "settings".into(),
+                name: "GitHub".into(),
+                login: None,
+                token,
+            }),
+            aws: (!l.aws_profile.is_empty()).then(|| ResolvedAws {
+                id: "settings".into(),
+                name: l.aws_profile.clone(),
+                profile: l.aws_profile,
+                region: l.aws_region,
+                monthly_cap_usd: None,
+            }),
+            agents: Vec::new(),
+            cloud_keys: Default::default(),
+        }
+    }
+    fn env_secret(&self, name: &str) -> Option<String> {
+        self.env_keys.lock().unwrap().get(name).cloned()
+    }
     fn live(&self) -> LiveSnapshot {
         self.live.lock().unwrap().clone()
     }
@@ -81,6 +117,10 @@ struct LiveSeen {
     tofu_binary: String,
     module_dir: String,
     harnesses: Vec<(HarnessKind, HarnessAuth)>,
+    /// The API keys handed to the local Claude Code / Codex adapters.
+    local_keys: (Option<String>, Option<String>),
+    /// What the runner secret source answers for (GITHUB_TOKEN, ANTHROPIC_API_KEY, OPENAI_API_KEY).
+    runner_secrets: (Option<String>, Option<String>, Option<String>),
 }
 
 struct LiveRec {
@@ -144,6 +184,8 @@ async fn build(o: BuildOpts) -> Built {
             ..LiveSnapshot::default()
         }),
         token: Mutex::new(o.token.then(|| "gho_TOKENTOKENTOKENTOKEN1234".to_owned())),
+        chosen: Mutex::new(None),
+        env_keys: Mutex::new(HashMap::new()),
     });
     if o.seed_aws_sandbox {
         let mut r = ratchet_core::ledger::RecordSandboxInput::new(
@@ -192,6 +234,27 @@ async fn build(o: BuildOpts) -> Built {
                         .iter()
                         .map(|h| (h.kind, h.auth))
                         .collect(),
+                    local_keys: (
+                        opts.local_agents
+                            .adapters
+                            .claude
+                            .as_ref()
+                            .and_then(|c| c.api_key.clone()),
+                        opts.local_agents
+                            .adapters
+                            .codex
+                            .as_ref()
+                            .and_then(|c| c.api_key.clone()),
+                    ),
+                    runner_secrets: {
+                        let src = opts.live.secrets.clone();
+                        let get = |n: &str| src.as_ref().and_then(|f| f(AgentKind::ClaudeCode, n));
+                        (
+                            get("GITHUB_TOKEN"),
+                            get("ANTHROPIC_API_KEY"),
+                            get("OPENAI_API_KEY"),
+                        )
+                    },
                 };
                 let d = disposed.clone();
                 let handle = LiveHandle {
@@ -412,6 +475,152 @@ mod real_runs {
             .unwrap();
         assert_eq!(b.live.lock().unwrap().len(), 2);
         b.product.dispose().await;
+    }
+
+    fn agent(
+        id: &str,
+        agent: ConnectorAgent,
+        source: AgentConnectorSource,
+        where_: AgentsWhere,
+        key: Option<&str>,
+    ) -> ResolvedAgent {
+        ResolvedAgent {
+            connector_id: id.into(),
+            name: id.into(),
+            agent,
+            source,
+            where_,
+            api_key: key.map(str::to_owned),
+        }
+    }
+
+    /// engine.ts › live: the connectors chosen for the repo decide the token, the AWS profile and region, and the keys of the
+    /// agents (a key chosen for a local agent goes to its adapter; a login runs with no key at all)
+    #[tokio::test]
+    async fn the_connectors_chosen_for_the_repo_decide_the_token_the_profile_and_the_agent_keys() {
+        let b = build(BuildOpts::default()).await;
+        *b.settings.chosen.lock().unwrap() = Some(Box::new(|repo| {
+            let (token, profile, region) = match repo {
+                Some("acme/api") => ("ghp_ORGTOKEN", "corp-sso", "eu-central-1"),
+                _ => ("ghp_PERSONAL", "personal", "us-west-2"),
+            };
+            ResolvedConnections {
+                github: Some(ResolvedGithub {
+                    id: format!("gh-{token}"),
+                    name: "gh".into(),
+                    login: None,
+                    token: token.into(),
+                }),
+                aws: Some(ResolvedAws {
+                    id: "aws".into(),
+                    name: profile.into(),
+                    profile: profile.into(),
+                    region: region.into(),
+                    monthly_cap_usd: None,
+                }),
+                agents: vec![
+                    agent(
+                        "claude-key",
+                        ConnectorAgent::ClaudeCode,
+                        AgentConnectorSource::ApiKey,
+                        AgentsWhere::Local,
+                        Some("sk-ant-local"),
+                    ),
+                    agent(
+                        "codex-login",
+                        ConnectorAgent::Codex,
+                        AgentConnectorSource::Login,
+                        AgentsWhere::Local,
+                        None,
+                    ),
+                ],
+                cloud_keys: [(ConnectorAgent::ClaudeCode, "sk-ant-local".to_owned())].into(),
+            }
+        }));
+        b.settings
+            .env_keys
+            .lock()
+            .unwrap()
+            .insert("openaiApiKey".into(), "sk-env-openai".into());
+        b.product
+            .create_optimization(&input("acme/api"))
+            .await
+            .unwrap();
+        b.product
+            .create_optimization(&input("acme/web"))
+            .await
+            .unwrap();
+        let live = b.live.lock().unwrap();
+        assert_eq!(
+            live.len(),
+            2,
+            "one runtime per repo, each from its own connectors"
+        );
+        let (api, web) = (&live[0].seen, &live[1].seen);
+        assert_eq!(api.github_token.as_deref(), Some("ghp_ORGTOKEN"));
+        assert_eq!(
+            (api.aws_profile.as_deref(), api.region.as_str()),
+            (Some("corp-sso"), "eu-central-1")
+        );
+        assert_eq!(web.github_token.as_deref(), Some("ghp_PERSONAL"));
+        assert_eq!(
+            (web.aws_profile.as_deref(), web.region.as_str()),
+            (Some("personal"), "us-west-2")
+        );
+        // the AMI lookup used the chosen profile and region
+        let calls = b.image_calls.lock().unwrap();
+        assert_eq!(
+            (calls[0].1.as_str(), calls[0].3.as_deref()),
+            ("eu-central-1", Some("corp-sso"))
+        );
+        // a key chosen for a local agent goes to its adapter; a chosen login gets none
+        assert_eq!(api.local_keys, (Some("sk-ant-local".to_owned()), None));
+        // the runner secrets: the chosen token and key; no environment key next to a chosen login
+        assert_eq!(
+            api.runner_secrets,
+            (
+                Some("ghp_ORGTOKEN".to_owned()),
+                Some("sk-ant-local".to_owned()),
+                None
+            )
+        );
+    }
+
+    /// engine.ts › live: a cloud agent falls back to the environment's key only when no connector holds one
+    #[tokio::test]
+    async fn a_cloud_agent_falls_back_to_the_environment_key_when_no_connector_holds_one() {
+        let b = build(BuildOpts::default()).await;
+        b.settings
+            .env_keys
+            .lock()
+            .unwrap()
+            .insert("anthropicApiKey".into(), "sk-ant-env".into());
+        b.product
+            .create_optimization(&input("acme/api"))
+            .await
+            .unwrap();
+        let live = b.live.lock().unwrap();
+        assert_eq!(live[0].seen.runner_secrets.1.as_deref(), Some("sk-ant-env"));
+        assert_eq!(live[0].seen.local_keys, (None, None));
+    }
+
+    /// engine.ts › live: no connector with a GitHub token is "sign in first", whatever the old settings say
+    #[tokio::test]
+    async fn no_chosen_github_account_is_sign_in_first() {
+        let b = build(BuildOpts::default()).await;
+        *b.settings.chosen.lock().unwrap() = Some(Box::new(|_| ResolvedConnections {
+            github: None,
+            aws: None,
+            agents: Vec::new(),
+            cloud_keys: Default::default(),
+        }));
+        let e = err_of(b.product.create_optimization(&input("acme/api")).await);
+        assert_eq!(e.code, EngineErrorCode::NotConfigured);
+        assert!(
+            e.message.starts_with("Sign in with GitHub first"),
+            "{}",
+            e.message
+        );
     }
 
     /// routes commands to the runtime of the optimization, by the repo in the ledger

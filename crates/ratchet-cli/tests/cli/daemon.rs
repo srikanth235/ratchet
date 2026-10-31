@@ -558,12 +558,13 @@ async fn repos_inspect_overview_and_connectors() {
 
     let c = env.ratchet(&["connectors"]).await;
     assert!(
-        c.stdout.contains("acme-prod") && c.stdout.contains("Expired"),
+        c.stdout.contains("acme-prod") && c.stdout.contains("expired"),
         "{}",
         c.stdout
     );
-    let cj: Vec<ConnectorVm> = parse(&env.ratchet(&["connectors", "--json"]).await);
-    assert_eq!(cj.len(), 8);
+    let cj: ConnectorsVm = parse(&env.ratchet(&["connectors", "--json"]).await);
+    assert_eq!(cj.connectors.len(), 7);
+    assert!(cj.encryption_available);
     env.stop().await;
 }
 

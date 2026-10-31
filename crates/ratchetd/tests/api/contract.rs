@@ -586,11 +586,15 @@ async fn every_route_round_trips_its_types() {
         .await;
     assert_eq!(flow.flow.as_ref().unwrap().state, GithubFlowState::Pending);
 
-    // ---- overview, connectors, drafts (provisional) ------------------------------------------------------
+    // ---- overview, connectors ----------------------------------------------------------------------------
     let ov: OverviewVm = c.rt("GET", "/v1/overview", "/v1/overview", None, 200).await;
     assert_eq!(ov.range, OverviewRange::Days90);
-    assert!(ov.value_locked_in.usd_per_year > 0.0 && !ov.staircase.points.is_empty());
-    assert!(ov.needs_you.iter().any(|n| n.kind == NeedsYouKind::SignIn));
+    assert!(ov.value.as_ref().is_some_and(|v| v.usd_per_year > 0.0) && !ov.wins.is_empty());
+    assert!(
+        ov.needs_you
+            .iter()
+            .any(|n| n.kind == OverviewNeedKind::Ship)
+    );
     assert_eq!(
         ov.rows.len(),
         5,
@@ -600,80 +604,198 @@ async fn every_route_round_trips_its_types() {
         .rt("GET", "/v1/overview", "/v1/overview?range=all", None, 200)
         .await;
 
-    let conns: Vec<ConnectorVm> = c
+    let list: ConnectorsVm = c
         .rt("GET", "/v1/connectors", "/v1/connectors", None, 200)
         .await;
-    assert_eq!(conns.len(), 8);
-    let new: ConnectorVm = c
+    assert_eq!(list.connectors.len(), 7);
+    assert!(list.encryption_available && list.github_flow.is_none());
+    let id_of = |l: &ConnectorsVm, name: &str| {
+        l.connectors
+            .iter()
+            .find(|c| c.name() == name)
+            .unwrap_or_else(|| panic!("no connector named {name}"))
+            .id()
+            .to_owned()
+    };
+    let _: ConnectorsVm = c
         .rt(
             "POST",
-            "/v1/connectors",
-            "/v1/connectors",
-            Some(json!({"kind": "aws", "name": "sandbox-eu", "auth": "profile", "profile": "eu", "region": "eu-west-1", "capUsdPerMonth": 80})),
-            201,
-        )
-        .await;
-    assert_eq!(new.kind, ConnectorKind::Aws);
-    let got: ConnectorVm = c
-        .rt(
-            "GET",
-            "/v1/connectors/{id}",
-            &format!("/v1/connectors/{}", new.id),
+            "/v1/connectors/refresh",
+            "/v1/connectors/refresh",
             None,
             200,
         )
         .await;
-    assert_eq!(got, new);
-    let upd: ConnectorVm = c
-        .rt(
-            "PATCH",
-            "/v1/connectors/{id}",
-            &format!("/v1/connectors/{}", new.id),
-            Some(json!({"name": "eu-sandbox", "isDefault": true})),
+    let org = c
+        .rt::<ConnectorsVm>(
+            "POST",
+            "/v1/connectors/github",
+            "/v1/connectors/github",
+            Some(json!({"token": "ghp_SIMULATEDPASTEDTOKEN0000000000000000", "name": "work"})),
             200,
         )
         .await;
-    assert!(upd.is_default && upd.name == "eu-sandbox");
+    assert_eq!(
+        org.connectors.len(),
+        7,
+        "the simulated account has the same login: its token is replaced"
+    );
+    let flow: ConnectorsVm = c
+        .rt(
+            "POST",
+            "/v1/connectors/github/sign-in",
+            "/v1/connectors/github/sign-in",
+            None,
+            200,
+        )
+        .await;
+    assert_eq!(
+        flow.github_flow.as_ref().unwrap().state,
+        GithubFlowState::Pending
+    );
+    let cancelled: ConnectorsVm = c
+        .rt(
+            "DELETE",
+            "/v1/connectors/github/sign-in",
+            "/v1/connectors/github/sign-in",
+            None,
+            200,
+        )
+        .await;
+    assert!(cancelled.github_flow.is_none());
+    c.fails(
+        "POST",
+        "/v1/connectors/github/sign-in",
+        Some(json!({"connectorId": "ghost"})),
+        404,
+        ErrorCode::NotFound,
+    )
+    .await;
+    let dev = id_of(&list, "personal-dev");
+    let removed: ConnectorsVm = c
+        .rt(
+            "DELETE",
+            "/v1/connectors/{id}",
+            &format!("/v1/connectors/{dev}"),
+            None,
+            200,
+        )
+        .await;
+    assert_eq!(removed.connectors.len(), 6);
+    let with_aws: ConnectorsVm = c
+        .rt(
+            "POST",
+            "/v1/connectors/aws",
+            "/v1/connectors/aws",
+            Some(json!({"profile": "personal-dev", "region": "eu-west-1", "monthlyCapUsd": 80, "name": "sandbox-eu"})),
+            200,
+        )
+        .await;
+    let aws_id = id_of(&with_aws, "sandbox-eu");
+    c.fails(
+        "POST",
+        "/v1/connectors/aws",
+        Some(json!({"profile": "not-in-aws"})),
+        400,
+        ErrorCode::InvalidRequest,
+    )
+    .await;
+    let with_key: ConnectorsVm = c
+        .rt(
+            "POST",
+            "/v1/connectors/agents",
+            "/v1/connectors/agents",
+            Some(json!({"agent": "codex", "source": "api-key", "apiKey": "sk-proj-SIMULATEDCODEXKEY00000000", "name": "Codex \u{00b7} ci"})),
+            200,
+        )
+        .await;
+    let key_id = id_of(&with_key, "Codex \u{00b7} ci");
+    assert!(
+        !serde_json::to_string(&with_key)
+            .unwrap()
+            .contains("SIMULATEDCODEXKEY")
+    );
+    let renamed: ConnectorsVm = c
+        .rt(
+            "PATCH",
+            "/v1/connectors/{id}",
+            &format!("/v1/connectors/{aws_id}"),
+            Some(json!({"name": "eu-sandbox", "region": "eu-west-2", "monthlyCapUsd": null})),
+            200,
+        )
+        .await;
+    assert!(renamed.connectors.iter().any(
+        |c| matches!(c, ConnectorVm::Aws { name, region, monthly_cap_usd: None, .. } if name == "eu-sandbox" && region == "eu-west-2")
+    ));
+    let defaulted: ConnectorsVm = c
+        .rt(
+            "POST",
+            "/v1/connectors/{id}/default",
+            &format!("/v1/connectors/{aws_id}/default"),
+            None,
+            200,
+        )
+        .await;
+    assert!(
+        defaulted
+            .connectors
+            .iter()
+            .any(|c| c.id() == aws_id && c.is_default())
+    );
     let tested: ConnectorTestVm = c
         .rt(
             "POST",
             "/v1/connectors/{id}/test",
-            "/v1/connectors/conn_aws_staging/test",
+            &format!("/v1/connectors/{aws_id}/test"),
             None,
             200,
         )
         .await;
-    assert_eq!(tested.connector.status, ConnectorStatus::Connected);
-    let sel: ConnectorSelectionVm = c
+    assert!(tested.ok && tested.connector.as_ref().unwrap().status() == ConnectorStatus::Connected);
+    let sel: RepoConnectionsVm = c
         .rt(
             "GET",
             "/v1/connector-selections",
-            "/v1/connector-selections?repo=acme-org/shop-api",
+            "/v1/connector-selections?repo=Acme-Org/Shop-API",
             None,
             200,
         )
         .await;
-    assert!(!sel.remembered);
-    assert!(sel.selection.aws_connector_id.is_some());
-    let saved: ConnectorSelectionVm = c
+    assert_eq!(sel.repo, "acme-org/shop-api");
+    assert!(sel.saved.is_none() && sel.effective.aws.is_some());
+    let github = sel.effective.github.clone().unwrap();
+    let saved: RepoConnectionsVm = c
         .rt(
             "PUT",
             "/v1/connector-selections",
             "/v1/connector-selections",
             Some(json!({"repo": "acme-org/shop-api", "selection": {
-                "awsConnectorId": "conn_aws_dev", "githubConnectorId": "conn_gh_acme",
-                "agents": [{"connectorId": "conn_agent_cc_key", "runsIn": "cloud"}]}})),
+                "github": github, "aws": aws_id,
+                "agents": [{"connectorId": key_id, "where": "cloud"}]}})),
             200,
         )
         .await;
-    assert!(saved.remembered);
-    c.no_content(
-        "DELETE",
-        "/v1/connectors/{id}",
-        &format!("/v1/connectors/{}", new.id),
-        None,
+    assert_eq!(
+        saved.saved.as_ref().unwrap().agents[0].where_,
+        ratchet_core::enums::AgentsWhere::Cloud
+    );
+    c.fails(
+        "PUT",
+        "/v1/connector-selections",
+        Some(json!({"repo": "acme-org/shop-api", "selection": {"github": github, "aws": aws_id, "agents": []}})),
+        400,
+        ErrorCode::InvalidRequest,
     )
     .await;
+    let _: ConnectorsVm = c
+        .rt(
+            "DELETE",
+            "/v1/connectors/{id}",
+            &format!("/v1/connectors/{key_id}"),
+            None,
+            200,
+        )
+        .await;
 
     let draft: EnvironmentDraftVm = c
         .rt(

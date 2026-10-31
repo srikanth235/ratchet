@@ -50,18 +50,24 @@ const RATCHET_API: &[(&str, Option<&str>)] = &[
     ("clearSecret", Some("clearSecret")),
     ("saveLiveSettings", Some("saveAdvancedSettings")),
     ("testConnection", Some("testConnection")),
-    // connectors and the overview (provisional on the TypeScript side, see the PENDING groups of `packages/contract`)
+    // the Overview and the connectors (`packages/desktop/src/shared/{overview,connectors}.ts`)
     ("overview", Some("getOverview")),
     ("listConnectors", Some("listConnectors")),
-    ("refreshConnectors", Some("listConnectors")), // the daemon re-checks on read; the app asks again
-    ("addGithubConnector", Some("createConnector")),
-    ("addAwsConnector", Some("createConnector")),
-    ("addAgentConnector", Some("createConnector")),
-    ("startGithubConnectorSignIn", Some("startGithubSignIn")),
-    ("cancelGithubConnectorSignIn", None), // the app stops waiting; nothing to call
+    ("refreshConnectors", Some("refreshConnectors")),
+    ("addGithubConnector", Some("addGithubConnector")),
+    (
+        "startGithubConnectorSignIn",
+        Some("startGithubConnectorSignIn"),
+    ),
+    (
+        "cancelGithubConnectorSignIn",
+        Some("cancelGithubConnectorSignIn"),
+    ),
+    ("addAwsConnector", Some("addAwsConnector")),
+    ("addAgentConnector", Some("addAgentConnector")),
     ("updateConnector", Some("updateConnector")),
-    ("setDefaultConnector", Some("updateConnector")), // `isDefault` is a field of the update
-    ("removeConnector", Some("deleteConnector")),
+    ("removeConnector", Some("removeConnector")),
+    ("setDefaultConnector", Some("setDefaultConnector")),
     ("testConnector", Some("testConnector")),
     ("getRepoConnections", Some("getConnectorSelection")),
     ("saveRepoConnections", Some("saveConnectorSelection")),
@@ -156,10 +162,12 @@ fn no_response_can_carry_a_secret() {
     );
     let mut found = Vec::new();
     for name in &reachable {
-        let Some(props) = d["components"]["schemas"][name]["properties"].as_object() else {
-            continue;
-        };
-        for (p, schema) in props {
+        // the properties of the schema, and of each member of a union (`ConnectorVm`, `ApiEvent`)
+        let schema_of = &d["components"]["schemas"][name];
+        let members = std::iter::once(schema_of)
+            .chain(schema_of["oneOf"].as_array().into_iter().flatten())
+            .filter_map(|m| m["properties"].as_object());
+        for (p, schema) in members.flatten() {
             let lower = p.to_lowercase();
             // `key` alone is a metric key; a count, a flag or an object of flags (`SecretsPresent`) holds no secret
             let harmless = p == "key"
@@ -176,12 +184,13 @@ fn no_response_can_carry_a_secret() {
     }
     found.sort();
     // the only such string in a response is the visible tail of a key ("····4f2a")
-    assert_eq!(found, ["AgentConnectorInfo.keyHint"], "{found:?}");
+    found.dedup();
+    assert_eq!(found, ["ConnectorVm.keyHint"], "{found:?}");
     // the request side carries them: that is how they get in, and they never come back
     for input in [
         "SetSecretInput",
-        "CreateConnectorInput",
-        "UpdateConnectorInput",
+        "AddGithubConnectorInput",
+        "AddAgentConnectorInput",
     ] {
         assert!(!reachable.contains(input), "{input} must not be a response");
     }

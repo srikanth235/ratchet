@@ -15,7 +15,10 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_connectors))
         .routes(routes!(refresh_connectors))
         .routes(routes!(add_github_connector))
-        .routes(routes!(start_github_connector_sign_in, cancel_github_connector_sign_in))
+        .routes(routes!(
+            start_github_connector_sign_in,
+            cancel_github_connector_sign_in
+        ))
         .routes(routes!(add_aws_connector))
         .routes(routes!(add_agent_connector))
         .routes(routes!(update_connector, remove_connector))

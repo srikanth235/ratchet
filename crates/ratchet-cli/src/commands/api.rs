@@ -489,7 +489,13 @@ async fn inspect(c: &Client, target: &str, json: bool, io: &dyn Io) -> R {
         }
     };
     let r: RepoInspectVm = c
-        .post("/v1/repos/inspections", &InspectRepoInput { source })
+        .post(
+            "/v1/repos/inspections",
+            &InspectRepoInput {
+                source,
+                connector_id: None,
+            },
+        )
         .await?;
     if json {
         emit_json(io, &r);
@@ -536,20 +542,32 @@ async fn overview(c: &Client, range: &str, json: bool, io: &dyn Io) -> R {
         emit_json(io, &o);
         return Ok(0);
     }
+    let value = match &o.value {
+        Some(v) => format!(
+            "${}/yr ({})",
+            to_fixed(v.usd_per_year, 0),
+            format!("{:?}", v.basis).to_lowercase()
+        ),
+        None => format!("{DASH} (set a value)"),
+    };
+    let ret = match &o.return_on_spend {
+        Some(r) => format!(
+            "{}x, paid back in {} days",
+            to_fixed(r.ratio, 1),
+            to_fixed(r.payback_days, 0)
+        ),
+        None => DASH.to_owned(),
+    };
     io.out(&format!(
-        "spent {}   value locked in ${}/yr   return {}\n",
+        "spent {}   value locked in {value}   return {ret}\n",
         money(o.spent.usd),
-        to_fixed(o.value_locked_in.usd_per_year, 0),
-        o.return_on_spend
-            .ratio
-            .map_or(DASH.into(), |r| format!("{}x", to_fixed(r, 0)))
     ));
     if o.needs_you.is_empty() {
         io.out("\nNothing is waiting on you.\n");
     } else {
         io.out("\nNeeds you\n");
         for n in &o.needs_you {
-            io.out(&format!("  {}: {}\n", n.title, n.subtitle));
+            io.out(&format!("  {}: {}\n", n.title, n.sub));
         }
     }
     let rows: Vec<Vec<String>> = o
@@ -558,8 +576,10 @@ async fn overview(c: &Client, range: &str, json: bool, io: &dyn Io) -> R {
         .map(|r| {
             vec![
                 r.name.clone(),
-                r.state_text.clone(),
-                r.result_text.clone(),
+                r.status_label.clone(),
+                r.gain_pct.map_or(DASH.into(), |g| {
+                    format!("{}{}%", if g > 0.0 { "+" } else { "" }, to_fixed(g, 1))
+                }),
                 money(r.spent_usd),
                 r.value_usd_per_year
                     .map_or(DASH.into(), |v| format!("${}", to_fixed(v, 0))),
@@ -569,7 +589,7 @@ async fn overview(c: &Client, range: &str, json: bool, io: &dyn Io) -> R {
     io.out(&format!(
         "\n{}",
         table(
-            &["OPTIMIZATION", "STATE", "RESULT", "SPENT", "VALUE/YR"],
+            &["OPTIMIZATION", "STATUS", "GAIN", "SPENT", "VALUE/YR"],
             &rows
         )
     ));
@@ -577,20 +597,23 @@ async fn overview(c: &Client, range: &str, json: bool, io: &dyn Io) -> R {
 }
 
 async fn connectors(c: &Client, json: bool, io: &dyn Io) -> R {
-    let list: Vec<ConnectorVm> = c.get("/v1/connectors").await?;
+    let vm: ConnectorsVm = c.get("/v1/connectors").await?;
     if json {
-        emit_json(io, &list);
+        emit_json(io, &vm);
         return Ok(0);
     }
-    let rows: Vec<Vec<String>> = list
+    let kebab = |v: serde_json::Value| v.as_str().unwrap_or_default().to_owned();
+    let rows: Vec<Vec<String>> = vm
+        .connectors
         .iter()
         .map(|x| {
             vec![
-                x.id.clone(),
-                format!("{:?}", x.kind).to_lowercase(),
-                x.name.clone(),
-                x.status_text.clone(),
-                if x.is_default {
+                x.id().to_owned(),
+                kebab(serde_json::to_value(x.kind()).unwrap_or_default()),
+                x.name().to_owned(),
+                kebab(serde_json::to_value(x.status()).unwrap_or_default()),
+                x.detail().to_owned(),
+                if x.is_default() {
                     "default".to_owned()
                 } else {
                     String::new()
@@ -598,7 +621,10 @@ async fn connectors(c: &Client, json: bool, io: &dyn Io) -> R {
             ]
         })
         .collect();
-    io.out(&table(&["ID", "KIND", "NAME", "STATUS", ""], &rows));
+    io.out(&table(
+        &["ID", "KIND", "NAME", "STATUS", "DETAIL", ""],
+        &rows,
+    ));
     Ok(0)
 }
 
@@ -869,7 +895,7 @@ async fn run_optimization(c: &Client, a: RunArgs, json: bool, io: &dyn Io) -> R 
         budget_usd: a.budget,
         time_limit_seconds: a.time_limit,
         plateau_evals: a.plateau,
-        connectors: None,
+        connections: None,
         environment_draft_id: None,
     };
     // Where the event stream resumes from, so --wait cannot miss the end of a fast run.

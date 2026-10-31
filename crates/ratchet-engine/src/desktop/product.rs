@@ -37,7 +37,8 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use super::harnesses::HarnessCache;
-use super::live_config::{LivePaths, effective_paths, secret_source};
+use super::live_config::secret_source;
+use super::live_config::{LivePaths, effective_paths};
 use crate::engine::Engine;
 use crate::errors::{EngineError, EngineErrorCode, EngineResult};
 use crate::runtime::{
@@ -45,6 +46,7 @@ use crate::runtime::{
     create_simulation_runtime,
 };
 use crate::settings::EngineSettings;
+use ratchet_connectors::{ConnectorAgent, ResolvedAws, ResolvedConnections, ResolvedGithub};
 
 type BoxFut<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
@@ -109,11 +111,48 @@ pub struct ImageQuery {
 pub type ImageResolver =
     Arc<dyn Fn(ImageQuery) -> BoxFut<Result<ResolvedImages, ImageLookupFailure>> + Send + Sync>;
 
-/// The settings the router reads (the daemon's `SettingsStore` implements it); secrets are looked up here, in the daemon.
+/// The settings the router reads (the daemon implements it); secrets are looked up here, in the daemon.
+#[async_trait]
 pub trait LiveSettingsSource: Send + Sync {
     fn live(&self) -> LiveSnapshot;
     /// A secret by setting name (`githubToken`, `anthropicApiKey`, `openaiApiKey`): the store or the environment.
     fn secret(&self, name: &str) -> Option<String>;
+    /// A secret from the process environment only (`anthropicApiKey`, `openaiApiKey`): what a cloud runner falls back to when
+    /// no connector holds a key. Default: none.
+    fn env_secret(&self, name: &str) -> Option<String> {
+        let _ = name;
+        None
+    }
+    /// The connectors a run on `repo` uses, with their secrets: the repo's remembered choice, else the defaults (`None`: the
+    /// defaults). Default: the single GitHub token, AWS profile and keys of `live()` / `secret()` (a daemon without connectors).
+    async fn connections(&self, repo: Option<&str>) -> ResolvedConnections {
+        let _ = repo;
+        let l = self.live();
+        let mut cloud_keys = std::collections::BTreeMap::new();
+        if let Some(k) = self.secret("anthropicApiKey") {
+            cloud_keys.insert(ConnectorAgent::ClaudeCode, k);
+        }
+        if let Some(k) = self.secret("openaiApiKey") {
+            cloud_keys.insert(ConnectorAgent::Codex, k);
+        }
+        ResolvedConnections {
+            github: self.secret("githubToken").map(|token| ResolvedGithub {
+                id: "settings".into(),
+                name: "GitHub".into(),
+                login: None,
+                token,
+            }),
+            aws: (!l.aws_profile.is_empty()).then(|| ResolvedAws {
+                id: "settings".into(),
+                name: l.aws_profile.clone(),
+                profile: l.aws_profile.clone(),
+                region: l.aws_region.clone(),
+                monthly_cap_usd: None,
+            }),
+            agents: Vec::new(),
+            cloud_keys,
+        }
+    }
 }
 
 /// The non-secret live settings (`SettingsStore.live`).
@@ -210,7 +249,7 @@ fn port(e: PortError) -> EngineError {
 
 pub const NO_REAL_RUNS: &str =
     "Real runs are not set up in this build. Use a demo, or start the app normally.";
-pub const SIGN_IN_FIRST: &str = "Sign in with GitHub first (Settings).";
+pub const SIGN_IN_FIRST: &str = "Sign in with GitHub first (Connectors).";
 
 fn default_sim_factory() -> SimFactory {
     Arc::new(|opts| {
@@ -392,24 +431,47 @@ impl ProductEngine {
             return Err(err(EngineErrorCode::NotConfigured, NO_REAL_RUNS));
         };
         let s = cfg.settings.live();
-        let token = cfg.settings.secret("githubToken");
+        // The connectors chosen for this repo (its remembered choice, else the defaults).
+        let chosen = cfg.settings.connections(slug).await;
+        let token = chosen.github.as_ref().map(|g| g.token.clone());
         if slug.is_some() && token.is_none() {
             return Err(err(EngineErrorCode::NotConfigured, SIGN_IN_FIRST));
         }
-        let fallback = if s.aws_region.is_empty() {
-            "us-east-1".to_owned()
-        } else {
-            s.aws_region.clone()
-        };
+        let aws_profile = chosen
+            .aws
+            .as_ref()
+            .map(|a| a.profile.clone())
+            .unwrap_or_default();
+        let fallback = chosen
+            .aws
+            .as_ref()
+            .map(|a| a.region.clone())
+            .filter(|r| !r.is_empty())
+            .or_else(|| Some(s.aws_region.clone()).filter(|r| !r.is_empty()))
+            .unwrap_or_else(|| "us-east-1".to_owned());
         let repo_config = slug
             .and_then(|sl| (cfg.config_for)(sl))
             .unwrap_or(serde_json::Value::Null);
         let region = region_for_optimization(&repo_config, Some(&fallback))
             .map_err(|e| err(EngineErrorCode::InvalidConfig, e.to_string()))?;
+        let agents_key = chosen
+            .agents
+            .iter()
+            .map(|a| {
+                format!(
+                    "{}{}",
+                    a.connector_id,
+                    if a.api_key.is_some() { "+k" } else { "" }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         let key = [
             slug.unwrap_or("*"),
             &region,
-            &s.aws_profile,
+            &aws_profile,
+            chosen.github.as_ref().map_or("", |g| g.id.as_str()),
+            &agents_key,
             &s.runner_image_ref,
             &s.bench_image_ref,
             &s.tofu_binary,
@@ -438,7 +500,7 @@ impl ProductEngine {
             lock(&self.0.lives).remove(&slot);
             tokio::spawn(async move { disposer().await });
         }
-        let handle = self.build_live(&cfg, slug, &region, token).await?;
+        let handle = self.build_live(&cfg, slug, &region, &chosen).await?;
         lock(&self.0.lives).insert(
             slot.clone(),
             LiveEntry {
@@ -456,9 +518,15 @@ impl ProductEngine {
         cfg: &LiveAppConfig,
         slug: Option<&str>,
         region: &str,
-        token: Option<String>,
+        chosen: &ResolvedConnections,
     ) -> EngineResult<LiveHandle> {
         let s = cfg.settings.live();
+        let token = chosen.github.as_ref().map(|g| g.token.clone());
+        let aws_profile = chosen
+            .aws
+            .as_ref()
+            .map(|a| a.profile.clone())
+            .unwrap_or_default();
         let paths = effective_paths(&s.tofu_binary, &s.module_dir, &cfg.defaults);
         tokio::fs::create_dir_all(&cfg.state_root)
             .await
@@ -479,7 +547,7 @@ impl ProductEngine {
             None => std::env::var("AWS_ACCESS_KEY_ID").is_ok_and(|v| !v.is_empty()),
         };
         let app_version = cfg.app_version.clone().filter(|v| !v.is_empty());
-        let can_look_up = app_version.is_some() && (!s.aws_profile.is_empty() || has_env_creds);
+        let can_look_up = app_version.is_some() && (!aws_profile.is_empty() || has_env_creds);
         let resolver = cfg
             .resolve_images
             .clone()
@@ -491,7 +559,7 @@ impl ProductEngine {
             need: vec![need],
             runner_override: runner_override.clone(),
             bench_override: bench_override.clone(),
-            profile: Some(s.aws_profile.clone()).filter(|p| !p.is_empty()),
+            profile: Some(aws_profile.clone()).filter(|p| !p.is_empty()),
         };
         let mut image_problem: Option<String> = None;
         let mut runner_problem: Option<String> = None;
@@ -534,12 +602,31 @@ impl ProductEngine {
         live.runner_image_ref = runner_image_ref.clone();
         live.bench_image_ref = bench_image_ref;
         live.app_version = cfg.app_version.clone();
-        live.secrets = Some(secret_source(Arc::new(move |name| settings.secret(name))));
-        live.aws_profile = Some(s.aws_profile.clone()).filter(|p| !p.is_empty());
+        live.secrets = Some(secret_source(chosen, move |name| settings.env_secret(name)));
+        live.aws_profile = Some(aws_profile.clone()).filter(|p| !p.is_empty());
         live.clock = self.0.opts.clock.clone();
         let mut options = HybridOptions::new(live);
         options.harnesses = Some(detected.harnesses);
         options.login_path = detected.login_path;
+        // An API key chosen for a local agent is handed to that agent's adapter; a login runs with no key at all.
+        for a in chosen
+            .agents
+            .iter()
+            .filter(|a| a.where_ == AgentsWhere::Local)
+        {
+            let Some(api_key) = a.api_key.clone() else {
+                continue;
+            };
+            let adapters = &mut options.local_agents.adapters;
+            match a.agent {
+                ConnectorAgent::ClaudeCode => {
+                    adapters.claude.get_or_insert_with(Default::default).api_key = Some(api_key);
+                }
+                ConnectorAgent::Codex => {
+                    adapters.codex.get_or_insert_with(Default::default).api_key = Some(api_key);
+                }
+            }
+        }
         let factory = cfg
             .create_runtime
             .clone()

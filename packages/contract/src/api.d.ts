@@ -147,9 +147,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The remembered connector choice for a repo, or the defaults. */
+        /** The choice remembered for a repo, and what a run on it would use now (saved choice, else the defaults). */
         get: operations["getConnectorSelection"];
-        /** Remember the connector choice for a repo ("Remembered for this repo"). */
+        /**
+         * Check and remember the choice for a repo. 400 when it cannot run: an unknown id, a login in the cloud, two
+         *     connectors for one agent, no agent.
+         */
         put: operations["saveConnectorSelection"];
         post?: never;
         delete?: never;
@@ -165,11 +168,105 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Every saved connector: GitHub accounts, AWS accounts, agents. */
+        /** Every connector (detected CLI logins included), the device flow in progress and the keychain state. */
         get: operations["listConnectors"];
         put?: never;
-        /** Add a connector. Secrets in the body go to the keychain and are never returned. */
-        post: operations["createConnector"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connectors/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A detected CLI login (one that was removed) or a pasted API key. The key goes to the keychain and is never
+         *     returned.
+         */
+        post: operations["addAgentConnector"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connectors/aws": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Connect an AWS profile from `~/.aws` with a region and an optional monthly cap. */
+        post: operations["addAwsConnector"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connectors/github": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A pasted GitHub token (personal access token or app token), checked against GitHub before it is kept. The token
+         *     goes to the keychain and is never returned.
+         */
+        post: operations["addGithubConnector"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connectors/github/sign-in": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start the device flow for a new account, or `connectorId` to sign it in again. `githubFlow` in the answer carries
+         *     the code to show; the daemon polls and stores the token.
+         */
+        post: operations["startGithubConnectorSignIn"];
+        /** Stop the device flow in progress. */
+        delete: operations["cancelGithubConnectorSignIn"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/connectors/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check every connector with its provider (and probe the machine for agent CLIs again), then list. */
+        post: operations["refreshConnectors"];
         delete?: never;
         options?: never;
         head?: never;
@@ -183,16 +280,32 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** One connector. */
-        get: operations["getConnector"];
+        get?: never;
         put?: never;
         post?: never;
         /** Remove a connector and forget its secret. Optimizations already running keep what they have. */
-        delete: operations["deleteConnector"];
+        delete: operations["removeConnector"];
         options?: never;
         head?: never;
-        /** Rename, change the cap or region, replace the key, make default. */
+        /** Rename; AWS: region and monthly cap (`null` removes the cap). */
         patch: operations["updateConnector"];
+        trace?: never;
+    };
+    "/v1/connectors/{id}/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Make this connector the default of its kind. */
+        post: operations["setDefaultConnector"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/connectors/{id}/test": {
@@ -204,7 +317,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** "Test" / "Sign in": probe the account and refresh its status. */
+        /** "Test connection": probe the account with its provider and remember the status. */
         post: operations["testConnector"];
         delete?: never;
         options?: never;
@@ -719,7 +832,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Overview: spent, value locked in, return, the value staircase, what needs you, the table. PROVISIONAL. */
+        /** Overview: spent, value locked in, return, the value staircase, what needs you, the table. */
         get: operations["getOverview"];
         put?: never;
         post?: never;
@@ -923,6 +1036,39 @@ export interface components {
             text: string;
             tone: components["schemas"]["ActivityTone"];
         };
+        /** @description `POST /v1/connectors/agents`: adopt a detected CLI login (one that was removed earlier) or store an API key. */
+        AddAgentConnectorInput: {
+            agent: components["schemas"]["ConnectorAgent"];
+            /** @enum {string} */
+            source: "login";
+        } | {
+            agent: components["schemas"]["ConnectorAgent"];
+            apiKey: string;
+            name?: string | null;
+            /** @enum {string} */
+            source: "api-key";
+        };
+        /** @description `POST /v1/connectors/aws`. */
+        AddAwsConnectorInput: {
+            /**
+             * Format: double
+             * @description USD per month; omit or `null` for no cap.
+             */
+            monthlyCapUsd?: number | null;
+            name?: string | null;
+            /** @description A profile from `~/.aws/config` or `~/.aws/credentials`. */
+            profile: string;
+            /** @description Default `us-east-1`. */
+            region?: string | null;
+        };
+        /**
+         * @description `POST /v1/connectors/github`: a pasted personal access token or app installation token, checked against GitHub
+         *     before it is kept.
+         */
+        AddGithubConnectorInput: {
+            name?: string | null;
+            token: string;
+        };
         /** @description What empty `tofuBinary` / `moduleDir` resolve to. */
         AdvancedDefaults: {
             moduleDir: string;
@@ -933,18 +1079,8 @@ export interface components {
             defaults: components["schemas"]["AdvancedDefaults"];
             values: components["schemas"]["LiveSettings"];
         };
-        AgentConnectorInfo: {
-            agent: components["schemas"]["AgentKind"];
-            credential: components["schemas"]["AgentCredential"];
-            /** @description Last characters of an API key (`····4f2a`). */
-            keyHint: string | null;
-            /** @description Where this connector can run agents: a login runs on this Mac, a key also in the cloud. */
-            runsIn: components["schemas"]["AgentsWhere"][];
-            /** @description CLI version for a login connector. */
-            version: string | null;
-        };
         /** @enum {string} */
-        AgentCredential: "login" | "api-key";
+        AgentConnectorSource: "login" | "api-key";
         AgentEventVm: {
             /** Format: int64 */
             at: number;
@@ -972,10 +1108,10 @@ export interface components {
             value: number;
             verdict: components["schemas"]["CandidateVerdict"];
         };
-        /** @description One agent choice on the New optimization step: a connector and where it runs. */
+        /** @description One agent choice: a connector and where it runs. */
         AgentSelection: {
             connectorId: string;
-            runsIn: components["schemas"]["AgentsWhere"];
+            where: components["schemas"]["AgentsWhere"];
         };
         AgentStats: {
             /** Format: int64 */
@@ -1109,24 +1245,7 @@ export interface components {
          */
         AwsAuthKind: "profile" | "sso";
         /** @enum {string} */
-        AwsConnectorAuth: "sso" | "profile" | "role";
-        AwsConnectorInfo: {
-            accountId: string | null;
-            auth: components["schemas"]["AwsConnectorAuth"];
-            /**
-             * Format: double
-             * @description Monthly spend cap in USD, when the user set one.
-             */
-            capUsdPerMonth: number | null;
-            /** @description Profile or SSO session name; `null` for a role. */
-            profile: string | null;
-            region: string;
-            /**
-             * Format: double
-             * @description What is left of the cap this month ("$412 left this month").
-             */
-            remainingUsdThisMonth: number | null;
-        };
+        AwsAuthStyle: "sso" | "role" | "keys" | "process" | "other";
         /** @enum {string} */
         AwsProfileKind: "sso" | "role" | "keys" | "process" | "other";
         /** @enum {string} */
@@ -1309,51 +1428,85 @@ export interface components {
         };
         /** @enum {string} */
         ConnectionTarget: "aws" | "github" | "anthropic" | "openai";
-        /** @enum {string} */
-        ConnectorKind: "github" | "aws" | "agent";
-        /** @description The connectors a run uses (step 2 of New optimization). */
-        ConnectorSelectionInput: {
-            agents: components["schemas"]["AgentSelection"][];
-            awsConnectorId?: string | null;
-            githubConnectorId?: string | null;
-        };
-        /** @description `GET /v1/connector-selections?repo=`: the remembered choice for a repo, or the defaults. */
-        ConnectorSelectionVm: {
-            /** @description True when the user chose it before for this repo ("Remembered for this repo"); false = the defaults. */
-            remembered: boolean;
-            repo: string;
-            selection: components["schemas"]["ConnectorSelectionInput"];
-        };
         /**
-         * @description `connected` / `signed-in` / `valid` all read as green in the UI; the text says which.
+         * @description The two agent CLIs Ratchet drives.
          * @enum {string}
          */
-        ConnectorStatus: "connected" | "expired" | "signed-out" | "invalid" | "unknown";
-        /** @description Result of "Test" / "Sign in" on a connector. */
+        ConnectorAgent: "claude-code" | "codex";
+        /**
+         * @description - `connected`: a GitHub account / AWS profile / agent login that works
+         *     - `expired`: it worked once and needs signing in again (GitHub token revoked, `aws sso login` needed)
+         *     - `signed-out`: nothing to use (an agent CLI that is not signed in or not installed, a GitHub account without a token)
+         *     - `valid`: an API key the provider accepted
+         *     - `invalid`: an API key (or static AWS keys) the provider rejected
+         * @enum {string}
+         */
+        ConnectorStatus: "connected" | "expired" | "signed-out" | "valid" | "invalid";
+        /** @description Result of "Test connection" on one connector. */
         ConnectorTestVm: {
-            connector: components["schemas"]["ConnectorVm"];
+            connector: null | components["schemas"]["ConnectorVm"];
             /** @description One line; never contains a key or token. */
             detail: string;
             ok: boolean;
         };
-        /** @description One saved connector. Exactly one of `github` / `aws` / `agent` is set, matching `kind`. */
+        /** @description One saved connector. `kind` says which of the three it is; the first fields are common. */
         ConnectorVm: {
-            agent: null | components["schemas"]["AgentConnectorInfo"];
-            aws: null | components["schemas"]["AwsConnectorInfo"];
-            /** @description Cost line on the New optimization step ("Free while this Mac is awake", "Billed to the key"). */
-            costNote: string | null;
-            /** @description The grey line: "Personal · 42 repos", "SSO · us-east-1 · cap $500 / month". */
+            /** @description One muted line under the name. Backticks mark a command to show in monospace. */
             detail: string;
-            github: null | components["schemas"]["GithubConnectorInfo"];
             id: string;
-            /** @description The default of its kind: preselected for new optimizations. */
+            /** @description The default of its kind (one per kind). */
             isDefault: boolean;
-            kind: components["schemas"]["ConnectorKind"];
-            /** @description "acme-prod", "Claude Code · your login". */
+            /** @enum {string} */
+            kind: "github";
+            /** @description The account's login, `null` until it is known. */
+            login: string | null;
+            /** @description What the user sees and can rename ("srikanth235"). */
             name: string;
+            source: components["schemas"]["GithubConnectorSource"];
             status: components["schemas"]["ConnectorStatus"];
-            /** @description "Connected", "Expired", "Signed out". */
-            statusText: string;
+        } | {
+            auth: components["schemas"]["AwsAuthStyle"];
+            detail: string;
+            id: string;
+            isDefault: boolean;
+            /** @enum {string} */
+            kind: "aws";
+            /**
+             * Format: double
+             * @description Optional monthly spend cap in USD.
+             */
+            monthlyCapUsd: number | null;
+            name: string;
+            /** @description Profile name in `~/.aws/config` (names only; credentials stay where AWS keeps them). */
+            profile: string;
+            region: string;
+            status: components["schemas"]["ConnectorStatus"];
+        } | {
+            agent: components["schemas"]["ConnectorAgent"];
+            detail: string;
+            id: string;
+            /** @description For agents: the one used when a run does not choose. */
+            isDefault: boolean;
+            /** @description Last characters of a stored key, e.g. `····4f2a`. Never the key. */
+            keyHint: string | null;
+            /** @enum {string} */
+            kind: "agent";
+            name: string;
+            /** @description `login` runs on this Mac only; `api-key` can run here or on cloud runners. */
+            runsOn: components["schemas"]["AgentsWhere"][];
+            source: components["schemas"]["AgentConnectorSource"];
+            status: components["schemas"]["ConnectorStatus"];
+            /** @description Detected CLI version (login) or `null`. */
+            version: string | null;
+        };
+        /** @description Everything the Connectors screen shows. */
+        ConnectorsVm: {
+            /** @description True when a real OAuth client id is configured for "Sign in with GitHub". */
+            clientIdConfigured: boolean;
+            connectors: components["schemas"]["ConnectorVm"][];
+            /** @description False when the keychain is unavailable: tokens and keys cannot be stored (the environment is still honoured). */
+            encryptionAvailable: boolean;
+            githubFlow: null | components["schemas"]["GithubFlowVm"];
         };
         /** @description One category of a reconcile run. */
         CostReconcileLine: {
@@ -1397,32 +1550,6 @@ export interface components {
          * @enum {string}
          */
         CostReconcileStatus: "reconciled" | "unchanged" | "pending";
-        /** @description `POST /v1/connectors`: what the "Add connector" sheet sends. */
-        CreateConnectorInput: {
-            /** @enum {string} */
-            kind: "github";
-            name?: string | null;
-            /** @description A pasted personal access token (Advanced). Without it the device flow starts. */
-            token?: string | null;
-        } | {
-            auth: components["schemas"]["AwsConnectorAuth"];
-            /** Format: double */
-            capUsdPerMonth?: number | null;
-            /** @enum {string} */
-            kind: "aws";
-            name: string;
-            profile?: string | null;
-            region?: string | null;
-        } | {
-            agent: components["schemas"]["AgentKind"];
-            /** @description The API key, for `credential: api-key`. */
-            apiKey?: string | null;
-            credential: components["schemas"]["AgentCredential"];
-            /** @enum {string} */
-            kind: "agent";
-            name: string;
-            runsIn?: components["schemas"]["AgentsWhere"][] | null;
-        };
         /** @description `POST /v1/environment-drafts`. */
         CreateEnvironmentDraftInput: {
             agent?: null | components["schemas"]["AgentKind"];
@@ -1438,7 +1565,7 @@ export interface components {
             baseRef?: string;
             /** Format: double */
             budgetUsd: number;
-            connectors?: null | components["schemas"]["ConnectorSelectionInput"];
+            connections?: null | components["schemas"]["RepoConnections"];
             demo?: null | components["schemas"]["DemoId"];
             /** @description Provisional (environment drafts): the approved draft whose environment this run uses. */
             environmentDraftId?: string | null;
@@ -1511,6 +1638,15 @@ export interface components {
             costUsd: number;
             /** Format: int32 */
             durationS: number;
+        };
+        /**
+         * @description What a run would use right now: the saved choice where there is one, else the defaults. `null` = nothing
+         *     connected of that kind.
+         */
+        EffectiveConnections: {
+            agents: components["schemas"]["AgentSelection"][];
+            aws: string | null;
+            github: string | null;
         };
         EffectiveProtected: {
             /** @description Everything, de-duplicated, in the order: config, evaluator, environment, install, user. */
@@ -1698,13 +1834,7 @@ export interface components {
             path: string;
         };
         /** @enum {string} */
-        GithubAccountKind: "personal" | "organization" | "app";
-        GithubConnectorInfo: {
-            accountKind: components["schemas"]["GithubAccountKind"];
-            login: string;
-            /** Format: int32 */
-            repoCount: number | null;
-        };
+        GithubConnectorSource: "device" | "token" | "env";
         /** @enum {string} */
         GithubFlowState: "pending" | "expired" | "denied" | "error";
         GithubFlowVm: {
@@ -1745,6 +1875,8 @@ export interface components {
             version: string | null;
         };
         InspectRepoInput: {
+            /** @description Read the repo with this GitHub connector (default: the default one). */
+            connectorId?: string | null;
             source: components["schemas"]["RepoSource"];
         };
         Kpi: {
@@ -1819,22 +1951,6 @@ export interface components {
          * @enum {string}
          */
         Mode: "live" | "simulation";
-        /** @description One item of "Needs you". The button opens `optimizationId` (or the draft / connector) in the app. */
-        NeedsYouItem: {
-            /** @description The button: "Review", "Open PR". */
-            actionLabel: string;
-            connectorId: string | null;
-            environmentDraftId: string | null;
-            id: string;
-            kind: components["schemas"]["NeedsYouKind"];
-            optimizationId: string | null;
-            subtitle: string;
-            title: string;
-            /** @description For `merge-wins`: the pull request to open. */
-            url: string | null;
-        };
-        /** @enum {string} */
-        NeedsYouKind: "approve-environment" | "merge-wins" | "sign-in" | "budget-limit";
         /** @enum {string} */
         NoticeLevel: "info" | "warning" | "error";
         OptimizationDetail: {
@@ -1921,45 +2037,133 @@ export interface components {
             optimizations: components["schemas"]["OptimizationVm"][];
             range: components["schemas"]["KpiRange"];
         };
+        /**
+         * @description `lower` = a smaller metric is better.
+         * @enum {string}
+         */
+        OverviewDirection: "lower" | "higher";
+        OverviewNeed: {
+            /** @description Button label. */
+            action: string;
+            id: string;
+            kind: components["schemas"]["OverviewNeedKind"];
+            optimizationId: string;
+            sub: string;
+            title: string;
+        };
         /** @enum {string} */
+        OverviewNeedKind: "ship" | "failed";
+        /**
+         * @description Window the Overview covers. `all` = everything in the ledger.
+         * @enum {string}
+         */
         OverviewRange: "30d" | "90d" | "all";
+        /** @description Yearly value per $1 spent, and days until the spend is earned back. */
+        OverviewReturn: {
+            /** Format: double */
+            paybackDays: number;
+            /** Format: double */
+            ratio: number;
+        };
         OverviewRow: {
             /** Format: double */
-            budgetUsd: number | null;
+            baseline: number | null;
+            /** Format: double */
+            best: number | null;
+            /** Format: double */
+            budgetUsd: number;
+            direction: components["schemas"]["OverviewDirection"];
+            /**
+             * Format: double
+             * @description Signed gain vs baseline in percent (positive = better); `null` without a baseline.
+             */
+            gainPct: number | null;
+            id: string;
+            live: boolean;
+            metric: string;
             name: string;
-            optimizationId: string;
+            /**
+             * Format: int64
+             * @description Seconds left of the time limit while running, else `null`.
+             */
+            remainingS: number | null;
             repo: string;
             /**
              * Format: double
-             * @description Signed percent change of the metric, positive = better.
+             * @description Spend in the range (lifetime when the range is `all`).
              */
-            resultPct: number | null;
-            /** @description "412 -> 288 ms" */
-            resultText: string;
-            /** Format: double */
             spentUsd: number;
-            state: components["schemas"]["OverviewState"];
-            /** @description Under the state: "1 h 12 m left". */
-            stateNote: string | null;
-            /** @description "Running", "Waiting on you", "Merged", "Done", "No win". */
-            stateText: string;
-            /** Format: double */
+            /** @description Ledger status as the pills use it (`pr-open` once a pull request exists). */
+            status: components["schemas"]["UiStatus"];
+            /** @description The status word shown next to the dot ("Running", "Waiting on you", "No win"). */
+            statusLabel: string;
+            tone: components["schemas"]["StatusTone"];
+            unit: string;
+            /**
+             * Format: double
+             * @description Value of the wins in the range, USD per year; `null` without a value model.
+             */
             valueUsdPerYear: number | null;
+            /** Format: int64 */
+            verifiedWins: number;
         };
-        /**
-         * @description The state dot of an Overview row.
-         * @enum {string}
-         */
-        OverviewState: "running" | "waiting-on-you" | "merged" | "done" | "no-win" | "draft" | "stopped" | "failed";
+        OverviewSpent: {
+            /**
+             * Format: double
+             * @description Budget of the optimizations listed in `rows`.
+             */
+            budgetUsd: number;
+            /** Format: int64 */
+            optimizations: number;
+            /** Format: double */
+            usd: number;
+        };
+        OverviewValue: {
+            basis: components["schemas"]["ValueBasis"];
+            /** Format: double */
+            usdPerYear: number;
+            /** Format: int64 */
+            wins: number;
+        };
         OverviewVm: {
-            needsYou: components["schemas"]["NeedsYouItem"][];
+            /** @description The ledger has no optimization at all (the Overview shows one calm empty state). */
+            empty: boolean;
+            /**
+             * Format: int64
+             * @description The window, epoch ms. `from` is the first activity for `all`.
+             */
+            from: number;
+            needsYou: components["schemas"]["OverviewNeed"][];
             range: components["schemas"]["OverviewRange"];
-            returnOnSpend: components["schemas"]["ReturnHero"];
+            returnOnSpend: null | components["schemas"]["OverviewReturn"];
+            /** @description Optimizations with activity in the range (drafts created in it included), newest first. */
             rows: components["schemas"]["OverviewRow"][];
-            sandbox: components["schemas"]["SandboxChip"];
-            spent: components["schemas"]["SpentHero"];
-            staircase: components["schemas"]["Staircase"];
-            valueLockedIn: components["schemas"]["ValueHero"];
+            spent: components["schemas"]["OverviewSpent"];
+            /** Format: int64 */
+            to: number;
+            value: null | components["schemas"]["OverviewValue"];
+            /** @description Staircase of cumulative value, oldest first; empty without a value model or wins in the range. */
+            wins: components["schemas"]["OverviewWin"][];
+        };
+        /** @description One step of the "value locked in" staircase: a verified win with a value model. */
+        OverviewWin: {
+            /**
+             * Format: int64
+             * @description When the ratchet moved (epoch ms).
+             */
+            at: number;
+            /**
+             * Format: double
+             * @description Cumulative value locked in after this win, USD per year.
+             */
+            cumulativeUsdPerYear: number;
+            optimization: string;
+            optimizationId: string;
+            /**
+             * Format: double
+             * @description What this win added, USD per year.
+             */
+            usdPerYear: number;
         };
         PipelineCandidate: {
             agent: components["schemas"]["AgentKind"];
@@ -1975,6 +2179,8 @@ export interface components {
         PreflightInput: {
             agents: components["schemas"]["AgentKind"][];
             agentsWhere: components["schemas"]["AgentsWhere"];
+            /** @description `owner/name`: check the connectors remembered for this repo instead of the defaults. */
+            repo?: string | null;
             source: components["schemas"]["PreflightSource"];
         };
         PreflightItem: {
@@ -2084,6 +2290,19 @@ export interface components {
         };
         /** @enum {string} */
         ReceiptTrigger: "idle" | "manual";
+        /** @description What one repo's runs use: one GitHub account, one AWS profile, and one connector per agent with where it runs. */
+        RepoConnections: {
+            agents: components["schemas"]["AgentSelection"][];
+            aws: string;
+            github: string;
+        };
+        /** @description `GET /v1/connector-selections?repo=`. */
+        RepoConnectionsVm: {
+            effective: components["schemas"]["EffectiveConnections"];
+            /** @description `owner/name`, lower-cased: the key the selection is remembered under. */
+            repo: string;
+            saved: null | components["schemas"]["RepoConnections"];
+        };
         /** @description What step 1 learned about the chosen repo (read from the default branch, never typed). */
         RepoInspectVm: {
             baseRef: string;
@@ -2122,31 +2341,11 @@ export interface components {
             fileName: string;
             markdown: string;
         };
-        /** @description "Return 84x: yearly value for every $1 spent, paid back in 4 days". */
-        ReturnHero: {
-            note: string;
-            /** Format: double */
-            paybackDays: number | null;
-            /**
-             * Format: double
-             * @description `null` when nothing was spent.
-             */
-            ratio: number | null;
-        };
         /** @description `POST /v1/environment-drafts/{id}/revisions`: "Ask for a change", or "Use a smaller setup". */
         ReviseEnvironmentDraftInput: {
             /** @description Plain words: "use RDS instead of a Postgres container". */
             request: string;
             scope?: null | components["schemas"]["EnvScope"];
-        };
-        /** @description The sandbox line at the bottom of the sidebar ("Sandbox on · acme-prod, $1.20 so far · off at 15:40"). */
-        SandboxChip: {
-            name: string | null;
-            /** Format: int64 */
-            offAt: number | null;
-            on: boolean;
-            /** Format: double */
-            spentUsd: number;
         };
         /**
          * @description `creating` -> `ready` -> (`idle` while no run is active) -> `destroying` -> `destroyed`; `failed` when a step
@@ -2155,9 +2354,9 @@ export interface components {
          */
         SandboxPhase: "creating" | "ready" | "idle" | "destroying" | "destroyed" | "failed";
         /** @description `PUT /v1/connector-selections`: remember the choice for a repo. */
-        SaveConnectorSelectionInput: {
+        SaveRepoConnectionsInput: {
             repo: string;
-            selection: components["schemas"]["ConnectorSelectionInput"];
+            selection: components["schemas"]["RepoConnections"];
         };
         /** @enum {string} */
         SecretName: "anthropicApiKey" | "openaiApiKey" | "githubToken";
@@ -2228,43 +2427,20 @@ export interface components {
             /** Format: double */
             total: number;
         };
-        /** @description "Spent $184 of $500 across AWS and agent keys". */
-        SpentHero: {
-            /**
-             * Format: double
-             * @description The total monthly caps of the connected AWS accounts and keys, when any is set.
-             */
-            capUsd: number | null;
-            /**
-             * Format: double
-             * @description 0..=1, for the thin bar; `null` without a cap.
-             */
-            fractionOfCap: number | null;
-            /** @description "across AWS and agent keys" */
-            note: string;
-            /** Format: double */
-            usd: number;
-        };
         /** @enum {string} */
         StageId: "checkout" | "guardrails" | "bench" | "confirm" | "verdict";
         /** @enum {string} */
         StageState: "done" | "active" | "idle" | "failed";
-        Staircase: {
-            /** Format: int64 */
-            from: number;
-            points: components["schemas"]["StaircasePoint"][];
-            /** Format: int64 */
-            to: number;
+        /** @description `POST /v1/connectors/github/sign-in`: start the device flow for a new account, or sign `connectorId` in again. */
+        StartGithubSignInInput: {
+            /** @description Re-sign-in: store the new token on this connector (default: a new one, or the one with the same login). */
+            connectorId?: string | null;
         };
-        /** @description One verified win on the staircase. `usdPerYear` is cumulative after this win. */
-        StaircasePoint: {
-            /** Format: int64 */
-            at: number;
-            optimizationId: string;
-            optimizationName: string;
-            /** Format: double */
-            usdPerYear: number;
-        };
+        /**
+         * @description Dot colour of a status word: brass (running), amber (waiting on you), mint (done), grey (nothing), rose (failed).
+         * @enum {string}
+         */
+        StatusTone: "run" | "wait" | "ok" | "off" | "bad";
         StepPoint: {
             /** Format: double */
             t: number;
@@ -2352,14 +2528,15 @@ export interface components {
          * @enum {string}
          */
         UiStatus: "draft" | "baselining" | "running" | "stopping" | "completed" | "stopped" | "failed" | "pr-open";
-        /** @description `PATCH /v1/connectors/{id}`: rename, change the cap, make default. */
+        /** @description `PATCH /v1/connectors/{id}`: rename; AWS: region and monthly cap. */
         UpdateConnectorInput: {
-            /** @description Replace the stored API key. */
-            apiKey?: string | null;
-            /** Format: double */
-            capUsdPerMonth?: number | null;
-            isDefault?: boolean | null;
+            /**
+             * Format: double
+             * @description AWS only; `null` removes the cap, absent leaves it alone.
+             */
+            monthlyCapUsd?: number | null;
             name?: string | null;
+            /** @description AWS only. */
             region?: string | null;
         };
         ValidateConfigInput: {
@@ -2377,15 +2554,6 @@ export interface components {
          * @enum {string}
          */
         ValueBasis: "estimated" | "measured";
-        /** @description "Value locked in $15.4k / yr from 9 verified wins (estimated)". */
-        ValueHero: {
-            basis: components["schemas"]["ValueBasis"];
-            note: string;
-            /** Format: double */
-            usdPerYear: number;
-            /** Format: int64 */
-            wins: number;
-        };
         /**
          * @description The period a value-model amount is quoted for.
          * @enum {string}
@@ -2708,7 +2876,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConnectorSelectionVm"];
+                    "application/json": components["schemas"]["RepoConnectionsVm"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -2725,7 +2893,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["SaveConnectorSelectionInput"];
+                "application/json": components["schemas"]["SaveRepoConnectionsInput"];
             };
         };
         responses: {
@@ -2735,7 +2903,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConnectorSelectionVm"];
+                    "application/json": components["schemas"]["RepoConnectionsVm"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -2758,14 +2926,14 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConnectorVm"][];
+                    "application/json": components["schemas"]["ConnectorsVm"];
                 };
             };
             401: components["responses"]["Unauthorized"];
             default: components["responses"]["Failure"];
         };
     };
-    createConnector: {
+    addAgentConnector: {
         parameters: {
             query?: never;
             header?: never;
@@ -2774,17 +2942,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateConnectorInput"];
+                "application/json": components["schemas"]["AddAgentConnectorInput"];
             };
         };
         responses: {
             /** @description OK */
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConnectorVm"];
+                    "application/json": components["schemas"]["ConnectorsVm"];
                 };
             };
             400: components["responses"]["BadRequest"];
@@ -2792,7 +2960,133 @@ export interface operations {
             default: components["responses"]["Failure"];
         };
     };
-    getConnector: {
+    addAwsConnector: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddAwsConnectorInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorsVm"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            default: components["responses"]["Failure"];
+        };
+    };
+    addGithubConnector: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddGithubConnectorInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorsVm"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            default: components["responses"]["Failure"];
+        };
+    };
+    startGithubConnectorSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Optional; an empty body starts a new account. */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartGithubSignInInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorsVm"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            default: components["responses"]["Failure"];
+        };
+    };
+    cancelGithubConnectorSignIn: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorsVm"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            default: components["responses"]["Failure"];
+        };
+    };
+    refreshConnectors: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorsVm"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            default: components["responses"]["Failure"];
+        };
+    };
+    removeConnector: {
         parameters: {
             query?: never;
             header?: never;
@@ -2810,32 +3104,8 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConnectorVm"];
+                    "application/json": components["schemas"]["ConnectorsVm"];
                 };
-            };
-            401: components["responses"]["Unauthorized"];
-            404: components["responses"]["NotFound"];
-            default: components["responses"]["Failure"];
-        };
-    };
-    deleteConnector: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                /** @description Connector id */
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Removed */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
@@ -2864,10 +3134,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConnectorVm"];
+                    "application/json": components["schemas"]["ConnectorsVm"];
                 };
             };
             400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Failure"];
+        };
+    };
+    setDefaultConnector: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Connector id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorsVm"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["NotFound"];
             default: components["responses"]["Failure"];
@@ -3157,6 +3453,8 @@ export interface operations {
             query?: {
                 /** @description Substring of `owner/name`. */
                 query?: string;
+                /** @description List with this GitHub connector (default: the default one). */
+                connectorId?: string;
             };
             header?: never;
             path?: never;
