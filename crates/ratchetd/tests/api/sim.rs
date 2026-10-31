@@ -668,7 +668,7 @@ async fn connectors_can_be_added_renamed_defaulted_tested_and_removed() {
             .map(|c| c.id().to_owned())
             .collect::<Vec<_>>()
     };
-    assert_eq!(agent_defaults(&v), [id.clone()]);
+    assert_eq!(agent_defaults(&v), std::slice::from_ref(&id));
     let v = sim.remove_connector(&id).await.unwrap();
     assert_eq!(agent_defaults(&v).len(), 1, "another one was promoted");
     // rename, and the cap of an AWS profile
