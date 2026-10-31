@@ -34,6 +34,8 @@ public protocol RatchetClient: Sendable {
     func addConnector(_ new: NewConnector) async throws -> Connector
     func removeConnector(id: String) async throws
     func setDefaultConnector(id: String) async throws -> [Connector]
+    /// Sign in again (an expired SSO session, a signed-out agent). Returns the refreshed connector.
+    func signInConnector(id: String) async throws -> Connector
     func connectionSelection(repoID: String) async throws -> ConnectionSelection?
     func saveConnectionSelection(_ selection: ConnectionSelection) async throws
 

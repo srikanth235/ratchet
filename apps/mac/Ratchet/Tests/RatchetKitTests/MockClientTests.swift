@@ -87,6 +87,15 @@ struct MockClientTests {
         await #expect(throws: RatchetClientError.self) { try await client.addConnector(NewConnector(kind: .github, name: " ")) }
     }
 
+    @Test func expiredConnectorsSignInAgain() async throws {
+        let client = MockRatchetClient(now: testNow)
+        let signedIn = try await client.signInConnector(id: "aws-acme-staging")
+        #expect(signedIn.state == .connected)
+        let codex = try await client.signInConnector(id: "agent-codex-login")
+        #expect(codex.state == .signedIn)
+        await #expect(throws: RatchetClientError.self) { try await client.signInConnector(id: "nope") }
+    }
+
     @Test func selectionsAreRememberedPerRepo() async throws {
         let client = MockRatchetClient(now: testNow)
         let known = try await client.connectionSelection(repoID: "acme-org/shop-api")

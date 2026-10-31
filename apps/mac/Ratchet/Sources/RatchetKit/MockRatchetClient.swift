@@ -235,6 +235,15 @@ public actor MockRatchetClient: RatchetClient {
         return world.connectors
     }
 
+    public func signInConnector(id: String) async throws -> Connector {
+        guard let index = world.connectors.firstIndex(where: { $0.id == id }) else {
+            throw RatchetClientError.notFound("connector \(id)")
+        }
+        world.connectors[index].state = world.connectors[index].kind == .agent ? .signedIn : .connected
+        emit([.connectorsChanged(world.connectors)])
+        return world.connectors[index]
+    }
+
     public func connectionSelection(repoID: String) async throws -> ConnectionSelection? {
         world.selections[repoID]
     }

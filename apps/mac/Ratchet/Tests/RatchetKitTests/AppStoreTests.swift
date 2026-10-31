@@ -134,6 +134,12 @@ struct AppStoreTests {
         #expect(store.lastError != nil)
     }
 
+    @Test func signingInRefreshesTheConnector() async {
+        let (store, _) = await loadedStore()
+        await store.signInConnector("aws-acme-staging")
+        #expect(store.connectors.first { $0.id == "aws-acme-staging" }?.state == .connected)
+    }
+
     @Test func endingTheSandboxStoresTheReceipt() async {
         let (store, _) = await loadedStore()
         await store.endSandbox()

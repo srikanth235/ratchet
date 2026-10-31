@@ -281,6 +281,15 @@ public final class AppStore {
         }
     }
 
+    public func signInConnector(_ id: String) async {
+        do {
+            _ = try await client.signInConnector(id: id)
+            connectors = try await client.connectors()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
     public func endSandbox() async {
         do {
             receipt = try await client.endSandbox()
