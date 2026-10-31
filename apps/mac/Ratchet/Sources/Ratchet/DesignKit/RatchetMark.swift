@@ -3,9 +3,9 @@ import SwiftUI
 
 /// The Ratchet mark: five quarter-discs whose radii grow by the golden ratio. Four sealed chambers in glass, the newest
 /// in brass. Geometry comes from design/icon/ratchet-mark.svg (viewBox 218 338 600 369) and ratchet-menubar.svg.
-struct RatchetMarkGeometry: Sendable {
+nonisolated struct RatchetMarkGeometry: Sendable {
     /// One quarter disc: the right-angle corner, then the two ends of the arc.
-    struct Chamber: Sendable {
+    nonisolated struct Chamber: Sendable {
         let center: CGPoint
         let start: CGPoint
         let end: CGPoint
