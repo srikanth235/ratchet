@@ -32,27 +32,56 @@ public protocol APIProtocol: Sendable {
     /// - Remark: HTTP `POST /v1/agents/{id}/resume`.
     /// - Remark: Generated from `#/paths//v1/agents/{id}/resume/post(resumeAgent)`.
     func resumeAgent(_ input: Operations.ResumeAgent.Input) async throws -> Operations.ResumeAgent.Output
-    /// The remembered connector choice for a repo, or the defaults.
+    /// The choice remembered for a repo, and what a run on it would use now (saved choice, else the defaults).
     ///
     /// - Remark: HTTP `GET /v1/connector-selections`.
     /// - Remark: Generated from `#/paths//v1/connector-selections/get(getConnectorSelection)`.
     func getConnectorSelection(_ input: Operations.GetConnectorSelection.Input) async throws -> Operations.GetConnectorSelection.Output
-    /// Remember the connector choice for a repo ("Remembered for this repo").
+    /// Check and remember the choice for a repo. 400 when it cannot run: an unknown id, a login in the cloud, two
+    /// connectors for one agent, no agent.
     ///
     /// - Remark: HTTP `PUT /v1/connector-selections`.
     /// - Remark: Generated from `#/paths//v1/connector-selections/put(saveConnectorSelection)`.
     func saveConnectorSelection(_ input: Operations.SaveConnectorSelection.Input) async throws -> Operations.SaveConnectorSelection.Output
-    /// Every saved connector: GitHub accounts, AWS accounts, agents.
+    /// Every connector (detected CLI logins included), the device flow in progress and the keychain state.
     ///
     /// - Remark: HTTP `GET /v1/connectors`.
     /// - Remark: Generated from `#/paths//v1/connectors/get(listConnectors)`.
     func listConnectors(_ input: Operations.ListConnectors.Input) async throws -> Operations.ListConnectors.Output
-    /// Add a connector. Secrets in the body go to the keychain and are never returned.
+    /// A detected CLI login (one that was removed) or a pasted API key. The key goes to the keychain and is never
+    /// returned.
     ///
-    /// - Remark: HTTP `POST /v1/connectors`.
-    /// - Remark: Generated from `#/paths//v1/connectors/post(createConnector)`.
-    func createConnector(_ input: Operations.CreateConnector.Input) async throws -> Operations.CreateConnector.Output
-    /// Rename, change the cap or region, replace the key, make default.
+    /// - Remark: HTTP `POST /v1/connectors/agents`.
+    /// - Remark: Generated from `#/paths//v1/connectors/agents/post(addAgentConnector)`.
+    func addAgentConnector(_ input: Operations.AddAgentConnector.Input) async throws -> Operations.AddAgentConnector.Output
+    /// Connect an AWS profile from `~/.aws` with a region and an optional monthly cap.
+    ///
+    /// - Remark: HTTP `POST /v1/connectors/aws`.
+    /// - Remark: Generated from `#/paths//v1/connectors/aws/post(addAwsConnector)`.
+    func addAwsConnector(_ input: Operations.AddAwsConnector.Input) async throws -> Operations.AddAwsConnector.Output
+    /// A pasted GitHub token (personal access token or app token), checked against GitHub before it is kept. The token
+    /// goes to the keychain and is never returned.
+    ///
+    /// - Remark: HTTP `POST /v1/connectors/github`.
+    /// - Remark: Generated from `#/paths//v1/connectors/github/post(addGithubConnector)`.
+    func addGithubConnector(_ input: Operations.AddGithubConnector.Input) async throws -> Operations.AddGithubConnector.Output
+    /// Start the device flow for a new account, or `connectorId` to sign it in again. `githubFlow` in the answer carries
+    /// the code to show; the daemon polls and stores the token.
+    ///
+    /// - Remark: HTTP `POST /v1/connectors/github/sign-in`.
+    /// - Remark: Generated from `#/paths//v1/connectors/github/sign-in/post(startGithubConnectorSignIn)`.
+    func startGithubConnectorSignIn(_ input: Operations.StartGithubConnectorSignIn.Input) async throws -> Operations.StartGithubConnectorSignIn.Output
+    /// Stop the device flow in progress.
+    ///
+    /// - Remark: HTTP `DELETE /v1/connectors/github/sign-in`.
+    /// - Remark: Generated from `#/paths//v1/connectors/github/sign-in/delete(cancelGithubConnectorSignIn)`.
+    func cancelGithubConnectorSignIn(_ input: Operations.CancelGithubConnectorSignIn.Input) async throws -> Operations.CancelGithubConnectorSignIn.Output
+    /// Check every connector with its provider (and probe the machine for agent CLIs again), then list.
+    ///
+    /// - Remark: HTTP `POST /v1/connectors/refresh`.
+    /// - Remark: Generated from `#/paths//v1/connectors/refresh/post(refreshConnectors)`.
+    func refreshConnectors(_ input: Operations.RefreshConnectors.Input) async throws -> Operations.RefreshConnectors.Output
+    /// Rename; AWS: region and monthly cap (`null` removes the cap).
     ///
     /// - Remark: HTTP `PATCH /v1/connectors/{id}`.
     /// - Remark: Generated from `#/paths//v1/connectors/{id}/patch(updateConnector)`.
@@ -60,9 +89,14 @@ public protocol APIProtocol: Sendable {
     /// Remove a connector and forget its secret. Optimizations already running keep what they have.
     ///
     /// - Remark: HTTP `DELETE /v1/connectors/{id}`.
-    /// - Remark: Generated from `#/paths//v1/connectors/{id}/delete(deleteConnector)`.
-    func deleteConnector(_ input: Operations.DeleteConnector.Input) async throws -> Operations.DeleteConnector.Output
-    /// "Test" / "Sign in": probe the account and refresh its status.
+    /// - Remark: Generated from `#/paths//v1/connectors/{id}/delete(removeConnector)`.
+    func removeConnector(_ input: Operations.RemoveConnector.Input) async throws -> Operations.RemoveConnector.Output
+    /// Make this connector the default of its kind.
+    ///
+    /// - Remark: HTTP `POST /v1/connectors/{id}/default`.
+    /// - Remark: Generated from `#/paths//v1/connectors/{id}/default/post(setDefaultConnector)`.
+    func setDefaultConnector(_ input: Operations.SetDefaultConnector.Input) async throws -> Operations.SetDefaultConnector.Output
+    /// "Test connection": probe the account with its provider and remember the status.
     ///
     /// - Remark: HTTP `POST /v1/connectors/{id}/test`.
     /// - Remark: Generated from `#/paths//v1/connectors/{id}/test/post(testConnector)`.
@@ -152,7 +186,7 @@ public protocol APIProtocol: Sendable {
     /// - Remark: HTTP `GET /v1/optimizations/{id}/winning-change`.
     /// - Remark: Generated from `#/paths//v1/optimizations/{id}/winning-change/get(getWinningChange)`.
     func getWinningChange(_ input: Operations.GetWinningChange.Input) async throws -> Operations.GetWinningChange.Output
-    /// Overview: spent, value locked in, return, the value staircase, what needs you, the table. PROVISIONAL.
+    /// Overview: spent, value locked in, return, the value staircase, what needs you, the table.
     ///
     /// - Remark: HTTP `GET /v1/overview`.
     /// - Remark: Generated from `#/paths//v1/overview/get(getOverview)`.
@@ -218,7 +252,7 @@ extension APIProtocol {
             headers: headers
         ))
     }
-    /// The remembered connector choice for a repo, or the defaults.
+    /// The choice remembered for a repo, and what a run on it would use now (saved choice, else the defaults).
     ///
     /// - Remark: HTTP `GET /v1/connector-selections`.
     /// - Remark: Generated from `#/paths//v1/connector-selections/get(getConnectorSelection)`.
@@ -231,7 +265,8 @@ extension APIProtocol {
             headers: headers
         ))
     }
-    /// Remember the connector choice for a repo ("Remembered for this repo").
+    /// Check and remember the choice for a repo. 400 when it cannot run: an unknown id, a login in the cloud, two
+    /// connectors for one agent, no agent.
     ///
     /// - Remark: HTTP `PUT /v1/connector-selections`.
     /// - Remark: Generated from `#/paths//v1/connector-selections/put(saveConnectorSelection)`.
@@ -244,27 +279,83 @@ extension APIProtocol {
             body: body
         ))
     }
-    /// Every saved connector: GitHub accounts, AWS accounts, agents.
+    /// Every connector (detected CLI logins included), the device flow in progress and the keychain state.
     ///
     /// - Remark: HTTP `GET /v1/connectors`.
     /// - Remark: Generated from `#/paths//v1/connectors/get(listConnectors)`.
     public func listConnectors(headers: Operations.ListConnectors.Input.Headers = .init()) async throws -> Operations.ListConnectors.Output {
         try await listConnectors(Operations.ListConnectors.Input(headers: headers))
     }
-    /// Add a connector. Secrets in the body go to the keychain and are never returned.
+    /// A detected CLI login (one that was removed) or a pasted API key. The key goes to the keychain and is never
+    /// returned.
     ///
-    /// - Remark: HTTP `POST /v1/connectors`.
-    /// - Remark: Generated from `#/paths//v1/connectors/post(createConnector)`.
-    public func createConnector(
-        headers: Operations.CreateConnector.Input.Headers = .init(),
-        body: Operations.CreateConnector.Input.Body
-    ) async throws -> Operations.CreateConnector.Output {
-        try await createConnector(Operations.CreateConnector.Input(
+    /// - Remark: HTTP `POST /v1/connectors/agents`.
+    /// - Remark: Generated from `#/paths//v1/connectors/agents/post(addAgentConnector)`.
+    public func addAgentConnector(
+        headers: Operations.AddAgentConnector.Input.Headers = .init(),
+        body: Operations.AddAgentConnector.Input.Body
+    ) async throws -> Operations.AddAgentConnector.Output {
+        try await addAgentConnector(Operations.AddAgentConnector.Input(
             headers: headers,
             body: body
         ))
     }
-    /// Rename, change the cap or region, replace the key, make default.
+    /// Connect an AWS profile from `~/.aws` with a region and an optional monthly cap.
+    ///
+    /// - Remark: HTTP `POST /v1/connectors/aws`.
+    /// - Remark: Generated from `#/paths//v1/connectors/aws/post(addAwsConnector)`.
+    public func addAwsConnector(
+        headers: Operations.AddAwsConnector.Input.Headers = .init(),
+        body: Operations.AddAwsConnector.Input.Body
+    ) async throws -> Operations.AddAwsConnector.Output {
+        try await addAwsConnector(Operations.AddAwsConnector.Input(
+            headers: headers,
+            body: body
+        ))
+    }
+    /// A pasted GitHub token (personal access token or app token), checked against GitHub before it is kept. The token
+    /// goes to the keychain and is never returned.
+    ///
+    /// - Remark: HTTP `POST /v1/connectors/github`.
+    /// - Remark: Generated from `#/paths//v1/connectors/github/post(addGithubConnector)`.
+    public func addGithubConnector(
+        headers: Operations.AddGithubConnector.Input.Headers = .init(),
+        body: Operations.AddGithubConnector.Input.Body
+    ) async throws -> Operations.AddGithubConnector.Output {
+        try await addGithubConnector(Operations.AddGithubConnector.Input(
+            headers: headers,
+            body: body
+        ))
+    }
+    /// Start the device flow for a new account, or `connectorId` to sign it in again. `githubFlow` in the answer carries
+    /// the code to show; the daemon polls and stores the token.
+    ///
+    /// - Remark: HTTP `POST /v1/connectors/github/sign-in`.
+    /// - Remark: Generated from `#/paths//v1/connectors/github/sign-in/post(startGithubConnectorSignIn)`.
+    public func startGithubConnectorSignIn(
+        headers: Operations.StartGithubConnectorSignIn.Input.Headers = .init(),
+        body: Operations.StartGithubConnectorSignIn.Input.Body
+    ) async throws -> Operations.StartGithubConnectorSignIn.Output {
+        try await startGithubConnectorSignIn(Operations.StartGithubConnectorSignIn.Input(
+            headers: headers,
+            body: body
+        ))
+    }
+    /// Stop the device flow in progress.
+    ///
+    /// - Remark: HTTP `DELETE /v1/connectors/github/sign-in`.
+    /// - Remark: Generated from `#/paths//v1/connectors/github/sign-in/delete(cancelGithubConnectorSignIn)`.
+    public func cancelGithubConnectorSignIn(headers: Operations.CancelGithubConnectorSignIn.Input.Headers = .init()) async throws -> Operations.CancelGithubConnectorSignIn.Output {
+        try await cancelGithubConnectorSignIn(Operations.CancelGithubConnectorSignIn.Input(headers: headers))
+    }
+    /// Check every connector with its provider (and probe the machine for agent CLIs again), then list.
+    ///
+    /// - Remark: HTTP `POST /v1/connectors/refresh`.
+    /// - Remark: Generated from `#/paths//v1/connectors/refresh/post(refreshConnectors)`.
+    public func refreshConnectors(headers: Operations.RefreshConnectors.Input.Headers = .init()) async throws -> Operations.RefreshConnectors.Output {
+        try await refreshConnectors(Operations.RefreshConnectors.Input(headers: headers))
+    }
+    /// Rename; AWS: region and monthly cap (`null` removes the cap).
     ///
     /// - Remark: HTTP `PATCH /v1/connectors/{id}`.
     /// - Remark: Generated from `#/paths//v1/connectors/{id}/patch(updateConnector)`.
@@ -282,17 +373,30 @@ extension APIProtocol {
     /// Remove a connector and forget its secret. Optimizations already running keep what they have.
     ///
     /// - Remark: HTTP `DELETE /v1/connectors/{id}`.
-    /// - Remark: Generated from `#/paths//v1/connectors/{id}/delete(deleteConnector)`.
-    public func deleteConnector(
-        path: Operations.DeleteConnector.Input.Path,
-        headers: Operations.DeleteConnector.Input.Headers = .init()
-    ) async throws -> Operations.DeleteConnector.Output {
-        try await deleteConnector(Operations.DeleteConnector.Input(
+    /// - Remark: Generated from `#/paths//v1/connectors/{id}/delete(removeConnector)`.
+    public func removeConnector(
+        path: Operations.RemoveConnector.Input.Path,
+        headers: Operations.RemoveConnector.Input.Headers = .init()
+    ) async throws -> Operations.RemoveConnector.Output {
+        try await removeConnector(Operations.RemoveConnector.Input(
             path: path,
             headers: headers
         ))
     }
-    /// "Test" / "Sign in": probe the account and refresh its status.
+    /// Make this connector the default of its kind.
+    ///
+    /// - Remark: HTTP `POST /v1/connectors/{id}/default`.
+    /// - Remark: Generated from `#/paths//v1/connectors/{id}/default/post(setDefaultConnector)`.
+    public func setDefaultConnector(
+        path: Operations.SetDefaultConnector.Input.Path,
+        headers: Operations.SetDefaultConnector.Input.Headers = .init()
+    ) async throws -> Operations.SetDefaultConnector.Output {
+        try await setDefaultConnector(Operations.SetDefaultConnector.Input(
+            path: path,
+            headers: headers
+        ))
+    }
+    /// "Test connection": probe the account with its provider and remember the status.
     ///
     /// - Remark: HTTP `POST /v1/connectors/{id}/test`.
     /// - Remark: Generated from `#/paths//v1/connectors/{id}/test/post(testConnector)`.
@@ -512,7 +616,7 @@ extension APIProtocol {
             headers: headers
         ))
     }
-    /// Overview: spent, value locked in, return, the value staircase, what needs you, the table. PROVISIONAL.
+    /// Overview: spent, value locked in, return, the value staircase, what needs you, the table.
     ///
     /// - Remark: HTTP `GET /v1/overview`.
     /// - Remark: Generated from `#/paths//v1/overview/get(getOverview)`.

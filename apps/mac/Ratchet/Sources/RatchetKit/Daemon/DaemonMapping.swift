@@ -149,37 +149,26 @@ enum DaemonMapping {
         }
     }
 
-    static func needsYou(_ item: VM.NeedsYouItem) -> NeedsYouItem {
-        let kind: NeedsYouKind
-        switch item.kind {
-        case .approveEnvironment: kind = .approveEnvironment
-        case .mergeWins: kind = .mergeWins
-        case .signIn: kind = .signIn
-        case .budgetLimit: kind = .budgetLimit
-        }
-        return NeedsYouItem(
-            id: item.id, kind: kind, title: item.title, detail: item.subtitle, actionTitle: item.actionLabel,
-            optimizationID: item.optimizationId ?? "")
+    static func needsYou(_ item: VM.OverviewNeed) -> NeedsYouItem {
+        // `ship`: verified wins waiting for a pull request; `failed`: the run failed.
+        NeedsYouItem(
+            id: item.id, kind: item.kind == .ship ? .mergeWins : .runFailed, title: item.title, detail: item.sub,
+            actionTitle: item.action, optimizationID: item.optimizationId)
     }
 
-    /// `budgetUSD` is the cap of the overview, or the sum of the optimization budgets when the daemon has no cap.
-    static func overview(_ vm: VM.OverviewVm, budgetUSD: Double) -> Overview {
-        let from = date(ms: vm.staircase.from)
-        let to = date(ms: vm.staircase.to)
-        let wins = vm.staircase.points.sorted { $0.at < $1.at }
-        let timeRange = timeRange(vm.range)
-        var series: [ValuePoint] = []
-        // Before the first win of the window the value is not known; "all time" starts at nothing.
-        series.append(ValuePoint(id: "start", date: from, valuePerYearUSD: timeRange == .all ? 0 : (wins.first?.usdPerYear ?? 0)))
-        for (index, point) in wins.enumerated() {
+    /// The staircase starts at nothing: the value locked in over a range is the sum of the wins inside it.
+    static func overview(_ vm: VM.OverviewVm) -> Overview {
+        let wins = vm.wins.sorted { $0.at < $1.at }
+        var series: [ValuePoint] = [ValuePoint(id: "start", date: date(ms: vm.from), valuePerYearUSD: 0)]
+        for (index, win) in wins.enumerated() {
             series.append(ValuePoint(
-                id: "win-\(index)-\(point.at)", date: date(ms: point.at), valuePerYearUSD: point.usdPerYear,
-                win: "Verified win", optimizationTitle: point.optimizationName))
+                id: "win-\(index)-\(win.at)", date: date(ms: win.at), valuePerYearUSD: win.cumulativeUsdPerYear,
+                win: "Verified win", optimizationTitle: win.optimization))
         }
-        series.append(ValuePoint(id: "end", date: to, valuePerYearUSD: wins.last?.usdPerYear ?? 0))
+        series.append(ValuePoint(id: "end", date: date(ms: vm.to), valuePerYearUSD: wins.last?.cumulativeUsdPerYear ?? 0))
         return Overview(
-            range: timeRange, spentUSD: vm.spent.usd, budgetUSD: vm.spent.capUsd ?? budgetUSD,
-            valueLockedPerYearUSD: vm.valueLockedIn.usdPerYear, winsCount: Int(vm.valueLockedIn.wins), series: series,
+            range: timeRange(vm.range), spentUSD: vm.spent.usd, budgetUSD: vm.spent.budgetUsd,
+            valueLockedPerYearUSD: vm.value?.usdPerYear ?? 0, winsCount: Int(vm.value?.wins ?? 0), series: series,
             needsYou: vm.needsYou.map(needsYou))
     }
 
@@ -213,30 +202,43 @@ enum DaemonMapping {
     // MARK: Connectors
 
     static func connector(_ vm: VM.ConnectorVm) -> Connector {
-        let state: ConnectorState
-        switch vm.status {
-        case .connected:
-            switch vm.kind {
-            case .github: state = .connected
-            case .aws: state = .valid
-            case .agent: state = .signedIn
-            }
-        case .expired, .invalid: state = .expired
-        case .signedOut, .unknown: state = .signedOut
+        switch vm {
+        case .case1(let github):
+            return Connector(
+                id: github.id, kind: .github, name: github.name, detail: github.detail,
+                state: state(github.status, kind: .github), isDefault: github.isDefault)
+        case .case2(let aws):
+            return Connector(
+                id: aws.id, kind: .aws, name: aws.name, detail: aws.detail, state: state(aws.status, kind: .aws),
+                isDefault: aws.isDefault, monthlyCapUSD: aws.monthlyCapUsd)
+        case .case3(let agent):
+            return Connector(
+                id: agent.id, kind: .agent, name: agent.name, detail: agent.detail,
+                state: state(agent.status, kind: .agent), isDefault: agent.isDefault,
+                canRunInCloud: agent.runsOn.contains(.cloud))
         }
-        let cap = vm.aws?.capUsdPerMonth
-        let remaining = vm.aws?.remainingUsdThisMonth
-        let used = (cap != nil && remaining != nil) ? max((cap ?? 0) - (remaining ?? 0), 0) : 0
-        return Connector(
-            id: vm.id, kind: kind(vm.kind), name: vm.name, detail: vm.detail, state: state, isDefault: vm.isDefault,
-            monthlyCapUSD: cap, usedThisMonthUSD: used, canRunInCloud: vm.agent?.runsIn.contains(.cloud) ?? false)
     }
 
-    static func kind(_ kind: VM.ConnectorKind) -> ConnectorKind {
-        switch kind {
-        case .github: .github
-        case .aws: .aws
-        case .agent: .agent
+    static func connectorID(_ vm: VM.ConnectorVm) -> String {
+        switch vm {
+        case .case1(let github): github.id
+        case .case2(let aws): aws.id
+        case .case3(let agent): agent.id
+        }
+    }
+
+    /// `connected` reads as green on every kind; the sheet words it per kind (an AWS profile is "valid", an agent "signed in").
+    static func state(_ status: VM.ConnectorStatus, kind: ConnectorKind) -> ConnectorState {
+        switch status {
+        case .connected:
+            switch kind {
+            case .github: .connected
+            case .aws: .valid
+            case .agent: .signedIn
+            }
+        case .valid: .valid
+        case .expired, .invalid: .expired
+        case .signedOut: .signedOut
         }
     }
 
@@ -248,18 +250,20 @@ enum DaemonMapping {
         placement == .cloud ? .cloud : .local
     }
 
-    static func selection(_ vm: VM.ConnectorSelectionVm) -> ConnectionSelection {
+    /// What was saved for the repo; nil when nothing usable was.
+    static func selection(_ vm: VM.RepoConnectionsVm) -> ConnectionSelection? {
+        guard let saved = vm.saved else { return nil }
         var agents: [String: Placement] = [:]
-        for agent in vm.selection.agents { agents[agent.connectorId] = placement(agent.runsIn) }
-        return ConnectionSelection(repoID: vm.repo, awsID: vm.selection.awsConnectorId, agents: agents)
+        for agent in saved.agents { agents[agent.connectorId] = placement(agent._where) }
+        return ConnectionSelection(repoID: vm.repo, awsID: saved.aws, agents: agents, githubID: saved.github)
     }
 
-    static func selectionInput(_ selection: ConnectionSelection) -> VM.ConnectorSelectionInput {
-        VM.ConnectorSelectionInput(
+    static func repoConnections(_ selection: ConnectionSelection, github: String, aws: String) -> VM.RepoConnections {
+        VM.RepoConnections(
             agents: selection.agents.sorted { $0.key < $1.key }.map {
-                VM.AgentSelection(connectorId: $0.key, runsIn: agentsWhere($0.value))
+                VM.AgentSelection(connectorId: $0.key, _where: agentsWhere($0.value))
             },
-            awsConnectorId: selection.awsID)
+            aws: aws, github: github)
     }
 
     // MARK: Environment drafts

@@ -46,9 +46,9 @@ public struct DaemonLocation: Sendable, Equatable {
 /// `RatchetClient` on the real daemon: the generated OpenAPI client over the unix socket, the daemon's view models
 /// mapped to the app's models, the event stream turned into `RatchetEvent`s.
 ///
-/// The provisional groups of the API (overview, connectors, environment drafts) answer 501 from an engine that does not
-/// have them yet. For those the client quietly serves the `fallback` (sample data) instead, and keeps asking the daemon
-/// again every minute.
+/// The environment drafts of the API are provisional and answer 501 from an engine that does not have them yet (an older
+/// daemon may also answer 501 for the overview and the connectors). For those the client quietly serves the `fallback`
+/// (sample data) instead, and keeps asking the daemon again every minute.
 public final class DaemonRatchetClient: RatchetClient {
     private let api: Client
     private let fallback: any RatchetClient
@@ -175,12 +175,7 @@ public final class DaemonRatchetClient: RatchetClient {
 
     public func overview(range: TimeRange) async throws -> Overview {
         try await providing("overview") {
-            let vm = try await api.getOverview(query: .init(range: DaemonMapping.range(range))).ok.body.json
-            var budget = vm.spent.capUsd ?? 0
-            if vm.spent.capUsd == nil {
-                budget = try await optimizationSnapshot().reduce(0) { $0 + $1.budgetUsd }
-            }
-            return DaemonMapping.overview(vm, budgetUSD: budget)
+            DaemonMapping.overview(try await api.getOverview(query: .init(range: DaemonMapping.range(range))).ok.body.json)
         } sample: {
             try await fallback.overview(range: range)
         }
@@ -248,11 +243,15 @@ public final class DaemonRatchetClient: RatchetClient {
         try await calling {
             let demo = request.templateID.flatMap { $0.hasPrefix("demo-") ? VM.DemoId(rawValue: $0) : nil }
             var kinds: [VM.AgentKind] = []
-            if let list = try? await api.listConnectors().ok.body.json {
+            if let list = try? await api.listConnectors().ok.body.json.connectors {
                 for id in request.selection.agents.keys.sorted() {
-                    if let kind = list.first(where: { $0.id == id })?.agent?.agent, !kinds.contains(kind) { kinds.append(kind) }
+                    if case .case3(let agent)? = list.first(where: { DaemonMapping.connectorID($0) == id }) {
+                        let kind: VM.AgentKind = agent.agent == .codex ? .codex : .claudeCode
+                        if !kinds.contains(kind) { kinds.append(kind) }
+                    }
                 }
             }
+            let connections = await repoConnections(request.repoID, request.selection, demo: demo != nil)
             let goal = request.goal.trimmingCharacters(in: .whitespacesAndNewlines)
             let draftID = await state.isRealDraft(request.draftID) ? request.draftID : nil
             let placements = Set(request.selection.agents.values)
@@ -261,8 +260,7 @@ public final class DaemonRatchetClient: RatchetClient {
                 agentsWhere: placements.count == 1 ? placements.first.map(DaemonMapping.agentsWhere) : nil,
                 baseRef: request.branch.isEmpty ? nil : request.branch,
                 budgetUsd: request.budgetUSD,
-                connectors: request.selection.agents.isEmpty && request.selection.awsID == nil
-                    ? nil : DaemonMapping.selectionInput(request.selection),
+                connections: connections,
                 demo: demo,
                 environmentDraftId: draftID,
                 name: goal.isEmpty ? nil : String(goal.prefix(80)),
@@ -276,6 +274,17 @@ public final class DaemonRatchetClient: RatchetClient {
             started.goal = goal
             return started
         }
+    }
+
+    /// The connectors a run on `repo` uses, when the sheet chose some: the GitHub account is the one chosen or the repo's default.
+    private func repoConnections(_ repo: String, _ selection: ConnectionSelection, demo: Bool) async -> VM.RepoConnections? {
+        guard !demo, !selection.agents.isEmpty, let aws = selection.awsID else { return nil }
+        var github = selection.githubID
+        if github == nil {
+            github = (try? await api.getConnectorSelection(query: .init(repo: repo)).ok.body.json)?.effective.github
+        }
+        guard let github else { return nil }
+        return DaemonMapping.repoConnections(selection, github: github, aws: aws)
     }
 
     // MARK: Agents
@@ -376,25 +385,35 @@ public final class DaemonRatchetClient: RatchetClient {
 
     public func connectors() async throws -> [Connector] {
         try await providing("connectors") {
-            try await api.listConnectors().ok.body.json.map(DaemonMapping.connector)
+            try await api.listConnectors().ok.body.json.connectors.map(DaemonMapping.connector)
         } sample: {
             try await fallback.connectors()
         }
     }
 
+    /// GitHub starts the device flow (the account appears in the list when it finishes); an AWS profile is connected by its
+    /// name; an agent is a CLI login that was removed earlier. The UI for pasting keys and tokens comes later.
     public func addConnector(_ new: NewConnector) async throws -> Connector {
         try await providing("connectors") {
-            let input: VM.CreateConnectorInput
+            let list: VM.ConnectorsVm
             switch new.kind {
             case .github:
-                input = .case1(.init(kind: .github, name: new.name.isEmpty ? nil : new.name))
+                list = try await api.startGithubConnectorSignIn(body: .json(.init())).ok.body.json
+                guard let existing = list.connectors.first(where: { DaemonMapping.connector($0).kind == .github }) else {
+                    return Connector(id: "github-pending", kind: .github, name: new.name, detail: "Signing in with GitHub", state: .signedOut)
+                }
+                return DaemonMapping.connector(existing)
             case .aws:
-                input = .case2(.init(auth: .profile, kind: .aws, name: new.name, profile: new.name))
+                list = try await api.addAwsConnector(body: .json(.init(profile: new.name))).ok.body.json
             case .agent:
-                let isCodex = new.name.lowercased().contains("codex")
-                input = .case3(.init(agent: isCodex ? .codex : .claudeCode, credential: .login, kind: .agent, name: new.name))
+                let agent: VM.ConnectorAgent = new.name.lowercased().contains("codex") ? .codex : .claudeCode
+                list = try await api.addAgentConnector(body: .json(.case1(.init(agent: agent, source: .login)))).ok.body.json
             }
-            return DaemonMapping.connector(try await api.createConnector(body: .json(input)).created.body.json)
+            let added = list.connectors.map(DaemonMapping.connector).first { $0.kind == new.kind && $0.name == new.name }
+            guard let added = added ?? list.connectors.map(DaemonMapping.connector).last(where: { $0.kind == new.kind }) else {
+                throw RatchetClientError.notFound(new.name)
+            }
+            return added
         } sample: {
             try await fallback.addConnector(new)
         }
@@ -402,7 +421,7 @@ public final class DaemonRatchetClient: RatchetClient {
 
     public func removeConnector(id: String) async throws {
         try await providing("connectors") {
-            _ = try await api.deleteConnector(path: .init(id: id)).noContent
+            _ = try await api.removeConnector(path: .init(id: id)).ok
         } sample: {
             try await fallback.removeConnector(id: id)
         }
@@ -410,8 +429,7 @@ public final class DaemonRatchetClient: RatchetClient {
 
     public func setDefaultConnector(id: String) async throws -> [Connector] {
         try await providing("connectors") {
-            _ = try await api.updateConnector(path: .init(id: id), body: .json(.init(isDefault: true))).ok
-            return try await api.listConnectors().ok.body.json.map(DaemonMapping.connector)
+            try await api.setDefaultConnector(path: .init(id: id)).ok.body.json.connectors.map(DaemonMapping.connector)
         } sample: {
             try await fallback.setDefaultConnector(id: id)
         }
@@ -419,7 +437,10 @@ public final class DaemonRatchetClient: RatchetClient {
 
     public func signInConnector(id: String) async throws -> Connector {
         try await providing("connectors") {
-            DaemonMapping.connector(try await api.testConnector(path: .init(id: id)).ok.body.json.connector)
+            guard let connector = try await api.testConnector(path: .init(id: id)).ok.body.json.connector else {
+                throw RatchetClientError.notFound(id)
+            }
+            return DaemonMapping.connector(connector)
         } sample: {
             try await fallback.signInConnector(id: id)
         }
@@ -427,8 +448,7 @@ public final class DaemonRatchetClient: RatchetClient {
 
     public func connectionSelection(repoID: String) async throws -> ConnectionSelection? {
         try await providing("connectors") {
-            let vm = try await api.getConnectorSelection(query: .init(repo: repoID)).ok.body.json
-            return vm.remembered ? DaemonMapping.selection(vm) : nil
+            DaemonMapping.selection(try await api.getConnectorSelection(query: .init(repo: repoID)).ok.body.json)
         } sample: {
             try await fallback.connectionSelection(repoID: repoID)
         }
@@ -436,7 +456,14 @@ public final class DaemonRatchetClient: RatchetClient {
 
     public func saveConnectionSelection(_ selection: ConnectionSelection) async throws {
         try await providing("connectors") {
-            let input = VM.SaveConnectorSelectionInput(repo: selection.repoID, selection: DaemonMapping.selectionInput(selection))
+            guard let aws = selection.awsID else { return }
+            var github = selection.githubID
+            if github == nil {
+                github = try await api.getConnectorSelection(query: .init(repo: selection.repoID)).ok.body.json.effective.github
+            }
+            guard let github else { return }
+            let input = VM.SaveRepoConnectionsInput(
+                repo: selection.repoID, selection: DaemonMapping.repoConnections(selection, github: github, aws: aws))
             _ = try await api.saveConnectorSelection(body: .json(input)).ok
         } sample: {
             try await fallback.saveConnectionSelection(selection)

@@ -549,12 +549,19 @@ async fn repos_inspect_overview_and_connectors() {
     let ov = env.ratchet(&["overview"]).await;
     assert_eq!(ov.code, 0, "{}", ov.stderr);
     assert!(
-        ov.stdout.contains("value locked in") && ov.stdout.contains("Needs you"),
+        ov.stdout.contains("value locked in")
+            && ov.stdout.contains("Needs you")
+            && ov
+                .stdout
+                .contains("Open a pull request for 2 verified wins")
+            && ov.stdout.contains("Waiting on you"),
         "{}",
         ov.stdout
     );
     let ovj: OverviewVm = parse(&env.ratchet(&["overview", "--range", "all", "--json"]).await);
     assert_eq!(ovj.range, OverviewRange::All);
+    assert!(!ovj.empty && ovj.value.is_some() && !ovj.needs_you.is_empty());
+    assert_eq!(ovj.rows.len(), 4);
 
     let c = env.ratchet(&["connectors"]).await;
     assert!(

@@ -25,9 +25,15 @@ filter:
     - listRepos
     - inspectRepo
     - listConnectors
-    - createConnector
+    - refreshConnectors
+    - addGithubConnector
+    - startGithubConnectorSignIn
+    - cancelGithubConnectorSignIn
+    - addAwsConnector
+    - addAgentConnector
     - updateConnector
-    - deleteConnector
+    - removeConnector
+    - setDefaultConnector
     - testConnector
     - getConnectorSelection
     - saveConnectorSelection

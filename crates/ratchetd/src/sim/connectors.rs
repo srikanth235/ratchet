@@ -26,6 +26,7 @@ use crate::connectors_hub::{ConnectorsHub, HubOptions};
 
 pub const SIM_LOGIN: &str = "srikanth235";
 const SIM_TOKEN: &str = "gho_SIMULATEDDEMOTOKEN000000001";
+const SIM_ORG_TOKEN: &str = "ghp_SIMULATEDORGTOKEN000000000000000000";
 
 /// A pretend GitHub: the device flow is approved after `approve_after` (never when `None`) or when
 /// [`SimGithub::approve`] is called; the signed-in account is `srikanth235`.
@@ -83,9 +84,14 @@ impl GithubApi for SimGithub {
         }
     }
 
-    async fn user(&self, _token: &str) -> GithubResult<GithubUser> {
+    async fn user(&self, token: &str) -> GithubResult<GithubUser> {
+        // the seeded organisation token belongs to the organisation, every other token to the demo user
         Ok(GithubUser {
-            login: SIM_LOGIN.into(),
+            login: if token == SIM_ORG_TOKEN {
+                "acme-org".into()
+            } else {
+                SIM_LOGIN.into()
+            },
         })
     }
 
@@ -227,11 +233,7 @@ async fn seed_demo(store: &Arc<ConnectorStore>) {
     };
     let seeded = (|| -> ratchet_connectors::Result<()> {
         store.upsert_github(UpsertGithub::new(SIM_LOGIN, SIM_TOKEN, true))?;
-        store.upsert_github(UpsertGithub::new(
-            "acme-org",
-            "ghp_SIMULATEDORGTOKEN000000000000000000",
-            false,
-        ))?;
+        store.upsert_github(UpsertGithub::new("acme-org", SIM_ORG_TOKEN, false))?;
         store.add_aws(aws("acme-prod", "us-east-1", Some(500.0)), false)?;
         store.add_aws(aws("personal-dev", "us-west-2", Some(100.0)), false)?;
         store.add_aws(aws("acme-staging", "eu-west-1", None), false)?;

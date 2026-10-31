@@ -112,7 +112,7 @@ pub fn secret_source(
         if logins.contains(&agent) {
             return None;
         }
-        setting_for_secret_env(name).and_then(|k| env(k))
+        setting_for_secret_env(name).and_then(&env)
     })
 }
 

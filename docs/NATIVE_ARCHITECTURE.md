@@ -53,7 +53,7 @@ ratchet CLI (Rust)     ──same socket─────────────�
 | `ratchet-agents` | `packages/agents` | Claude Code / Codex adapters (spawn the CLIs), runner loop, worktrees, harness detection |
 | `ratchet-github` | `packages/github` | octocrab: device-flow sign-in, repos, branches, PRs, commit files |
 | `ratchet-engine` | `packages/engine`, `packages/runtime` | the ratchet loop on tokio, sandbox lifecycle, runtimes (simulation / live / hybrid) |
-| `ratchet-connectors` | desktop main `connectors` work in flight | saved GitHub / AWS / agent connectors, per-repo selection, Keychain |
+| `ratchet-connectors` | desktop main `connectors*.ts`, secret half of `settings.ts` | saved GitHub / AWS / agent connectors (one default per kind), per-repo selection, migration of the single-account settings, the `SecretStore`s (Keychain). Its `model` module is the wire types of the connectors group |
 | `ratchetd` | Electron main process | axum on a unix socket, OpenAPI (`utoipa`), SSE events, LaunchAgent entry |
 | `ratchet` | `packages/cli` | clap, API client |
 

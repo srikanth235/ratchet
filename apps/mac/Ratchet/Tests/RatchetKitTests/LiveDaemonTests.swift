@@ -89,7 +89,9 @@ struct LiveDaemonTests {
             let again = try await client.signInConnector(id: expired.id)
             print("LIVE signed in", again)
         }
-        var selection = ConnectionSelection(repoID: "acme/shop-api", awsID: connectors.first { $0.kind == .aws }?.id)
+        var selection = ConnectionSelection(
+            repoID: "acme/shop-api", awsID: connectors.first { $0.kind == .aws }?.id,
+            githubID: connectors.first { $0.kind == .github && $0.isDefault }?.id)
         if let agent = connectors.first(where: { $0.kind == .agent }) { selection.agents[agent.id] = .local }
         try await client.saveConnectionSelection(selection)
         #expect(try await client.connectionSelection(repoID: "acme/shop-api") == selection)

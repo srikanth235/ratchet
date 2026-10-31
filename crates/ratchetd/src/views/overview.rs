@@ -335,7 +335,7 @@ impl LedgerViews {
                     .filter(|r| r.status != UiStatus::Draft)
                     .count() as i64,
             },
-            value: has_value_model.then(|| OverviewValue {
+            value: has_value_model.then_some(OverviewValue {
                 usd_per_year: value_usd,
                 wins: wins.len() as i64,
                 basis: if all_measured {
