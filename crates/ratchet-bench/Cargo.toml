@@ -1,0 +1,49 @@
+[package]
+name = "ratchet-bench"
+version = "0.0.0"
+description = "Ratchet bench: the evaluate pipeline, local and remote runners, queue, dependency and container-image snapshots, and the setuid candidate launcher (port of packages/bench)."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "ratchet_bench"
+
+# The setuid-root launcher the evaluator harness uses inside a bench container (port of
+# infra/images/scripts/ratchet-candidate-ctr.c). It shares nothing with the async runners but the crate.
+[[bin]]
+name = "ratchet-candidate-launcher"
+path = "src/bin/ratchet-candidate-launcher.rs"
+
+[features]
+default = []
+# Test doubles for the ports the runners use (fake bench instance that runs the scripts with local bash, docker shim,
+# fixture git repo, directory-backed artifact store). Enabled by this crate's own tests.
+testkit = []
+
+[dependencies]
+async-trait = "0.1"
+base64 = "0.22"
+indexmap = { version = "2", features = ["serde"] }
+libc = "0.2"
+nix = { version = "0.30", features = ["user", "process", "fs", "signal", "feature"] }
+ratchet-core = { path = "../ratchet-core" }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["process", "fs", "time", "rt", "sync", "macros", "io-util"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+insta = { version = "1", features = ["json"] }
+proptest = "1"
+ratchet-bench = { path = ".", features = ["testkit"] }
+tokio = { version = "1", features = ["process", "fs", "time", "rt-multi-thread", "sync", "macros", "io-util"] }
+
+[lints.rust]
+unsafe_code = "forbid"
