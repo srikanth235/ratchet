@@ -127,6 +127,7 @@ pub fn ensure_node_shim(
         .prefix("ratchet-node-")
         .tempdir_in(&root)?
         .keep();
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;
     let file = dir.join("node");
     fs::write(&file, node_shim_script(&exec_path.to_string_lossy(), electron))?;
     fs::set_permissions(&file, fs::Permissions::from_mode(0o755))?;
