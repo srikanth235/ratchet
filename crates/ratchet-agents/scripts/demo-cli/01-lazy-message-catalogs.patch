@@ -1,0 +1,45 @@
+diff --git a/src/messages.ts b/src/messages.ts
+index af0f893..a32aaa2 100644
+--- a/src/messages.ts
++++ b/src/messages.ts
+@@ -1,2 +1,2 @@
+-import { readdirSync, readFileSync } from 'node:fs';
++import { existsSync, readdirSync, readFileSync } from 'node:fs';
+ import { join } from 'node:path';
+@@ -7,9 +7,14 @@ import { MESSAGES_DIR } from './paths.js';
+  * Message catalogs: one JSON file per area under data/messages/ (`list.json`, `errors.json`, ...), keys
+- * namespaced by the file name (`list.header.id`). Every catalog is read and compiled when the module loads.
++ * namespaced by the file name (`list.header.id`). A catalog is read and compiled the first time one of its
++ * keys is asked for; a run only pays for the areas it prints from.
+  */
+ const catalog = new Map<string, Message>();
++const loaded = new Set<string>();
+ 
+-for (const file of readdirSync(MESSAGES_DIR).sort()) {
+-  if (!file.endsWith('.json')) continue;
+-  const entries = JSON.parse(readFileSync(join(MESSAGES_DIR, file), 'utf8')) as Record<string, string>;
++function loadPack(pack: string): void {
++  if (loaded.has(pack)) return;
++  loaded.add(pack);
++  const file = join(MESSAGES_DIR, `${pack}.json`);
++  if (!existsSync(file)) return;
++  const entries = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>;
+   for (const [key, source] of Object.entries(entries)) catalog.set(key, compileMessage(source));
+@@ -17,4 +22,9 @@ for (const file of readdirSync(MESSAGES_DIR).sort()) {
+ 
++function loadAll(): void {
++  for (const file of readdirSync(MESSAGES_DIR).sort()) if (file.endsWith('.json')) loadPack(file.slice(0, -5));
++}
++
+ /** Format a message by key; unknown keys come back as `[key]` so a missing string is visible, not fatal. */
+ export function t(key: string, vars?: Vars): string {
++  loadPack(key.slice(0, key.indexOf('.')));
+   const m = catalog.get(key);
+@@ -24,2 +34,3 @@ export function t(key: string, vars?: Vars): string {
+ export function hasMessage(key: string): boolean {
++  loadPack(key.slice(0, key.indexOf('.')));
+   return catalog.has(key);
+@@ -28,2 +39,3 @@ export function hasMessage(key: string): boolean {
+ export function messageCount(): number {
++  loadAll();
+   return catalog.size;

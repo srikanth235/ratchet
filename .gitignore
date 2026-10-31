@@ -13,3 +13,5 @@ packages/e2e/artifacts/
 .ratchet-sim-*/
 .ratchet-app-sim/
 .claude/worktrees/
+/target
+Cargo.lock
