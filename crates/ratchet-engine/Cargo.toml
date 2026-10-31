@@ -38,6 +38,7 @@ tracing = "0.1"
 security-framework = "3"
 
 [dev-dependencies]
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite"] }
 ratchet-bench = { path = "../ratchet-bench", features = ["testkit"] }
 ratchet-engine = { path = ".", features = ["testing"] }
 ratchet-github = { path = "../ratchet-github", features = ["testing"] }
