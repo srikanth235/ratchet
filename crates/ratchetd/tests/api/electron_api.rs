@@ -50,6 +50,21 @@ const RATCHET_API: &[(&str, Option<&str>)] = &[
     ("clearSecret", Some("clearSecret")),
     ("saveLiveSettings", Some("saveAdvancedSettings")),
     ("testConnection", Some("testConnection")),
+    // connectors and the overview (provisional on the TypeScript side, see the PENDING groups of `packages/contract`)
+    ("overview", Some("getOverview")),
+    ("listConnectors", Some("listConnectors")),
+    ("refreshConnectors", Some("listConnectors")), // the daemon re-checks on read; the app asks again
+    ("addGithubConnector", Some("createConnector")),
+    ("addAwsConnector", Some("createConnector")),
+    ("addAgentConnector", Some("createConnector")),
+    ("startGithubConnectorSignIn", Some("startGithubSignIn")),
+    ("cancelGithubConnectorSignIn", None), // the app stops waiting; nothing to call
+    ("updateConnector", Some("updateConnector")),
+    ("setDefaultConnector", Some("updateConnector")), // `isDefault` is a field of the update
+    ("removeConnector", Some("deleteConnector")),
+    ("testConnector", Some("testConnector")),
+    ("getRepoConnections", Some("getConnectorSelection")),
+    ("saveRepoConnections", Some("saveConnectorSelection")),
     ("onEvent", Some("streamEvents")),
 ];
 
