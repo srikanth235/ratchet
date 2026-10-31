@@ -477,20 +477,26 @@ async fn creating_validates_and_checks_readiness() {
     let draft = sim
         .create_environment_draft(CreateEnvironmentDraftInput {
             repo: "acme/search-api".into(),
-            base_ref: "main".into(),
+            base_ref: None,
             goal: "Make search faster".into(),
-            agent: None,
-            scope: None,
+            agent_connector: ratchet_core::AgentKind::ClaudeCode,
+            aws_profile: None,
+            region: None,
+            time_limit_seconds: None,
+            config_path: None,
         })
         .await
         .unwrap();
+    settled(&sim, &draft.id).await;
     let mut with_draft = demo_input(10.0, 5);
     with_draft.environment_draft_id = Some(draft.id.clone());
     assert!(matches!(
         sim.create_optimization(with_draft.clone()).await,
         Err(ServiceError::NotReady(_))
     ));
-    sim.approve_environment_draft(&draft.id).await.unwrap();
+    sim.approve_environment_draft(&draft.id, Default::default())
+        .await
+        .unwrap();
     sim.create_optimization(with_draft).await.unwrap();
 }
 
@@ -750,97 +756,111 @@ async fn overview_numbers_add_up() {
     assert!(ov.sandbox.on && ov.sandbox.name.is_some());
 }
 
+/// Wait for the background agent turn of a draft to end.
+async fn settled(sim: &SimService, id: &str) -> EnvironmentDraftVm {
+    for _ in 0..500 {
+        let d = sim.get_environment_draft(id).await.unwrap();
+        if d.status != EnvironmentDraftStatus::Drafting {
+            return d;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    panic!("draft {id} is still drafting");
+}
+
 #[tokio::test]
 async fn drafts_follow_their_life_cycle() {
     let sim = SimService::manual().await.unwrap();
-    let mk = |goal: &str, scope| CreateEnvironmentDraftInput {
+    let mk = |goal: &str| CreateEnvironmentDraftInput {
         repo: "acme-org/web".into(),
-        base_ref: "main".into(),
+        base_ref: None,
         goal: goal.into(),
-        agent: None,
-        scope,
+        agent_connector: ratchet_core::AgentKind::ClaudeCode,
+        aws_profile: None,
+        region: None,
+        time_limit_seconds: None,
+        config_path: None,
     };
-    let single = sim
-        .create_environment_draft(mk("Shrink the bundle", None))
+    let mut events = sim.subscribe();
+    // the POST answers at once, with the draft still being made
+    let begun = sim.create_environment_draft(mk("Shrink the bundle")).await.unwrap();
+    assert_eq!((begun.status, begun.revision), (EnvironmentDraftStatus::Drafting, 0));
+    assert!(begun.draft.is_none());
+    let single = settled(&sim, &begun.id).await;
+    assert_eq!((single.status, single.revision), (EnvironmentDraftStatus::Ready, 1));
+    let p = single.draft.as_ref().unwrap();
+    assert_eq!(p.scope, ratchet_core::enums::EnvironmentScope::Single);
+    assert_eq!(p.resources.len(), 1);
+    assert!(p.checks.iter().all(|c| c.ok), "{:?}", p.checks);
+    // the events: drafting, progress lines, ready
+    let mut seen = Vec::new();
+    while let Ok(e) = events.try_recv() {
+        if let ApiEvent::EnvironmentDraft { status, phase, .. } = e {
+            seen.push((status, phase));
+        }
+    }
+    assert_eq!(seen.first(), Some(&(EnvironmentDraftStatus::Drafting, None)));
+    assert!(seen.iter().any(|(_, p)| *p == Some(EnvironmentDraftPhase::Validating)));
+    assert_eq!(seen.last(), Some(&(EnvironmentDraftStatus::Ready, None)));
+
+    let none = sim.create_environment_draft(mk("Speed up the unit tests")).await.unwrap();
+    let none = settled(&sim, &none.id).await;
+    let np = none.draft.as_ref().unwrap();
+    assert_eq!((np.scope, np.resources.len()), (ratchet_core::enums::EnvironmentScope::None, 1)); // the evaluator's pinned host
+    assert_eq!(np.files.len(), 1); // only ratchet.yaml
+
+    let full = sim.create_environment_draft(mk("Cut checkout p95 latency of the api")).await.unwrap();
+    let full = settled(&sim, &full.id).await;
+    assert_eq!(full.draft.as_ref().unwrap().scope, ratchet_core::enums::EnvironmentScope::Full);
+    assert_eq!(full.draft.as_ref().unwrap().resources.len(), 4);
+    // revisions: the same agent session continues
+    let revised = sim
+        .revise_environment_draft(&full.id, ReviseEnvironmentDraftInput { message: "use a smaller setup".into() })
         .await
         .unwrap();
-    assert_eq!(single.scope, EnvScope::Single);
-    assert_eq!(single.resources.len(), 1);
-    let none = sim
-        .create_environment_draft(mk("Tidy the docs", None))
-        .await
-        .unwrap();
-    assert_eq!(
-        (none.scope, none.resources.len(), none.cost.hourly_usd),
-        (EnvScope::None, 0, 0.0)
-    );
-    assert!(
-        matches!(
-            sim.open_environment_draft_pr(&none.id).await,
-            Err(ServiceError::Conflict(_))
-        ),
-        "no files, no PR"
-    );
-    let forced = sim
-        .create_environment_draft(mk("Tidy the docs", Some(EnvScope::Full)))
-        .await
-        .unwrap();
-    assert_eq!(forced.scope, EnvScope::Full);
-    // revisions
-    let rds = sim
-        .revise_environment_draft(
-            &forced.id,
-            ReviseEnvironmentDraftInput {
-                request: "use RDS instead of a Postgres container".into(),
-                scope: None,
-            },
-        )
-        .await
-        .unwrap();
-    assert_eq!(rds.revision, 2);
-    assert!(rds.resources.iter().any(|r| r.name == "RDS Postgres 16"));
-    assert!(rds.cost.hourly_usd > forced.cost.hourly_usd);
-    let files = sim.environment_draft_files(&rds.id).await.unwrap();
-    assert!(files.files[0].content.contains("aws_db_instance"));
+    assert_eq!(revised.status, EnvironmentDraftStatus::Drafting);
+    assert!(matches!(
+        sim.revise_environment_draft(&full.id, ReviseEnvironmentDraftInput { message: "again".into() }).await,
+        Err(ServiceError::Conflict(_))
+    ));
+    let revised = settled(&sim, &full.id).await;
+    assert_eq!(revised.revision, 2);
+    assert_eq!(revised.draft.as_ref().unwrap().scope, ratchet_core::enums::EnvironmentScope::Single);
+    let listed = sim.list_environment_drafts().await.unwrap().drafts;
+    assert_eq!(listed.len(), 3);
     // validation
     for bad in [
-        CreateEnvironmentDraftInput {
-            goal: "  ".into(),
-            ..mk("x", None)
-        },
-        CreateEnvironmentDraftInput {
-            repo: "nope".into(),
-            ..mk("x", None)
-        },
+        CreateEnvironmentDraftInput { goal: "  ".into(), ..mk("x") },
+        CreateEnvironmentDraftInput { repo: " ".into(), ..mk("x") },
     ] {
         assert!(matches!(
             sim.create_environment_draft(bad).await,
             Err(ServiceError::InvalidFields { .. })
         ));
     }
-    // approving locks; approving again is a no-op
-    let a = sim.approve_environment_draft(&rds.id).await.unwrap();
-    assert!(a.approved_at.is_some());
+    assert!(matches!(
+        sim.revise_environment_draft(&full.id, ReviseEnvironmentDraftInput { message: " ".into() }).await,
+        Err(ServiceError::InvalidFields { .. })
+    ));
+    // approving locks (a pull request by default); approving again is a no-op
+    let a = sim.approve_environment_draft(&full.id, Default::default()).await.unwrap();
+    let ap = a.approval.clone().unwrap();
+    assert_eq!((a.status, ap.mode, ap.locked), (EnvironmentDraftStatus::Approved, EnvironmentApprovalMode::Pr, true));
+    assert!(ap.pr_url.is_some());
     assert_eq!(
-        sim.approve_environment_draft(&rds.id)
-            .await
-            .unwrap()
-            .approved_at,
-        a.approved_at
+        sim.approve_environment_draft(&full.id, Default::default()).await.unwrap().approval,
+        a.approval
     );
     assert!(matches!(
-        sim.revise_environment_draft(
-            &rds.id,
-            ReviseEnvironmentDraftInput {
-                request: "x".into(),
-                scope: None
-            }
-        )
-        .await,
+        sim.revise_environment_draft(&full.id, ReviseEnvironmentDraftInput { message: "x".into() }).await,
         Err(ServiceError::Conflict(_))
     ));
+    assert!(matches!(sim.discard_environment_draft(&full.id).await, Err(ServiceError::Conflict(_))));
+    // a ready draft can be discarded ("Back")
+    sim.discard_environment_draft(&none.id).await.unwrap();
+    assert!(matches!(sim.get_environment_draft(&none.id).await, Err(ServiceError::NotFound(_))));
     assert!(matches!(
-        sim.get_environment_draft("envd_nope").await,
+        sim.get_environment_draft("env-nope").await,
         Err(ServiceError::NotFound(_))
     ));
 }

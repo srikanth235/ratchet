@@ -226,6 +226,6 @@ fn enums_have_stable_wire_values() {
     );
     assert_eq!(e("AgentKind"), ["claude-code", "codex", "mock"]);
     assert_eq!(e("HarnessAuth"), ["signed-in", "api-key", "signed-out"]);
-    assert_eq!(e("EnvScope"), ["none", "single", "full"]);
+    assert_eq!(e("EnvironmentScope"), ["none", "single", "full"]);
     assert_eq!(e("ErrorCode").len(), 8);
 }
