@@ -60,9 +60,9 @@ struct EnvironmentStep: View {
                             TitleStack(title: resource.name, subtitle: resource.detail, subtitleLines: 2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Text(resource.machine).kitType(.meta).foregroundStyle(Ink.textMuted)
-                                .frame(width: 96, alignment: .leading)
+                                .frame(width: 80, alignment: .leading)
                             Text(Money.perHour(resource.usdPerHour)).kitType(.mono).foregroundStyle(Ink.text)
-                                .frame(width: 64, alignment: .trailing)
+                                .frame(width: 56, alignment: .trailing)
                         }
                     }
                 }

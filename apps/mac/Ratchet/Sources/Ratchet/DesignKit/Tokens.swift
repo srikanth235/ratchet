@@ -86,7 +86,7 @@ enum Dim {
     static let icon: CGFloat = 16
     static let rowPadding: CGFloat = 14
     /// Rows of a page that has to fit a short window (the Environment step).
-    static let rowPaddingTight: CGFloat = 10
+    static let rowPaddingTight: CGFloat = 8
     /// Heading to content (the reference's h2 margin), and the gap between choice cards.
     static let sectionGap: CGFloat = 14
     static let cardGap: CGFloat = 10

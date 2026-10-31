@@ -30,9 +30,9 @@ struct NewOptimizationView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: Space.md) {
+        VStack(alignment: .leading, spacing: Space.sm) {
             StepProgress(current: flow.step.rawValue, total: WizardStep.allCases.count, caption: flow.step.caption)
-            VStack(alignment: .leading, spacing: Space.sm) {
+            VStack(alignment: .leading, spacing: Space.xs) {
                 Text(flow.title).kitType(.pageTitle).foregroundStyle(Ink.text).lineLimit(2)
                 Text(subtitle).kitType(.body).foregroundStyle(Ink.textFaint)
             }
@@ -67,7 +67,7 @@ struct NewOptimizationView: View {
             footerButtons
         }
         .padding(.horizontal, Space.pageX)
-        .padding(.vertical, Space.lg)
+        .padding(.vertical, flow.step == .environment ? Space.md : Space.lg)
         .frame(maxWidth: .infinity)
         .overlay(alignment: .top) { Hairline() }
         .background(Ink.canvas)

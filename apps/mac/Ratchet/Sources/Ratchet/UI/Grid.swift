@@ -20,7 +20,7 @@ enum Space {
     /// Gap between the big blocks of a page.
     static let block: CGFloat = 40
     /// The same, on a page that has to fit a short window.
-    static let blockTight: CGFloat = 28
+    static let blockTight: CGFloat = 24
 }
 
 extension View {
