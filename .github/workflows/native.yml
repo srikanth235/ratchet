@@ -98,6 +98,10 @@ jobs:
       # build-and-verify skill, step 1: release build, installed to ~/Applications/<AppName>.app (ad-hoc signed).
       - name: Build
         run: ./build.sh
+      # test-mac-app skill, level 1: Swift Testing unit tests of RatchetKit (formatting, store, mock client, wizard).
+      - name: Unit tests
+        run: swift test --scratch-path "$HOME/Library/Developer/$APP_NAME/test-build" 2>&1 | tail -n 200
+        shell: bash -o pipefail {0}
       # Step 3: the grid lint, and the self-test (new-mac-app / test-mac-app skills); run when the app ships them.
       - name: Grid lint
         run: |
