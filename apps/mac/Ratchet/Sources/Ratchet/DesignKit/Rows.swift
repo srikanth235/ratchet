@@ -104,9 +104,11 @@ struct HairlineList<Content: View>: View {
 
 /// One row of a hairline list.
 struct HairlineRow<Content: View>: View {
+    var verticalPadding = Dim.rowPadding
     let content: Content
 
-    init(@ViewBuilder content: () -> Content) {
+    init(verticalPadding: CGFloat = Dim.rowPadding, @ViewBuilder content: () -> Content) {
+        self.verticalPadding = verticalPadding
         self.content = content()
     }
 
@@ -114,7 +116,7 @@ struct HairlineRow<Content: View>: View {
         HStack(spacing: Space.lg) {
             content
         }
-        .padding(.vertical, Dim.rowPadding)
+        .padding(.vertical, verticalPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(alignment: .bottom) { Hairline() }
     }
@@ -156,7 +158,6 @@ struct SidebarRow: View {
                     .foregroundStyle(isSelected ? Ink.brass : Ink.textFaint)
                 Text(title)
                     .kitType(.body)
-                    .fontWeight(isSelected ? .medium : .regular)
                     .foregroundStyle(isSelected ? Ink.text : Ink.textFaint)
                 Spacer(minLength: 0)
             }

@@ -8,13 +8,12 @@ struct EnvironmentStep: View {
 
     var body: some View {
         if let draft = flow.draft {
-            VStack(alignment: .leading, spacing: Space.block) {
+            VStack(alignment: .leading, spacing: Space.blockTight) {
                 quote(draft)
                 HStack(alignment: .top, spacing: Space.pageX) {
                     resources(draft).frame(maxWidth: .infinity, alignment: .leading)
-                    cost(draft).frame(width: 320, alignment: .leading)
+                    cost(draft).frame(width: 288, alignment: .leading)
                 }
-                requestChange
             }
         } else {
             HStack(spacing: Space.sm) {
@@ -57,7 +56,7 @@ struct EnvironmentStep: View {
             VStack(alignment: .leading, spacing: Space.md) {
                 HairlineList {
                     ForEach(draft.resources) { resource in
-                        HairlineRow {
+                        HairlineRow(verticalPadding: Dim.rowPaddingTight) {
                             TitleStack(title: resource.name, subtitle: resource.detail, subtitleLines: 2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Text(resource.machine).kitType(.meta).foregroundStyle(Ink.textMuted)
@@ -97,10 +96,13 @@ struct EnvironmentStep: View {
             }
         }
     }
+}
 
-    // MARK: Ask for a change
+/// "Ask for a change" and Send. It sits in the window's footer with Back and Approve, so it is always in view.
+struct AskForChange: View {
+    @Bindable var flow: NewOptimizationFlow
 
-    private var requestChange: some View {
+    var body: some View {
         HStack(spacing: Space.md) {
             TextField("Ask for a change, e.g. “use RDS instead of a Postgres container”", text: $flow.revisionText)
                 .kitField()
@@ -153,7 +155,7 @@ struct BudgetStep: View {
             VStack(alignment: .leading, spacing: Space.md) {
                 HStack(alignment: .firstTextBaseline, spacing: Space.md) {
                     HStack(alignment: .firstTextBaseline, spacing: Space.xs) {
-                        Text(value).kitType(.hero).tracking(-1).foregroundStyle(Ink.text)
+                        Text(value).kitType(.hero).foregroundStyle(Ink.text)
                         if let unit { Text(unit).kitType(.heroUnit).foregroundStyle(Ink.textMuted) }
                     }
                     control().labelsHidden()

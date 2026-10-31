@@ -12,6 +12,7 @@
 <key>CFBundleVersion</key><string>__BUILD__</string>
 <key>LSMinimumSystemVersion</key><string>26.0</string>
 <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+<key>ATSApplicationFontsPath</key><string>Fonts</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>

@@ -44,7 +44,7 @@ private struct ConnectorRow: View {
             TitleStack(title: connector.name, subtitle: connector.detail)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if connector.isDefault {
-                Text("Default").kitType(.meta).foregroundStyle(Ink.brassText)
+                Text("Default").kitType(.meta).foregroundStyle(Ink.textFaint)
             } else if hovering && connector.state.isUsable {
                 Button("Make default") { Task { await store.setDefaultConnector(connector.id) } }
                     .buttonStyle(.kit(.link))

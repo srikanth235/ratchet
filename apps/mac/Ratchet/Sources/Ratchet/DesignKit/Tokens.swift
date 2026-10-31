@@ -68,11 +68,11 @@ enum Ink {
 
 /// Layer 3: sizes. Pages use `Space` (UI/Grid.swift) for margins and gaps.
 enum Dim {
-    static let radiusButton: CGFloat = 8
+    static let radiusButton: CGFloat = 9
     static let radiusRow: CGFloat = 8
     static let radiusCard: CGFloat = 12
-    static let radiusField: CGFloat = 8
-    static let buttonHeight: CGFloat = 32
+    static let radiusField: CGFloat = 9
+    static let buttonHeight: CGFloat = 34
     static let buttonHeightSmall: CGFloat = 28
     static let fieldHeight: CGFloat = 36
     static let sidebarRow: CGFloat = 32
@@ -85,8 +85,17 @@ enum Dim {
     static let mark: CGFloat = 15
     static let icon: CGFloat = 16
     static let rowPadding: CGFloat = 14
+    /// Rows of a page that has to fit a short window (the Environment step).
+    static let rowPaddingTight: CGFloat = 10
+    /// Heading to content (the reference's h2 margin), and the gap between choice cards.
+    static let sectionGap: CGFloat = 14
+    static let cardGap: CGFloat = 10
     static let heroValue: CGFloat = 56
-    static let chartHeight: CGFloat = 248
+    /// The Overview chart. The reference draws a 760 x 250 viewBox about 440 pt wide, so about 145 pt tall with its axis
+    /// labels; the extra room here is the tooltip's.
+    static let chartHeight: CGFloat = 160
+    /// The chart of a running optimization has the page to itself.
+    static let chartHeightDetail: CGFloat = 248
     static let textLine: CGFloat = 18
     static let markStroke: CGFloat = 1.5
 }

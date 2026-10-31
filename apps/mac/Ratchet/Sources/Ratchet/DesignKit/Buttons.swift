@@ -39,7 +39,7 @@ private struct KitButtonBody: View {
                 .onHover { hovering = $0 }
         } else {
             configuration.label
-                .kitType(small ? .buttonSmall : .button)
+                .kitType(small ? .buttonSmall : kind == .primary ? .buttonPrimary : .button)
                 .padding(.horizontal, small ? Space.md : Space.lg)
                 .frame(height: small ? Dim.buttonHeightSmall : Dim.buttonHeight)
                 .foregroundStyle(kind == .primary ? Ink.onBrass : Ink.text)

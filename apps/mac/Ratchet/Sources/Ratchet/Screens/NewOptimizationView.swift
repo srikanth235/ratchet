@@ -60,6 +60,20 @@ struct NewOptimizationView: View {
     // MARK: Footer
 
     private var footer: some View {
+        VStack(spacing: Space.md) {
+            if flow.step == .environment, flow.draft != nil {
+                AskForChange(flow: flow)
+            }
+            footerButtons
+        }
+        .padding(.horizontal, Space.pageX)
+        .padding(.vertical, Space.lg)
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .top) { Hairline() }
+        .background(Ink.canvas)
+    }
+
+    private var footerButtons: some View {
         HStack(spacing: Space.md) {
             Button(flow.step == .goal ? "Cancel" : "Back") {
                 if flow.step == .goal { router.closeWizard() } else { Task { await flow.back() } }
@@ -74,11 +88,6 @@ struct NewOptimizationView: View {
             }
             primaryButton
         }
-        .padding(.horizontal, Space.pageX)
-        .padding(.vertical, Space.lg)
-        .frame(maxWidth: .infinity)
-        .overlay(alignment: .top) { Hairline() }
-        .background(Ink.canvas)
     }
 
     private var note: String {

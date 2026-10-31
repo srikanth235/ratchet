@@ -70,6 +70,11 @@ struct RatchetApp: App {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // The design's fonts, before the first view asks for one.
+        _ = KitFonts.registered
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Started from a terminal, the process is not a foreground app yet.
         NSApp.setActivationPolicy(.regular)
