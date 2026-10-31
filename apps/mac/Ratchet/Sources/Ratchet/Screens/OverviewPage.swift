@@ -96,7 +96,7 @@ struct OverviewPage: View {
                     ForEach(store.needsYou) { item in
                         HairlineRow {
                             StatusDot(tone: .wait)
-                            TitleStack(title: item.title, subtitle: item.detail)
+                            TitleStack(title: item.title, subtitle: item.detail, subtitleLines: 2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Button(item.actionTitle) { act(on: item) }
                                 .buttonStyle(.kit(.quiet, small: true))

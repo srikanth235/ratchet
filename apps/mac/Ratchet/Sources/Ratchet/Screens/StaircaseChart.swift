@@ -10,6 +10,14 @@ struct StairPoint: Identifiable, Equatable {
     var label: String?
 }
 
+/// How the x axis is labelled.
+enum StairAxis: Equatable {
+    /// Calendar dates ("Oct 31"), for charts over days.
+    case dates
+    /// Time since the run started ("0 m", "30 m", "1 h"), for one run.
+    case elapsed(since: Date)
+}
+
 /// A step chart in brass: the value holds until the next win, then jumps. Hover (or click and drag) over the chart to
 /// see the win nearest the pointer.
 struct StaircaseChart: View {
@@ -19,6 +27,7 @@ struct StaircaseChart: View {
     var yDomain: ClosedRange<Double>?
     /// A dashed reference line (the baseline of a run).
     var reference: Double?
+    var xAxis: StairAxis = .dates
     /// Show the tooltip of the last win without hovering (snapshots).
     var previewLast = false
 
@@ -73,11 +82,11 @@ struct StaircaseChart: View {
             }
         }
         .chartXAxis {
-            AxisMarks(values: .automatic(desiredCount: 4)) { value in
+            // Ticks sit inside the plot, so the last label is never cut off at the right edge.
+            AxisMarks(values: xTicks) { value in
                 AxisValueLabel {
                     if let date = value.as(Date.self) {
-                        Text(date, format: .dateTime.month(.abbreviated).day())
-                            .kitType(.caption).foregroundStyle(Ink.textFaint)
+                        Text(xLabel(date)).kitType(.caption).foregroundStyle(Ink.textFaint).lineLimit(1)
                     }
                 }
             }
@@ -86,6 +95,26 @@ struct StaircaseChart: View {
         .frame(height: Dim.chartHeight)
         .accessibilityLabel("Chart")
         .accessibilityValue(summary)
+    }
+
+    private var xTicks: [Date] {
+        let domain = xDomain
+        let span = domain.upperBound.timeIntervalSince(domain.lowerBound)
+        switch xAxis {
+        case .dates:
+            return ChartTicks.fractions(count: 4).map { domain.lowerBound.addingTimeInterval(span * $0) }
+        case .elapsed(let start):
+            let offset = domain.lowerBound.timeIntervalSince(start)
+            return ChartTicks.elapsed(span: span + offset).map { start.addingTimeInterval($0) }
+                .filter { domain.contains($0) }
+        }
+    }
+
+    private func xLabel(_ date: Date) -> String {
+        switch xAxis {
+        case .dates: Elapsed.shortDate(date)
+        case .elapsed(let start): Elapsed.axis(date.timeIntervalSince(start))
+        }
     }
 
     private var wins: [StairPoint] { points.filter { $0.label != nil } }

@@ -67,6 +67,15 @@ public enum Elapsed {
         return "\(total) s"
     }
 
+    /// Chart axis ticks of a run: "0 m", "30 m", "1 h", "1 h 30 m".
+    public static func axis(_ seconds: Double) -> String {
+        let total = max(Int(seconds.rounded()), 0)
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        if hours > 0 { return minutes > 0 ? "\(hours) h \(minutes) m" : "\(hours) h" }
+        return "\(minutes) m"
+    }
+
     /// "4 days", "1 day", "under a day".
     public static func days(_ value: Double) -> String {
         let n = Int(value.rounded())
@@ -98,6 +107,14 @@ public enum Elapsed {
     }
 }
 
+public enum Plural {
+    /// A count with its noun, plural unless exactly one: "1 win", "0 wins", "3 evals", "1 file".
+    /// Pass `plural` for nouns that do not just add an "s" ("1 match", "2 matches").
+    public static func count(_ count: Int, _ singular: String, plural: String? = nil) -> String {
+        "\(count) " + (count == 1 ? singular : plural ?? singular + "s")
+    }
+}
+
 public enum Figure {
     /// "84×".
     public static func multiple(_ value: Double) -> String {
@@ -106,12 +123,36 @@ public enum Figure {
 
     /// "9 verified wins", "1 verified win".
     public static func wins(_ count: Int) -> String {
-        count == 1 ? "1 verified win" : "\(count) verified wins"
+        Plural.count(count, "verified win")
     }
 
     /// "$38 / 50": spent against a budget, the budget without its dollar sign.
     public static func spentOf(_ spent: Double, budget: Double?) -> (spent: String, budget: String?) {
         guard let budget else { return (Money.short(spent), nil) }
         return (Money.short(spent), String(format: "%.0f", budget))
+    }
+}
+
+public enum ChartTicks {
+    /// Where to put x-axis labels along a run: round elapsed times (0, 30 m, 1 h, ...) that fit `maxCount` labels
+    /// and all sit inside the plot, so the last label is never cut off at the edge.
+    public static func elapsed(span: Double, maxCount: Int = 5) -> [Double] {
+        guard span > 0, maxCount > 1 else { return [0] }
+        let steps: [Double] = [60, 300, 600, 900, 1800, 3600, 7200, 10_800, 21_600, 43_200, 86_400, 172_800]
+        let step = steps.first { span / $0 < Double(maxCount) } ?? (steps.last ?? 86_400)
+        var ticks: [Double] = []
+        var t = 0.0
+        // Keep the last 6% of the plot free of labels.
+        while t <= span * 0.94 {
+            ticks.append(t)
+            t += step
+        }
+        return ticks
+    }
+
+    /// `count` evenly spaced fractions from 0, leaving the far end out: [0, 0.25, 0.5, 0.75] for 4.
+    public static func fractions(count: Int) -> [Double] {
+        guard count > 1 else { return [0] }
+        return (0..<count).map { Double($0) / Double(count) }
     }
 }
