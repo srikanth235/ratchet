@@ -48,7 +48,7 @@ ratchet CLI (Rust)     ──same socket─────────────�
 | `ratchet-core` | `packages/core` | config (`ratchet.yaml`, serde + schemars), stats and auto-calibration, verdicts, protected paths, value model, templates |
 | `ratchet-ledger` | `core/ledger` (drizzle) | sqlx SQLite, append-only `ratchet_moves` / `spend_events`, `engine_kv` |
 | `ratchet-sandbox` | `packages/aws`, sandbox parts of `engine` | aws-sdk-rust, tofu as subprocess, image lookup by tag, reaper, cost |
-| `ratchet-env` | dynamic-environment work in flight | environment drafts (scope none / single / full), validator, cost estimate, approve and lock |
+| `ratchet-env` | `packages/core/src/environment`, `packages/engine/src/environment` | environment drafts (scope none / single / full), validator, cost estimate, brief, drafters (real + mock), approve and lock; depends on `ratchet-core` only |
 | `ratchet-bench` | `packages/bench` | evaluator pipeline, dependency snapshots, container images, the bench-host agent binary and the setuid launcher (replaces the C launcher) |
 | `ratchet-agents` | `packages/agents` | Claude Code / Codex adapters (spawn the CLIs), runner loop, worktrees, harness detection |
 | `ratchet-github` | `packages/github` | octocrab: device-flow sign-in, repos, branches, PRs, commit files |

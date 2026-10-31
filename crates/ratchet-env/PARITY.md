@@ -53,11 +53,20 @@ The fixtures are produced by running the TypeScript with `tsx` on seeded inputs 
 6. `regex` has no look-behind: `(?<![\d.])0\.0\.0\.0\/0` and `(?<![\w.])(file|...)\s*\(` are checked by hand; `\b`, `\w`
    are ASCII (`(?-u:...)`), as in JavaScript.
 
-## Pending (owner: main)
+## Drafters, approve, tree reader, engine and daemon
 
-| TS | Rust | Status |
-|---|---|---|
-| `engine/environment/drafter.ts` (`AgentEnvironmentDrafter`) | `src/drafter.rs` | pending (owner: main) |
-| `engine/environment/mock.ts` (`MockEnvironmentDrafter`) | `src/mock.rs` | pending (owner: main) |
-| `engine/environment/approve.ts` | `src/approve.rs` | pending (owner: main) |
-| `engine/environment-files.ts` | `src/tree.rs` | pending (owner: main) |
+| TS | Rust | TS tests | Rust tests |
+|---|---|---|---|
+| `engine/environment/drafter.ts` (`AgentEnvironmentDrafter`) | `src/drafter.rs` | `drafter.test.ts`: 16 `it`s | `tests/drafter.rs`: 18 (the same cases, a few folded into one fn, plus the begin/run halves and a git host that cannot commit) |
+| `engine/environment/mock.ts` (`MockEnvironmentDrafter`, `scopeFromGoal`) | `src/mock.rs` | `mock.test.ts`: 15 (incl. the PR text) | `tests/mock.rs`: 15 (the "tampered check" case needs a mutable record in TS; Rust records are copies, so it is covered by `drafter.rs::approve_refuses_a_draft_whose_checks_did_not_pass`) |
+| `engine/environment/approve.ts` (`commitDraft`, PR text) | `src/approve.rs` | in `drafter.test.ts` / `mock.test.ts` | in `tests/drafter.rs` / `tests/mock.rs` |
+| `engine/environment-files.ts` (`readEnvironmentTree`, `readEnvironment`) | `src/tree.rs` | in `apply.test.ts` | exercised by `ratchet-engine/tests/engine/environment_apply.rs` |
+| `engine/environment/apply.test.ts` (engine applies the approved environment, locks it) | `ratchet-engine/src/engine.rs::environment_of`, `sandbox_auto.rs` | 10 `it`s (some `it.each`) | `ratchet-engine/tests/engine/environment_apply.rs`: 10 (the `it.each` rows are looped) |
+| `aws/sandbox/environment.ts`, `environment-check.ts`, drafted stage of `tofu.ts` / `mock.ts` | `ratchet-sandbox/src/sandbox/environment*.rs` | `environment.test.ts`: 28 | `tests/suite/sandbox_environment.rs`: 27 |
+
+Deliberate differences of the drafter: `draft` / `revise` are `begin_*` (synchronous, record the request as `drafting`) plus
+`run_*` (the agent's turn) so the daemon can answer a `POST` at once; `draft()` / `revise()` are the two together, as in
+TypeScript. `DraftEnvironmentInput.id` lets the caller pick the draft id. The agent is an `AgentAdapter` handed in by a
+factory (`ratchet-agents::local_adapter_for` in the daemon) and `tofu plan` is an `EnvironmentChecker` (`ratchet-sandbox`),
+which keeps this crate dependent on `ratchet-core` only. Why a crate and not a module of `ratchet-engine`: `ratchet-sandbox`
+re-validates an approved environment when it applies it, and the engine depends on `ratchet-sandbox`.
