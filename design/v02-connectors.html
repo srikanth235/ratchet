@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ratchet — v0.2 connectors & dynamic environment</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#070B12;--win:#0B1019;--side:#0E1420;--card:#111827;--card2:#151D2B;--line:rgba(148,163,190,.13);--line2:rgba(148,163,190,.2);
+--tx:#ECEFF4;--mu:#A7B1C2;--fa:#8592A6;--br:#D9B26F;--br2:#EBCB8E;--brbg:rgba(217,178,111,.10);--mint:#7FD1AE;--rose:#E58C8C}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:13px 'Instrument Sans',-apple-system,'Helvetica Neue',sans-serif}
+.serif{font-family:'Instrument Serif',Georgia,serif;font-weight:400;letter-spacing:-.01em}
+.mono{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace}
+.eyebrow{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--fa);font-weight:600}
+.screen{padding:28px;width:1440px}
+.win{display:flex;background:var(--win);border:1px solid var(--line);border-radius:16px;overflow:hidden;min-height:900px}
+nav{width:236px;flex:none;background:var(--side);border-right:1px solid rgba(148,163,190,.1);padding:16px 14px;display:flex;flex-direction:column;gap:20px}
+.lights{display:flex;gap:8px;padding:2px 4px}.lights i{width:12px;height:12px;border-radius:6px;display:block}
+.brand{display:flex;align-items:center;gap:11px;padding:0 4px}
+.logo{width:34px;height:34px;border-radius:9px;background:var(--card2);border:1px solid rgba(217,178,111,.35);display:flex;align-items:center;justify-content:center}
+.nav{display:flex;align-items:center;gap:11px;height:34px;padding:0 10px;border-radius:8px;color:var(--mu)}
+.nav.on{background:var(--brbg);color:#F4E3C0;font-weight:500}
+.nav b{margin-left:auto;font:500 11px 'JetBrains Mono',monospace;color:var(--br)}
+.sbx{margin-top:auto;border:1px solid var(--line);background:var(--card);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:4px}
+main{flex:1;padding:30px 36px;display:flex;flex-direction:column;gap:20px;min-width:0}
+h1{margin:4px 0 0;font-size:34px}
+.sub{color:var(--mu);margin:6px 0 0;max-width:720px;line-height:1.5}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.035)}
+.pad{padding:18px 20px}
+.row{display:flex;align-items:center;gap:12px}
+.pill{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:11px;font-size:11.5px;font-weight:500;border:1px solid}
+.pill:before{content:'';width:6px;height:6px;border-radius:3px;background:currentColor}
+.ok{color:var(--mint);border-color:rgba(127,209,174,.3);background:rgba(127,209,174,.08)}
+.warn{color:var(--br2);border-color:rgba(217,178,111,.35);background:rgba(217,178,111,.08)}
+.bad{color:var(--rose);border-color:rgba(229,140,140,.3);background:rgba(229,140,140,.08)}
+.neu{color:var(--fa);border-color:var(--line2);background:transparent}
+.btn{height:34px;padding:0 14px;border-radius:9px;border:1px solid var(--line2);background:var(--card2);color:var(--tx);font:500 13px inherit;display:inline-flex;align-items:center;gap:8px}
+.btn.pri{background:linear-gradient(#E2BE7C,#C99D55);color:#1A1408;border-color:#D9B26F;font-weight:600}
+.btn.ghost{background:transparent}
+.tag{font:500 10.5px 'JetBrains Mono',monospace;color:var(--fa);border:1px solid var(--line2);border-radius:5px;padding:2px 6px}
+.tag.def{color:var(--br2);border-color:rgba(217,178,111,.4)}
+.ico{width:34px;height:34px;border-radius:9px;background:var(--card2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font:600 12px 'JetBrains Mono',monospace;color:var(--mu);flex:none}
+.group-h{display:flex;align-items:baseline;gap:10px;padding:16px 20px 10px;border-bottom:1px solid var(--line)}
+.group-h h2{margin:0;font-size:15px}
+.group-h span{color:var(--fa)}
+.group-h .btn{margin-left:auto;height:28px;font-size:12px}
+.conn{display:grid;grid-template-columns:34px 1.4fr 1.6fr auto 22px;gap:14px;align-items:center;padding:12px 20px;border-bottom:1px solid var(--line)}
+.conn:last-child{border-bottom:0}
+.conn .nm{font-weight:600}.conn .d{color:var(--fa);font-size:12px;margin-top:2px}
+.dots{color:var(--fa);letter-spacing:2px}
+.steps{display:flex;gap:8px}
+.step{flex:1;display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;border:1px solid var(--line);color:var(--fa)}
+.step i{font:600 11px 'JetBrains Mono',monospace;width:22px;height:22px;border-radius:11px;border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font-style:normal}
+.step.done{color:var(--mu)}.step.done i{background:rgba(127,209,174,.12);color:var(--mint);border-color:rgba(127,209,174,.35)}
+.step.on{border-color:rgba(217,178,111,.45);background:var(--brbg);color:#F4E3C0}.step.on i{background:var(--br);color:#1A1408;border-color:var(--br)}
+.pick{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.opt{border:1px solid var(--line);border-radius:11px;padding:12px 14px;background:#0C121D;display:flex;gap:11px;align-items:flex-start}
+.opt.sel{border-color:rgba(217,178,111,.6);background:rgba(217,178,111,.06);box-shadow:0 0 0 1px rgba(217,178,111,.25) inset}
+.opt.dis{opacity:.55}
+.radio{width:16px;height:16px;border-radius:8px;border:1.5px solid var(--line2);flex:none;margin-top:2px}
+.sel .radio{border:5px solid var(--br)}
+.chk{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--line2);flex:none;margin-top:2px}
+.sel .chk{background:var(--br);border-color:var(--br);position:relative}
+.sel .chk:after{content:'';position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid #1A1408;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.opt .nm{font-weight:600}.opt .d{color:var(--fa);font-size:12px;margin-top:3px;line-height:1.4}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:8px;overflow:hidden;margin-top:8px}
+.seg span{padding:4px 10px;font-size:11.5px;color:var(--fa)}.seg .on{background:var(--brbg);color:#F4E3C0}
+.sec-h{display:flex;align-items:baseline;gap:10px;margin-bottom:12px}.sec-h h2{margin:0;font-size:15px}.sec-h span{color:var(--fa)}
+.foot{display:flex;align-items:center;gap:10px;margin-top:auto;padding-top:6px}
+.foot .sp{margin-left:auto}
+.scope{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.scope .opt{flex-direction:column;gap:6px}
+.scope .opt .row{gap:8px}
+.badge{font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--br2)}
+.cols{display:grid;grid-template-columns:1.25fr 1fr;gap:16px}
+.res{display:grid;grid-template-columns:28px 1fr auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
+.res:last-child{border-bottom:0}
+.code{background:#0A0F18;border:1px solid var(--line);border-radius:10px;padding:12px 14px;font:12px/1.6 'JetBrains Mono',monospace;color:#C3CBD8;white-space:pre;overflow:hidden}
+.code .k{color:var(--br2)}.code .s{color:var(--mint)}.code .c{color:#5E6B80}
+.tabs{display:flex;gap:4px;margin-bottom:10px}.tabs span{padding:5px 10px;border-radius:7px;color:var(--fa);font-size:12px}.tabs .on{background:var(--card2);color:var(--tx)}
+.check{display:flex;align-items:center;gap:9px;padding:6px 0;color:var(--mu)}
+.check i{width:16px;height:16px;border-radius:8px;background:rgba(127,209,174,.14);color:var(--mint);font:700 10px sans-serif;display:flex;align-items:center;justify-content:center;font-style:normal}
+.cost{display:flex;gap:10px}
+.tile{flex:1;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:#0C121D}
+.tile .l{font-size:11px;color:var(--fa)}.tile .v{font-size:22px;margin-top:2px}
+.ask{display:flex;gap:8px;margin-top:12px}
+.field{flex:1;height:34px;border:1px solid var(--line2);border-radius:9px;background:#0C121D;color:var(--fa);padding:0 12px;display:flex;align-items:center;font-size:12.5px}
+.agentline{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;background:#0C121D;border:1px solid var(--line);color:var(--mu)}
+.live{width:8px;height:8px;border-radius:4px;background:var(--mint);box-shadow:0 0 0 4px rgba(127,209,174,.15)}
+</style>
+</head>
+<body>
+
+<!-- ============ shared sidebar (repeated) ============ -->
+<template id="side">
+<nav>
+  <div class="lights"><i style="background:#FF5F57"></i><i style="background:#FEBC2E"></i><i style="background:#28C840"></i></div>
+  <div class="brand"><span class="logo"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#D9B26F" stroke-width="1.8" stroke-linejoin="round"><path d="M2 13.5 L6 5 V13.5 L10 5 V13.5 L14 5 V13.5"/></svg></span><span class="serif" style="font-size:24px">Ratchet</span></div>
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <div class="eyebrow" style="padding:0 10px 8px">Workspace</div>
+    <div class="nav" data-k="opt">Optimizations<b>3</b></div>
+    <div class="nav" data-k="bench">Benchmarks</div>
+    <div class="nav" data-k="agents">Agents</div>
+    <div class="nav" data-k="conn">Connectors<b>7</b></div>
+  </div>
+  <div class="sbx">
+    <div class="row" style="gap:8px"><span class="pill ok" style="height:20px">Sandbox ready</span></div>
+    <div style="color:var(--fa);font-size:12px">acme-prod · <span class="mono">$1.20</span> · ends 15:40</div>
+  </div>
+</nav>
+</template>
+
+<!-- ============ 1 · Connectors ============ -->
+<section class="screen" id="s1"><div class="win"><div data-side="conn"></div>
+<main>
+  <div class="row" style="align-items:flex-end">
+    <div><div class="eyebrow">Connectors</div><h1 class="serif">Connectors</h1>
+    <p class="sub">Saved accounts and credentials. Add as many as you like; each optimization picks the ones it uses. Secrets stay in the macOS keychain.</p></div>
+    <button class="btn pri" style="margin-left:auto">+ Add connector</button>
+  </div>
+
+  <div class="card">
+    <div class="group-h"><h2>Source control</h2><span>repos agents push branches to</span><button class="btn ghost">+ GitHub</button></div>
+    <div class="conn"><span class="ico">GH</span><div><div class="nm">srikanth235</div><div class="d">Personal · signed in with GitHub</div></div><div class="d">42 repos · scopes <span class="mono">repo, workflow</span></div><div class="row"><span class="tag def">default</span><span class="pill ok">Connected</span></div><span class="dots">···</span></div>
+    <div class="conn"><span class="ico">GH</span><div><div class="nm">acme-org</div><div class="d">Work · GitHub App install</div></div><div class="d">18 repos selected</div><div class="row"><span class="pill ok">Connected</span></div><span class="dots">···</span></div>
+  </div>
+
+  <div class="card">
+    <div class="group-h"><h2>Cloud</h2><span>where evaluators and environments run</span><button class="btn ghost">+ AWS profile</button></div>
+    <div class="conn"><span class="ico">AWS</span><div><div class="nm">acme-prod</div><div class="d">SSO · account <span class="mono">4821…0193</span></div></div><div class="d">us-east-1 · spend cap <span class="mono">$500/mo</span></div><div class="row"><span class="tag def">default</span><span class="pill ok">Connected</span></div><span class="dots">···</span></div>
+    <div class="conn"><span class="ico">AWS</span><div><div class="nm">personal-dev</div><div class="d">Profile from <span class="mono">~/.aws/config</span></div></div><div class="d">us-west-2 · spend cap <span class="mono">$100/mo</span></div><div class="row"><span class="pill ok">Connected</span></div><span class="dots">···</span></div>
+    <div class="conn"><span class="ico">AWS</span><div><div class="nm">acme-staging</div><div class="d">SSO · session expired 2 h ago</div></div><div class="d">eu-west-1</div><div class="row"><button class="btn" style="height:26px;font-size:12px">Sign in again</button><span class="pill warn">Expired</span></div><span class="dots">···</span></div>
+  </div>
+
+  <div class="card">
+    <div class="group-h"><h2>Agents</h2><span>harnesses and their credentials</span><button class="btn ghost">+ Agent credential</button></div>
+    <div class="conn"><span class="ico">CC</span><div><div class="nm">Claude Code · this Mac</div><div class="d">Detected <span class="mono">v2.1.314</span> · your login</div></div><div class="d">Runs on this Mac only</div><div class="row"><span class="tag def">default</span><span class="pill ok">Signed in</span></div><span class="dots">···</span></div>
+    <div class="conn"><span class="ico">CC</span><div><div class="nm">Claude Code · team key</div><div class="d">API key <span class="mono">sk-ant-…4f2a</span></div></div><div class="d">This Mac or cloud runners</div><div class="row"><span class="pill ok">Valid</span></div><span class="dots">···</span></div>
+    <div class="conn"><span class="ico">CX</span><div><div class="nm">Codex · this Mac</div><div class="d">Detected <span class="mono">0.166</span> · not signed in</div></div><div class="d">Run <span class="mono">codex login</span></div><div class="row"><span class="pill neu">Signed out</span></div><span class="dots">···</span></div>
+  </div>
+</main></div></section>
+
+<!-- ============ 2 · New optimization: connections ============ -->
+<section class="screen" id="s2"><div class="win"><div data-side="opt"></div>
+<main>
+  <div><div class="eyebrow">New optimization</div><h1 class="serif">Make checkout p95 faster</h1></div>
+  <div class="steps">
+    <div class="step done"><i>✓</i>Goal & repo</div>
+    <div class="step on"><i>2</i>Connections</div>
+    <div class="step"><i>3</i>Environment</div>
+    <div class="step"><i>4</i>Budget</div>
+  </div>
+
+  <div class="card pad">
+    <div class="sec-h"><h2>Repository</h2><span>via GitHub connector</span></div>
+    <div class="pick">
+      <div class="opt sel"><span class="radio"></span><div><div class="nm">acme-org / shop-api</div><div class="d">acme-org · default branch <span class="mono">main</span> · no ratchet.yaml yet</div></div></div>
+    </div>
+  </div>
+
+  <div class="card pad">
+    <div class="sec-h"><h2>Cloud account</h2><span>evaluator and environment run here</span></div>
+    <div class="pick">
+      <div class="opt sel"><span class="radio"></span><div><div class="nm">acme-prod</div><div class="d">us-east-1 · $412 of $500 left this month</div></div></div>
+      <div class="opt"><span class="radio"></span><div><div class="nm">personal-dev</div><div class="d">us-west-2 · $96 of $100 left</div></div></div>
+      <div class="opt dis"><span class="radio"></span><div><div class="nm">acme-staging</div><div class="d">Expired · sign in again</div></div></div>
+    </div>
+  </div>
+
+  <div class="card pad">
+    <div class="sec-h"><h2>Agents</h2><span>pick one or more; each gets its own branch</span></div>
+    <div class="pick">
+      <div class="opt sel"><span class="chk"></span><div><div class="nm">Claude Code · this Mac</div><div class="d">Your login · free while your Mac is awake</div><div class="seg"><span class="on">This Mac</span><span>Cloud</span></div></div></div>
+      <div class="opt sel"><span class="chk"></span><div><div class="nm">Claude Code · team key</div><div class="d">API key · billed to the key</div><div class="seg"><span>This Mac</span><span class="on">Cloud</span></div></div></div>
+      <div class="opt dis"><span class="chk"></span><div><div class="nm">Codex · this Mac</div><div class="d">Signed out · run <span class="mono">codex login</span></div></div></div>
+    </div>
+  </div>
+
+  <div class="foot"><button class="btn ghost">Back</button><span class="sp" style="color:var(--fa)">Saved as this repo's defaults</span><button class="btn pri">Continue to environment</button></div>
+</main></div></section>
+
+<!-- ============ 3 · New optimization: dynamic environment ============ -->
+<section class="screen" id="s3"><div class="win"><div data-side="opt"></div>
+<main>
+  <div><div class="eyebrow">New optimization</div><h1 class="serif">Make checkout p95 faster</h1></div>
+  <div class="steps">
+    <div class="step done"><i>✓</i>Goal & repo</div>
+    <div class="step done"><i>✓</i>Connections</div>
+    <div class="step on"><i>3</i>Environment</div>
+    <div class="step"><i>4</i>Budget</div>
+  </div>
+
+  <div class="agentline"><span class="live"></span><b style="color:var(--tx)">Claude Code · this Mac</b> read <span class="mono">shop-api</span> and the goal, and drafted the environment in 2 min 14 s.<span style="margin-left:auto" class="mono">$0.31</span></div>
+
+  <div class="card pad">
+    <div class="sec-h"><h2>What this task needs</h2><span>the agent picks the smallest that measures the goal</span></div>
+    <div class="scope">
+      <div class="opt"><div class="row"><span class="radio"></span><span class="nm">No environment</span></div><div class="d">Pure code or tests, run in the evaluator's container. Seconds to start, ~$0.10/h.</div></div>
+      <div class="opt"><div class="row"><span class="radio"></span><span class="nm">One machine</span></div><div class="d">A CLI, build or single service on pinned hardware. ~2 min to start.</div></div>
+      <div class="opt sel"><div class="row"><span class="radio"></span><span class="nm">Full stack</span><span class="badge" style="margin-left:auto">Agent's pick</span></div><div class="d">API + Postgres + Redis with seeded data. Needed because p95 depends on DB queries.</div></div>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div class="card pad">
+      <div class="tabs"><span class="on">Resources</span><span>main.tf</span><span>Dockerfile</span><span>seed.sh</span></div>
+      <div class="res"><span class="ico" style="width:28px;height:28px">EC2</span><div><b>app</b> · c7i.2xlarge<div style="color:var(--fa);font-size:12px">shop-api in the repo's container, measured with k6</div></div><span class="mono">$0.36/h</span></div>
+      <div class="res"><span class="ico" style="width:28px;height:28px">EC2</span><div><b>db</b> · r7g.large<div style="color:var(--fa);font-size:12px">Postgres 16 · 2.1 GB snapshot of anonymised orders</div></div><span class="mono">$0.11/h</span></div>
+      <div class="res"><span class="ico" style="width:28px;height:28px">EC2</span><div><b>cache</b> · t4g.medium<div style="color:var(--fa);font-size:12px">Redis 7, empty on each measurement</div></div><span class="mono">$0.03/h</span></div>
+      <div class="res"><span class="ico" style="width:28px;height:28px">EC2</span><div><b>load</b> · c7i.large<div style="color:var(--fa);font-size:12px">k6 load generator, separate host so it doesn't skew results</div></div><span class="mono">$0.09/h</span></div>
+      <div class="code" style="margin-top:12px"><span class="c"># infra/ratchet/main.tf · written by the agent</span>
+<span class="k">module</span> <span class="s">"base"</span> { source = <span class="s">"ratchet/sandbox"</span> }   <span class="c"># fixed: network, IAM, sealed results</span>
+<span class="k">resource</span> <span class="s">"ratchet_host"</span> <span class="s">"db"</span> {
+  machine  = <span class="s">"r7g.large"</span>
+  image    = <span class="s">"postgres:16"</span>
+  snapshot = <span class="s">"bench-data/orders-2026-10.sql.zst"</span>
+}</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div class="card pad">
+        <div class="sec-h"><h2>Ratchet checked it</h2></div>
+        <div class="check"><i>✓</i>No internet on measuring machines</div>
+        <div class="check"><i>✓</i>Agents can't read results or the hidden test set</div>
+        <div class="check"><i>✓</i>Same hardware for baseline and every candidate</div>
+        <div class="check"><i>✓</i>Everything tagged; full teardown in ~3 min</div>
+        <div class="check"><i>✓</i>Plan applies cleanly in <span class="mono">acme-prod</span></div>
+      </div>
+      <div class="card pad">
+        <div class="cost">
+          <div class="tile"><div class="l">While running</div><div class="v serif">$0.59/h</div></div>
+          <div class="tile"><div class="l">Start-up</div><div class="v serif">~6 min</div></div>
+          <div class="tile"><div class="l">Est. 2 h run</div><div class="v serif">$1.18</div></div>
+        </div>
+        <div class="ask"><div class="field">Ask the agent to change something…</div><button class="btn">Send</button></div>
+      </div>
+      <div class="card pad" style="border-color:rgba(217,178,111,.35)">
+        <div style="color:var(--mu);line-height:1.5">Approving locks this environment for the run. Agents change code only; any change to these files stops the run.</div>
+        <div class="row" style="margin-top:12px"><button class="btn ghost">Open as PR instead</button><button class="btn pri" style="margin-left:auto">Approve & lock</button></div>
+      </div>
+    </div>
+  </div>
+</main></div></section>
+
+<script>
+const t=document.getElementById('side');
+document.querySelectorAll('[data-side]').forEach(h=>{const n=t.content.cloneNode(true);const k=h.dataset.side;n.querySelector(`[data-k="${k}"]`).classList.add('on');h.replaceWith(n)});
+</script>
+</body>
+</html>
