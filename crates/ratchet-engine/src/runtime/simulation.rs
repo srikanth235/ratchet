@@ -570,7 +570,9 @@ pub async fn create_simulation_runtime(opts: SimulationOptions) -> EngineResult<
     let environment: Arc<dyn ratchet_env::EnvironmentDrafter> = Arc::new(
         ratchet_env::MockEnvironmentDrafter::new(ratchet_env::MockEnvironmentDrafterOptions {
             clock: Some(clock.clone()),
-            git: Some(ratchet_env::fixed_git(git.clone() as Arc<dyn ratchet_core::ports::GitHost>)),
+            git: Some(ratchet_env::fixed_git(
+                git.clone() as Arc<dyn ratchet_core::ports::GitHost>
+            )),
             ..Default::default()
         }),
     );

@@ -260,13 +260,18 @@ impl SimService {
         let drafts = {
             let tx = tx.clone();
             let n = std::sync::atomic::AtomicU32::new(0);
-            let mock = ratchet_env::MockEnvironmentDrafter::new(ratchet_env::MockEnvironmentDrafterOptions {
-                clock: Some(Arc::clone(&clock)),
-                new_id: Some(Arc::new(move || {
-                    format!("env-{:04}", n.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1)
-                })),
-                ..Default::default()
-            });
+            let mock = ratchet_env::MockEnvironmentDrafter::new(
+                ratchet_env::MockEnvironmentDrafterOptions {
+                    clock: Some(Arc::clone(&clock)),
+                    new_id: Some(Arc::new(move || {
+                        format!(
+                            "env-{:04}",
+                            n.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+                        )
+                    })),
+                    ..Default::default()
+                },
+            );
             crate::drafts::EnvDrafts::new(
                 Arc::new(crate::drafts::FixedDrafter(Arc::new(mock))),
                 Arc::new(move |e| {

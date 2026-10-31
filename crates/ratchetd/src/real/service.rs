@@ -36,8 +36,8 @@ use super::mappers::{
 };
 use super::settings::SettingsStore;
 use crate::api::validate::{validate_profile_name, validate_secret_format};
-use crate::drafts::{DrafterSource, EnvDrafts};
 use crate::api::*;
+use crate::drafts::{DrafterSource, EnvDrafts};
 use crate::service::{AppService, ServiceError, ServiceResult};
 use crate::views::{LedgerViews, PrUrlLookup};
 
@@ -218,7 +218,10 @@ impl DrafterSource for ProductDrafters {
         &self,
         repo: &str,
     ) -> ServiceResult<Arc<dyn ratchet_env::EnvironmentDrafter>> {
-        self.0.environment_drafter(repo).await.map_err(service_error)
+        self.0
+            .environment_drafter(repo)
+            .await
+            .map_err(service_error)
     }
 }
 

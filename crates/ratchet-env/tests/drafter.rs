@@ -1,5 +1,7 @@
 //! `AgentEnvironmentDrafter` (ports of `packages/engine/src/environment/drafter.test.ts`).
 
+#![allow(clippy::await_holding_lock)]
+
 mod common;
 
 use std::sync::atomic::{AtomicUsize, Ordering};

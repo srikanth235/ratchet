@@ -25,8 +25,8 @@ use ratchet_core::ids::{AgentId, OptimizationId};
 use ratchet_core::ports::{
     AgentEvent, AgentEventType, AgentIdentity, BaselineMetrics, BenchJob, BenchJobPhase, Clock,
     EngineApi, EngineCreateOptimizationInput, EngineEvent, GitHost, PortError, PortResult,
-    RunnerConfig, RunnerControl, RunnerHandle, SandboxEnvironment, SandboxInput, SandboxOutputs, SandboxPlan,
-    SandboxState, SecretRef,
+    RunnerConfig, RunnerControl, RunnerHandle, SandboxEnvironment, SandboxInput, SandboxOutputs,
+    SandboxPlan, SandboxState, SecretRef,
 };
 use ratchet_core::sandbox::{
     MemorySandboxInputStore, SandboxBlockers, SandboxInputStore, SandboxLifecycle,
@@ -1544,7 +1544,10 @@ impl Engine {
         message: &str,
     ) -> EngineResult<ratchet_env::EnvironmentDraftRecord> {
         self.ready().await;
-        Ok(self.environment_drafter()?.revise(draft_id, message).await?)
+        Ok(self
+            .environment_drafter()?
+            .revise(draft_id, message)
+            .await?)
     }
 
     pub async fn approve_environment(
@@ -1553,7 +1556,10 @@ impl Engine {
         options: ratchet_env::ApproveEnvironmentOptions,
     ) -> EngineResult<ratchet_env::EnvironmentDraftRecord> {
         self.ready().await;
-        Ok(self.environment_drafter()?.approve(draft_id, options).await?)
+        Ok(self
+            .environment_drafter()?
+            .approve(draft_id, options)
+            .await?)
     }
 
     pub fn environment_draft(

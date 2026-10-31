@@ -9,8 +9,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use ratchet_env::{
-    ApproveEnvironmentOptions, DraftEnvironmentInput, EnvError, EnvErrorKind, EnvironmentDraftPhase as Phase,
-    EnvironmentDraftRecord, EnvironmentDraftStatus as Status, EnvironmentDrafter,
+    ApproveEnvironmentOptions, DraftEnvironmentInput, EnvError, EnvErrorKind,
+    EnvironmentDraftPhase as Phase, EnvironmentDraftRecord, EnvironmentDraftStatus as Status,
+    EnvironmentDrafter,
 };
 
 use crate::api::*;
@@ -62,7 +63,10 @@ impl EnvDrafts {
             .ok_or_else(|| ServiceError::not_found("environment draft", id))
     }
 
-    fn record(&self, id: &str) -> ServiceResult<(Arc<dyn EnvironmentDrafter>, EnvironmentDraftRecord)> {
+    fn record(
+        &self,
+        id: &str,
+    ) -> ServiceResult<(Arc<dyn EnvironmentDrafter>, EnvironmentDraftRecord)> {
         let d = self.drafter_of(id)?;
         let rec = d
             .get(id)
@@ -102,7 +106,10 @@ impl EnvDrafts {
     }
 
     /// `POST /v1/environment-drafts`: records the draft (`drafting`) and starts the setup agent.
-    pub async fn create(&self, input: CreateEnvironmentDraftInput) -> ServiceResult<EnvironmentDraftVm> {
+    pub async fn create(
+        &self,
+        input: CreateEnvironmentDraftInput,
+    ) -> ServiceResult<EnvironmentDraftVm> {
         let goal = input.goal.trim();
         if goal.is_empty() || goal.chars().count() > 2000 {
             return Err(invalid("goal", "the goal must be 1 to 2000 characters"));
@@ -113,7 +120,10 @@ impl EnvDrafts {
         if let Some(t) = input.time_limit_seconds
             && !(t.is_finite() && t > 0.0)
         {
-            return Err(invalid("timeLimitSeconds", "the time limit must be a positive number of seconds"));
+            return Err(invalid(
+                "timeLimitSeconds",
+                "the time limit must be a positive number of seconds",
+            ));
         }
         let drafter = self.source.drafter_for(input.repo.trim()).await?;
         let mut di = DraftEnvironmentInput::new(input.repo.trim(), goal, input.agent_connector);
@@ -170,10 +180,17 @@ impl EnvDrafts {
         Ok(())
     }
 
-    pub async fn revise(&self, id: &str, input: ReviseEnvironmentDraftInput) -> ServiceResult<EnvironmentDraftVm> {
+    pub async fn revise(
+        &self,
+        id: &str,
+        input: ReviseEnvironmentDraftInput,
+    ) -> ServiceResult<EnvironmentDraftVm> {
         let message = input.message.trim();
         if message.is_empty() || message.chars().count() > 2000 {
-            return Err(invalid("message", "say what to change, in 1 to 2000 characters"));
+            return Err(invalid(
+                "message",
+                "say what to change, in 1 to 2000 characters",
+            ));
         }
         let d = self.drafter_of(id)?;
         let rec = d.begin_revise(id, message).map_err(env_error)?;
@@ -182,7 +199,11 @@ impl EnvDrafts {
         Ok(draft_vm(&rec))
     }
 
-    pub async fn approve(&self, id: &str, input: ApproveEnvironmentDraftInput) -> ServiceResult<EnvironmentDraftVm> {
+    pub async fn approve(
+        &self,
+        id: &str,
+        input: ApproveEnvironmentDraftInput,
+    ) -> ServiceResult<EnvironmentDraftVm> {
         let d = self.drafter_of(id)?;
         let was = d.get(id).map(|r| r.status);
         let mode = input.mode.map(|m| match m {
@@ -216,7 +237,9 @@ impl EnvDrafts {
             .into_iter()
             .filter(|d| {
                 d.status == EnvironmentDraftStatus::Ready
-                    && d.draft.as_ref().is_some_and(|p| !p.checks.is_empty() && p.checks.iter().all(|c| c.ok))
+                    && d.draft
+                        .as_ref()
+                        .is_some_and(|p| !p.checks.is_empty() && p.checks.iter().all(|c| c.ok))
             })
             .collect();
         v.sort_by_key(|d| d.created_at);

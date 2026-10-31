@@ -57,6 +57,7 @@ pub const DEFAULT_TOKEN_PRICING: TokenPricing = TokenPricing {
     output_usd_per_mtok: 15.0,
 };
 
+type ToolProgress = Arc<dyn Fn(&str) + Send + Sync>;
 pub type ErrorHook = Arc<dyn Fn(&EnvError, &str) + Send + Sync>;
 
 #[derive(Clone)]
@@ -256,7 +257,7 @@ impl AgentEnvironmentDrafter {
         session: Option<AgentSession>,
         workdir: &Path,
         prompt: &str,
-        progress: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+        progress: Option<ToolProgress>,
     ) -> EnvResult<AgentRun> {
         #[derive(Default)]
         struct Acc {
@@ -661,7 +662,7 @@ impl EnvironmentDrafter for AgentEnvironmentDrafter {
             );
             let started = self.o.clock.now();
             let before = digest(scratch.path());
-            let tool_progress: Arc<dyn Fn(&str) + Send + Sync> = {
+            let tool_progress: ToolProgress = {
                 let cb = cb.clone();
                 let id = id.clone();
                 Arc::new(move |t: &str| {
@@ -975,7 +976,7 @@ impl EnvironmentDrafter for AgentEnvironmentDrafter {
             .iter()
             .filter_map(|id| st.records.get(id).cloned())
             .collect();
-        v.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        v.sort_by_key(|r| std::cmp::Reverse(r.created_at));
         v
     }
 

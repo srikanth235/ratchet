@@ -7,8 +7,8 @@ use ratchet_core::enums::{EnvironmentScope, Mode};
 use ratchet_core::ports::{GitHost as _, SandboxEnvironmentKind, SandboxInput, SandboxStateStatus};
 use ratchet_engine::{EngineErrorCode as C, EngineSettings, SandboxSettings};
 use ratchet_env::{
-    EnvironmentConfigPatch, SampleOptions, apply_environment_to_config_yaml, environment_sandbox_id,
-    sample_environment,
+    EnvironmentConfigPatch, SampleOptions, apply_environment_to_config_yaml,
+    environment_sandbox_id, sample_environment,
 };
 
 use crate::common::*;
@@ -94,7 +94,13 @@ async fn create(h: &Harness, id: &str) {
 async fn start(h: &Harness, id: &str) -> SandboxInput {
     create(h, id).await;
     h.engine.start(id).await.unwrap();
-    h.sandbox.applies.lock().unwrap().last().cloned().expect("an apply")
+    h.sandbox
+        .applies
+        .lock()
+        .unwrap()
+        .last()
+        .cloned()
+        .expect("an apply")
 }
 
 fn applies(h: &Harness) -> Vec<String> {
@@ -113,16 +119,40 @@ async fn full_environment_files_go_into_the_sandbox_input_hashed_and_tagged() {
     assert_eq!(env.path, D);
     assert_eq!(env.commit, "main-sha");
     let paths: Vec<_> = env.files.iter().map(|f| f.path.as_str()).collect();
-    for want in ["main.tf", "seed.sh", "seed/orders.sql", "scripts/api.sh", "scripts/load.sh"] {
+    for want in [
+        "main.tf",
+        "seed.sh",
+        "seed/orders.sql",
+        "scripts/api.sh",
+        "scripts/load.sh",
+    ] {
         assert!(paths.contains(&want), "{want} in {paths:?}");
     }
-    assert!(env.hash.len() == 10 && env.hash.bytes().all(|b| b.is_ascii_hexdigit()), "{}", env.hash);
-    assert_eq!(input.sandbox_id, environment_sandbox_id("us-east-1", &env.hash));
+    assert!(
+        env.hash.len() == 10 && env.hash.bytes().all(|b| b.is_ascii_hexdigit()),
+        "{}",
+        env.hash
+    );
+    assert_eq!(
+        input.sandbox_id,
+        environment_sandbox_id("us-east-1", &env.hash)
+    );
     let tags = input.tags.clone().unwrap();
-    assert_eq!(tags.get("ratchet:managed").map(String::as_str), Some("true"));
+    assert_eq!(
+        tags.get("ratchet:managed").map(String::as_str),
+        Some("true")
+    );
     assert_eq!(tags.get("ratchet:env"), Some(&env.hash));
-    let opt = h.ledger.get_optimization(&oid("run-a")).await.unwrap().unwrap();
-    assert_eq!(opt.sandbox_id.as_ref().map(|s| s.to_string()), Some(input.sandbox_id.clone()));
+    let opt = h
+        .ledger
+        .get_optimization(&oid("run-a"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        opt.sandbox_id.as_ref().map(|s| s.to_string()),
+        Some(input.sandbox_id.clone())
+    );
     assert_eq!(opt.status, OptimizationStatus::Running);
 }
 
@@ -149,8 +179,16 @@ async fn the_same_environment_shares_a_sandbox_and_a_changed_one_gets_its_own() 
     let a = start(&h, "run-a").await;
     create(&h, "run-b").await;
     h.engine.start("run-b").await.unwrap();
-    let b = h.ledger.get_optimization(&oid("run-b")).await.unwrap().unwrap();
-    assert_eq!(b.sandbox_id.as_ref().map(|s| s.to_string()), Some(a.sandbox_id.clone()));
+    let b = h
+        .ledger
+        .get_optimization(&oid("run-b"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        b.sandbox_id.as_ref().map(|s| s.to_string()),
+        Some(a.sandbox_id.clone())
+    );
     assert_eq!(applies(&h).len(), 1);
 
     let tweak = |p: &str, c: &str| {
@@ -162,7 +200,10 @@ async fn the_same_environment_shares_a_sandbox_and_a_changed_one_gets_its_own() 
     };
     let h2 = with_environment(EnvironmentScope::Full, false, Some(&tweak)).await;
     let changed = start(&h2, "run-a").await;
-    assert_ne!(changed.environment.unwrap().hash, a.environment.unwrap().hash);
+    assert_ne!(
+        changed.environment.unwrap().hash,
+        a.environment.unwrap().hash
+    );
     assert_ne!(changed.sandbox_id, a.sandbox_id);
 }
 
@@ -170,13 +211,21 @@ async fn the_same_environment_shares_a_sandbox_and_a_changed_one_gets_its_own() 
 #[tokio::test]
 async fn reads_the_files_at_the_commit_the_optimization_was_created_on() {
     let h = with_environment(EnvironmentScope::Full, false, None).await;
-    h.git.resolved.lock().unwrap().insert("main".into(), "sha-at-create".into());
+    h.git
+        .resolved
+        .lock()
+        .unwrap()
+        .insert("main".into(), "sha-at-create".into());
     h.bench.set(
         "sha-at-create",
         "baseline",
         ScriptedBench::samples(&[100.0, 102.0, 98.0]).with_metric("peak_rss", 500.0),
     );
-    h.bench.set("sha-at-create", "confirm", ScriptedBench::samples(&[100.0, 100.0, 100.0]));
+    h.bench.set(
+        "sha-at-create",
+        "confirm",
+        ScriptedBench::samples(&[100.0, 100.0, 100.0]),
+    );
     let input = start(&h, "run-a").await;
     assert_eq!(input.environment.unwrap().commit, "sha-at-create");
 }
@@ -204,7 +253,9 @@ async fn refuses_an_environment_that_breaks_the_sandbox_contract_before_anything
     let cases: [(&str, Tweak); 3] = [
         ("a security group opening the internet", |p, c| {
             if p == "main.tf" {
-                format!("{c}\nresource \"aws_security_group\" \"open\" {{\n  egress {{\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }}\n}}\n")
+                format!(
+                    "{c}\nresource \"aws_security_group\" \"open\" {{\n  egress {{\n    cidr_blocks = [\"0.0.0.0/0\"]\n  }}\n}}\n"
+                )
             } else {
                 c.to_owned()
             }
@@ -230,7 +281,11 @@ async fn refuses_an_environment_that_breaks_the_sandbox_contract_before_anything
         create(&h, "run-a").await;
         let err = h.engine.start("run-a").await.unwrap_err();
         assert_eq!(err.code, C::InvalidConfig, "{name}");
-        assert!(err.message.contains("sandbox contract"), "{name}: {}", err.message);
+        assert!(
+            err.message.contains("sandbox contract"),
+            "{name}: {}",
+            err.message
+        );
         assert!(applies(&h).is_empty(), "{name}");
     }
 }
@@ -251,10 +306,19 @@ async fn the_sandbox_that_held_the_environment_is_destroyed_after_the_idle_windo
     );
     assert!(h.sandbox.applied.lock().unwrap().is_empty());
     assert_eq!(
-        h.engine.sandbox_state(&input.sandbox_id).await.unwrap().status,
+        h.engine
+            .sandbox_state(&input.sandbox_id)
+            .await
+            .unwrap()
+            .status,
         SandboxStateStatus::Destroyed
     );
-    let receipt = h.engine.teardown_receipt("run-a").await.unwrap().expect("a receipt");
+    let receipt = h
+        .engine
+        .teardown_receipt("run-a")
+        .await
+        .unwrap()
+        .expect("a receipt");
     assert_eq!(receipt.sandbox_id, input.sandbox_id);
 }
 
@@ -272,10 +336,23 @@ async fn a_candidate_that_touches_the_locked_environment_is_blocked_without_a_be
         h.engine.start("run-a").await.unwrap();
         let branch = "ratchet/run-a/codex";
         h.candidate(branch, "sha-env", Cand::new().files(&["src/a.ts", path]));
-        h.candidate(branch, "sha-ok", Cand::new().files(&["src/a.ts"]).bench(&[80.0, 80.0, 80.0]).confirm(&[80.0, 80.0, 80.0]));
-        h.until(async || all_decided(&h, "run-a", 2).await, 60).await;
+        h.candidate(
+            branch,
+            "sha-ok",
+            Cand::new()
+                .files(&["src/a.ts"])
+                .bench(&[80.0, 80.0, 80.0])
+                .confirm(&[80.0, 80.0, 80.0]),
+        );
+        h.until(async || all_decided(&h, "run-a", 2).await, 60)
+            .await;
         let rows = candidates(&h, "run-a").await;
-        let by = |sha: &str| rows.iter().find(|c| c.candidate.sha == sha).unwrap().clone();
+        let by = |sha: &str| {
+            rows.iter()
+                .find(|c| c.candidate.sha == sha)
+                .unwrap()
+                .clone()
+        };
         let blocked = by("sha-env");
         assert_eq!(blocked.candidate.verdict.to_string(), "blocked", "{path}");
         assert!(
@@ -284,7 +361,11 @@ async fn a_candidate_that_touches_the_locked_environment_is_blocked_without_a_be
             blocked.candidate.reasons
         );
         assert!(blocked.results.is_empty(), "{path}");
-        assert_eq!(by("sha-ok").candidate.verdict.to_string(), "verified", "{path}"); // a code-only change next to it is untouched
+        assert_eq!(
+            by("sha-ok").candidate.verdict.to_string(),
+            "verified",
+            "{path}"
+        ); // a code-only change next to it is untouched
     }
 }
 
@@ -294,11 +375,25 @@ async fn the_protected_set_lists_the_environment_directory() {
     let h = with_environment(EnvironmentScope::Full, false, None).await;
     create(&h, "run-a").await;
     let glob = format!("{D}/**");
-    assert!(h.engine.protected_paths("run-a").await.unwrap().globs.contains(&glob));
+    assert!(
+        h.engine
+            .protected_paths("run-a")
+            .await
+            .unwrap()
+            .globs
+            .contains(&glob)
+    );
     // the decision is locked whatever the scope: even `none` cannot be turned into a bigger environment by a candidate
     let none = with_environment(EnvironmentScope::None, false, None).await;
     create(&none, "run-a").await;
-    assert!(none.engine.protected_paths("run-a").await.unwrap().globs.contains(&glob));
+    assert!(
+        none.engine
+            .protected_paths("run-a")
+            .await
+            .unwrap()
+            .globs
+            .contains(&glob)
+    );
     // no environment decided yet (no scope in ratchet.yaml): nothing extra is protected
     let undecided = Harness::new(HarnessOptions {
         mode: Some(Mode::Live),
@@ -313,5 +408,13 @@ async fn the_protected_set_lists_the_environment_directory() {
     })
     .await;
     create(&undecided, "run-a").await;
-    assert!(!undecided.engine.protected_paths("run-a").await.unwrap().globs.contains(&glob));
+    assert!(
+        !undecided
+            .engine
+            .protected_paths("run-a")
+            .await
+            .unwrap()
+            .globs
+            .contains(&glob)
+    );
 }

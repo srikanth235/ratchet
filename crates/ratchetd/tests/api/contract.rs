@@ -709,7 +709,13 @@ async fn every_route_round_trips_its_types() {
     assert!(p.checks.iter().all(|c| c.ok));
     assert_eq!(p.files[0].path, "ratchet.yaml");
     let listed: EnvironmentDraftsVm = c
-        .rt("GET", "/v1/environment-drafts", "/v1/environment-drafts", None, 200)
+        .rt(
+            "GET",
+            "/v1/environment-drafts",
+            "/v1/environment-drafts",
+            None,
+            200,
+        )
         .await;
     assert_eq!(listed.drafts.len(), 1);
     let revised: EnvironmentDraftVm = c
@@ -734,7 +740,10 @@ async fn every_route_round_trips_its_types() {
             )
             .await;
         if d.status == EnvironmentDraftStatus::Ready {
-            assert_eq!((d.draft.unwrap().scope, d.revision), (ratchet_core::enums::EnvironmentScope::Single, 2));
+            assert_eq!(
+                (d.draft.unwrap().scope, d.revision),
+                (ratchet_core::enums::EnvironmentScope::Single, 2)
+            );
             break;
         }
     }
@@ -748,7 +757,10 @@ async fn every_route_round_trips_its_types() {
         )
         .await;
     assert_eq!(approved.status, EnvironmentDraftStatus::Approved);
-    assert_eq!(approved.approval.unwrap().mode, EnvironmentApprovalMode::Commit);
+    assert_eq!(
+        approved.approval.unwrap().mode,
+        EnvironmentApprovalMode::Commit
+    );
     c.fails(
         "POST",
         &format!("/v1/environment-drafts/{did}/revisions"),

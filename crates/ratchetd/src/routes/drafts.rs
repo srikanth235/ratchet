@@ -80,10 +80,7 @@ async fn get_draft(
     params(("id" = String, Path, description = "Draft id")),
     responses((status = 204, description = "Discarded"), (status = 409, body = ApiError, description = "Approved"))
 )]
-async fn discard_draft(
-    State(s): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<StatusCode> {
+async fn discard_draft(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<StatusCode> {
     s.service.discard_environment_draft(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

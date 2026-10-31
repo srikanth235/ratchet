@@ -120,7 +120,9 @@ fn build_local_adapter(
         AgentKind::Mock => return Err("mock agents are not available in this runtime".to_string()),
     };
     if let Some(problem) = local_agent_problem(&opts.harnesses, kind) {
-        return Err(format!("cannot run {agent_kind} on this machine: {problem}"));
+        return Err(format!(
+            "cannot run {agent_kind} on this machine: {problem}"
+        ));
     }
     let info = opts
         .harnesses

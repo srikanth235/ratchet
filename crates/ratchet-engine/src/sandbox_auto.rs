@@ -19,9 +19,8 @@ use ratchet_core::config::RatchetConfig;
 use ratchet_core::enums::{EnvironmentScope, Mode, OptimizationStatus, SandboxStatus};
 use ratchet_core::ports::{
     EngineEvent, InstanceState, SandboxActivity, SandboxEnvironment, SandboxInput, SandboxOutputs,
-    SandboxPhase,
-    SandboxStateStatus, SandboxTeardownReceipt, TeardownOrphan, TeardownRemoved, TeardownRun,
-    TeardownTrigger,
+    SandboxPhase, SandboxStateStatus, SandboxTeardownReceipt, TeardownOrphan, TeardownRemoved,
+    TeardownRun, TeardownTrigger,
 };
 use ratchet_core::rows::Optimization;
 
@@ -134,7 +133,9 @@ impl Engine {
                 let input =
                     self.sandbox_input_for(&sandbox_id, &region, &config, environment.clone());
                 let what = match &environment {
-                    Some(env) if env.scope == EnvironmentScope::Full => "the full-stack environment",
+                    Some(env) if env.scope == EnvironmentScope::Full => {
+                        "the full-stack environment"
+                    }
                     _ => "the environment",
                 };
                 self.phase(
@@ -645,18 +646,20 @@ fn resources_of(o: &SandboxOutputs) -> Vec<String> {
             .map(|r| format!("environment ({}): {r}", env.scope))
             .collect::<Vec<_>>()
     });
-    env.unwrap_or_default().into_iter().chain([
-        format!("S3 bucket {} (artifacts)", o.artifacts_bucket),
-        format!("S3 bucket {} (sealed holdout)", o.sealed_bucket),
-        format!("network subnet {}", o.network.subnet_id),
-        format!(
-            "security groups {}, {}",
-            o.network.agent_runner_security_group_id, o.network.bench_security_group_id
-        ),
-        format!("agent permission boundary {}", o.agent_boundary_ref),
-        format!("evaluator identity {}", o.eval_identity_ref),
-    ])
-    .collect()
+    env.unwrap_or_default()
+        .into_iter()
+        .chain([
+            format!("S3 bucket {} (artifacts)", o.artifacts_bucket),
+            format!("S3 bucket {} (sealed holdout)", o.sealed_bucket),
+            format!("network subnet {}", o.network.subnet_id),
+            format!(
+                "security groups {}, {}",
+                o.network.agent_runner_security_group_id, o.network.bench_security_group_id
+            ),
+            format!("agent permission boundary {}", o.agent_boundary_ref),
+            format!("evaluator identity {}", o.eval_identity_ref),
+        ])
+        .collect()
 }
 
 fn summarize(r: &SandboxTeardownReceipt) -> String {

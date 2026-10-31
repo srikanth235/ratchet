@@ -534,7 +534,7 @@ impl EnvironmentDrafter for MockEnvironmentDrafter {
             .iter()
             .filter_map(|id| st.records.get(id).cloned())
             .collect();
-        v.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        v.sort_by_key(|r| std::cmp::Reverse(r.created_at));
         v
     }
 
