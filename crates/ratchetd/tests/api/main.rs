@@ -4,6 +4,8 @@
 mod auth;
 mod common;
 mod contract;
+mod electron_api;
 mod openapi;
 mod sim;
 mod sse;
+mod views;

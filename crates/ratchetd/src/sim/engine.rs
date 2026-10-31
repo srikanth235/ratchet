@@ -227,21 +227,18 @@ impl Inner {
                     }
                 }
             });
-            if let Some(r) = self.st().runs.get_mut(id)
-                && let Some(old) = r.task.replace(handle)
-            {
-                old.abort();
+            // The baseline task (if any) is the one calling this: leave it to finish, never abort it.
+            if let Some(r) = self.st().runs.get_mut(id) {
+                r.task = Some(handle);
             }
         }
         Ok(())
     }
 
+    /// Forget the run. Its timer sees that the run is gone and ends by itself, so a turn that is in flight (or the
+    /// task that is calling this) is never cut off half way through its ledger writes.
     fn halt(&self, id: &str) {
-        if let Some(run) = self.st().runs.remove(id)
-            && let Some(t) = run.task
-        {
-            t.abort();
-        }
+        self.st().runs.remove(id);
     }
 
     pub(crate) fn run_config(&self, id: &str) -> ServiceResult<RatchetConfig> {

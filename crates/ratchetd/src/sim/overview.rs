@@ -136,16 +136,15 @@ impl Inner {
                     subtitle: format!(
                         "{}{}{}",
                         s.name.clone().unwrap_or_else(|| s.repo.clone()),
-                        s.gain_pct.map_or(String::new(), |g| format!(
-                            " \u{00b7} {:+.0}%",
-                            -g.abs().copysign(
-                                if s.direction == ratchet_core::Direction::Minimize {
-                                    1.0
-                                } else {
-                                    -1.0
-                                }
-                            )
-                        )),
+                        // the metric's own change: down for "lower is better", up for "higher"
+                        s.gain_pct.map_or(String::new(), |g| {
+                            let change = if s.direction == ratchet_core::Direction::Minimize {
+                                -g
+                            } else {
+                                g
+                            };
+                            format!(" \u{00b7} {change:+.0}%")
+                        }),
                         url.as_ref().map_or(String::new(), |u| format!(
                             " \u{00b7} {}",
                             u.rsplit('/')

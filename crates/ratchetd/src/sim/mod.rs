@@ -314,6 +314,11 @@ impl SimService {
         &self.0.ledger
     }
 
+    /// The read side over that ledger (view models).
+    pub fn views(&self) -> &LedgerViews {
+        &self.0.views
+    }
+
     /// Stop every timer. Ledger state is untouched.
     pub fn shutdown(&self) {
         self.0.halt_all();
@@ -886,4 +891,36 @@ pub(crate) fn join_errors(errors: &[ratchet_core::config::ConfigError]) -> Strin
         .map(|e| e.message.clone())
         .collect::<Vec<_>>()
         .join("; ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::repo_slug;
+
+    /// dev-engine.test.ts "repoSlug normalises git urls"
+    #[test]
+    fn repo_slug_normalises_remote_urls() {
+        for (input, want) in [
+            ("acme/search-api", Some("acme/search-api")),
+            (
+                "https://github.com/acme/search-api",
+                Some("acme/search-api"),
+            ),
+            (
+                "https://github.com/acme/search-api.git",
+                Some("acme/search-api"),
+            ),
+            (
+                "https://github.com/acme/search-api/",
+                Some("acme/search-api"),
+            ),
+            ("ssh://host/acme/search-api.git", Some("acme/search-api")),
+            ("  acme/search-api  ", Some("acme/search-api")),
+            ("search-api", None),
+            ("not a repo", None),
+            ("", None),
+        ] {
+            assert_eq!(repo_slug(input).as_deref(), want, "{input:?}");
+        }
+    }
 }
