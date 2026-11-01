@@ -54,6 +54,8 @@ public final class AppStore {
     public private(set) var lastError: String?
     /// The GitHub sign-in in progress: its code is shown until the account appears or the flow ends.
     public private(set) var githubFlow: GithubSignInFlow?
+    /// Agent logs, result details and benchmark series of what was opened (see RatchetClient+Insights.swift).
+    public internal(set) var insight = InsightsState()
     public var range: TimeRange = .days90
     /// True when the data is the sample or the simulation (demo mode): the sidebar says so, quietly.
     public private(set) var isDemoData: Bool
@@ -88,6 +90,7 @@ public final class AppStore {
         sandbox = .off
         receipt = nil
         githubFlow = nil
+        insight = InsightsState()
         isLoaded = false
         restoreCache()
         await refresh()
@@ -220,6 +223,8 @@ public final class AppStore {
                 detail.agents.append(agent)
             }
             details[id] = detail
+        case .agentLogAppended(_, let agentID):
+            agentLogChanged(agentID)
         case .needsYouChanged(let items):
             overview?.needsYou = items
         case .connectorsChanged(let list):
@@ -241,6 +246,8 @@ public final class AppStore {
     private func resync() async {
         await refresh()
         for id in Array(details.keys) { await loadDetail(id: id) }
+        for agentID in Array(insight.logs.keys) { await loadAgentLog(agentID) }
+        for id in Array(insight.insights.keys) { await loadInsights(id) }
     }
 
     private func applyUpdate(_ new: Optimization) {

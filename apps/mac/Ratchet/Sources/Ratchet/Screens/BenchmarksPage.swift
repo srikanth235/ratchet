@@ -25,6 +25,8 @@ struct BenchmarksPage: View {
                 .gridProbe("header", area: "benchmarks")
             KitSection("History") { history }
                 .gridProbe("history", area: "benchmarks")
+            BenchmarkRunSection()
+                .gridProbe("run", area: "benchmarks")
             KitSection("Templates") { gallery(.template) }
                 .gridProbe("templates", area: "benchmarks")
             KitSection("Try a demo") { gallery(.demo) }

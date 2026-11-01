@@ -9,6 +9,12 @@ enum SnapScene: String, CaseIterable {
     case detailLive = "detail-live"
     case detailResult = "detail-result"
     case detailNoWin = "detail-nowin"
+    // The live log, the Result details and the benchmark run (a section far down its page, scrolled into view).
+    case detailLiveLog = "detail-live-log"
+    case detailResultTime = "detail-result-time"
+    case detailResultSpend = "detail-result-spend"
+    case benchmarksRun = "benchmarks-run"
+    case benchmarksRunP99 = "benchmarks-run-p99"
     case newGoal = "new-goal"
     case newConnections = "new-connections"
     case newEnvironment = "new-environment"
@@ -22,6 +28,8 @@ enum SnapScene: String, CaseIterable {
     /// Puts the window in this scene's state.
     func apply(store: AppStore, router: AppRouter, daemon: DaemonController, notifier: AppNotifier) async {
         // Every scene starts from the calm state.
+        SnapshotFocus.shared.target = nil
+        SnapshotFocus.shared.metric = nil
         daemon.preview(nil)
         notifier.preview(.allowed, prompt: false)
         await store.cancelGithubSignIn()
@@ -40,6 +48,26 @@ enum SnapScene: String, CaseIterable {
         case .detailLive: router.open(optimization: "opt-checkout")
         case .detailResult: router.open(optimization: "opt-forecast")
         case .detailNoWin: router.open(optimization: "opt-bundle")
+        case .detailLiveLog:
+            router.open(optimization: "opt-checkout")
+            await store.loadDetail(id: "opt-checkout")
+            await store.loadAgentLog("agent-claude-login")
+            SnapshotFocus.shared.target = "log"
+        case .detailResultTime:
+            router.open(optimization: "opt-cli")
+            await store.loadDetail(id: "opt-cli")
+            await store.loadInsights("opt-cli")
+            SnapshotFocus.shared.target = "time"
+        case .detailResultSpend:
+            router.open(optimization: "opt-forecast")
+            await store.loadDetail(id: "opt-forecast")
+            await store.loadInsights("opt-forecast")
+            SnapshotFocus.shared.target = "spend"
+        case .benchmarksRun, .benchmarksRunP99:
+            router.show(.benchmarks)
+            await store.loadBenchmark("opt-checkout", metric: nil)
+            if self == .benchmarksRunP99 { SnapshotFocus.shared.metric = "p99" }
+            SnapshotFocus.shared.target = "run"
         case .newGoal, .newConnections, .newEnvironment, .newBudget:
             let flow = NewOptimizationFlow(client: store.client)
             router.show(.optimizations)

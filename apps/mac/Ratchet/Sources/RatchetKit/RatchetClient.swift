@@ -3,7 +3,7 @@ import Foundation
 /// Everything the app asks of `ratchetd`, shaped as REST resources plus one server-sent event stream.
 /// `MockRatchetClient` implements it with sample data and `DaemonRatchetClient` talks to the real daemon through the
 /// client generated from its OpenAPI; `AppStore` and the views never learn which one they talk to.
-public protocol RatchetClient: Sendable {
+public protocol RatchetClient: RatchetInsightsClient {
     // Overview and spend
     func overview(range: TimeRange) async throws -> Overview
     func spend(range: TimeRange) async throws -> SpendSummary
@@ -70,6 +70,8 @@ public enum RatchetEvent: Sendable, Equatable {
     case candidateUpdated(optimizationID: String, candidate: Candidate)
     case moveAdded(optimizationID: String, move: RatchetMove)
     case agentUpdated(optimizationID: String, agent: Agent)
+    /// An agent wrote to its log: the lines after the last one shown are worth fetching.
+    case agentLogAppended(optimizationID: String, agentID: String)
     case needsYouChanged([NeedsYouItem])
     case connectorsChanged([Connector])
     case githubFlowChanged(GithubSignInFlow?)

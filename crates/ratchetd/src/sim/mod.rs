@@ -11,6 +11,7 @@
 
 mod connectors;
 mod data;
+mod demo_diff;
 mod engine;
 mod environments;
 mod seed;
@@ -455,15 +456,20 @@ impl AppService for SimService {
     }
 
     async fn winning_change(&self, id: &str) -> ServiceResult<WinningChangeVm> {
-        // The simulation has no git behind it: say so instead of inventing a diff.
-        self.0
-            .views
-            .winning_change(
-                id,
-                None,
-                Some("This engine has no git access to diff the winning commit.".into()),
-            )
-            .await
+        // The simulation has no git behind it, so a demo shows a fixed, believable diff of its kind (`demo_diff`).
+        // Before the first win there is nothing to show, and the view says so.
+        let oid = OptimizationId::new(id);
+        let opt = self
+            .0
+            .ledger
+            .get_optimization(&oid)
+            .await?
+            .ok_or_else(|| ServiceError::not_found("optimization", id))?;
+        if self.0.ledger.ratchet_history(&oid).await?.is_empty() {
+            return self.0.views.winning_change(id, None, None).await;
+        }
+        let files = demo_diff::files_for(&opt.repo, &opt.metric);
+        self.0.views.winning_change(id, Some(files), None).await
     }
 
     async fn candidates(&self, id: &str) -> ServiceResult<Vec<CandidateVm>> {

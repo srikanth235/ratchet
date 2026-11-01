@@ -36,7 +36,10 @@ struct OptimizationDetailView: View {
                 ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .task(id: id) { await store.loadDetail(id: id) }
+        .task(id: id) {
+            await store.loadDetail(id: id)
+            if store.details[id]?.optimization.status.isFinished == true { await store.loadInsights(id) }
+        }
     }
 
     // MARK: Header
@@ -125,6 +128,7 @@ struct OptimizationDetailView: View {
             KitSection("Agents") { agentList }
                 .frame(width: 360, alignment: .leading)
         }
+        AgentLogSection(agents: detail?.agents ?? [])
         KitSection("Candidates") { candidateTable(optimization) }
     }
 
@@ -185,11 +189,43 @@ struct OptimizationDetailView: View {
             KitSection("What changed") { changeBlock(optimization) }
                 .frame(width: 320, alignment: .leading)
         }
+        if let insights = store.insight.insights[id] {
+            resultInsights(insights, optimization)
+        }
         KitSection("Candidates") { candidateTable(optimization) }
         if let receipt = detail?.receipt {
             KitSection("Teardown receipt") {
                 ReceiptView(receipt: receipt)
             }
+        }
+    }
+
+    /// Where the time went, before and after, the winning change as a diff, and where the money went.
+    @ViewBuilder
+    private func resultInsights(_ insights: RunInsights, _ optimization: Optimization) -> some View {
+        HStack(alignment: .top, spacing: Space.pageX) {
+            if let spans = insights.spans, !spans.isEmpty {
+                KitSection("Where the time went") { SpansSection(spans: spans, metricLabel: optimization.metric.name) }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            KitSection("Before and after") {
+                CompareSection(lines: insights.compare, family: insights.family, objective: optimization)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .id("time")
+        if let change = insights.change, change.commits > 0 {
+            KitSection("Winning change") { WinningChangeSection(change: change) }
+                .id("change")
+        }
+        if let spend = insights.spend {
+            HStack(alignment: .top, spacing: Space.pageX) {
+                KitSection("Spend") { SpendSection(spend: spend) }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                KitSection("By agent") { AgentSpendSection(spend: spend) }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .id("spend")
         }
     }
 

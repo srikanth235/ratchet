@@ -7,7 +7,7 @@ import Foundation
 /// is spent, time runs down, and at zero the run ends, the sandbox is torn down and a receipt is issued. Tests and
 /// snapshots use `live: false` and call `advance()` themselves.
 public actor MockRatchetClient: RatchetClient {
-    private var world: MockWorld
+    var world: MockWorld
     private let live: Bool
     private let interval: Duration
     private var subscribers: [UUID: AsyncStream<RatchetEvent>.Continuation] = [:]
@@ -19,7 +19,9 @@ public actor MockRatchetClient: RatchetClient {
     private let startedAt: Date
 
     public init(now: Date = Date(), live: Bool = false, interval: Duration = .seconds(2)) {
-        self.world = MockWorld.standard(now: now)
+        var sample = MockWorld.standard(now: now)
+        sample.seedLogs()
+        self.world = sample
         self.startedAt = now
         self.live = live
         self.interval = interval
@@ -408,7 +410,7 @@ public actor MockRatchetClient: RatchetClient {
         subscribers[id] = nil
     }
 
-    private func emit(_ events: [RatchetEvent]) {
+    func emit(_ events: [RatchetEvent]) {
         for event in events {
             for continuation in subscribers.values { continuation.yield(event) }
         }
@@ -551,6 +553,7 @@ public actor MockRatchetClient: RatchetClient {
         detail.agents[at].evals += evalsBy
         detail.agents[at].wins += winsBy
         if let activity { detail.agents[at].activity = activity }
+        appendLog(agent: detail.agents[at], evalsBy: evalsBy, winsBy: winsBy, activity: activity, events: &events, id: id)
         events.append(.agentUpdated(optimizationID: id, agent: detail.agents[at]))
     }
 }

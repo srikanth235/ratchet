@@ -204,16 +204,16 @@ the app calls (22 of the 63 operations are not called by Swift). What was ported
 
 | Electron renderer feature | Reachable today through |
 |---|---|
-| Live agent log (paged, appended on events) | `ratchet agent log`, `ratchet events` |
-| Spend breakdown by category and agent; per-win cost | `ratchet spend` |
-| "Where the time went" spans; before/after compare rows | `GET /v1/optimizations/{id}` |
-| Benchmarks: metric switch, latency histogram, candidate filters (`@ratchet/ui` `Histogram`, `EvalBars`) | `GET …/ratchet?metric=` |
+| Live agent log (paged, appended on events) | **ported**: the "Agent log" section of a running optimization (`AgentLogSection`, `AgentLog`); also `ratchet agent log`, `ratchet events` |
+| Spend breakdown by category and agent; per-win cost | **ported**: "Spend" and "By agent" on the Result page (`SpendSection`); also `ratchet spend` |
+| "Where the time went" spans; before/after compare rows | **ported**: "Where the time went", "Before and after" and the "Winning change" diff on the Result page |
+| Benchmarks: metric switch, latency histogram, candidate filters (`@ratchet/ui` `Histogram`, `EvalBars`) | **ported**: "Run detail" on the Benchmarks page (`BenchmarkRunSection`: ratchet chart with noise band, histogram, eval bars, candidate filters) |
 | Template → pull request ("Add via pull request") | the API only (`proposeTemplate`); the Swift gallery prefills the wizard |
 | New optimization: repo search, "Local folder…", `ratchet.yaml` review and invalid-YAML reason, "What's missing" preflight | `ratchet inspect <path>`; preflight: the API only |
 | Connectors: paste a GitHub token, AWS region and monthly cap, rename, edit in place, "Check connection"/"Refresh all", re-detect CLIs, `~/.aws` profile list, keychain-unavailable explanation | the API only |
 | Advanced (development) overrides: AMI ids, `tofu` binary and module directory | the API only (`saveAdvancedSettings`) |
 | Discard an environment draft | the API only |
-| Demo mode showed a real diff of the winning change (`dev-git`) | `ratchetd` simulation answers "no git access"; real-mode demos do diff |
+| Demo mode showed a real diff of the winning change (`dev-git`) | **ported**: the `ratchetd` simulation answers with a fixed, believable diff per demo (`crates/ratchetd/src/sim/demo_diff.rs`); the app shows it under "Winning change" |
 | A full Environments screen ("How it fits together") | the sidebar sandbox line and receipt |
 
 `packages/e2e` had four specs; none ran in CI (CI only syntax-checked them). 01-boot (Electron security) does not apply to

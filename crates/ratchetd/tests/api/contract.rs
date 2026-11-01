@@ -187,9 +187,15 @@ async fn every_route_round_trips_its_types() {
         .await;
     assert_eq!(wc.commits, 5);
     assert!(
-        wc.unavailable.is_some(),
-        "the simulation has no git behind it"
+        wc.unavailable.is_none(),
+        "a demo shows its fixed diff instead of saying there is no git"
     );
+    assert!(!wc.files.is_empty() && wc.additions > 0 && wc.deletions > 0);
+    let excerpt = wc
+        .excerpt
+        .as_ref()
+        .expect("the first hunk of the biggest file");
+    assert!(!excerpt.lines.is_empty());
     let cands: Vec<CandidateVm> = c
         .rt(
             "GET",

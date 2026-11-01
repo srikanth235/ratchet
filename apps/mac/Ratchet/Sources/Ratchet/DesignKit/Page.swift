@@ -13,18 +13,29 @@ struct KitPage<Content: View>: View {
         self.content = content()
     }
 
+    @State private var focus = SnapshotFocus.shared
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Space.block) {
-                content
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: Space.block) {
+                    content
+                }
+                .frame(maxWidth: maxWidth ?? .infinity, alignment: .leading)
+                .padding(.horizontal, Space.pageX)
+                .padding(.top, Space.pageTop)
+                .padding(.bottom, Space.pageBottom)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .id("page-top")
             }
-            .frame(maxWidth: maxWidth ?? .infinity, alignment: .leading)
-            .padding(.horizontal, Space.pageX)
-            .padding(.top, Space.pageTop)
-            .padding(.bottom, Space.pageBottom)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Ink.canvas)
+            .task(id: focus.target) {
+                // Snapshot mode only: bring the section of the scene into view once its data is there.
+                guard Store.isOverridden else { return }
+                try? await Task.sleep(for: .milliseconds(300))
+                proxy.scrollTo(focus.target ?? "page-top", anchor: .top)
+            }
         }
-        .background(Ink.canvas)
     }
 }
 

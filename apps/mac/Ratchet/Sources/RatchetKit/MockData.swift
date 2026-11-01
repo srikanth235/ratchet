@@ -16,6 +16,8 @@ public struct MockWorld: Sendable {
     public var receipt: TeardownReceipt?
     public var drafts: [String: EnvironmentDraft]
     public var budgetUSD: Double
+    /// The log of each agent, oldest first (see `seedLogs`).
+    public var agentLogs: [String: [AgentLogLine]] = [:]
 
     /// One verified win on the staircase: the total value locked in right after it.
     public struct WinStep: Sendable, Hashable {

@@ -366,6 +366,32 @@ async fn pull_request_and_report_follow_the_wins() {
 }
 
 #[tokio::test]
+async fn a_demo_shows_a_real_looking_diff_of_its_winning_change() {
+    let sim = SimService::manual().await.unwrap();
+    let ingest = sim.winning_change("opt_demo_ingest").await.unwrap();
+    assert!(ingest.unavailable.is_none(), "{:?}", ingest.unavailable);
+    assert_eq!(ingest.commits, 2);
+    assert_eq!(ingest.files.len(), 2);
+    assert_eq!(
+        ingest.additions,
+        ingest.files.iter().map(|f| f.additions).sum::<u64>()
+    );
+    let excerpt = ingest.excerpt.expect("the first hunk of the biggest file");
+    assert_eq!(excerpt.path, "src/ingest/writer.ts");
+    assert!(
+        excerpt
+            .lines
+            .iter()
+            .any(|l| l.kind == DiffLineKind::Add && l.text.contains("flush"))
+    );
+    // A run without a win has nothing to diff, and says so.
+    let web = sim.winning_change("opt_demo_web").await.unwrap();
+    assert_eq!(web.commits, 0);
+    assert_eq!(web.unavailable.as_deref(), Some("No verified win yet."));
+    assert!(web.files.is_empty());
+}
+
+#[tokio::test]
 async fn cost_reconcile_is_pending_while_running_and_idempotent_afterwards() {
     let sim = SimService::manual().await.unwrap();
     let live = sim.reconcile_costs("opt_demo_search").await.unwrap();

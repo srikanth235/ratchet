@@ -121,6 +121,23 @@ enum SelfTest {
         await store.endSandbox()
         check("End now tears the sandbox down", !store.sandbox.isOn && store.receipt?.allGone == true)
 
+        // Agent log, Result details and the benchmark run.
+        await store.loadAgentLog("agent-claude-team")
+        let log = store.insight.logs["agent-claude-team"]
+        check("an agent's log loads", (log?.lines.count ?? 0) > 2 && log?.error == nil)
+        let cursor = log?.cursor
+        await store.loadAgentLog("agent-claude-team")
+        check("reading the log again adds nothing", store.insight.logs["agent-claude-team"]?.lines.count == log?.lines.count && cursor == store.insight.logs["agent-claude-team"]?.cursor)
+        await store.loadInsights("opt-cli")
+        let insights = store.insight.insights["opt-cli"]
+        check("the result has spans, compare rows and a diff", insights?.spans?.isEmpty == false && insights?.compare.isEmpty == false && insights?.change?.files.isEmpty == false)
+        check("the spend adds up per agent", insights?.spend.map { abs($0.agents.reduce(0) { $0 + $1.usd } - $0.totalUSD) < 0.05 } == true)
+        await store.loadBenchmark("opt-checkout")
+        check("the benchmark has a metric switch", store.insight.series["opt-checkout"]?.hasMetricSwitch == true)
+        await store.loadBenchmark("opt-checkout", metric: "p99")
+        check("another metric re-plots the ratchet", store.insight.series["opt-checkout"]?.metric == "p99" && store.insight.series["opt-checkout"]?.noiseFloor == nil)
+        check("the candidate filter narrows the table", CandidateFilter.blocked.apply(to: store.insight.results["opt-checkout"] ?? []).count == 1)
+
         // Symbols used in the app exist.
         for name in ["chart.line.uptrend.xyaxis", "gearshape", "link"] {
             check("SF Symbol \(name) exists", NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil)
@@ -164,6 +181,25 @@ enum SelfTest {
             await store.resumeAgent(agent.id)
         } else {
             print("SKIP pausing an agent: no working agent in the simulation")
+        }
+
+        // The log, the result details and the benchmark series, through the daemon.
+        if let finished = store.optimizations.first(where: { $0.status.isFinished && $0.winsCount > 0 }) {
+            await store.loadInsights(finished.id)
+            let insights = store.insight.insights[finished.id]
+            check("the result details load", insights != nil, store.lastError ?? "")
+            check("the spend breakdown comes from the daemon", insights?.spend?.categories.isEmpty == false)
+            check("the simulation answers with a real diff", insights?.change?.unavailable == nil && insights?.change?.files.isEmpty == false,
+                  insights?.change?.unavailable ?? "no change")
+            await store.loadBenchmark(finished.id)
+            check("the ratchet series loads", store.insight.series[finished.id]?.steps.isEmpty == false)
+            check("the candidates load with their verdicts", store.insight.results[finished.id]?.isEmpty == false)
+        } else {
+            print("SKIP result details: no finished optimization with a win in the simulation")
+        }
+        if let agent = store.details[live.id]?.agents.first {
+            await store.loadAgentLog(agent.id)
+            check("an agent's log loads from the daemon", store.insight.logs[agent.id]?.error == nil, store.insight.logs[agent.id]?.error ?? "")
         }
 
         // Environment drafts: draft, revise, approve through the wizard's own flow object.

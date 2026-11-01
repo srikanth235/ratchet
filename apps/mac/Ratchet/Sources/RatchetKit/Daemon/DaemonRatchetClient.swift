@@ -49,7 +49,7 @@ public struct DaemonLocation: Sendable, Equatable {
 /// Every group of the API is real: the overview, connectors and environment drafts included. There is no sample-data
 /// fallback; a daemon that cannot answer is an error the app shows (and retries).
 public final class DaemonRatchetClient: RatchetClient {
-    private let api: Client
+    let api: Client
     private let transport: any ClientTransport
     private let state = DaemonClientState()
 
@@ -83,7 +83,7 @@ public final class DaemonRatchetClient: RatchetClient {
     }
 
     /// Runs `real` and translates its failure.
-    private func calling<T: Sendable>(_ real: () async throws -> T) async throws -> T {
+    func calling<T: Sendable>(_ real: () async throws -> T) async throws -> T {
         do {
             return try await real()
         } catch {
@@ -102,12 +102,12 @@ public final class DaemonRatchetClient: RatchetClient {
         var markdown: String
     }
 
-    private func escaped(_ segment: String) -> String {
+    func escaped(_ segment: String) -> String {
         segment.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? segment
     }
 
     /// One request without a body, through the error middleware; the response body on success.
-    private func rawCall(_ method: HTTPRequest.Method, _ path: String, operationID: String) async throws -> Data {
+    func rawCall(_ method: HTTPRequest.Method, _ path: String, operationID: String) async throws -> Data {
         let base = URL(string: "http://localhost") ?? URL(fileURLWithPath: "/")
         let request = HTTPRequest(method: method, scheme: nil, authority: nil, path: path)
         let transport = self.transport
@@ -151,7 +151,7 @@ public final class DaemonRatchetClient: RatchetClient {
 
     // MARK: Fetching
 
-    private func optimizationDetail(_ id: String) async throws -> VM.OptimizationDetail {
+    func optimizationDetail(_ id: String) async throws -> VM.OptimizationDetail {
         let detail = try await api.getOptimization(path: .init(id: id)).ok.body.json
         await state.remember(agents: detail.agents.map(\.id), of: id)
         return detail
@@ -655,6 +655,7 @@ public final class DaemonRatchetClient: RatchetClient {
                 continuation.yield(.candidateUpdated(optimizationID: id, candidate: DaemonMapping.candidate(changed)))
             }
         case .agentEvent(let id, let agentID):
+            continuation.yield(.agentLogAppended(optimizationID: id, agentID: agentID))
             if let detail = try? await optimizationDetail(id), let agent = detail.agents.first(where: { $0.id == agentID }) {
                 continuation.yield(.agentUpdated(optimizationID: id, agent: DaemonMapping.agent(agent)))
             }
