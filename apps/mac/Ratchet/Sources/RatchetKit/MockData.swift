@@ -187,19 +187,22 @@ public struct MockWorld: Sendable {
 
     static func makeConnectors() -> [Connector] {
         [
-            Connector(id: "gh-srikanth235", kind: .github, name: "srikanth235", detail: "Personal · 42 repos", state: .connected, isDefault: true),
-            Connector(id: "gh-acme-org", kind: .github, name: "acme-org", detail: "GitHub App · 18 repos", state: .connected),
+            Connector(id: "gh-srikanth235", kind: .github, name: "srikanth235", detail: "Personal · 42 repos", state: .connected, isDefault: true, origin: .device),
+            Connector(id: "gh-acme-org", kind: .github, name: "acme-org", detail: "GitHub App · 18 repos", state: .connected, origin: .token),
             Connector(id: "aws-acme-prod", kind: .aws, name: "acme-prod", detail: "SSO · us-east-1 · cap $500 / month",
-                      state: .connected, isDefault: true, monthlyCapUSD: 500, usedThisMonthUSD: 88),
+                      state: .connected, isDefault: true, monthlyCapUSD: 500, usedThisMonthUSD: 88,
+                      profile: "acme-prod", region: "us-east-1"),
             Connector(id: "aws-personal-dev", kind: .aws, name: "personal-dev", detail: "~/.aws profile · us-west-2 · cap $100 / month",
-                      state: .connected, monthlyCapUSD: 100, usedThisMonthUSD: 4),
-            Connector(id: "aws-acme-staging", kind: .aws, name: "acme-staging", detail: "SSO · eu-west-1", state: .expired),
+                      state: .connected, monthlyCapUSD: 100, usedThisMonthUSD: 4,
+                      profile: "personal-dev", region: "us-west-2"),
+            Connector(id: "aws-acme-staging", kind: .aws, name: "acme-staging", detail: "SSO · eu-west-1", state: .expired,
+                      profile: "acme-staging", region: "eu-west-1"),
             Connector(id: "agent-claude-login", kind: .agent, name: "Claude Code · your login", detail: "Found on this Mac · v2.1.314",
-                      state: .signedIn, isDefault: true),
+                      state: .signedIn, isDefault: true, origin: .login, cli: .claudeCode),
             Connector(id: "agent-claude-team", kind: .agent, name: "Claude Code · team key", detail: "API key ····4f2a · also runs in the cloud",
-                      state: .valid, canRunInCloud: true),
+                      state: .valid, canRunInCloud: true, origin: .apiKey, cli: .claudeCode),
             Connector(id: "agent-codex-login", kind: .agent, name: "Codex · your login", detail: "Found on this Mac · v0.166 · run codex login",
-                      state: .signedOut),
+                      state: .signedOut, origin: .login, cli: .codex),
         ]
     }
 

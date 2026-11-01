@@ -24,6 +24,21 @@ enum SnapScene: String, CaseIterable {
     case daemonApproval = "daemon-approval"
     case notificationPrompt = "notification-prompt"
     case connectorSignIn = "connector-signin"
+    // Setup: finding the repo, "What's missing", the Connectors forms, "Use template".
+    case newRepoFound = "new-repo-found"
+    case newRepoInvalid = "new-repo-invalid"
+    case newRepoTemplate = "new-repo-template"
+    case newLocalFolder = "new-local-folder"
+    case newLocalNoRemote = "new-local-noremote"
+    case newMissing = "new-missing"
+    case connectorsAddGithub = "connectors-add-github"
+    case connectorsAddAWS = "connectors-add-aws"
+    case connectorsAddAgent = "connectors-add-agent"
+    case connectorsEdit = "connectors-edit"
+    case connectorsRename = "connectors-rename"
+    case connectorsCheck = "connectors-check"
+    case connectorsKeychain = "connectors-keychain"
+    case templatePR = "template-pr"
 
     /// Puts the window in this scene's state.
     func apply(store: AppStore, router: AppRouter, daemon: DaemonController, notifier: AppNotifier) async {
@@ -34,6 +49,15 @@ enum SnapScene: String, CaseIterable {
         notifier.preview(.allowed, prompt: false)
         await store.cancelGithubSignIn()
         router.show(.overview)
+        router.rowModes = [:]
+        router.rowNotes = [:]
+        router.connectorSheet = nil
+        router.templateProposal = nil
+        router.advancedExpanded = false
+        let mock = store.client as? MockRatchetClient
+        await mock?.simulate(keychainAvailable: true)
+        await mock?.simulate(preflight: nil)
+        await store.refresh()
         switch self {
         case .overview: break
         case .daemonStarting: daemon.preview(.starting)
@@ -68,6 +92,61 @@ enum SnapScene: String, CaseIterable {
             await store.loadBenchmark("opt-checkout", metric: nil)
             if self == .benchmarksRunP99 { SnapshotFocus.shared.metric = "p99" }
             SnapshotFocus.shared.target = "run"
+        case .newRepoFound, .newRepoInvalid, .newRepoTemplate, .newLocalFolder, .newLocalNoRemote, .newMissing:
+            let flow = NewOptimizationFlow(client: store.client)
+            router.show(.optimizations)
+            router.wizard = flow
+            await flow.load()
+            flow.goal = "Make checkout p95 faster"
+            switch self {
+            case .newRepoFound:
+                flow.showsYAML = true
+            case .newRepoInvalid:
+                flow.repoQuery = "search"
+                await flow.search()
+                await flow.selectRepo("acme-org/search-svc")
+            case .newRepoTemplate:
+                await flow.selectRepo("acme-org/web-app")
+                await flow.proposeTemplate("build-size")
+            case .newLocalFolder:
+                await flow.chooseLocalFolder("/Users/dev/shop-api")
+            case .newLocalNoRemote:
+                await flow.chooseLocalFolder("/Users/dev/scratch-no-remote")
+            default:
+                await mock?.simulate(preflight: [
+                    PreflightItem(id: "codex", label: "Codex is not signed in", state: .fail, detail: "Run `codex login` in a terminal, or add an API key in Connectors."),
+                    PreflightItem(id: "aws", label: "acme-staging needs signing in again", state: .warn, detail: "Run `aws sso login --profile acme-staging` before a long run."),
+                ])
+                await flow.go(to: .connections)
+            }
+        case .connectorsAddGithub, .connectorsAddAWS, .connectorsAddAgent, .connectorsEdit, .connectorsRename, .connectorsCheck,
+            .connectorsKeychain:
+            router.show(.connectors)
+            // The page has to be on screen to take what is set below.
+            try? await Task.sleep(for: .milliseconds(400))
+            switch self {
+            case .connectorsAddGithub: router.connectorSheet = ConnectorSheetRequest(kind: .github, showsToken: true)
+            case .connectorsAddAWS: router.connectorSheet = ConnectorSheetRequest(kind: .aws, pick: "sandbox-eu")
+            case .connectorsAddAgent: router.connectorSheet = ConnectorSheetRequest(kind: .agent)
+            case .connectorsEdit: router.rowModes["aws-acme-prod"] = .edit
+            case .connectorsRename: router.rowModes["gh-acme-org"] = .rename
+            case .connectorsCheck:
+                router.rowModes["aws-acme-staging"] = .ssoHint
+                router.rowNotes["gh-srikanth235"] = ConnectorNote(ok: true, text: "GitHub says you are signed in as srikanth235.")
+                router.rowNotes["agent-codex-login"] = ConnectorNote(ok: false, text: "Codex is not signed in. Run `codex login` in a terminal.")
+            default:
+                await mock?.simulate(keychainAvailable: false)
+                await store.refresh()
+            }
+        case .templatePR:
+            router.show(.benchmarks)
+            if let template = store.templates.first(where: { $0.id == "build-size" }) {
+                let flow = TemplateProposalFlow(template: template, client: store.client)
+                await flow.load()
+                if let repo = flow.repos.first(where: { $0.id == "acme-org/web-app" }) { flow.select(repo) }
+                await flow.openPullRequest()
+                router.templateProposal = flow
+            }
         case .newGoal, .newConnections, .newEnvironment, .newBudget:
             let flow = NewOptimizationFlow(client: store.client)
             router.show(.optimizations)
@@ -144,6 +223,15 @@ enum Snapshot {
                         }
                         capture(to: "\(dir)/settings-\(tab.rawValue)-\(mode).png", window: settings)
                     }
+                    // Advanced (development), opened.
+                    router.settingsTab = .general
+                    router.advancedExpanded = true
+                    try? await Task.sleep(for: .seconds(1))
+                    let advanced = NSApp.windows.first {
+                        $0.isVisible && $0 !== main && !$0.isSheet && $0.styleMask.contains(.titled)
+                    }
+                    capture(to: "\(dir)/settings-advanced-\(mode).png", window: advanced)
+                    router.advancedExpanded = false
                 }
             }
             print("SNAPSHOT done \(dir)")

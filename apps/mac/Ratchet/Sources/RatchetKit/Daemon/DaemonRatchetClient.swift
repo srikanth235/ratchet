@@ -50,7 +50,7 @@ public struct DaemonLocation: Sendable, Equatable {
 /// fallback; a daemon that cannot answer is an error the app shows (and retries).
 public final class DaemonRatchetClient: RatchetClient {
     let api: Client
-    private let transport: any ClientTransport
+    let transport: any ClientTransport
     private let state = DaemonClientState()
 
     public init(transport: any ClientTransport) {
@@ -67,7 +67,7 @@ public final class DaemonRatchetClient: RatchetClient {
     // MARK: Failures
 
     /// What the app sees of a failed call: the protocol's own errors, in plain words.
-    private func translate(_ error: any Error) -> any Error {
+    func translate(_ error: any Error) -> any Error {
         if let error = daemonError(in: error) { return error.clientError }
         if let socket = underlyingSocketError(in: error) {
             return RatchetClientError.unavailable(socket.errorDescription ?? "Cannot reach ratchetd.")
@@ -438,7 +438,11 @@ public final class DaemonRatchetClient: RatchetClient {
                 }
                 return DaemonMapping.connector(existing)
             case .aws:
-                list = try await api.addAwsConnector(body: .json(.init(profile: new.name))).ok.body.json
+                if new.region != nil || new.monthlyCapUSD != nil {
+                    list = try await addAwsConnector(new)
+                } else {
+                    list = try await api.addAwsConnector(body: .json(.init(profile: new.name))).ok.body.json
+                }
             case .agent:
                 let agent: VM.ConnectorAgent = new.name.lowercased().contains("codex") ? .codex : .claudeCode
                 if let key = new.secret?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty {

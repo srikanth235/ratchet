@@ -37,6 +37,27 @@ enum Page: String, CaseIterable, Identifiable {
     }
 }
 
+/// What a Connectors row is doing besides showing itself.
+enum ConnectorRowMode: Equatable {
+    case rename, edit, ssoHint
+}
+
+/// The answer of "Check connection", shown under the row.
+struct ConnectorNote: Equatable {
+    var ok: Bool
+    var text: String
+}
+
+/// Opens the Add connector sheet on a kind (and, for snapshots, in a state).
+struct ConnectorSheetRequest: Identifiable, Equatable {
+    let id = UUID()
+    var kind: ConnectorKind
+    /// GitHub: "Use an access token instead" is open.
+    var showsToken = false
+    /// AWS: the profile already picked.
+    var pick: String?
+}
+
 /// Where the window is: the page, the open optimization, the open wizard. Menus, the menu bar item and the
 /// snapshot mode all drive it.
 @Observable
@@ -44,6 +65,15 @@ final class AppRouter {
     var page: Page = .overview
     var optimizationID: String?
     var wizard: NewOptimizationFlow?
+    /// The Connectors rows that are being renamed, edited or explained, and the last "Check connection" answers.
+    var rowModes: [String: ConnectorRowMode] = [:]
+    var rowNotes: [String: ConnectorNote] = [:]
+    /// Set to open the Add connector sheet on the Connectors page; the page takes it and clears it.
+    var connectorSheet: ConnectorSheetRequest?
+    /// Settings > General > Advanced (development) is open. Collapsed every time the app starts.
+    var advancedExpanded = false
+    /// "Use template": the template whose pull request is being set up.
+    var templateProposal: TemplateProposalFlow?
     /// Settings reopens on the last tab. Test and snapshot runs leave it alone.
     var settingsTab: SettingsTab = SettingsTab(rawValue: UserDefaults.standard.string(forKey: "settings.tab") ?? "") ?? .general {
         didSet { if !Store.isOverridden { UserDefaults.standard.set(settingsTab.rawValue, forKey: "settings.tab") } }
