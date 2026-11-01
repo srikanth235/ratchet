@@ -43,6 +43,9 @@ struct ContentView: View {
             Snapshot.runIfRequested(
                 store: store, router: router, openSettings: openSettings, daemon: daemon, notifier: notifier)
         }
+        .sheet(item: Binding(get: { router.templateProposal }, set: { router.templateProposal = $0 })) { flow in
+            UseTemplateSheet(flow: flow)
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             daemon.recheck()
             Task { await notifier.refreshAuthorization() }

@@ -116,6 +116,39 @@ enum SelfTest {
             check("the new optimization is on screen", store.optimization(id: started.id) != nil)
         }
 
+        // Setup: repo search, ratchet.yaml review, template pull request, connector editing, drafts, overrides.
+        let setup = NewOptimizationFlow(client: store.client)
+        await setup.load()
+        setup.repoQuery = "search"
+        await setup.search()
+        check("searching repos narrows the list", setup.shownRepos.map(\.id) == ["acme-org/search-svc"])
+        await setup.selectRepo("acme-org/search-svc")
+        check("an invalid ratchet.yaml says why", setup.inspection?.outcome == .invalid && !(setup.inspection?.problems.isEmpty ?? true) && !setup.repoIsUsable)
+        await setup.selectRepo("acme-org/web-app")
+        await setup.proposeTemplate("build-size")
+        check("a template opens a pull request", setup.proposal?.prURL.contains("/pull/") == true)
+        await setup.chooseLocalFolder("/Users/dev/shop-api")
+        check("a local folder is read through its remote", setup.inspection?.repo == "srikanth235/shop-api" && setup.repoIsUsable)
+        await setup.chooseLocalFolder("/Users/dev/no-remote")
+        check("a folder without a remote cannot be used", !setup.repoIsUsable)
+        do {
+            try await store.updateConnector("aws-personal-dev", ConnectorUpdate(name: "dev", region: "eu-west-2", cap: .remove))
+            let edited = store.connectors.first { $0.id == "aws-personal-dev" }
+            check("an AWS connector is edited in place", edited?.name == "dev" && edited?.region == "eu-west-2" && edited?.monthlyCapUSD == nil)
+            let checked = try await store.checkConnector("gh-srikanth235")
+            check("Check connection answers in a line", checked.ok && !checked.detail.isEmpty)
+            let saved = try await store.client.saveAdvancedSettings(AdvancedSettings(benchAMI: "ami-0123456789abcdef0"))
+            check("the development overrides are saved", saved.benchAMI == "ami-0123456789abcdef0")
+        } catch {
+            check("connector and settings forms work", false, error.localizedDescription)
+        }
+        let drafted = NewOptimizationFlow(client: store.client)
+        await drafted.load()
+        drafted.goal = "Go"
+        await drafted.go(to: .environment)
+        await drafted.discardDraft()
+        check("a draft can be discarded", drafted.draft == nil && drafted.step == .connections)
+
         // Sandbox.
         check("the sandbox is on", store.sandbox.isOn)
         await store.endSandbox()
@@ -147,6 +180,19 @@ enum SelfTest {
             check("a repo's connection selection answers", true)
         } catch {
             check("connectors answer", false, error.localizedDescription)
+        }
+
+        // The setup routes.
+        do {
+            _ = try await store.client.awsProfiles()
+            _ = try await store.client.detectedAgents(redetect: false)
+            let advanced = try await store.client.advancedSettings()
+            check("the development overrides are readable", !advanced.defaultModuleDir.isEmpty || advanced.moduleDir.isEmpty)
+            _ = try await store.client.connectorSetup()
+            _ = try await store.client.preflight(PreflightRequest(source: .demo, agentIDs: [], placement: .local))
+            check("what's missing answers for a demo", true)
+        } catch {
+            check("the setup routes answer", false, error.localizedDescription)
         }
 
         // An optimization's detail, and an action with its live event.

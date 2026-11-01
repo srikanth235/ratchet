@@ -54,6 +54,8 @@ public final class AppStore {
     public private(set) var lastError: String?
     /// The GitHub sign-in in progress: its code is shown until the account appears or the flow ends.
     public private(set) var githubFlow: GithubSignInFlow?
+    /// Whether the keychain can hold tokens and keys, and whether "Sign in with GitHub" has a real client id.
+    public private(set) var connectorSetup = ConnectorSetup()
     public var range: TimeRange = .days90
     /// True when the data is the sample or the simulation (demo mode): the sidebar says so, quietly.
     public private(set) var isDemoData: Bool
@@ -107,6 +109,7 @@ public final class AppStore {
             optimizations = try await client.optimizations()
             connectors = try await client.connectors()
             githubFlow = try await client.githubSignInFlow()
+            connectorSetup = (try? await client.connectorSetup()) ?? connectorSetup
             templates = try await client.templates()
             benchmarks = try await client.benchmarks()
             repos = try await client.repos()
@@ -408,6 +411,42 @@ public final class AppStore {
         do {
             _ = try await client.signInConnector(id: id)
             connectors = try await client.connectors()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    // MARK: Connector forms
+    // These throw, so a form can show the reason next to its field instead of in the window's error line.
+
+    /// Adds a connector and reports why it could not be added.
+    public func addConnectorChecked(_ new: NewConnector) async throws {
+        _ = try await client.addConnector(new)
+        connectors = try await client.connectors()
+    }
+
+    /// A pasted GitHub token: checked against GitHub by the daemon, filed in the keychain, never returned.
+    public func addGithubToken(_ token: String, name: String? = nil) async throws {
+        connectors = try await client.addGithubToken(token, name: name)
+    }
+
+    /// Rename; for AWS the region and the monthly cap too.
+    public func updateConnector(_ id: String, _ update: ConnectorUpdate) async throws {
+        connectors = try await client.updateConnector(id: id, update)
+    }
+
+    /// "Check connection": asks the provider and returns its one-line answer; the list shows the fresh status.
+    public func checkConnector(_ id: String) async throws -> ConnectorCheck {
+        let check = try await client.checkConnector(id: id)
+        connectors = try await client.connectors()
+        return check
+    }
+
+    /// "Refresh all": every connector is checked with its provider.
+    public func refreshConnectors() async {
+        do {
+            connectors = try await client.refreshConnectors()
+            lastError = nil
         } catch {
             lastError = error.localizedDescription
         }

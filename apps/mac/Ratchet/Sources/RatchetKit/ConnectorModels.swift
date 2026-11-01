@@ -33,6 +33,33 @@ public enum ConnectorState: String, Codable, Sendable {
     public var isUsable: Bool { self == .connected || self == .signedIn || self == .valid }
 }
 
+/// How a connector got here.
+public enum ConnectorOrigin: String, Codable, Sendable {
+    /// GitHub: signed in with the device flow.
+    case device
+    /// GitHub: a pasted access token.
+    case token
+    /// GitHub: `GITHUB_TOKEN` from the environment.
+    case environment
+    /// An agent CLI's own login on this Mac.
+    case login
+    /// An agent API key kept in the keychain.
+    case apiKey
+}
+
+/// The two agent CLIs Ratchet drives.
+public enum AgentCLI: String, CaseIterable, Codable, Sendable, Identifiable {
+    case claudeCode = "claude-code"
+    case codex
+
+    public var id: String { rawValue }
+
+    public var title: String { self == .claudeCode ? "Claude Code" : "Codex" }
+
+    /// The key a pasted API key must look like.
+    public var secretKind: SecretKind { self == .claudeCode ? .anthropicKey : .openaiKey }
+}
+
 public struct Connector: Identifiable, Codable, Hashable, Sendable {
     public var id: String
     public var kind: ConnectorKind
@@ -46,10 +73,19 @@ public struct Connector: Identifiable, Codable, Hashable, Sendable {
     public var usedThisMonthUSD: Double
     /// Agents: whether a cloud sandbox can run it (a team key can, a personal login cannot).
     public var canRunInCloud: Bool
+    /// How it was added; nil when the source does not say. An account taken from the environment (`GITHUB_TOKEN`) cannot
+    /// be renamed or removed here.
+    public var origin: ConnectorOrigin?
+    /// AWS: the profile name in `~/.aws` and the region it runs in.
+    public var profile: String?
+    public var region: String?
+    /// Agents: which CLI it drives.
+    public var cli: AgentCLI?
 
     public init(
         id: String, kind: ConnectorKind, name: String, detail: String, state: ConnectorState,
-        isDefault: Bool = false, monthlyCapUSD: Double? = nil, usedThisMonthUSD: Double = 0, canRunInCloud: Bool = false
+        isDefault: Bool = false, monthlyCapUSD: Double? = nil, usedThisMonthUSD: Double = 0, canRunInCloud: Bool = false,
+        origin: ConnectorOrigin? = nil, profile: String? = nil, region: String? = nil, cli: AgentCLI? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -60,7 +96,14 @@ public struct Connector: Identifiable, Codable, Hashable, Sendable {
         self.monthlyCapUSD = monthlyCapUSD
         self.usedThisMonthUSD = usedThisMonthUSD
         self.canRunInCloud = canRunInCloud
+        self.origin = origin
+        self.profile = profile
+        self.region = region
+        self.cli = cli
     }
+
+    /// Taken from the environment (`GITHUB_TOKEN`): the app can use it but neither rename nor remove it.
+    public var isFromEnvironment: Bool { origin == .environment }
 
     public var leftThisMonthUSD: Double? {
         monthlyCapUSD.map { max($0 - usedThisMonthUSD, 0) }
@@ -74,12 +117,20 @@ public struct NewConnector: Codable, Hashable, Sendable {
     /// An API key typed once in the Add sheet (agents). It goes to `ratchetd`, which files it in the Keychain; the app
     /// keeps it nowhere and never saves it.
     public var secret: String?
+    /// AWS: the region and the optional monthly cap typed in the Add sheet.
+    public var region: String?
+    public var monthlyCapUSD: Double?
 
-    public init(kind: ConnectorKind, name: String, detail: String = "", secret: String? = nil) {
+    public init(
+        kind: ConnectorKind, name: String, detail: String = "", secret: String? = nil, region: String? = nil,
+        monthlyCapUSD: Double? = nil
+    ) {
         self.kind = kind
         self.name = name
         self.detail = detail
         self.secret = secret
+        self.region = region
+        self.monthlyCapUSD = monthlyCapUSD
     }
 
     private enum CodingKeys: String, CodingKey { case kind, name, detail }

@@ -202,6 +202,29 @@ enum DaemonMapping {
             suggestedTemplateID: vm.templates.first?.id)
     }
 
+    static func repoConfig(_ config: VM.ConfigSummary) -> RepoConfig {
+        RepoConfig(
+            metric: config.metric, lowerIsBetter: config.direction == .minimize,
+            evaluator: config.evaluator.template ?? config.evaluator.run, evaluatorIsTemplate: config.evaluator.template != nil,
+            holdout: config.evaluator.holdout, image: config.environment.image, machine: config.environment.machine,
+            region: config.environment.region, repeats: config.evaluator.repeats.map { Int($0) },
+            protected: config.protectedEntries.map { ProtectedPath(glob: $0.glob, reason: $0.reason) }, name: config.name)
+    }
+
+    /// What step 1 learned about a repo or a local folder.
+    static func inspection(_ vm: VM.RepoInspectVm) -> RepoInspection {
+        let source: RepoSource
+        switch vm.source {
+        case .case1(let github): source = .github(github.repo)
+        case .case2(let local): source = .local(local.path)
+        }
+        let templates = vm.templates.map(template)
+        return RepoInspection(
+            source: source, repo: vm.repo, baseRef: vm.baseRef, configYAML: vm.configYaml, config: vm.config.map(repoConfig),
+            problems: vm.errors.map { ConfigProblem(path: $0.path, message: $0.message) }, templates: templates,
+            problem: vm.problem, suggestedTemplateID: vm.config == nil ? templates.first?.id : nil)
+    }
+
     // MARK: Connectors
 
     static func connector(_ vm: VM.ConnectorVm) -> Connector {
@@ -209,16 +232,18 @@ enum DaemonMapping {
         case .case1(let github):
             return Connector(
                 id: github.id, kind: .github, name: github.name, detail: github.detail,
-                state: state(github.status, kind: .github), isDefault: github.isDefault)
+                state: state(github.status, kind: .github), isDefault: github.isDefault,
+                origin: github.source == .env ? .environment : github.source == .token ? .token : .device)
         case .case2(let aws):
             return Connector(
                 id: aws.id, kind: .aws, name: aws.name, detail: aws.detail, state: state(aws.status, kind: .aws),
-                isDefault: aws.isDefault, monthlyCapUSD: aws.monthlyCapUsd)
+                isDefault: aws.isDefault, monthlyCapUSD: aws.monthlyCapUsd, profile: aws.profile, region: aws.region)
         case .case3(let agent):
             return Connector(
                 id: agent.id, kind: .agent, name: agent.name, detail: agent.detail,
                 state: state(agent.status, kind: .agent), isDefault: agent.isDefault,
-                canRunInCloud: agent.runsOn.contains(.cloud))
+                canRunInCloud: agent.runsOn.contains(.cloud), origin: agent.source == .apiKey ? .apiKey : .login,
+                cli: agent.agent == .codex ? .codex : .claudeCode)
         }
     }
 

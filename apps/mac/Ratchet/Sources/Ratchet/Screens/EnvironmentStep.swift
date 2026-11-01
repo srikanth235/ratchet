@@ -37,6 +37,11 @@ struct EnvironmentStep: View {
                     Button("Use a smaller setup") { Task { await flow.sendRevision("Use a smaller setup") } }
                         .buttonStyle(.kit(.link))
                 }
+                if draft.state == .draft {
+                    Button("Discard draft") { Task { await flow.discardDraft() } }
+                        .buttonStyle(.kit(.link))
+                        .disabled(flow.isBusy)
+                }
             }
         }
     }

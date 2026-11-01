@@ -121,6 +121,7 @@ struct GeneralSettings: View {
             LabeledContent("Source", value: sourceText)
             LabeledContent("Optimizations", value: "\(store.optimizations.count)")
         }
+        AdvancedSettingsSection()
         Section("Shortcuts") {
             LabeledContent("New optimization", value: "Command-N")
             LabeledContent("Overview, Optimizations, Benchmarks, Connectors", value: "Command-1 to 4")

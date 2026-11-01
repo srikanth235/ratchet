@@ -471,11 +471,16 @@ public struct Repo: Identifiable, Codable, Hashable, Sendable {
     public var id: String
     public var defaultBranch: String
     public var account: String
+    /// Shown in the search results; nil when the source does not say.
+    public var isPrivate: Bool?
+    public var summary: String?
 
-    public init(id: String, defaultBranch: String = "main", account: String) {
+    public init(id: String, defaultBranch: String = "main", account: String, isPrivate: Bool? = nil, summary: String? = nil) {
         self.id = id
         self.defaultBranch = defaultBranch
         self.account = account
+        self.isPrivate = isPrivate
+        self.summary = summary
     }
 
     public var name: String { id.split(separator: "/").last.map(String.init) ?? id }

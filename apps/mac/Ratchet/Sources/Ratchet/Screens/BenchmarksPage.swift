@@ -103,7 +103,11 @@ struct BenchmarksPage: View {
                 .kitType(.caption).foregroundStyle(Ink.textFaint)
             Spacer(minLength: Space.xs)
             Button(template.kind == .demo ? "Try a demo" : "Use template") {
-                router.startWizard(client: store.client, templateID: template.id)
+                if template.kind == .demo {
+                    router.startWizard(client: store.client, templateID: template.id)
+                } else {
+                    router.templateProposal = TemplateProposalFlow(template: template, client: store.client)
+                }
             }
             .buttonStyle(.kit(.quiet, small: true))
         }
