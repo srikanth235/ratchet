@@ -114,7 +114,7 @@ jobs:
         run: ./build.sh --universal
       # test-mac-app skill, level 1: Swift Testing unit tests of RatchetKit (formatting, store, mock client, wizard).
       - name: Unit tests
-        run: swift test --scratch-path "$HOME/Library/Developer/$APP_NAME/test-build" 2>&1 | tail -n 200
+        run: swift test --scratch-path "$HOME/Library/Developer/$APP_NAME/test-build" 2>&1 | { grep -v '✔ Test' || true; } | tail -n 300
         shell: bash -o pipefail {0}
       # Sources/RatchetAPI is generated from api/openapi.yaml and committed (tools/generate-api.sh). Advisory (a yellow
       # step, never a red job): it builds swift-openapi-generator, so it only warns when the committed client is stale.
