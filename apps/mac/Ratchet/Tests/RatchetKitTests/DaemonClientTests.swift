@@ -321,7 +321,7 @@ struct DaemonClientTests {
         let daemon = daemonWithData()
         daemon.route("POST /v1/optimizations/opt_demo_ingest/stop", 204)
         daemon.route("POST /v1/optimizations/opt_demo_ingest/pull-request", 201, #"{"url":"https://ghe.acme.test/acme/ingest/pull/7"}"#)
-        daemon.route("GET /v1/optimizations/opt_demo_ingest/report", 200, #"{"fileName":"ratchet-ingest.md","markdown":"# Ingest throughput\n"}"#)
+        daemon.route("GET /v1/optimizations/opt_demo_ingest/report", 200, ##"{"fileName":"ratchet-ingest.md","markdown":"# Ingest throughput\n"}"##)
         let client = make(daemon)
         try await client.stopOptimization(id: "opt_demo_ingest")
         #expect(daemon.count("POST /v1/optimizations/opt_demo_ingest/stop") == 1)
