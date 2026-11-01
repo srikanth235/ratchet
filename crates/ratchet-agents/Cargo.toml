@@ -1,0 +1,38 @@
+[package]
+name = "ratchet-agents"
+version = "0.0.0"
+description = "Claude Code and Codex adapters, runner loop, local and SSM runner control, harness detection, and the ratchet-runner binary"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "ratchet_agents"
+
+[[bin]]
+name = "ratchet-runner"
+path = "src/bin/ratchet-runner.rs"
+
+[dependencies]
+async-trait = "0.1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive", "env"] }
+futures = "0.3"
+libc = "0.2"
+ratchet-core = { path = "../ratchet-core" }
+ratchet-sandbox = { path = "../ratchet-sandbox" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+tokio = { version = "1", features = ["process", "fs", "time", "rt-multi-thread", "macros", "sync", "io-util", "signal"] }
+tokio-util = "0.7"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+
+[dev-dependencies]
+insta = { version = "1", features = ["json"] }
+regex = "1"
+tempfile = "3"
+

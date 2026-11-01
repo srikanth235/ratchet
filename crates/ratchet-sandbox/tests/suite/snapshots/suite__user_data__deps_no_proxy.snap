@@ -1,0 +1,26 @@
+---
+source: crates/ratchet-sandbox/tests/suite/user_data.rs
+expression: "deps_user_data(&bench(BenchPurpose::Deps), 2.0, None).unwrap()"
+---
+#!/bin/bash
+set -euo pipefail
+shutdown -h +60 >/dev/null 2>&1 || true
+id -u ratchet-deps >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin ratchet-deps
+iptables -I OUTPUT 1 -m owner --uid-owner ratchet-deps -d 169.254.169.254 -j REJECT
+command -v ip6tables >/dev/null 2>&1 && ip6tables -I OUTPUT 1 -m owner --uid-owner ratchet-deps -d fd00:ec2::254 -j REJECT || true
+mount -o remount,hidepid=2 /proc >/dev/null 2>&1 || true
+install -d -m 700 /etc/ratchet
+umask 077
+cat > /etc/ratchet/runner.env <<'RATCHET_ENV_EOF'
+RATCHET_OPTIMIZATION_ID='opt1'
+RATCHET_BENCH_PURPOSE='deps'
+RATCHET_ENV_EOF
+if command -v docker >/dev/null 2>&1; then
+  iptables -N DOCKER-USER >/dev/null 2>&1 || true
+  iptables -I DOCKER-USER 1 -d 169.254.169.254 -j REJECT
+  iptables -I FORWARD 1 -d 169.254.169.254 -j REJECT
+  command -v ip6tables >/dev/null 2>&1 && ip6tables -I FORWARD 1 -d fd00:ec2::254 -j REJECT || true
+  systemctl start docker
+fi
+set -a; . /etc/ratchet/runner.env; set +a
+mkdir -p /run/ratchet && touch /run/ratchet/user-data.done

@@ -1,0 +1,6 @@
+{
+  "clean": "rm -rf dist",
+  "build": "npm run build",
+  "output_dir": "dist",
+  "include": ["js", "mjs", "cjs", "css", "html", "wasm", "json"]
+}

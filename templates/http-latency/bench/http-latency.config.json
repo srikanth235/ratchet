@@ -1,0 +1,11 @@
+{
+  "start": "npm start",
+  "port": 3000,
+  "ready_path": "/",
+  "rate": 100,
+  "duration_s": 20,
+  "warmup_s": 3,
+  "requests": [
+    { "method": "GET", "path": "/" }
+  ]
+}

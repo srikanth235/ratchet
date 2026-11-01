@@ -1,0 +1,95 @@
+---
+source: crates/ratchet-bench/tests/snapshots.rs
+expression: "step_script(&i).expect(\"script\")"
+---
+set -uo pipefail
+W='/var/tmp/ratchet-bench/opt1-1234'
+CODE="$W/code"; STAGE="$W/stage"; G="$W/repo.git"; H="$W/harness"
+emit() { printf '%s %s %s\n' '@@RATCHET@@' "$1" "$2"; }
+b64() { base64 | tr -d '\n'; }
+
+parents_real() {
+  local d acc="$CODE" part; local -a parts
+  d=$(dirname -- "$1"); [ "$d" = . ] && return 0
+  IFS=/ read -ra parts <<< "$d"
+  for part in "${parts[@]}"; do acc="$acc/$part"; [ -L "$acc" ] && return 1; [ -d "$acc" ] || return 1; done
+  return 0
+}
+ensure_parents() {
+  local d acc="$CODE" part; local -a parts
+  d=$(dirname -- "$1"); [ "$d" = . ] && return 0
+  IFS=/ read -ra parts <<< "$d"
+  for part in "${parts[@]}"; do
+    acc="$acc/$part"
+    if [ -L "$acc" ] || { [ -e "$acc" ] && [ ! -d "$acc" ]; }; then rm -f -- "${acc:?}"; fi
+    [ -d "$acc" ] || mkdir -- "$acc"
+  done
+}
+same() {
+  if [ -L "$1" ]; then [ -L "$2" ] && [ "$(readlink -- "$1")" = "$(readlink -- "$2")" ]
+  else [ -f "$2" ] && [ ! -L "$2" ] && cmp -s -- "$1" "$2"; fi
+}
+copied=0
+apply() {
+  local mode="$1" p
+  : > "$W/changed.list"
+  while IFS= read -r -d '' p; do
+    if [ "$mode" = check ] && parents_real "$p" && same "$STAGE/$p" "$CODE/$p"; then continue; fi
+    [ "$mode" = check ] && printf '%s\0' "$p" >> "$W/changed.list"
+    ensure_parents "$p"
+    rm -rf -- "${CODE:?}/${p:?}"
+    cp -P -p -- "$STAGE/$p" "$CODE/$p" || return 1
+    copied=$((copied+1))
+  done < "$W/bench.match"
+}
+
+BU='ratchet-bench'; HU='ratchet-holdout'
+kill_users() { pkill -KILL -u "$BU" 2>/dev/null || true; pkill -KILL -u "$HU" 2>/dev/null || true; }
+kill_users
+export RATCHET_CANDIDATE_DIR="$CODE" RATCHET_CANDIDATE_HOME="$W/home" RATCHET_CANDIDATE_TMP="$W/tmp" RATCHET_CANDIDATE_PATH="$PATH"
+
+apply check
+if [ -s "$W/changed.list" ]; then
+  emit tampered "{\"paths_b64\":\"$(tr '\0' '\n' < "$W/changed.list" | head -c 4000 | b64)\"}"
+  exit 87
+fi
+
+# ---- read-only snapshot of the built tree: what the harness (HOLDOUT_USER) executes ----
+snapshot() {
+  rm -rf -- "$W/harness.tmp"
+  cp -a --reflink=auto -- "$CODE" "$W/harness.tmp" || return 1
+  find "$W/harness.tmp" -type f -perm /6000 -exec chmod ug-s {} + || return 1
+  chown -hR root:root "$W/harness.tmp" || return 1
+  chmod -R go-w,a+rX "$W/harness.tmp" || return 1
+  mv -- "$W/harness.tmp" "$H"
+}
+[ -d "$H" ] || snapshot || { echo "cannot snapshot the built tree for the evaluator" >&2; exit 31; }
+
+# ---- holdout: fetched only now (after setup and guardrails), by root, for this run alone ----
+HD="$W/holdout"; TRACE='/var/tmp/ratchet-bench/opt1-1234/holdout/trace.json'; URI='s3://sealed/holdout/trace.json'
+wipe() { shred -u -- "$TRACE" 2>/dev/null || rm -f -- "$TRACE"; rm -rf -- "${HD:?}"/* 2>/dev/null || true; }
+trap wipe EXIT
+mkdir -p "$HD" || exit 40
+case "$URI" in
+  s3://*) aws s3 cp --only-show-errors "$URI" "$TRACE" || exit 41 ;;
+  file://*) cp -- "${URI#file://}" "$TRACE" || exit 41 ;;
+  *) cp -- "$URI" "$TRACE" || exit 41 ;;
+esac
+chown "$HU:" "$TRACE" || exit 42
+chmod 600 "$TRACE" || exit 42
+emit holdout "{\"bytes\":$(wc -c < "$TRACE" | tr -d ' ')}"
+export RATCHET_TRACE="$TRACE"
+cd "$H" || exit 30
+export RATCHET_PHASE='confirm'
+OUT="$W/logs/bench_run_1_3"
+s=$(date +%s%N)
+timeout -k 10 60 setpriv --reuid="$HU" --regid="$HU" --clear-groups -- env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN -u AWS_PROFILE HOME="$W/hhome" TMPDIR="$W/htmp" USER="$HU" LOGNAME="$HU" RATCHET_OUT_DIR="$W/out" RATCHET_CANDIDATE_EXEC='/usr/local/bin/ratchet-candidate' bash -c 'k6 run bench/k6/search.js' </dev/null >"$OUT.stdout" 2>"$OUT.stderr"; rc=$?
+e=$(date +%s%N); ms=$(( (e - s) / 1000000 ))
+
+kill_users
+wipe
+to=false
+if [ $rc -eq 124 ] || { [ $rc -eq 137 ] && [ $ms -ge $(( 60 * 1000 )) ]; }; then to=true; fi
+emit run "{\"exit\":$rc,\"ms\":$ms,\"timedOut\":$to,\"stdout_b64\":\"$(tail -c 12000 "$OUT.stdout" | b64)\"}"
+echo "--- stderr withheld: holdout run ---"
+exit 0

@@ -1,0 +1,9 @@
+Reading prompt from stdin...
+{"type":"thread.started","thread_id":"thread-noisy"}
+{"type":"turn.started"}
+{"type":"error","message":"Reconnecting... 1/5"}
+{"type":"item.completed","item":{"id":"item_0","type":"web_search","query":"tsconfig"}}
+{"type":"item.completed","item":{"id":"item_1","type":"hologram","text":"future item kind"}}
+{"type":"something.new","x":1}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Done."}}
+{"type":"turn.completed","usage":{"input_tokens":100,"cached_input_tokens":0,"output_tokens":10}}

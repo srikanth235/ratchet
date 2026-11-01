@@ -1,0 +1,259 @@
+name: Native
+# CI for the native stack (docs/NATIVE_ARCHITECTURE.md): the Rust workspace in crates/ and the SwiftUI Mac app in
+# apps/mac/. ci.yml has the demos and the infra tests (the only Node left), images.yml the machine-image binaries.
+on:
+  push:
+    paths:
+      - "Cargo.toml"
+      - "crates/**"
+      - "templates/**"
+      - "apps/mac/**"
+      - "api/**"
+      - ".github/workflows/native.yml"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "crates/**"
+      - "templates/**"
+      - "apps/mac/**"
+      - "api/**"
+      - ".github/workflows/native.yml"
+
+concurrency:
+  group: native-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  rust:
+    name: rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      # rust-version in Cargo.toml is 1.97 (edition 2024); stable is at least that.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      # Caches ~/.cargo and target/, keyed on Cargo.toml / Cargo.lock / the toolchain. Cargo.lock is not committed
+      # (libraries and apps resolve fresh), so the key falls back to the manifests.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.os }}
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace --no-fail-fast
+
+  # `if:` cannot look at the file system, so a tiny job decides whether apps/mac exists.
+  detect-mac:
+    runs-on: ubuntu-latest
+    outputs:
+      present: ${{ steps.find.outputs.present }}
+      dir: ${{ steps.find.outputs.dir }}
+      name: ${{ steps.find.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: find
+        shell: bash
+        run: |
+          # The Mac app is a Swift package scaffolded by the new-mac-app skill: apps/mac/<AppName>/build.sh
+          build=$(find apps/mac -maxdepth 2 -name build.sh -print -quit 2>/dev/null || true)
+          if [ -n "$build" ]; then
+            dir=$(dirname "$build")
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            echo "dir=$dir" >> "$GITHUB_OUTPUT"
+            echo "name=$(basename "$dir")" >> "$GITHUB_OUTPUT"
+            echo "Mac app found in $dir"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "No apps/mac/<App>/build.sh yet; skipping the mac-app job"
+          fi
+
+  mac-app:
+    name: mac-app (${{ needs.detect-mac.outputs.name }})
+    needs: detect-mac
+    if: needs.detect-mac.outputs.present == 'true'
+    # The app targets macOS 26 (Package.swift). Use macos-latest instead if the macos-26 image is ever unavailable.
+    runs-on: macos-26
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: ${{ needs.detect-mac.outputs.dir }}
+    env:
+      APP_NAME: ${{ needs.detect-mac.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+      # The app bundles the Rust daemon (ratchetd) and the CLI, built for arm64 and x86_64 and joined with lipo.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: mac-app-universal
+      # build-and-verify skill, step 1: release build, installed to ~/Applications/<AppName>.app (ad-hoc signed), with
+      # Contents/Helpers/{ratchetd,ratchet} and the LaunchAgent plists inside.
+      - name: Build
+        env:
+          RATCHET_REQUIRE_DAEMON: "1"
+        run: ./build.sh --universal
+      # test-mac-app skill, level 1: Swift Testing unit tests of RatchetKit (formatting, store, mock client, wizard).
+      - name: Unit tests
+        run: swift test --scratch-path "$HOME/Library/Developer/$APP_NAME/test-build" 2>&1 | { grep -v '✔ Test' || true; } | tail -n 300
+        shell: bash -o pipefail {0}
+      # Sources/RatchetAPI is generated from api/openapi.yaml and committed (tools/generate-api.sh). Advisory (a yellow
+      # step, never a red job): it builds swift-openapi-generator, so it only warns when the committed client is stale.
+      - name: API client is current
+        continue-on-error: true
+        run: |
+          tools/generate-api.sh
+          git diff --exit-code -- Sources/RatchetAPI
+      # Step 3: the grid lint, and the self-test (new-mac-app / test-mac-app skills); run when the app ships them.
+      - name: Grid lint
+        run: |
+          if [ -x tools/grid-lint.sh ]; then tools/grid-lint.sh; else echo "no tools/grid-lint.sh"; fi
+      - name: Self-test
+        run: |
+          if [ -x tools/selftest.sh ]; then tools/selftest.sh; else echo "no tools/selftest.sh"; fi
+      # The real client path end to end: the bundled `ratchetd serve --mode sim` on a temp socket, and the app's own
+      # self-test (`--selftest-live`) against it, not the sample client. Also checks the bundle layout and plists.
+      - name: Daemon smoke
+        run: tools/smoke-daemon.sh "$HOME/Applications/$APP_NAME.app"
+      - name: Bundle layout
+        if: always()
+        run: |
+          find "$HOME/Applications/$APP_NAME.app/Contents" -maxdepth 3 -not -path '*/Resources/*' | sort > "$RUNNER_TEMP/bundle-layout.txt"
+          cat "$RUNNER_TEMP/bundle-layout.txt"
+      # Step 2: snapshot mode walks every page and Settings tab in light and dark and saves one PNG (and a layout JSON)
+      # per page and mode to /tmp/<AppName>-shots, on a fresh test store with seed data.
+      - name: Snapshots
+        env:
+          APP_SNAPSHOT_PAGES: all,settings
+        run: |
+          # wake the display so screencapture has a window server to talk to
+          caffeinate -u -t 2 || true
+          tools/snap.sh 2>&1 | tee "$RUNNER_TEMP/snap.log"
+          shots="/tmp/${APP_NAME}-shots"
+          count=$(find "$shots" -name '*.png' 2>/dev/null | wc -l | tr -d ' ')
+          echo "$count snapshot images in $shots"
+          if [ "$count" = "0" ]; then
+            echo "::error::snapshot mode produced no images"
+            exit 1
+          fi
+          # "(fallback: ...)" means Screen Recording permission is missing and glass/sidebars render blank
+          if grep -q "fallback" "$RUNNER_TEMP/snap.log"; then
+            echo "::warning::some snapshots used the fallback renderer; sidebars and glass may be blank"
+          fi
+      # Step 3: layout probe over the files snapshot mode wrote.
+      - name: Layout check
+        run: |
+          shopt -s nullglob
+          files=(/tmp/${APP_NAME}-shots/*-layout.json)
+          if [ -f tools/check-layout.swift ] && [ ${#files[@]} -gt 0 ]; then
+            swift tools/check-layout.swift "${files[@]}"
+          else
+            echo "no layout files or no tools/check-layout.swift"
+          fi
+      - name: Upload snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-snapshots
+          path: /tmp/${{ env.APP_NAME }}-shots
+          if-no-files-found: warn
+          retention-days: 14
+      # app-icon skill: the icon in Default / Dark / Tinted / Clear at 256 pt plus 32 and 16 pt, rendered with ictool.
+      # Without ictool (no Icon Composer on the runner) it falls back to the compiled AppIcon.icns, exported to PNGs.
+      - name: Icon review
+        if: always()
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/icon-review"
+          mkdir -p "$out"
+          ictool="$(xcode-select -p)/../Applications/Icon Composer.app/Contents/Executables/ictool"
+          if [ -x "$ictool" ]; then
+            echo "ictool found: rendering all looks"
+            tools/icon_review.sh "$out/Ratchet-icon.png"
+          else
+            echo "::warning::ictool not found on this runner; falling back to AppIcon.icns renditions (default look only)"
+            icns=Resources/AppIcon.icns
+            if [ -f "$icns" ]; then
+              iconutil -c iconset "$icns" -o "$out/AppIcon.iconset"
+              for f in icon_256x256@2x icon_32x32@2x icon_16x16@2x icon_16x16; do
+                [ -f "$out/AppIcon.iconset/$f.png" ] && cp "$out/AppIcon.iconset/$f.png" "$out/fallback-$f.png"
+              done
+              rm -rf "$out/AppIcon.iconset"
+            else
+              echo "::error::no Resources/AppIcon.icns"
+              exit 1
+            fi
+          fi
+      - name: Upload icon review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ratchet-icon-review
+          path: ${{ runner.temp }}/icon-review
+          if-no-files-found: warn
+          retention-days: 14
+      # Design drift, made visible: the dark snapshots against design/v02.html rendered at the same window size
+      # (design/render-reference.mjs writes design/v02/ref-<screen>.png). A warning, never a failure.
+      - name: Design diff
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          shots="/tmp/${APP_NAME}-shots"
+          refs="$GITHUB_WORKSPACE/design/v02"
+          out="$RUNNER_TEMP/design-diff"
+          compare="$GITHUB_WORKSPACE/.claude/skills/design-from-app/scripts/compare.swift"
+          mkdir -p "$out"
+          {
+            echo "### Design diff (dark snapshot vs design/v02.html, warning only)"
+            echo
+            echo "| screen | snapshot | differing pixels |"
+            echo "|---|---|---|"
+          } > "$out/summary.md"
+          for screen in overview connectors new-connections new-environment; do
+            build="$shots/$screen-dark.png"
+            ref="$refs/ref-$screen.png"
+            if [ ! -f "$build" ]; then
+              echo "::warning::no snapshot for $screen"
+              continue
+            fi
+            # compare.swift wants both images at one scale. The reference is 1x; a retina snapshot gets a 2x reference.
+            bw=$(sips -g pixelWidth "$build" | awk '/pixelWidth/ {print $2}')
+            bh=$(sips -g pixelHeight "$build" | awk '/pixelHeight/ {print $2}')
+            if [ "$bw" -ge 2000 ]; then
+              sips -z 1384 2160 "$ref" --out "$out/ref-$screen@2x.png" > /dev/null
+              ref="$out/ref-$screen@2x.png"
+            fi
+            line=$(swift "$compare" "$ref" "$build" "$out/$screen" | head -n 1)
+            echo "$screen (snapshot ${bw}x${bh}): $line"
+            echo "| $screen | ${bw}x${bh} | $line |" >> "$out/summary.md"
+            echo "::warning::design diff $screen: $line"
+          done
+          cat "$out/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload design diff
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-design-diff
+          path: ${{ runner.temp }}/design-diff
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,35 @@
+version: 0
+pack: perf                         # domain pack: code performance
+objective:
+  name: taskr CLI cold start p50
+  metric: cold_start_ms.p50       # key in the benchmark's JSON output (wall ms of one `node dist/src/main.js ...`)
+  direction: minimize
+  min_gain: 0.03                  # 3%
+  value:                          # business case: what 1 ms of cold start is worth
+    usd_per_unit: 400             # USD per ms of cold start per year. ~12M invocations a year (400 engineers x ~120 a day
+                                  # x 250 days, plus CI): 1 ms is ~3.3 h of waiting, at ~$90/h loaded cost ~$300, plus ~$100
+                                  # of CI runner time. Replace with the customer's own numbers.
+    period: year
+    basis: estimated              # becomes `measured` once confirmed in production
+    unit: ms
+evaluator:                        # the trusted evaluation (alias: bench)
+  kind: benchmark
+  ref: ratchet/bench              # protected ref holding the trusted bench
+  run: node dist/bench/hyperfine.js --runs 10 --warmup 3 --mix "${RATCHET_TRACE:-bench/invocations.json}"   # hyperfine --export-json per invocation; local fallback without hyperfine: node dist/bench/spawn.js
+  repeats: 5                      # also used for the baseline noise floor
+  hardware: c7i.large             # pinned, dedicated host
+  holdout: s3://sealed/demo-cli-invocations.json   # node dist/bench/gen-invocations.js --seed <hidden> --out <path>
+guardrails:
+  - run: pnpm test:unit
+  - run: pnpm test:contract       # the CLI's output must equal tests/golden/*.out, byte for byte
+  - error_rate: "< 0.001"         # share of benchmark runs that ended with an unexpected exit code or printed nothing
+protected:                        # changes here block a candidate
+  - bench/**
+  - ratchet.yaml
+  - package.json                  # defines the guardrail commands
+  - tests/contract/**
+  - tests/golden/**
+  - SOLUTIONS.md
+agent:
+  instructions: RATCHET.md        # brief injected into every session
+  allowed_instance_types: [c7i.large, c7i.xlarge, m7i.large]

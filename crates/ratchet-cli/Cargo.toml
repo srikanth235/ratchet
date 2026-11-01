@@ -1,0 +1,33 @@
+[package]
+name = "ratchet-cli"
+version = "0.0.0"
+description = "The `ratchet` command line: a thin client of the ratchetd socket API, plus offline commands"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "ratchet_cli"
+
+[[bin]]
+name = "ratchet"
+path = "src/main.rs"
+
+[dependencies]
+ratchet-core = { path = "../ratchet-core" }
+ratchetd = { path = "../ratchetd", default-features = false }
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+libc = "0.2"
+hyper-util = { version = "0.1", features = ["tokio"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "process", "time", "io-util", "fs", "sync"] }
+
+[dev-dependencies]
+ratchetd = { path = "../ratchetd", features = ["server"] }
+tempfile = "3"

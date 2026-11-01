@@ -1,0 +1,198 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "DenyPrincipalWithoutOptTag",
+      "Effect": "Deny",
+      "Action": "*",
+      "Resource": "*",
+      "Condition": { "Null": { "aws:PrincipalTag/ratchet:opt": "true" } }
+    },
+    {
+      "Sid": "DenyPrincipalWithoutAgentTag",
+      "Effect": "Deny",
+      "Action": "*",
+      "Resource": "*",
+      "Condition": { "Null": { "aws:PrincipalTag/ratchet:agent": "true" } }
+    },
+    {
+      "Sid": "DenySealedBucket",
+      "Effect": "Deny",
+      "Action": "s3:*",
+      "Resource": ["${sealed_bucket_arn}", "${sealed_bucket_arn}/*"]
+    },
+    {
+      "Sid": "DenyControlPlaneAndBilling",
+      "Effect": "Deny",
+      "Action": [
+        "iam:*",
+        "organizations:*",
+        "account:*",
+        "billing:*",
+        "aws-portal:*",
+        "ce:*",
+        "budgets:*",
+        "cur:*",
+        "invoicing:*",
+        "payments:*",
+        "tax:*",
+        "sts:AssumeRole",
+        "sts:AssumeRoleWithSAML",
+        "sts:AssumeRoleWithWebIdentity",
+        "sts:TagSession",
+        "sts:SetSourceIdentity"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DenyRunInstancesOtherTypes",
+      "Effect": "Deny",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:${partition}:ec2:${region}:${account_id}:instance/*",
+      "Condition": { "StringNotEquals": { "ec2:InstanceType": ${allowed_instance_types_json} } }
+    },
+    {
+      "Sid": "DenyRunInstancesWithoutImdsV2",
+      "Effect": "Deny",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:${partition}:ec2:${region}:${account_id}:instance/*",
+      "Condition": { "StringNotEquals": { "ec2:MetadataHttpTokens": "required" } }
+    },
+    {
+      "Sid": "DenyRunInstancesInInternalSecurityGroups",
+      "Effect": "Deny",
+      "Action": "ec2:RunInstances",
+      "Resource": ${denied_security_group_arns_json}
+    },
+    {
+      "Sid": "DenyInstanceHardeningChanges",
+      "Effect": "Deny",
+      "Action": [
+        "ec2:ModifyInstanceAttribute",
+        "ec2:ModifyInstanceMetadataOptions",
+        "ec2:AssociateIamInstanceProfile",
+        "ec2:ReplaceIamInstanceProfileAssociation"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowRunInstancesTaggedAndAllowListed",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:${partition}:ec2:${region}:${account_id}:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:InstanceType": ${allowed_instance_types_json},
+          "ec2:MetadataHttpTokens": "required",
+          "aws:RequestTag/ratchet:opt": "$${aws:PrincipalTag/ratchet:opt}",
+          "aws:RequestTag/ratchet:agent": "$${aws:PrincipalTag/ratchet:agent}"
+        }
+      }
+    },
+    {
+      "Sid": "AllowRunInstancesImagesAndVolumes",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": [
+        "arn:${partition}:ec2:${region}::image/*",
+        "arn:${partition}:ec2:${region}::snapshot/*",
+        "arn:${partition}:ec2:${region}:${account_id}:volume/*"
+      ]
+    },
+    {
+      "Sid": "AllowRunInstancesAgentSubnetOnly",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "${agent_subnet_arn}",
+      "Condition": { "ArnEquals": { "ec2:Vpc": "${vpc_arn}" } }
+    },
+    {
+      "Sid": "AllowRunInstancesGroupsAndInterfacesInSandboxVpcOnly",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": [
+        "arn:${partition}:ec2:${region}:${account_id}:security-group/*",
+        "arn:${partition}:ec2:${region}:${account_id}:network-interface/*"
+      ],
+      "Condition": { "ArnEquals": { "ec2:Vpc": "${vpc_arn}" } }
+    },
+    {
+      "Sid": "AllowTagOnCreateOnly",
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": [
+        "arn:${partition}:ec2:${region}:${account_id}:instance/*",
+        "arn:${partition}:ec2:${region}:${account_id}:volume/*",
+        "arn:${partition}:ec2:${region}:${account_id}:network-interface/*"
+      ],
+      "Condition": { "StringEquals": { "ec2:CreateAction": "RunInstances" } }
+    },
+    {
+      "Sid": "AllowLifecycleOnOwnInstancesOnly",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:StartInstances",
+        "ec2:StopInstances",
+        "ec2:RebootInstances",
+        "ec2:TerminateInstances"
+      ],
+      "Resource": "arn:${partition}:ec2:${region}:${account_id}:instance/*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:ResourceTag/ratchet:opt": "$${aws:PrincipalTag/ratchet:opt}",
+          "ec2:ResourceTag/ratchet:agent": "$${aws:PrincipalTag/ratchet:agent}"
+        }
+      }
+    },
+    {
+      "Sid": "AllowEc2ReadOnly",
+      "Effect": "Allow",
+      "Action": ["ec2:Describe*", "ec2:GetConsoleOutput"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowOwnArtifactObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts"
+      ],
+      "Resource": "${artifacts_bucket_arn}/artifacts/$${aws:PrincipalTag/ratchet:opt}/$${aws:PrincipalTag/ratchet:agent}/*"
+    },
+    {
+      "Sid": "AllowListOwnArtifactPrefix",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "${artifacts_bucket_arn}",
+      "Condition": {
+        "StringLike": { "s3:prefix": "artifacts/$${aws:PrincipalTag/ratchet:opt}/$${aws:PrincipalTag/ratchet:agent}/*" }
+      }
+    },
+    {
+      "Sid": "AllowReadOwnSecrets",
+      "Effect": "Allow",
+      "Action": ["ssm:GetParameter", "ssm:GetParameters"],
+      "Resource": "arn:${partition}:ssm:${region}:${account_id}:parameter/ratchet/$${aws:PrincipalTag/ratchet:opt}/$${aws:PrincipalTag/ratchet:agent}/*"
+    },
+    {
+      "Sid": "AllowSsmManagedInstanceChannel",
+      "Effect": "Allow",
+      "Action": [
+        "ssm:UpdateInstanceInformation",
+        "ssmmessages:CreateControlChannel",
+        "ssmmessages:CreateDataChannel",
+        "ssmmessages:OpenControlChannel",
+        "ssmmessages:OpenDataChannel",
+        "ec2messages:AcknowledgeMessage",
+        "ec2messages:DeleteMessage",
+        "ec2messages:FailMessage",
+        "ec2messages:GetEndpoint",
+        "ec2messages:GetMessages",
+        "ec2messages:SendReply"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

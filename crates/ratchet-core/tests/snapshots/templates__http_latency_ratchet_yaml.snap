@@ -1,0 +1,30 @@
+---
+source: crates/ratchet-core/tests/templates.rs
+expression: yaml
+---
+version: 0
+pack: perf                       # template category (docs/packs/perf.md)
+objective:
+  name: http_req_duration.p95
+  metric: http_req_duration.p95      # key in the evaluator's JSON output (dotted path)
+  direction: minimize
+  # min_gain, the number of repeats and the noise floor are calibrated from the baseline's noise. To pin the win
+  # threshold yourself, add `min_gain: 0.03` (a fraction) here and `repeats: 5` under evaluator.
+  value:                           # business case: what one unit of the metric is worth
+    usd_per_unit: 1000    # USD per ms per year. A placeholder: replace it with your own numbers
+    period: year
+    basis: estimated               # becomes `measured` once confirmed in production
+    unit: ms
+evaluator:
+  template: http-latency                 # fills in the command, kind and default guardrails; its files are protected automatically
+  # holdout: s3://sealed/http-latency-holdout.json  # TODO: the hidden request mix, never shown to the agents (the winner is re-checked on it)
+environment:
+  machine: c7i.2xlarge          # bench hardware (pinned, dedicated host)
+guardrails:
+  - run: npm test                  # TODO: your test command; must exit 0
+  - error_rate: "< 0.001"
+protected:                         # added to what is protected automatically (ratchet.yaml, the evaluator, lockfiles)
+  - package.json                   # defines the guardrail commands
+agent:
+  instructions: RATCHET.md         # brief injected into every session
+  allowed_instance_types: [c7i.2xlarge, c7i.large, c7i.xlarge, m7i.large]

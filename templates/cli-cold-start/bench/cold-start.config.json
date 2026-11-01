@@ -1,0 +1,9 @@
+{
+  "prepare": "",
+  "commands": [
+    "node --version"
+  ],
+  "runs": 10,
+  "warmup": 2,
+  "expect_exit": 0
+}

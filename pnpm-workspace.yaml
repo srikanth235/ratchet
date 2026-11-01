@@ -1,0 +1,6 @@
+# The Node toolchain left after the cut-over (docs/CUTOVER.md): the demo repositories and the infra tests.
+packages:
+  - infra/tests
+  - examples/*
+onlyBuiltDependencies:
+  - esbuild

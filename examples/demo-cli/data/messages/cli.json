@@ -1,0 +1,4 @@
+{
+ "cli.unknown": "Unknown command \"{name}\".",
+ "cli.didYouMean": "Did you mean: {names}?"
+}

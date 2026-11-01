@@ -1,0 +1,1524 @@
+{
+ "seed": 1,
+ "queries": [
+  {
+   "q": "yarora",
+   "filters": "(category:kitchen OR category:home) AND price:20-80 AND inStock:true"
+  },
+  {
+   "q": "monitor"
+  },
+  {
+   "q": "robot"
+  },
+  {
+   "q": "quarora",
+   "offset": 20
+  },
+  {
+   "q": "yar whisk",
+   "filters": "category:kitchen AND price:<150"
+  },
+  {
+   "q": "glass",
+   "filters": "category:kitchen AND (brand:tund OR brand:yarith) AND rating:>=4.5 AND price:100-300"
+  },
+  {
+   "q": "silent"
+  },
+  {
+   "q": "dumbbell pol",
+   "filters": "category:electronics AND price:<150"
+  },
+  {
+   "q": "teapot",
+   "filters": "category:kitchen AND price:<100",
+   "limit": 50
+  },
+  {
+   "q": "zenith nordex"
+  },
+  {
+   "filters": "brand:wilex AND rating:>=4.5 AND price:<50"
+  },
+  {
+   "q": "rake",
+   "filters": "brand:nordora AND rating:>=4 AND price:<50"
+  },
+  {
+   "q": "elegant stove"
+  },
+  {
+   "q": "bestseller headphones"
+  },
+  {
+   "q": "silent"
+  },
+  {
+   "q": "blender vert",
+   "filters": "category:home AND (brand:solith OR brand:tundith) AND rating:>=3.5 AND price:25-100"
+  },
+  {
+   "q": "acme rav",
+   "offset": 20
+  },
+  {
+   "q": "yoga almanac",
+   "limit": 50
+  },
+  {
+   "q": "acmeith"
+  },
+  {
+   "q": "inflator",
+   "filters": "brand:wilith AND rating:>=4 AND price:<75"
+  },
+  {
+   "q": "steel",
+   "limit": 50
+  },
+  {
+   "q": "cushion acme",
+   "limit": 50
+  },
+  {
+   "q": "vertith yari",
+   "filters": "category:office AND price:<100",
+   "limit": 50
+  },
+  {
+   "q": "atlas wilith",
+   "filters": "tag:sale AND brand:pinith AND price:<=200",
+   "offset": 20
+  },
+  {
+   "q": "mellow",
+   "filters": "brand:wil AND rating:>=3.5 AND price:<100",
+   "offset": 20
+  },
+  {
+   "q": "sneakers cushion",
+   "filters": "(category:kitchen OR category:electronics) AND price:20-80 AND inStock:true"
+  },
+  {
+   "q": "bestseller cozy"
+  },
+  {
+   "q": "wilex tun",
+   "filters": "category:office AND price:<100"
+  },
+  {
+   "q": "speaker nordora",
+   "filters": "brand:acmeith AND rating:>=4.5 AND price:<25"
+  },
+  {
+   "q": "vert",
+   "filters": "category:toys AND (brand:zen OR brand:pinex) AND rating:>=4.5 AND price:50-150"
+  },
+  {
+   "q": "ravex mar"
+  },
+  {
+   "q": "mask jolly",
+   "offset": 20
+  },
+  {
+   "q": "jack pin",
+   "filters": "brand:quarix AND rating:>=4 AND price:<100",
+   "offset": 20
+  },
+  {
+   "q": "beanie sto"
+  },
+  {
+   "q": "cushion yarora"
+  },
+  {
+   "q": "monitor pin",
+   "filters": "(category:electronics OR category:electronics) AND price:50-150 AND inStock:true"
+  },
+  {
+   "q": "shears",
+   "filters": "category:outdoors AND price:<150"
+  },
+  {
+   "q": "tent vert",
+   "filters": "category:books AND (brand:lumex OR brand:wilix) AND rating:>=3.5 AND price:25-100"
+  },
+  {
+   "q": "heavy",
+   "filters": "(category:home OR category:outdoors) AND price:25-100 AND inStock:true"
+  },
+  {
+   "q": "pol racket",
+   "filters": "brand:lumora AND rating:>=3 AND price:<300"
+  },
+  {
+   "q": "monitor grinder"
+  },
+  {
+   "q": "yarex rocket"
+  },
+  {
+   "q": "skillet rapid"
+  },
+  {
+   "filters": "tag:eco AND brand:quar AND price:<=75"
+  },
+  {
+   "q": "acme acm",
+   "filters": "tag:cotton AND brand:xenith AND price:<=50"
+  },
+  {
+   "q": "nimble",
+   "filters": "brand:acmeex AND rating:>=4.5 AND price:<50"
+  },
+  {
+   "q": "balm lum",
+   "filters": "category:home AND price:<25"
+  },
+  {
+   "q": "belt outdoor"
+  },
+  {
+   "q": "keyb radi"
+  },
+  {
+   "q": "lotion acmeex"
+  },
+  {
+   "q": "nordex xeni",
+   "filters": "category:electronics AND price:<150",
+   "offset": 20
+  },
+  {
+   "q": "glo bicycle"
+  },
+  {
+   "q": "acmeora mirror",
+   "filters": "brand:ravex AND rating:>=4 AND price:<75"
+  },
+  {
+   "q": "xenith lum",
+   "filters": "category:garden AND price:<200"
+  },
+  {
+   "q": "puzzle atlas",
+   "filters": "tag:aluminum AND brand:yarix AND price:<=100"
+  },
+  {
+   "q": "acmeith jack",
+   "filters": "brand:zenix AND rating:>=3.5 AND price:<50"
+  },
+  {
+   "q": "monitor",
+   "offset": 20
+  },
+  {
+   "q": "magnetic compass"
+  },
+  {
+   "q": "jou acm"
+  },
+  {
+   "q": "rugg",
+   "offset": 20
+  },
+  {
+   "q": "umb lumex"
+  },
+  {
+   "q": "toaster",
+   "limit": 50
+  },
+  {
+   "q": "teapot kestix"
+  },
+  {
+   "q": "kestith",
+   "filters": "(category:outdoors OR category:garden) AND price:20-80 AND inStock:true"
+  },
+  {
+   "q": "jack jack"
+  },
+  {
+   "q": "lotion tundora"
+  },
+  {
+   "q": "kestora lotion",
+   "filters": "tag:pro AND brand:lumith AND price:<=75"
+  },
+  {
+   "q": "yarix",
+   "filters": "tag:bestseller AND brand:vertith AND price:<=75"
+  },
+  {
+   "q": "tarp drone"
+  },
+  {
+   "q": "bestseller",
+   "filters": "category:sports AND (brand:vert OR brand:orb) AND rating:>=3.5 AND price:10-50"
+  },
+  {
+   "q": "lumix shampoo"
+  },
+  {
+   "q": "jolly radiant",
+   "filters": "category:home AND price:<25"
+  },
+  {
+   "q": "kestora rack",
+   "filters": "brand:kestith AND rating:>=3.5 AND price:<100"
+  },
+  {
+   "q": "acme ergonomic",
+   "filters": "brand:zenix AND rating:>=4 AND price:<25"
+  },
+  {
+   "q": "binder polish",
+   "filters": "brand:quarex AND rating:>=3.5 AND price:<25"
+  },
+  {
+   "q": "speaker cushion",
+   "filters": "category:office AND price:<300",
+   "offset": 20
+  },
+  {
+   "q": "vertix",
+   "filters": "brand:zenith AND rating:>=4 AND price:<100",
+   "limit": 50
+  },
+  {
+   "q": "adju nov",
+   "filters": "(category:books OR category:outdoors) AND price:25-100 AND inStock:true"
+  },
+  {
+   "q": "sprinkler vertex"
+  },
+  {
+   "q": "speaker vertex",
+   "filters": "(category:toys OR category:books) AND price:50-150 AND inStock:true"
+  },
+  {
+   "q": "whiteboard sol"
+  },
+  {
+   "q": "lantern ergonomic",
+   "filters": "brand:ravora AND rating:>=4 AND price:<150"
+  },
+  {
+   "q": "curtain",
+   "filters": "category:home AND price:<25"
+  },
+  {
+   "q": "jacket notebook"
+  },
+  {
+   "q": "bold"
+  },
+  {
+   "q": "cha shampoo"
+  },
+  {
+   "q": "sunglasses jolly",
+   "filters": "(category:beauty OR category:outdoors) AND price:20-80 AND inStock:true",
+   "limit": 50
+  },
+  {
+   "q": "umbora",
+   "filters": "brand:orbex AND rating:>=4 AND price:<200"
+  },
+  {
+   "q": "travel"
+  },
+  {
+   "q": "foldable"
+  },
+  {
+   "q": "cookbook rapid",
+   "offset": 20
+  },
+  {
+   "q": "vacuum solith",
+   "filters": "category:office AND price:<300",
+   "offset": 20
+  },
+  {
+   "filters": "tag:pro AND brand:umbith AND price:<=150"
+  },
+  {
+   "q": "solith",
+   "filters": "brand:vertex AND rating:>=4.5 AND price:<150"
+  },
+  {
+   "q": "rug kestix"
+  },
+  {
+   "q": "dro",
+   "limit": 50
+  },
+  {
+   "q": "zen vert",
+   "offset": 20
+  },
+  {
+   "q": "umb lantern",
+   "filters": "category:home AND (brand:pinix OR brand:orbix) AND rating:>=4.5 AND price:10-50"
+  },
+  {
+   "q": "marker bold",
+   "filters": "category:kitchen AND price:<25"
+  },
+  {
+   "q": "lumix",
+   "filters": "(category:fashion OR category:toys) AND price:100-300 AND inStock:true",
+   "offset": 20
+  },
+  {
+   "q": "travel jack",
+   "filters": "category:sports AND price:<100"
+  },
+  {
+   "q": "keyboard",
+   "offset": 20
+  },
+  {
+   "q": "tarp cooler",
+   "filters": "category:automotive AND (brand:ravith OR brand:tundex) AND rating:>=3 AND price:50-150"
+  },
+  {
+   "q": "planter sil",
+   "filters": "(category:home OR category:electronics) AND price:50-150 AND inStock:true"
+  },
+  {
+   "q": "kestix racket",
+   "filters": "category:home AND (brand:acmeix OR brand:wilix) AND rating:>=4.5 AND price:20-80",
+   "offset": 20
+  },
+  {
+   "q": "waterpro",
+   "filters": "(category:automotive OR category:books) AND price:25-100 AND inStock:true"
+  },
+  {
+   "q": "whiteboard lamp",
+   "filters": "(category:toys OR category:home) AND price:25-100 AND inStock:true"
+  },
+  {
+   "q": "xenix perfume"
+  },
+  {
+   "q": "puzzle lumith",
+   "filters": "(category:sports OR category:office) AND price:25-100 AND inStock:true",
+   "limit": 50
+  },
+  {
+   "filters": "brand:nordex AND rating:>=4.5 AND price:<100"
+  },
+  {
+   "q": "yogamat planter",
+   "filters": "category:home AND (brand:xenith OR brand:lumith) AND rating:>=3.5 AND price:25-100"
+  },
+  {
+   "q": "lum",
+   "limit": 50
+  },
+  {
+   "q": "tabl",
+   "filters": "tag:budget AND brand:yar AND price:<=50"
+  },
+  {
+   "q": "note sol"
+  },
+  {
+   "q": "gloves",
+   "limit": 50
+  },
+  {
+   "filters": "brand:nordith AND rating:>=3.5 AND price:<75"
+  },
+  {
+   "q": "umb belt",
+   "filters": "category:garden AND price:<150",
+   "limit": 50
+  },
+  {
+   "q": "compa compact",
+   "filters": "(category:automotive OR category:beauty) AND price:25-100 AND inStock:true"
+  },
+  {
+   "q": "yar skates"
+  },
+  {
+   "q": "zenix wall",
+   "filters": "(category:home OR category:outdoors) AND price:10-50 AND inStock:true",
+   "offset": 20
+  },
+  {
+   "q": "sunglasses jack"
+  },
+  {
+   "q": "tundix handmade",
+   "filters": "category:garden AND (brand:zenora OR brand:lumora) AND rating:>=3.5 AND price:25-100"
+  },
+  {
+   "q": "kestith xen",
+   "filters": "(category:outdoors OR category:electronics) AND price:10-50 AND inStock:true"
+  },
+  {
+   "q": "loti marbles",
+   "filters": "tag:kids AND brand:vert AND price:<=75"
+  },
+  {
+   "q": "hose"
+  },
+  {
+   "q": "wilex",
+   "filters": "category:fashion AND price:<100",
+   "limit": 50
+  },
+  {
+   "q": "perfu cotton",
+   "filters": "category:beauty AND (brand:wilex OR brand:tundora) AND rating:>=3.5 AND price:25-100"
+  },
+  {
+   "q": "colander"
+  },
+  {
+   "q": "ver",
+   "filters": "category:kitchen AND price:<300"
+  },
+  {
+   "q": "trowel sleek",
+   "filters": "category:toys AND price:<200"
+  },
+  {
+   "filters": "tag:kids AND brand:ravith AND price:<=150",
+   "limit": 50
+  },
+  {
+   "q": "shelf"
+  },
+  {
+   "q": "xenora rav"
+  },
+  {
+   "q": "classic gloves",
+   "filters": "category:books AND price:<300"
+  },
+  {
+   "q": "acme marbles"
+  },
+  {
+   "q": "bean kids",
+   "filters": "tag:solar AND brand:nordex AND price:<=25",
+   "limit": 50
+  },
+  {
+   "filters": "tag:recycled AND brand:lumix AND price:<=25"
+  },
+  {
+   "q": "almanac novel",
+   "filters": "brand:umbith AND rating:>=3 AND price:<100"
+  },
+  {
+   "q": "shelf foldable",
+   "filters": "category:electronics AND price:<50"
+  },
+  {
+   "q": "nim sol",
+   "filters": "brand:kestora AND rating:>=3.5 AND price:<75"
+  },
+  {
+   "q": "handmade nor",
+   "filters": "tag:aluminum AND brand:nord AND price:<=200"
+  },
+  {
+   "q": "clock rapid"
+  },
+  {
+   "q": "rocket",
+   "offset": 20
+  },
+  {
+   "q": "rapid tun",
+   "filters": "category:beauty AND price:<200"
+  },
+  {
+   "q": "vertith balm",
+   "filters": "tag:aluminum AND brand:nordora AND price:<=50",
+   "limit": 50
+  },
+  {
+   "q": "adjustable vert"
+  },
+  {
+   "q": "nord insul"
+  },
+  {
+   "q": "qua charger"
+  },
+  {
+   "q": "nordi woven"
+  },
+  {
+   "q": "foldable lantern"
+  },
+  {
+   "q": "vacuum she",
+   "filters": "category:garden AND price:<100"
+  },
+  {
+   "q": "cot mirror",
+   "filters": "category:electronics AND price:<100",
+   "limit": 50
+  },
+  {
+   "q": "paddle headphones",
+   "filters": "(category:outdoors OR category:electronics) AND price:25-100 AND inStock:true"
+  },
+  {
+   "q": "cozy",
+   "filters": "brand:tundex AND rating:>=4 AND price:<150"
+  },
+  {
+   "q": "charger",
+   "filters": "brand:umbith AND rating:>=4 AND price:<150"
+  },
+  {
+   "q": "acmeith",
+   "filters": "category:sports AND (brand:quarex OR brand:yarith) AND rating:>=4 AND price:20-80"
+  },
+  {
+   "q": "whi yogam"
+  },
+  {
+   "q": "wilora tund",
+   "limit": 50
+  },
+  {
+   "q": "hammock nordo",
+   "filters": "category:beauty AND (brand:kestith OR brand:acme) AND rating:>=4 AND price:25-100",
+   "limit": 50
+  },
+  {
+   "q": "crisp rout",
+   "filters": "tag:carbon AND brand:vertix AND price:<=25",
+   "offset": 20
+  },
+  {
+   "q": "tent",
+   "filters": "category:fashion AND price:<50"
+  },
+  {
+   "q": "journ",
+   "filters": "brand:xenora AND rating:>=3 AND price:<100",
+   "offset": 20
+  },
+  {
+   "q": "helmet nordix",
+   "filters": "(category:sports OR category:electronics) AND price:100-300 AND inStock:true"
+  },
+  {
+   "q": "pinith rac",
+   "filters": "category:fashion AND price:<25"
+  },
+  {
+   "q": "nim rake",
+   "filters": "category:automotive AND price:<200"
+  },
+  {
+   "q": "sleek flu",
+   "limit": 50
+  },
+  {
+   "q": "blender jolly"
+  },
+  {
+   "q": "goggles yarix",
+   "filters": "category:toys AND price:<300"
+  },
+  {
+   "q": "notebook noble",
+   "filters": "brand:orbix AND rating:>=3 AND price:<100"
+  },
+  {
+   "q": "backpack"
+  },
+  {
+   "q": "fou bold",
+   "offset": 20
+  },
+  {
+   "q": "lum magn",
+   "filters": "category:beauty AND (brand:solith OR brand:tundith) AND rating:>=3 AND price:100-300"
+  },
+  {
+   "q": "colander"
+  },
+  {
+   "q": "qua ravex"
+  },
+  {
+   "q": "plush",
+   "filters": "(category:electronics OR category:fashion) AND price:10-50 AND inStock:true"
+  },
+  {
+   "q": "lofty deluxe",
+   "offset": 20
+  },
+  {
+   "q": "hanger solex",
+   "filters": "brand:rav AND rating:>=3.5 AND price:<200"
+  },
+  {
+   "q": "nordith tablet"
+  },
+  {
+   "q": "whiteb kestex"
+  },
+  {
+   "q": "helmet",
+   "filters": "brand:quarith AND rating:>=3.5 AND price:<200"
+  },
+  {
+   "q": "acm airy"
+  },
+  {
+   "q": "cozy yog"
+  },
+  {
+   "q": "hea orb",
+   "filters": "category:outdoors AND (brand:zen OR brand:orbith) AND rating:>=4.5 AND price:100-300"
+  },
+  {
+   "q": "eleg ravix"
+  },
+  {
+   "q": "ravora whiteboard"
+  },
+  {
+   "q": "sca eco",
+   "filters": "category:garden AND (brand:kestith OR brand:ravex) AND rating:>=3.5 AND price:10-50"
+  },
+  {
+   "q": "xen",
+   "filters": "(category:outdoors OR category:outdoors) AND price:25-100 AND inStock:true",
+   "offset": 20
+  },
+  {
+   "q": "kestora",
+   "filters": "category:garden AND (brand:pinix OR brand:wil) AND rating:>=3.5 AND price:25-100"
+  },
+  {
+   "q": "mat radiant",
+   "filters": "tag:budget AND brand:nordith AND price:<=50",
+   "limit": 50
+  },
+  {
+   "q": "skates headphones"
+  },
+  {
+   "q": "acme mat",
+   "filters": "tag:limited AND brand:tundora AND price:<=50"
+  },
+  {
+   "q": "nordith"
+  },
+  {
+   "q": "fountain",
+   "filters": "brand:tund AND rating:>=4 AND price:<300",
+   "offset": 20
+  },
+  {
+   "q": "tundith umbix",
+   "filters": "category:kitchen AND price:<75",
+   "offset": 20
+  },
+  {
+   "q": "nordora compass",
+   "filters": "tag:carbon AND brand:orbix AND price:<=150",
+   "limit": 50
+  },
+  {
+   "q": "lum"
+  },
+  {
+   "q": "compass keyboard",
+   "filters": "tag:rechargeable AND brand:zenix AND price:<=50"
+  },
+  {
+   "q": "xenix shea",
+   "filters": "tag:eco AND brand:vertora AND price:<=75"
+  },
+  {
+   "q": "tundex pinith",
+   "filters": "(category:outdoors OR category:sports) AND price:100-300 AND inStock:true",
+   "offset": 20
+  },
+  {
+   "q": "lant",
+   "filters": "category:sports AND (brand:nordith OR brand:pinix) AND rating:>=4 AND price:25-100"
+  },
+  {
+   "q": "rap zenora"
+  },
+  {
+   "q": "magnetic dumbbell",
+   "filters": "brand:nord AND rating:>=3 AND price:<75",
+   "offset": 20
+  },
+  {
+   "q": "rugged orbith",
+   "filters": "brand:nordix AND rating:>=4.5 AND price:<50",
+   "limit": 50
+  },
+  {
+   "q": "orb planner",
+   "limit": 50
+  },
+  {
+   "q": "pin zen",
+   "filters": "brand:solora AND rating:>=4 AND price:<50",
+   "limit": 50
+  },
+  {
+   "q": "keen bundle",
+   "filters": "category:books AND price:<100"
+  },
+  {
+   "q": "flu shelf"
+  },
+  {
+   "q": "airy pin"
+  },
+  {
+   "q": "plann"
+  },
+  {
+   "q": "han desk",
+   "filters": "(category:office OR category:garden) AND price:25-100 AND inStock:true"
+  },
+  {
+   "q": "acme hanger",
+   "offset": 20
+  },
+  {
+   "q": "rou vert"
+  },
+  {
+   "q": "speaker",
+   "filters": "brand:xenith AND rating:>=4.5 AND price:<200"
+  },
+  {
+   "q": "xenix"
+  },
+  {
+   "q": "vivid skat"
+  },
+  {
+   "q": "xenix tent",
+   "filters": "brand:tundith AND rating:>=3 AND price:<25"
+  },
+  {
+   "q": "tund sprink",
+   "offset": 20
+  },
+  {
+   "q": "ser kes"
+  },
+  {
+   "q": "whisk bold",
+   "filters": "brand:quarex AND rating:>=4.5 AND price:<200"
+  },
+  {
+   "q": "eco mat",
+   "filters": "brand:orbora AND rating:>=3.5 AND price:<25"
+  },
+  {
+   "q": "skillet waterproof",
+   "filters": "brand:pin AND rating:>=4 AND price:<200"
+  },
+  {
+   "q": "kids",
+   "limit": 50
+  },
+  {
+   "q": "zenith lightweight",
+   "filters": "category:office AND price:<100"
+  },
+  {
+   "q": "stove"
+  },
+  {
+   "q": "bicy han",
+   "filters": "tag:compact AND brand:zen AND price:<=200"
+  },
+  {
+   "q": "silent",
+   "filters": "brand:quarix AND rating:>=4.5 AND price:<25"
+  },
+  {
+   "filters": "tag:eco AND brand:wilex AND price:<=150",
+   "offset": 20
+  },
+  {
+   "q": "desk indoor"
+  },
+  {
+   "q": "orb",
+   "filters": "brand:umbex AND rating:>=3 AND price:<25"
+  },
+  {
+   "q": "nordith serum",
+   "filters": "category:electronics AND (brand:yarix OR brand:vertix) AND rating:>=4 AND price:10-50"
+  },
+  {
+   "q": "teapot grinder",
+   "filters": "category:electronics AND (brand:zenith OR brand:acmeith) AND rating:>=4 AND price:50-150"
+  },
+  {
+   "q": "stapler"
+  },
+  {
+   "q": "tent fluffy",
+   "filters": "category:electronics AND (brand:orbora OR brand:quarith) AND rating:>=3 AND price:100-300"
+  },
+  {
+   "q": "lumora wiper"
+  },
+  {
+   "q": "beanie wiper",
+   "filters": "category:garden AND (brand:nordix OR brand:lumora) AND rating:>=4.5 AND price:50-150"
+  },
+  {
+   "q": "ravora pin"
+  },
+  {
+   "q": "ravith tundo",
+   "filters": "(category:automotive OR category:toys) AND price:25-100 AND inStock:true"
+  },
+  {
+   "q": "belt kids",
+   "filters": "category:beauty AND price:<300"
+  },
+  {
+   "q": "acmeix umb",
+   "filters": "tag:aluminum AND brand:quarora AND price:<=150"
+  },
+  {
+   "q": "wilora dumbbell",
+   "filters": "category:home AND price:<200"
+  },
+  {
+   "q": "spe acme"
+  },
+  {
+   "q": "xenith",
+   "filters": "brand:acmeix AND rating:>=3.5 AND price:<50",
+   "offset": 20
+  },
+  {
+   "q": "wil shelf",
+   "filters": "brand:acmeith AND rating:>=4.5 AND price:<75",
+   "offset": 20
+  },
+  {
+   "q": "rav yar",
+   "filters": "(category:outdoors OR category:office) AND price:50-150 AND inStock:true"
+  },
+  {
+   "q": "orbora ravith",
+   "offset": 20
+  },
+  {
+   "q": "pin lamp",
+   "filters": "brand:vertix AND rating:>=4 AND price:<50"
+  },
+  {
+   "q": "sprink orbith",
+   "filters": "category:electronics AND price:<150"
+  },
+  {
+   "q": "zenix quarex",
+   "filters": "(category:garden OR category:kitchen) AND price:10-50 AND inStock:true"
+  },
+  {
+   "q": "acmeix mon",
+   "limit": 50
+  },
+  {
+   "q": "cozy acmeex",
+   "offset": 20
+  },
+  {
+   "q": "pinith xenex",
+   "filters": "category:garden AND price:<50"
+  },
+  {
+   "q": "wireless",
+   "filters": "brand:nordith AND rating:>=3 AND price:<300"
+  },
+  {
+   "q": "scarf"
+  },
+  {
+   "q": "yar waterp",
+   "filters": "brand:acmeith AND rating:>=3 AND price:<200"
+  },
+  {
+   "q": "chair",
+   "filters": "category:fashion AND price:<300"
+  },
+  {
+   "q": "wilith sham",
+   "filters": "category:electronics AND (brand:sol OR brand:xenex) AND rating:>=4.5 AND price:20-80",
+   "offset": 20
+  },
+  {
+   "q": "serum zes"
+  },
+  {
+   "q": "novel keen",
+   "filters": "brand:lumith AND rating:>=4.5 AND price:<75"
+  },
+  {
+   "q": "whisk bold",
+   "filters": "category:home AND (brand:lumix OR brand:sol) AND rating:>=4.5 AND price:100-300"
+  },
+  {
+   "q": "wirele lotion"
+  },
+  {
+   "q": "pinix",
+   "offset": 20
+  },
+  {
+   "q": "cooler backpa"
+  },
+  {
+   "q": "lea",
+   "limit": 50
+  },
+  {
+   "q": "trowel"
+  },
+  {
+   "q": "quiet cola",
+   "filters": "category:home AND (brand:nordith OR brand:zenix) AND rating:>=3 AND price:25-100"
+  },
+  {
+   "q": "sunglasses coo",
+   "filters": "(category:fashion OR category:home) AND price:10-50 AND inStock:true"
+  },
+  {
+   "q": "sca nordora",
+   "offset": 20
+  },
+  {
+   "q": "stackable sile",
+   "filters": "category:garden AND (brand:xenex OR brand:vertith) AND rating:>=3.5 AND price:50-150"
+  },
+  {
+   "q": "tre",
+   "filters": "category:electronics AND (brand:lumix OR brand:solix) AND rating:>=4.5 AND price:50-150"
+  },
+  {
+   "q": "ergonomic journal",
+   "filters": "category:electronics AND price:<300",
+   "limit": 50
+  },
+  {
+   "q": "stove ver"
+  },
+  {
+   "q": "sprinkler mat",
+   "filters": "tag:organic AND brand:vertix AND price:<=50"
+  },
+  {
+   "q": "skillet",
+   "filters": "(category:books OR category:toys) AND price:50-150 AND inStock:true",
+   "offset": 20
+  },
+  {
+   "q": "portable",
+   "filters": "category:toys AND price:<150"
+  },
+  {
+   "q": "zen hea",
+   "filters": "category:sports AND (brand:zenora OR brand:ravex) AND rating:>=3.5 AND price:10-50",
+   "offset": 20
+  },
+  {
+   "q": "acmeix fountain"
+  },
+  {
+   "q": "ravix quari"
+  },
+  {
+   "q": "quarex"
+  },
+  {
+   "q": "speaker modern"
+  },
+  {
+   "q": "planter classic",
+   "filters": "brand:zen AND rating:>=3.5 AND price:<25"
+  },
+  {
+   "q": "aluminum acmeex",
+   "offset": 20
+  },
+  {
+   "q": "yar puzzle",
+   "filters": "category:kitchen AND (brand:acme OR brand:xenora) AND rating:>=3 AND price:25-100"
+  },
+  {
+   "q": "char"
+  },
+  {
+   "q": "mellow",
+   "filters": "tag:recycled AND brand:acmeix AND price:<=50"
+  },
+  {
+   "q": "insulated paddle",
+   "offset": 20
+  },
+  {
+   "q": "quar",
+   "filters": "brand:zenix AND rating:>=3 AND price:<300"
+  },
+  {
+   "q": "whi lamp"
+  },
+  {
+   "q": "orb",
+   "filters": "category:beauty AND (brand:vertith OR brand:pin) AND rating:>=3.5 AND price:20-80",
+   "offset": 20
+  },
+  {
+   "q": "wiper",
+   "filters": "category:toys AND (brand:xen OR brand:kestix) AND rating:>=3 AND price:25-100"
+  },
+  {
+   "q": "modern kesto",
+   "filters": "category:toys AND (brand:ravora OR brand:quarex) AND rating:>=4 AND price:50-150"
+  },
+  {
+   "q": "wil",
+   "filters": "tag:travel AND brand:tundora AND price:<=50"
+  },
+  {
+   "q": "kestex",
+   "filters": "category:garden AND price:<150"
+  },
+  {
+   "q": "tundith tent"
+  },
+  {
+   "q": "nordora charger",
+   "filters": "brand:vertora AND rating:>=4 AND price:<25"
+  },
+  {
+   "q": "beanie",
+   "filters": "brand:solith AND rating:>=3.5 AND price:<150"
+  },
+  {
+   "q": "lumix",
+   "filters": "tag:handmade AND brand:pinora AND price:<=300"
+  },
+  {
+   "q": "rug mod"
+  },
+  {
+   "q": "keyboa journal",
+   "offset": 20
+  },
+  {
+   "q": "skillet wireless",
+   "limit": 50
+  },
+  {
+   "q": "journal",
+   "filters": "(category:toys OR category:electronics) AND price:25-100 AND inStock:true",
+   "offset": 20
+  },
+  {
+   "q": "nordora handmade",
+   "filters": "(category:electronics OR category:office) AND price:10-50 AND inStock:true"
+  },
+  {
+   "q": "noteb goggles",
+   "filters": "category:fashion AND (brand:acmeora OR brand:acmeex) AND rating:>=4.5 AND price:100-300",
+   "limit": 50
+  },
+  {
+   "q": "blocks"
+  },
+  {
+   "q": "skillet whi",
+   "filters": "category:toys AND (brand:pinora OR brand:xen) AND rating:>=4 AND price:100-300"
+  },
+  {
+   "q": "ravex kestora"
+  },
+  {
+   "q": "desk portable",
+   "filters": "brand:zenix AND rating:>=4 AND price:<150"
+  },
+  {
+   "q": "radiant tablet"
+  },
+  {
+   "q": "lotion sketchbook",
+   "filters": "category:garden AND (brand:quarex OR brand:sol) AND rating:>=3 AND price:25-100"
+  },
+  {
+   "filters": "tag:fast AND brand:kestith AND price:<=50"
+  },
+  {
+   "q": "brush modern",
+   "filters": "tag:aluminum AND brand:xenex AND price:<=100"
+  },
+  {
+   "q": "teapot xenix",
+   "filters": "category:books AND (brand:yarex OR brand:orb) AND rating:>=4 AND price:20-80"
+  },
+  {
+   "q": "bicycle"
+  },
+  {
+   "q": "ceramic",
+   "filters": "category:kitchen AND price:<25"
+  },
+  {
+   "q": "fluf recycled",
+   "filters": "tag:sale AND brand:quarix AND price:<=50"
+  },
+  {
+   "q": "prem scarf",
+   "filters": "brand:zenex AND rating:>=3 AND price:<25"
+  },
+  {
+   "q": "xenix came",
+   "filters": "category:office AND price:<150"
+  },
+  {
+   "q": "ceramic yogamat",
+   "filters": "category:office AND (brand:xenora OR brand:umbex) AND rating:>=4 AND price:10-50"
+  },
+  {
+   "q": "wip solix",
+   "limit": 50
+  },
+  {
+   "q": "planter"
+  },
+  {
+   "q": "sol trowel",
+   "filters": "brand:xenora AND rating:>=3.5 AND price:<200"
+  },
+  {
+   "q": "quar zenith",
+   "filters": "tag:cotton AND brand:umb AND price:<=75",
+   "offset": 20
+  },
+  {
+   "q": "cover"
+  },
+  {
+   "q": "modern gift",
+   "filters": "category:beauty AND price:<150"
+  },
+  {
+   "q": "goggles rocket"
+  },
+  {
+   "q": "zenex sca",
+   "filters": "category:books AND (brand:acmeora OR brand:quarora) AND rating:>=4.5 AND price:50-150",
+   "offset": 20
+  },
+  {
+   "q": "atlas robot",
+   "filters": "brand:acmeex AND rating:>=4 AND price:<100"
+  },
+  {
+   "q": "silent chair",
+   "filters": "tag:ceramic AND brand:yarora AND price:<=100",
+   "offset": 20
+  },
+  {
+   "q": "vertora"
+  },
+  {
+   "q": "quarex radiant",
+   "filters": "category:electronics AND (brand:orbix OR brand:ravex) AND rating:>=3 AND price:20-80"
+  },
+  {
+   "q": "kestix"
+  },
+  {
+   "q": "monitor nordex"
+  },
+  {
+   "q": "lofty lamp",
+   "filters": "tag:recycled AND brand:kestora AND price:<=200"
+  },
+  {
+   "q": "sale"
+  },
+  {
+   "q": "comp sol",
+   "filters": "brand:vertora AND rating:>=3.5 AND price:<100"
+  },
+  {
+   "q": "ravix",
+   "filters": "tag:cotton AND brand:ravex AND price:<=100"
+  },
+  {
+   "q": "new belt",
+   "filters": "(category:electronics OR category:kitchen) AND price:50-150 AND inStock:true"
+  },
+  {
+   "q": "mat rug"
+  },
+  {
+   "q": "glossy mat",
+   "filters": "tag:budget AND brand:kest AND price:<=300"
+  },
+  {
+   "q": "rechargeable keyboard",
+   "filters": "brand:yar AND rating:>=4 AND price:<100"
+  },
+  {
+   "filters": "tag:bestseller AND brand:kest AND price:<=75"
+  },
+  {
+   "q": "solex class",
+   "filters": "category:sports AND price:<25",
+   "offset": 20
+  },
+  {
+   "q": "mel rapid",
+   "filters": "tag:travel AND brand:solix AND price:<=25"
+  },
+  {
+   "q": "lumix balm",
+   "filters": "(category:books OR category:toys) AND price:10-50 AND inStock:true"
+  },
+  {
+   "q": "mirr zen",
+   "filters": "category:outdoors AND price:<100"
+  },
+  {
+   "q": "hanger compass",
+   "filters": "tag:travel AND brand:ravora AND price:<=150"
+  },
+  {
+   "q": "stapler yari",
+   "filters": "category:books AND (brand:rav OR brand:vertith) AND rating:>=3.5 AND price:10-50"
+  },
+  {
+   "filters": "brand:zenith AND rating:>=3 AND price:<50"
+  },
+  {
+   "q": "notebook orb"
+  },
+  {
+   "q": "premium qua",
+   "offset": 20
+  },
+  {
+   "q": "sol mask",
+   "filters": "category:outdoors AND (brand:kestex OR brand:pinora) AND rating:>=4 AND price:10-50"
+  },
+  {
+   "q": "rugged",
+   "filters": "tag:handmade AND brand:orbix AND price:<=50"
+  },
+  {
+   "q": "xen silent"
+  },
+  {
+   "q": "alma planner"
+  },
+  {
+   "q": "hose camera",
+   "filters": "category:garden AND price:<150"
+  },
+  {
+   "q": "woven racket"
+  },
+  {
+   "q": "acmeith"
+  },
+  {
+   "q": "rug umbith"
+  },
+  {
+   "q": "ste",
+   "filters": "category:outdoors AND price:<25"
+  },
+  {
+   "q": "serum journal",
+   "filters": "tag:aluminum AND brand:yarex AND price:<=75",
+   "limit": 50
+  },
+  {
+   "q": "quari"
+  },
+  {
+   "q": "eco tund"
+  },
+  {
+   "q": "desk curta",
+   "filters": "category:toys AND price:<25"
+  },
+  {
+   "q": "kettle",
+   "filters": "(category:sports OR category:sports) AND price:20-80 AND inStock:true"
+  },
+  {
+   "q": "ravora fluffy",
+   "filters": "(category:outdoors OR category:fashion) AND price:25-100 AND inStock:true"
+  },
+  {
+   "q": "bold vacu",
+   "filters": "category:electronics AND (brand:yarora OR brand:tundora) AND rating:>=4 AND price:25-100"
+  },
+  {
+   "filters": "brand:yar AND rating:>=3 AND price:<25"
+  },
+  {
+   "q": "hea ergonomic",
+   "filters": "(category:office OR category:electronics) AND price:50-150 AND inStock:true",
+   "offset": 20
+  },
+  {
+   "q": "premium"
+  },
+  {
+   "q": "umbo vivid",
+   "filters": "brand:orbora AND rating:>=4 AND price:<100"
+  },
+  {
+   "q": "marker mask",
+   "filters": "(category:sports OR category:toys) AND price:20-80 AND inStock:true",
+   "limit": 50
+  },
+  {
+   "q": "han",
+   "filters": "category:books AND (brand:tundith OR brand:pinith) AND rating:>=3.5 AND price:10-50"
+  },
+  {
+   "q": "rav drone",
+   "filters": "category:garden AND (brand:acme OR brand:yarix) AND rating:>=4.5 AND price:100-300"
+  },
+  {
+   "q": "stur compa",
+   "filters": "tag:cotton AND brand:orbex AND price:<=75"
+  },
+  {
+   "q": "skillet foldable",
+   "filters": "tag:new AND brand:rav AND price:<=150"
+  },
+  {
+   "q": "headphones racket",
+   "filters": "(category:outdoors OR category:automotive) AND price:20-80 AND inStock:true",
+   "offset": 20
+  },
+  {
+   "q": "xenix mat",
+   "filters": "tag:cotton AND brand:pin AND price:<=150",
+   "limit": 50
+  },
+  {
+   "q": "yar compact",
+   "filters": "category:outdoors AND (brand:orb OR brand:solix) AND rating:>=4.5 AND price:25-100"
+  },
+  {
+   "q": "waterproof umb"
+  },
+  {
+   "q": "gloves kite"
+  },
+  {
+   "q": "headphones",
+   "offset": 20
+  },
+  {
+   "q": "charger",
+   "filters": "(category:fashion OR category:garden) AND price:10-50 AND inStock:true"
+  },
+  {
+   "q": "plush",
+   "filters": "category:kitchen AND (brand:zenex OR brand:zenora) AND rating:>=3 AND price:25-100"
+  },
+  {
+   "q": "colander cooler",
+   "filters": "brand:xenex AND rating:>=4 AND price:<75"
+  },
+  {
+   "q": "curtain"
+  },
+  {
+   "q": "whiteboard insula",
+   "filters": "category:outdoors AND price:<50"
+  },
+  {
+   "filters": "brand:zen AND rating:>=4.5 AND price:<200"
+  },
+  {
+   "q": "premium lum",
+   "filters": "(category:automotive OR category:electronics) AND price:20-80 AND inStock:true",
+   "offset": 20
+  },
+  {
+   "q": "acm wireless",
+   "filters": "tag:indoor AND brand:rav AND price:<=50"
+  },
+  {
+   "q": "umbora ham",
+   "offset": 20
+  },
+  {
+   "q": "nor"
+  },
+  {
+   "q": "vertith"
+  },
+  {
+   "q": "rugged",
+   "filters": "tag:quiet AND brand:orbex AND price:<=200"
+  },
+  {
+   "q": "jac toaster",
+   "filters": "category:garden AND price:<25",
+   "offset": 20
+  },
+  {
+   "filters": "brand:zenix AND rating:>=4.5 AND price:<300",
+   "offset": 20
+  },
+  {
+   "q": "magnetic",
+   "filters": "category:home AND (brand:sol OR brand:lumex) AND rating:>=3 AND price:10-50"
+  },
+  {
+   "q": "vertix ser"
+  },
+  {
+   "q": "wilix yarora",
+   "filters": "category:home AND price:<100"
+  },
+  {
+   "q": "quarix noble"
+  },
+  {
+   "q": "sketc",
+   "filters": "category:sports AND (brand:quarix OR brand:nord) AND rating:>=3.5 AND price:100-300"
+  },
+  {
+   "q": "foun"
+  }
+ ]
+}

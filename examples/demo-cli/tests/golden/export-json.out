@@ -1,0 +1,81 @@
+[
+  {
+    "id": 15,
+    "title": "Validate report behind a flag",
+    "status": "blocked",
+    "priority": 1,
+    "assignee": "yara.saleh",
+    "labels": [
+      "bug",
+      "billing"
+    ],
+    "estimate": 3,
+    "created": "2025-09-06",
+    "due": null
+  },
+  {
+    "id": 35,
+    "title": "Split audit log in staging",
+    "status": "blocked",
+    "priority": 2,
+    "assignee": "sam.osei",
+    "labels": [
+      "email"
+    ],
+    "estimate": 15.5,
+    "created": "2025-11-03",
+    "due": null
+  },
+  {
+    "id": 45,
+    "title": "Review webhook with better errors",
+    "status": "blocked",
+    "priority": 3,
+    "assignee": "mia.jensen",
+    "labels": [
+      "bug"
+    ],
+    "estimate": 24.5,
+    "created": "2025-12-11",
+    "due": "2026-03-02"
+  },
+  {
+    "id": 49,
+    "title": "Rename permissions for the new plan",
+    "status": "blocked",
+    "priority": 1,
+    "assignee": "priya.nair",
+    "labels": [
+      "perf"
+    ],
+    "estimate": 30,
+    "created": "2025-07-01",
+    "due": "2026-04-21"
+  },
+  {
+    "id": 65,
+    "title": "Add invoice in staging",
+    "status": "blocked",
+    "priority": 1,
+    "assignee": "amara.okafor",
+    "labels": [
+      "ux"
+    ],
+    "estimate": 18,
+    "created": "2025-10-24",
+    "due": "2026-01-25"
+  },
+  {
+    "id": 70,
+    "title": "Optimize sitemap behind a flag",
+    "status": "blocked",
+    "priority": 1,
+    "assignee": "diego.alves",
+    "labels": [
+      "ux"
+    ],
+    "estimate": 8.5,
+    "created": "2025-07-11",
+    "due": null
+  }
+]

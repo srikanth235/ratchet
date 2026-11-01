@@ -1,0 +1,32 @@
+---
+source: crates/ratchet-agents/tests/snapshots.rs
+expression: text
+---
+# Ratchet context (generated; refreshed before every turn)
+
+## Objective
+- Metric: `http_req_duration.p95` (minimize). A candidate must beat the current best by more than 3.0% and more than the benchmark noise floor.
+- Baseline: 20
+- Current ratchet best: 12.5 (commit 11111111); improvement so far 37.5%
+
+## Limits
+- Time remaining: 58m
+- Budget remaining: $15.50 of $20.00
+- Turn: 3; candidates submitted: 2
+
+## History of your candidates
+| # | commit | verdict | best after | notes |
+|---|---|---|---|---|
+| 1 | abcdef12 | blocked | 20 | touches protected path bench/run.sh |
+| 2 | 11111111 | verified | 12.5 | - |
+
+## Rules
+- Protected paths (a candidate touching them is blocked): `ratchet.yaml`, `bench/**`, and lockfiles / install config (`pnpm-lock.yaml`, `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `bun.lock`, `bun.lockb`, `.npmrc`, `.yarnrc`, `.yarnrc.yml`, `pnpm-workspace.yaml`, `.pnpmfile.cjs`) at any depth
+- Guardrails checked on every candidate: `pnpm test` must pass; `error_rate` < 0.001
+- Dependencies are fixed: the trusted benchmark has no network and installs from the lockfile of the base ref. A candidate that changes the lockfile (pnpm-lock.yaml, package-lock.json) is blocked, so do not add or upgrade packages.
+- The trusted benchmark runs on pinned hardware and a hidden trace; your own measurements only guide you.
+
+## How to submit
+- Commit one idea per commit. The runner submits your newest commit (or commits a dirty tree for you) with the trailer `Ratchet-Candidate: true`; do not push yourself.
+- After each verdict you are resumed with the result. When another agent moves the ratchet best, the runner rebases your branch onto it (conflicts resolved in favour of the best).
+- To abandon rejected work and start from the last accepted tree: `git reset --hard refs/ratchet/accepted`.

@@ -1,0 +1,126 @@
+import Foundation
+
+/// Everything the app asks of `ratchetd`, shaped as REST resources plus one server-sent event stream.
+/// `MockRatchetClient` implements it with sample data and `DaemonRatchetClient` talks to the real daemon through the
+/// client generated from its OpenAPI; `AppStore` and the views never learn which one they talk to.
+public protocol RatchetClient: RatchetInsightsClient {
+    // Overview and spend
+    func overview(range: TimeRange) async throws -> Overview
+    func spend(range: TimeRange) async throws -> SpendSummary
+
+    // Optimizations
+    func optimizations() async throws -> [Optimization]
+    func optimization(id: String) async throws -> OptimizationDetail
+    func candidates(optimizationID: String) async throws -> [Candidate]
+    func ratchetHistory(optimizationID: String) async throws -> [RatchetMove]
+    func startOptimization(_ request: StartRequest) async throws -> Optimization
+    /// The kill switch: stops the agents, revokes their keys and ends the run. Wins found so far are kept.
+    func stopOptimization(id: String) async throws
+    /// Opens the pull request with the squashed verified wins and returns where it is. Refused without a verified win.
+    func openPullRequest(optimizationID: String) async throws -> URL
+    /// The markdown report, for the save dialog.
+    func report(optimizationID: String) async throws -> OptimizationReport
+
+    // Agents
+    func agents(optimizationID: String) async throws -> [Agent]
+    func pauseAgent(id: String) async throws -> Agent
+    func resumeAgent(id: String) async throws -> Agent
+    func messageAgent(id: String, text: String) async throws
+
+    // Benchmarks and templates
+    func benchmarks() async throws -> [BenchmarkRun]
+    func templates() async throws -> [Template]
+
+    // Repos and harness detection
+    func repos() async throws -> [Repo]
+    func detectHarness(repoID: String) async throws -> HarnessDetection
+
+    // Connectors
+    func connectors() async throws -> [Connector]
+    func addConnector(_ new: NewConnector) async throws -> Connector
+    func removeConnector(id: String) async throws
+    func setDefaultConnector(id: String) async throws -> [Connector]
+    /// Sign in again (an expired SSO session, a signed-out agent). Returns the refreshed connector.
+    func signInConnector(id: String) async throws -> Connector
+    /// The GitHub device flow in progress (its code to show), or nil. The daemon keeps one at a time.
+    func githubSignInFlow() async throws -> GithubSignInFlow?
+    /// Starts the device flow for a new account, or for `connectorID` again. The code is in the returned flow.
+    func startGithubSignIn(connectorID: String?) async throws -> GithubSignInFlow?
+    func cancelGithubSignIn() async throws
+    func connectionSelection(repoID: String) async throws -> ConnectionSelection?
+    func saveConnectionSelection(_ selection: ConnectionSelection) async throws
+
+    // Environment drafts
+    func createDraft(_ request: DraftRequest) async throws -> EnvironmentDraft
+    func reviseDraft(id: String, instruction: String) async throws -> EnvironmentDraft
+    func approveDraft(id: String) async throws -> EnvironmentDraft
+
+    // Sandbox
+    func sandboxStatus() async throws -> SandboxStatus
+    func endSandbox() async throws -> TeardownReceipt
+    func sandboxReceipt() async throws -> TeardownReceipt?
+
+    // Setup: repo search, what step 1 learns about a repo, "What's missing", template pull requests
+    /// The signed-in account's repos whose name contains `query`. Empty (not an error) when not signed in to GitHub.
+    func searchRepos(query: String) async throws -> [Repo]
+    /// Reads `ratchet.yaml` from a GitHub repo or a local folder.
+    func inspectRepo(_ source: RepoSource) async throws -> RepoInspection
+    func preflight(_ request: PreflightRequest) async throws -> [PreflightItem]
+    /// Commits the template's files on a branch of the repo and opens the pull request.
+    func proposeTemplate(_ request: TemplateProposalRequest) async throws -> TemplateProposal
+
+    // Connectors: pasted tokens, editing in place, checking, detecting
+    func connectorSetup() async throws -> ConnectorSetup
+    func addGithubToken(_ token: String, name: String?) async throws -> [Connector]
+    func updateConnector(id: String, _ update: ConnectorUpdate) async throws -> [Connector]
+    func checkConnector(id: String) async throws -> ConnectorCheck
+    /// Checks every connector with its provider, then lists them.
+    func refreshConnectors() async throws -> [Connector]
+    func awsProfiles() async throws -> AwsProfiles
+    /// The agent CLIs on this Mac; `redetect` probes the machine again first.
+    func detectedAgents(redetect: Bool) async throws -> [DetectedAgent]
+
+    // Environment drafts, continued
+    /// Forgets a draft that was not approved.
+    func discardDraft(id: String) async throws
+
+    // Settings: development overrides
+    func advancedSettings() async throws -> AdvancedSettings
+    func saveAdvancedSettings(_ settings: AdvancedSettings) async throws -> AdvancedSettings
+
+    // Live updates (server-sent events on the real daemon)
+    func events() async -> AsyncStream<RatchetEvent>
+}
+
+/// One server-sent event. The app applies it to what it already shows; nothing polls.
+public enum RatchetEvent: Sendable, Equatable {
+    case optimizationUpdated(Optimization)
+    case candidateUpdated(optimizationID: String, candidate: Candidate)
+    case moveAdded(optimizationID: String, move: RatchetMove)
+    case agentUpdated(optimizationID: String, agent: Agent)
+    /// An agent wrote to its log: the lines after the last one shown are worth fetching.
+    case agentLogAppended(optimizationID: String, agentID: String)
+    case needsYouChanged([NeedsYouItem])
+    case connectorsChanged([Connector])
+    case githubFlowChanged(GithubSignInFlow?)
+    /// An environment agent finished drafting (or revising): the draft waits for approval.
+    case environmentDraftReady(draftID: String, repoID: String)
+    case sandboxChanged(SandboxStatus)
+    case receiptIssued(TeardownReceipt)
+    /// The daemon could not replay what was missed (it restarted, or the gap is too old): reload everything shown.
+    case resync
+}
+
+public enum RatchetClientError: Error, Sendable, Equatable, LocalizedError {
+    case notFound(String)
+    case invalid(String)
+    case unavailable(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .notFound(let what): "Not found: \(what)"
+        case .invalid(let why): why
+        case .unavailable(let why): why
+        }
+    }
+}

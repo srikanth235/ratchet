@@ -1,0 +1,5470 @@
+openapi: 3.1.0
+info:
+  title: ratchetd
+  description: 'The Ratchet daemon API: REST resources over HTTP on a local unix socket, plus one server-sent-event stream. Every route needs `Authorization: Bearer <token>` (the per-boot token the daemon writes next to its socket). Timestamps are epoch milliseconds, money is USD. Routes tagged `(provisional)` mirror features that are still being built and may change.'
+  version: v1
+servers:
+- url: http://localhost
+  description: The daemon, over its unix socket (`ratchetd.sock`).
+paths:
+  /v1/activity:
+    get:
+      tags:
+      - optimizations
+      summary: The merged, newest-first feed of verdicts and verified wins.
+      operationId: listActivity
+      parameters:
+      - name: optimizationId
+        in: query
+        required: false
+        schema:
+          type: string
+      - name: limit
+        in: query
+        description: 1..=200, default 20.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ActivityVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/agents/{id}/events:
+    get:
+      tags:
+      - agents
+      summary: 'An agent''s log. Without `cursor`: the newest events (oldest first). With it: only events newer than the cursor.'
+      operationId: listAgentEvents
+      parameters:
+      - name: id
+        in: path
+        description: Agent id
+        required: true
+        schema:
+          type: string
+      - name: cursor
+        in: query
+        description: 'Return only events newer than this id. Without it: the newest `limit` events.'
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: limit
+        in: query
+        description: 1..=1000, default 200.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentEventsPage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/agents/{id}/messages:
+    post:
+      tags:
+      - agents
+      summary: Send the agent a note; it reads it at the start of its next turn.
+      operationId: messageAgent
+      parameters:
+      - name: id
+        in: path
+        description: Agent id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageAgentInput'
+        required: true
+      responses:
+        '204':
+          description: Delivered
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/agents/{id}/pause:
+    post:
+      tags:
+      - agents
+      summary: Pause the agent after its current step.
+      operationId: pauseAgent
+      parameters:
+      - name: id
+        in: path
+        description: Agent id
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Paused
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/agents/{id}/resume:
+    post:
+      tags:
+      - agents
+      summary: Resume a paused agent.
+      operationId: resumeAgent
+      parameters:
+      - name: id
+        in: path
+        description: Agent id
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Resumed
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/aws/profiles:
+    get:
+      tags:
+      - aws
+      summary: The AWS profiles found on this Mac (names only).
+      operationId: listAwsProfiles
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AwsProfilesVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/config/validations:
+    post:
+      tags:
+      - config
+      summary: 'Parse ratchet.yaml text (read-only; the repo owns the file). Always 200: problems are in the result.'
+      operationId: validateConfig
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidateConfigInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidateConfigResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connection-tests:
+    post:
+      tags:
+      - settings
+      summary: A read-only probe of AWS (STS), GitHub or a model API. Secrets are read inside the daemon.
+      operationId: testConnection
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestConnectionInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectionResultVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connector-selections:
+    get:
+      tags:
+      - connectors
+      summary: The choice remembered for a repo, and what a run on it would use now (saved choice, else the defaults).
+      operationId: getConnectorSelection
+      parameters:
+      - name: repo
+        in: query
+        description: '`owner/name`'
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepoConnectionsVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+    put:
+      tags:
+      - connectors
+      summary: |-
+        Check and remember the choice for a repo. 400 when it cannot run: an unknown id, a login in the cloud, two
+        connectors for one agent, no agent.
+      operationId: saveConnectorSelection
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveRepoConnectionsInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepoConnectionsVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connectors:
+    get:
+      tags:
+      - connectors
+      summary: Every connector (detected CLI logins included), the device flow in progress and the keychain state.
+      operationId: listConnectors
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connectors/agents:
+    post:
+      tags:
+      - connectors
+      summary: |-
+        A detected CLI login (one that was removed) or a pasted API key. The key goes to the keychain and is never
+        returned.
+      operationId: addAgentConnector
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddAgentConnectorInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connectors/aws:
+    post:
+      tags:
+      - connectors
+      summary: Connect an AWS profile from `~/.aws` with a region and an optional monthly cap.
+      operationId: addAwsConnector
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddAwsConnectorInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connectors/github:
+    post:
+      tags:
+      - connectors
+      summary: |-
+        A pasted GitHub token (personal access token or app token), checked against GitHub before it is kept. The token
+        goes to the keychain and is never returned.
+      operationId: addGithubConnector
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddGithubConnectorInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connectors/github/sign-in:
+    post:
+      tags:
+      - connectors
+      summary: |-
+        Start the device flow for a new account, or `connectorId` to sign it in again. `githubFlow` in the answer carries
+        the code to show; the daemon polls and stores the token.
+      operationId: startGithubConnectorSignIn
+      requestBody:
+        description: Optional; an empty body starts a new account.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartGithubSignInInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+    delete:
+      tags:
+      - connectors
+      summary: Stop the device flow in progress.
+      operationId: cancelGithubConnectorSignIn
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connectors/refresh:
+    post:
+      tags:
+      - connectors
+      summary: Check every connector with its provider (and probe the machine for agent CLIs again), then list.
+      operationId: refreshConnectors
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connectors/{id}:
+    delete:
+      tags:
+      - connectors
+      summary: Remove a connector and forget its secret. Optimizations already running keep what they have.
+      operationId: removeConnector
+      parameters:
+      - name: id
+        in: path
+        description: Connector id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+    patch:
+      tags:
+      - connectors
+      summary: 'Rename; AWS: region and monthly cap (`null` removes the cap).'
+      operationId: updateConnector
+      parameters:
+      - name: id
+        in: path
+        description: Connector id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateConnectorInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connectors/{id}/default:
+    post:
+      tags:
+      - connectors
+      summary: Make this connector the default of its kind.
+      operationId: setDefaultConnector
+      parameters:
+      - name: id
+        in: path
+        description: Connector id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorsVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/connectors/{id}/test:
+    post:
+      tags:
+      - connectors
+      summary: '"Test connection": probe the account with its provider and remember the status.'
+      operationId: testConnector
+      parameters:
+      - name: id
+        in: path
+        description: Connector id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorTestVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/environment-drafts:
+    get:
+      tags:
+      - environment drafts
+      summary: Every environment draft, newest first.
+      operationId: listEnvironmentDrafts
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentDraftsVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+    post:
+      tags:
+      - environment drafts
+      summary: |-
+        Ask the setup agent to draft the environment this goal needs (scope none, single or full, resources, checks, cost).
+        Answers at once with the draft in status `drafting`; the agent works in the background and `environment-draft`
+        events say when it is `ready` (or `failed`).
+      operationId: createEnvironmentDraft
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEnvironmentDraftInput'
+        required: true
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentDraftVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Something to set up first (sign in, an agent connector)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '501':
+          description: This engine has no setup agent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/environment-drafts/{id}:
+    get:
+      tags:
+      - environment drafts
+      summary: One environment draft, with the content of its files ("View files").
+      operationId: getEnvironmentDraft
+      parameters:
+      - name: id
+        in: path
+        description: Draft id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentDraftVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
+    delete:
+      tags:
+      - environment drafts
+      summary: '"Back": forget a draft that was not approved. 409 once approved.'
+      operationId: discardEnvironmentDraft
+      parameters:
+      - name: id
+        in: path
+        description: Draft id
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Discarded
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/environment-drafts/{id}/approval:
+    post:
+      tags:
+      - environment drafts
+      summary: |-
+        Approve and lock the environment: the files are committed to the protected ref (`mode` `commit`) or proposed as a
+        pull request (`pr`, the default), and from then on agents change code only, never the environment. 409 unless
+        every check passed (and unless the base `ratchet.yaml` is still the one the draft was made from).
+      operationId: approveEnvironmentDraft
+      parameters:
+      - name: id
+        in: path
+        description: Draft id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        description: Optional; empty means a pull request
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApproveEnvironmentDraftInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentDraftVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/environment-drafts/{id}/revisions:
+    post:
+      tags:
+      - environment drafts
+      summary: |-
+        "Ask for a change" or "Use a smaller setup": the same agent session continues and the draft is re-validated and
+        re-costed. Answers with the draft in status `drafting`; 409 once approved or while it is being drafted.
+      operationId: reviseEnvironmentDraft
+      parameters:
+      - name: id
+        in: path
+        description: Draft id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviseEnvironmentDraftInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentDraftVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Approved or being drafted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/environments:
+    get:
+      tags:
+      - environments
+      summary: 'What is running and what it costs: the automatic environments and the last teardown receipt.'
+      operationId: listEnvironments
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentsVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/environments/{sandboxId}/end:
+    post:
+      tags:
+      - environments
+      summary: '"End sandbox now": tear the environment down without waiting for the idle window. 409 while a run is active.'
+      operationId: endEnvironment
+      parameters:
+      - name: sandboxId
+        in: path
+        description: Sandbox id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentsVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: A run is still active
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/events:
+    get:
+      tags:
+      - events
+      summary: The live event stream (server-sent events).
+      description: |-
+        Each message has `event:` = the `type` of the payload, `id:` = a sequence number and `data:` = the JSON of an
+        `ApiEvent`. Reconnect with `Last-Event-ID` to receive what was missed; when the daemon cannot replay it (it
+        restarted, or the gap is older than its window) the stream starts with a `resync` event and the client refetches
+        its snapshots. The first message is always `hello` (it has no `id`). A comment line keeps the connection alive.
+      operationId: streamEvents
+      parameters:
+      - name: Last-Event-ID
+        in: header
+        description: Id of the last event the client saw.
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+      responses:
+        '200':
+          description: A stream of server-sent events; each `data:` is an ApiEvent.
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/ApiEvent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/github/repos:
+    get:
+      tags:
+      - github
+      summary: The signed-in account's repos, optionally filtered by a substring of `owner/name`. 409 when not signed in.
+      operationId: listRepos
+      parameters:
+      - name: query
+        in: query
+        description: Substring of `owner/name`.
+        required: false
+        schema:
+          type: string
+      - name: connectorId
+        in: query
+        description: 'List with this GitHub connector (default: the default one).'
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RepoVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/github/session:
+    delete:
+      tags:
+      - github
+      summary: Sign out of GitHub and forget the token.
+      operationId: signOutOfGithub
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GithubStatusVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/github/sign-in:
+    post:
+      tags:
+      - github
+      summary: 'Start "Sign in with GitHub" (device flow): returns the code to show; the daemon polls and stores the token.'
+      operationId: startGithubSignIn
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GithubStatusVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/github/status:
+    get:
+      tags:
+      - github
+      summary: The GitHub row of Settings.
+      operationId: getGithubStatus
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GithubStatusVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/harnesses:
+    get:
+      tags:
+      - harnesses
+      summary: 'The detected agent CLIs (Claude Code, Codex): installed, version, signed in.'
+      operationId: listHarnesses
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HarnessVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/harnesses/detections:
+    post:
+      tags:
+      - harnesses
+      summary: '"Re-detect": probe the machine again.'
+      operationId: detectHarnesses
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HarnessVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations:
+    get:
+      tags:
+      - optimizations
+      summary: 'Everything the Optimizations screen shows: KPI cards, the featured run''s chart, the table, the activity feed.'
+      operationId: listOptimizations
+      parameters:
+      - name: range
+        in: query
+        description: KPI window; default `30d`.
+        required: false
+        schema:
+          $ref: '#/components/schemas/KpiRange'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptimizationsSnapshot'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+    post:
+      tags:
+      - optimizations
+      summary: Create an optimization (a draft; `start` runs it). With `demo` it runs in simulation with no setup.
+      operationId: createOptimization
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOptimizationInput'
+        required: true
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedOptimization'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}:
+    get:
+      tags:
+      - optimizations
+      summary: One optimization with its agents, bench pipeline, baseline vs best, receipt and calibration.
+      operationId: getOptimization
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OptimizationDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/calibration:
+    get:
+      tags:
+      - optimizations
+      summary: The auto-calibrated statistics (repeats, the gain a win must beat). 404 until the baseline has run.
+      operationId: getCalibration
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Calibration'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/candidates:
+    get:
+      tags:
+      - optimizations
+      summary: Every candidate commit with its verdict and bench results.
+      operationId: listCandidates
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CandidateVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/protected-paths:
+    get:
+      tags:
+      - optimizations
+      summary: 'Every protected path with why: the automatic set plus the user''s list.'
+      operationId: getProtectedPaths
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EffectiveProtected'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/pull-request:
+    post:
+      tags:
+      - reports
+      summary: Open the pull request with the squashed verified wins. 409 without a verified win.
+      operationId: openPullRequest
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PullRequestVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: No verified win yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/ratchet:
+    get:
+      tags:
+      - optimizations
+      summary: 'The ratchet chart: baseline step, one step per verified win, a point per candidate.'
+      operationId: getRatchetHistory
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      - name: metric
+        in: query
+        description: One of the series' `options` keys; default the objective.
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RatchetSeries'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/receipt:
+    get:
+      tags:
+      - environments
+      summary: The receipt of the sandbox teardown that covered this run. 404 while the environment is still alive.
+      operationId: getReceipt
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TeardownReceiptVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/report:
+    get:
+      tags:
+      - reports
+      summary: The markdown report of the optimization.
+      operationId: getReport
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/spend:
+    get:
+      tags:
+      - optimizations
+      summary: Spend by category and by agent, estimated vs reconciled, and the cumulative series.
+      operationId: getSpend
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SpendVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/spend/reconciliations:
+    post:
+      tags:
+      - optimizations
+      summary: Compare the ledger's estimates with billing and record correction rows. Idempotent; `pending` while billing lags.
+      operationId: reconcileSpend
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CostReconcileReport'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/start:
+    post:
+      tags:
+      - optimizations
+      summary: Start the baseline and the agents. Idempotent while running; refused (409) once the optimization ended.
+      operationId: startOptimization
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Started
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Already ended or not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/stop:
+    post:
+      tags:
+      - optimizations
+      summary: 'The kill switch: stop the agents and end the run.'
+      operationId: stopOptimization
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        description: Optional; an empty body is fine.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StopOptimizationInput'
+        required: true
+      responses:
+        '204':
+          description: Stopped
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/winning-change:
+    get:
+      tags:
+      - optimizations
+      summary: 'The squashed result: best verified commit vs the base ref, as the pull request will show it.'
+      operationId: getWinningChange
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WinningChangeVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/overview:
+    get:
+      tags:
+      - overview
+      summary: 'Overview: spent, value locked in, return, the value staircase, what needs you, the table.'
+      operationId: getOverview
+      parameters:
+      - name: range
+        in: query
+        description: Window of the hero numbers and the staircase; default `90d`.
+        required: false
+        schema:
+          $ref: '#/components/schemas/OverviewRange'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OverviewVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/preflight:
+    post:
+      tags:
+      - config
+      summary: '"What''s missing" for a run: the short list on the New optimization page.'
+      operationId: runPreflight
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreflightInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PreflightItem'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/repos/inspections:
+    post:
+      tags:
+      - github
+      summary: |-
+        What step 1 of New optimization learns about a repo (a GitHub repo or a local folder): its ratchet.yaml, a
+        summary, or the templates to add one.
+      operationId: inspectRepo
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InspectRepoInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RepoInspectVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/settings:
+    get:
+      tags:
+      - settings
+      summary: 'The Settings screen: AWS profile and region, which secrets are stored, the advanced overrides, the engine.'
+      operationId: getSettings
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/settings/advanced:
+    put:
+      tags:
+      - settings
+      summary: |-
+        Region and the development overrides (AMI ids, OpenTofu paths). Validated as a whole; nothing is saved if any
+        field is invalid (400 with a `fields` entry per problem).
+      operationId: saveAdvancedSettings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveSettingsInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/settings/aws-profile:
+    put:
+      tags:
+      - settings
+      summary: Choose the AWS profile Ratchet uses (an empty name clears it).
+      operationId: setAwsProfile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetAwsProfileInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/settings/secrets/{name}:
+    put:
+      tags:
+      - settings
+      summary: Store a secret in the keychain. The value is checked for format before anything is stored and never returned.
+      operationId: setSecret
+      parameters:
+      - name: name
+        in: path
+        description: anthropicApiKey, openaiApiKey or githubToken
+        required: true
+        schema:
+          $ref: '#/components/schemas/SecretName'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetSecretInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+    delete:
+      tags:
+      - settings
+      summary: Remove a stored secret.
+      operationId: clearSecret
+      parameters:
+      - name: name
+        in: path
+        description: anthropicApiKey, openaiApiKey or githubToken
+        required: true
+        schema:
+          $ref: '#/components/schemas/SecretName'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SettingsVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/status:
+    get:
+      tags:
+      - status
+      summary: 'Who is answering: version, engine, uptime, where the socket and the ledger are.'
+      operationId: getStatus
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DaemonStatus'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/template-proposals:
+    post:
+      tags:
+      - templates
+      summary: '"Use template" / "Add via pull request": commit the template''s files on a branch of the repo and open the PR.'
+      operationId: proposeTemplate
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProposeTemplateInput'
+        required: true
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProposeTemplateResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/templates:
+    get:
+      tags:
+      - templates
+      summary: 'The evaluator template gallery (Benchmarks): runnable templates, then the "Try a demo" entries.'
+      operationId: listTemplates
+      parameters:
+      - name: kind
+        in: query
+        description: '`template` (runnable evaluators) or `demo` ("Try a demo"); default both.'
+        required: false
+        schema:
+          $ref: '#/components/schemas/TemplateKind'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TemplateInfo'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/templates/{id}:
+    get:
+      tags:
+      - templates
+      summary: One template by id (a legacy `--pack` name is accepted).
+      operationId: getTemplate
+      parameters:
+      - name: id
+        in: path
+        description: Template id, e.g. http-latency
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateInfo'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+components:
+  schemas:
+    ActivityTone:
+      type: string
+      enum:
+      - brass
+      - mint
+      - rose
+      - neutral
+    ActivityVm:
+      type: object
+      required:
+      - id
+      - optimizationId
+      - agent
+      - text
+      - at
+      - atMs
+      - tone
+      properties:
+        agent:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/AgentKind'
+        at:
+          type: string
+          description: Relative time ("12m ago").
+        atMs:
+          type: integer
+          format: int64
+        id:
+          type: string
+        optimizationId:
+          type: string
+        text:
+          type: string
+        tone:
+          $ref: '#/components/schemas/ActivityTone'
+    AddAgentConnectorInput:
+      oneOf:
+      - type: object
+        required:
+        - agent
+        - source
+        properties:
+          agent:
+            $ref: '#/components/schemas/ConnectorAgent'
+          source:
+            type: string
+            enum:
+            - login
+      - type: object
+        required:
+        - agent
+        - apiKey
+        - source
+        properties:
+          agent:
+            $ref: '#/components/schemas/ConnectorAgent'
+          apiKey:
+            type: string
+          name:
+            type:
+            - string
+            - 'null'
+          source:
+            type: string
+            enum:
+            - api-key
+      description: '`POST /v1/connectors/agents`: adopt a detected CLI login (one that was removed earlier) or store an API key.'
+    AddAwsConnectorInput:
+      type: object
+      description: '`POST /v1/connectors/aws`.'
+      required:
+      - profile
+      properties:
+        monthlyCapUsd:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: USD per month; omit or `null` for no cap.
+        name:
+          type:
+          - string
+          - 'null'
+        profile:
+          type: string
+          description: A profile from `~/.aws/config` or `~/.aws/credentials`.
+        region:
+          type:
+          - string
+          - 'null'
+          description: Default `us-east-1`.
+    AddGithubConnectorInput:
+      type: object
+      description: |-
+        `POST /v1/connectors/github`: a pasted personal access token or app installation token, checked against GitHub
+        before it is kept.
+      required:
+      - token
+      properties:
+        name:
+          type:
+          - string
+          - 'null'
+        token:
+          type: string
+    AdvancedDefaults:
+      type: object
+      description: What empty `tofuBinary` / `moduleDir` resolve to.
+      required:
+      - tofuBinary
+      - moduleDir
+      properties:
+        moduleDir:
+          type: string
+        tofuBinary:
+          type: string
+    AdvancedSettingsVm:
+      type: object
+      description: The "Advanced (development)" disclosure of Settings.
+      required:
+      - values
+      - defaults
+      properties:
+        defaults:
+          $ref: '#/components/schemas/AdvancedDefaults'
+        values:
+          $ref: '#/components/schemas/LiveSettings'
+    AgentConnectorSource:
+      type: string
+      enum:
+      - login
+      - api-key
+    AgentEventVm:
+      type: object
+      required:
+      - id
+      - at
+      - type
+      - text
+      properties:
+        at:
+          type: integer
+          format: int64
+        id:
+          type: integer
+          format: int64
+        text:
+          type: string
+        type:
+          type: string
+    AgentEventsPage:
+      type: object
+      required:
+      - events
+      - cursor
+      properties:
+        cursor:
+          type: integer
+          format: int64
+          description: Pass back as `cursor` to get only newer events.
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentEventVm'
+    AgentKind:
+      type: string
+      description: Which agent CLI (or the mock) an agent runs.
+      enum:
+      - claude-code
+      - codex
+      - grok
+      - mock
+    AgentRecentEval:
+      type: object
+      required:
+      - value
+      - verdict
+      - label
+      properties:
+        label:
+          type: string
+        value:
+          type: number
+          format: double
+        verdict:
+          $ref: '#/components/schemas/CandidateVerdict'
+    AgentSelection:
+      type: object
+      description: 'One agent choice: a connector and where it runs.'
+      required:
+      - connectorId
+      - where
+      properties:
+        connectorId:
+          type: string
+        where:
+          $ref: '#/components/schemas/AgentsWhere'
+    AgentStats:
+      type: object
+      required:
+      - candidates
+      - verified
+      - rejected
+      - blocked
+      - spendUsd
+      properties:
+        blocked:
+          type: integer
+          format: int64
+        candidates:
+          type: integer
+          format: int64
+        rejected:
+          type: integer
+          format: int64
+        spendUsd:
+          type: number
+          format: double
+        verified:
+          type: integer
+          format: int64
+    AgentStatus:
+      type: string
+      description: Agent lifecycle state.
+      enum:
+      - pending
+      - launching
+      - running
+      - paused
+      - stopped
+      - done
+      - failed
+    AgentVm:
+      type: object
+      required:
+      - id
+      - kind
+      - branch
+      - status
+      - hypothesis
+      - recent
+      - stats
+      - lastEventId
+      - runnerInstanceId
+      properties:
+        branch:
+          type: string
+        hypothesis:
+          type:
+          - string
+          - 'null'
+          description: Latest agent message, used as the "current hypothesis".
+        id:
+          type: string
+        kind:
+          $ref: '#/components/schemas/AgentKind'
+        lastEventId:
+          type: integer
+          format: int64
+          description: Pass to `GET /v1/agents/{id}/events?cursor=` to read only newer events.
+        recent:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentRecentEval'
+        runnerInstanceId:
+          type:
+          - string
+          - 'null'
+        stats:
+          $ref: '#/components/schemas/AgentStats'
+        status:
+          $ref: '#/components/schemas/AgentStatus'
+    AgentsWhere:
+      type: string
+      description: 'Where an optimization''s agents run: this machine, or cloud runners.'
+      enum:
+      - local
+      - cloud
+    ApiError:
+      type: object
+      description: The body of every non-2xx response.
+      required:
+      - code
+      - message
+      properties:
+        code:
+          $ref: '#/components/schemas/ErrorCode'
+        fields:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+          description: Per-field problems, for `invalid_request`.
+        message:
+          type: string
+          description: One plain sentence for the user. Never contains a secret.
+    ApiEvent:
+      oneOf:
+      - type: object
+        description: First message of a connection (no `id`).
+        required:
+        - lastEventId
+        - serverTime
+        - version
+        - type
+        properties:
+          lastEventId:
+            type: integer
+            format: int64
+            description: Id of the newest event so far.
+            minimum: 0
+          serverTime:
+            type: integer
+            format: int64
+          type:
+            type: string
+            enum:
+            - hello
+          version:
+            type: string
+      - type: object
+        description: |-
+          The client's `Last-Event-ID` is older than what the daemon kept (or from before a restart): refetch
+          everything you show.
+        required:
+        - reason
+        - type
+        properties:
+          reason:
+            type: string
+          type:
+            type: string
+            enum:
+            - resync
+      - type: object
+        description: An optimization changed status.
+        required:
+        - optimizationId
+        - status
+        - type
+        properties:
+          optimizationId:
+            type: string
+          status:
+            $ref: '#/components/schemas/OptimizationStatus'
+          type:
+            type: string
+            enum:
+            - optimization
+      - type: object
+        description: An agent logged something. `event` carries it so a log view can append without refetching.
+        required:
+        - optimizationId
+        - agentId
+        - event
+        - type
+        properties:
+          agentId:
+            type: string
+          event:
+            oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/AgentEventVm'
+          optimizationId:
+            type: string
+          type:
+            type: string
+            enum:
+            - agent-event
+      - type: object
+        description: A candidate got its verdict.
+        required:
+        - optimizationId
+        - candidateId
+        - verdict
+        - type
+        properties:
+          candidateId:
+            type: string
+          optimizationId:
+            type: string
+          type:
+            type: string
+            enum:
+            - candidate
+          verdict:
+            $ref: '#/components/schemas/CandidateVerdict'
+      - type: object
+        description: 'The ratchet moved: a verified win.'
+        required:
+        - optimizationId
+        - from
+        - to
+        - type
+        properties:
+          from:
+            type: number
+            format: double
+          optimizationId:
+            type: string
+          to:
+            type: number
+            format: double
+          type:
+            type: string
+            enum:
+            - ratchet
+      - type: object
+        required:
+        - optimizationId
+        - totalUsd
+        - type
+        properties:
+          optimizationId:
+            type: string
+          totalUsd:
+            type: number
+            format: double
+          type:
+            type: string
+            enum:
+            - spend
+      - type: object
+        required:
+        - optimizationId
+        - level
+        - text
+        - type
+        properties:
+          level:
+            $ref: '#/components/schemas/NoticeLevel'
+          optimizationId:
+            type: string
+          text:
+            type: string
+          type:
+            type: string
+            enum:
+            - notice
+      - type: object
+        description: True while any run is active (the app turns it into "prevent system sleep").
+        required:
+        - active
+        - optimizationIds
+        - type
+        properties:
+          active:
+            type: boolean
+          optimizationIds:
+            type: array
+            items:
+              type: string
+          type:
+            type: string
+            enum:
+            - run-active
+      - type: object
+        description: The automatic environment changing phase.
+        required:
+        - sandboxId
+        - phase
+        - region
+        - text
+        - type
+        properties:
+          phase:
+            $ref: '#/components/schemas/SandboxPhase'
+          region:
+            type:
+            - string
+            - 'null'
+          sandboxId:
+            type: string
+          text:
+            type: string
+          type:
+            type: string
+            enum:
+            - sandbox
+      - type: object
+        description: |-
+          An environment draft changed status, or its agent reported progress (`phase` and `text`, the same strings as the
+          TypeScript `EnvironmentDraftProgress`).
+        required:
+        - draftId
+        - status
+        - revision
+        - type
+        properties:
+          draftId:
+            type: string
+          phase:
+            $ref: '#/components/schemas/EnvironmentDraftPhase'
+          revision:
+            type: integer
+            format: int32
+            description: 0 while the first draft is being made.
+            minimum: 0
+          status:
+            $ref: '#/components/schemas/EnvironmentDraftStatus'
+          text:
+            type: string
+          type:
+            type: string
+            enum:
+            - environment-draft
+      - type: object
+        description: A connector changed (the device flow finished, a probe changed its status, it was removed).
+        required:
+        - connectorId
+        - status
+        - type
+        properties:
+          connectorId:
+            type: string
+          status:
+            oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/ConnectorStatus'
+          type:
+            type: string
+            enum:
+            - connector
+      - type: object
+        description: The GitHub sign-in changed (device flow finished, signed out).
+        required:
+        - signedIn
+        - type
+        properties:
+          signedIn:
+            type: boolean
+          type:
+            type: string
+            enum:
+            - github
+      description: One message of the stream.
+    ApproveEnvironmentDraftInput:
+      type: object
+      description: '`POST /v1/environment-drafts/{id}/approval`. The body is optional.'
+      properties:
+        mode:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/EnvironmentApprovalMode'
+            description: '`pr` (default): a branch and a pull request the user merges. `commit`: straight onto the base ref.'
+    AwsAuthKind:
+      type: string
+      description: '`profile` = a named profile with static keys or an assume-role; `sso` = a profile created by `aws configure sso`.'
+      enum:
+      - profile
+      - sso
+    AwsAuthStyle:
+      type: string
+      enum:
+      - sso
+      - role
+      - keys
+      - process
+      - other
+    AwsProfileKind:
+      type: string
+      enum:
+      - sso
+      - role
+      - keys
+      - process
+      - other
+    AwsProfileSource:
+      type: string
+      enum:
+      - config
+      - credentials
+    AwsProfileVm:
+      type: object
+      description: A profile found in `~/.aws/config` or `~/.aws/credentials` (names only, never a key).
+      required:
+      - name
+      - kind
+      - source
+      - ssoSession
+      properties:
+        kind:
+          $ref: '#/components/schemas/AwsProfileKind'
+        name:
+          type: string
+        source:
+          $ref: '#/components/schemas/AwsProfileSource'
+        ssoSession:
+          type:
+          - string
+          - 'null'
+          description: The `sso-session` a profile uses.
+    AwsProfilesVm:
+      type: object
+      required:
+      - profiles
+      - ssoSessions
+      - selected
+      - region
+      - defaultRegion
+      - filesFound
+      properties:
+        defaultRegion:
+          type: string
+        filesFound:
+          type: boolean
+          description: False when neither file exists.
+        profiles:
+          type: array
+          items:
+            $ref: '#/components/schemas/AwsProfileVm'
+        region:
+          type: string
+        selected:
+          type: string
+          description: The profile Ratchet uses (empty = none chosen).
+        ssoSessions:
+          type: array
+          items:
+            type: string
+          description: '`[sso-session x]` names in `~/.aws/config`.'
+    BenchPipelineVm:
+      type: object
+      required:
+      - candidate
+      - queued
+      - stages
+      properties:
+        candidate:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/PipelineCandidate'
+            description: Candidate the pipeline is working on / last worked on.
+        queued:
+          type: integer
+          format: int64
+        stages:
+          type: array
+          items:
+            $ref: '#/components/schemas/PipelineStage'
+    Better:
+      type: string
+      description: Which way is better, as the screens say it.
+      enum:
+      - lower
+      - higher
+    Calibration:
+      type: object
+      description: The calibration record (stored as JSON in `engine_kv` under `opt:<id>:calibration`).
+      required:
+      - version
+      - baselineRuns
+      - cv
+      - noise
+      - repeats
+      - repeatsSource
+      - repeatsCapped
+      - minGain
+      - minGainSource
+      - resolvable
+      - noiseFactor
+      - noiseFactorSource
+      - explanation
+      properties:
+        baselineRuns:
+          type: integer
+          format: int64
+          description: Number of baseline runs the noise was measured on.
+          minimum: 0
+        cv:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: |-
+            Coefficient of variation of the baseline (fraction); `None` when it cannot be estimated (fewer than
+            3 runs, or a zero mean).
+        explanation:
+          type: string
+          description: |-
+            Plain words for the UI, e.g. "this metric is noisy (±9%); wins must beat 9%; each candidate is
+            measured 7 times".
+        minGain:
+          type: number
+          format: double
+          description: The win threshold as a fraction of the current best.
+        minGainSource:
+          $ref: '#/components/schemas/CalibrationSource'
+        noise:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: '`2 x CV` as a fraction: "this metric moves by about +/- noise from run to run". `None` with `cv`.'
+        noiseFactor:
+          type: number
+          format: double
+          description: The k of the noise floor `k x stddev(baseline)`.
+        noiseFactorSource:
+          $ref: '#/components/schemas/CalibrationSource'
+        repeats:
+          type: integer
+          format: int64
+          description: Runs per candidate / confirm run.
+          minimum: 0
+        repeatsCapped:
+          type: boolean
+          description: True when the derivation wanted more than the cap allows.
+        repeatsSource:
+          $ref: '#/components/schemas/CalibrationSource'
+        resolvable:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: |-
+            The gain the chosen repeats can resolve with confidence (a fraction); `min_gain` is never below it
+            when auto.
+        version:
+          type: integer
+          format: int32
+          description: Schema version of this record (it is stored as JSON).
+          minimum: 0
+    CalibrationSource:
+      type: string
+      description: Where a calibrated value came from.
+      enum:
+      - config
+      - auto
+      - default
+    CandidateVerdict:
+      type: string
+      description: |-
+        A candidate's verdict as stored in the ledger: `pending` until the bench runner decides, the rest
+        mirror the ratchet rule.
+      enum:
+      - pending
+      - verified
+      - rejected
+      - failed_confirm
+      - blocked
+    CandidateVm:
+      type: object
+      required:
+      - id
+      - sha
+      - agentId
+      - agent
+      - message
+      - submittedAt
+      - t
+      - verdict
+      - reasons
+      - benchValue
+      - confirmValue
+      - vsBaselinePct
+      - movedRatchet
+      - samples
+      - stats
+      properties:
+        agent:
+          $ref: '#/components/schemas/AgentKind'
+        agentId:
+          type: string
+        benchValue:
+          type:
+          - number
+          - 'null'
+          format: double
+        confirmValue:
+          type:
+          - number
+          - 'null'
+          format: double
+        id:
+          type: string
+        message:
+          type: string
+        movedRatchet:
+          type: boolean
+        reasons:
+          type: array
+          items:
+            type: string
+        samples:
+          type: array
+          items:
+            type: number
+            format: double
+        sha:
+          type: string
+        stats:
+          type: object
+          description: Stats of the latest bench run (`value`, and p50/p95/p99 when the bench reports them).
+          additionalProperties:
+            type: number
+            format: double
+          propertyNames:
+            type: string
+        submittedAt:
+          type: integer
+          format: int64
+        t:
+          type: number
+          format: double
+          description: Minutes since the optimization started.
+        verdict:
+          $ref: '#/components/schemas/CandidateVerdict'
+        vsBaselinePct:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: Signed % improvement vs the baseline (positive = better).
+    CompareRow:
+      type: object
+      description: One row of "Baseline vs best" / "Before and after".
+      required:
+      - key
+      - label
+      - unit
+      - baseline
+      - best
+      - deltaPct
+      - better
+      properties:
+        baseline:
+          type:
+          - number
+          - 'null'
+          format: double
+        best:
+          type:
+          - number
+          - 'null'
+          format: double
+        better:
+          $ref: '#/components/schemas/Better'
+          description: Which way is better for this metric.
+        deltaPct:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: Signed % change best vs baseline.
+        key:
+          type: string
+        label:
+          type: string
+        unit:
+          type: string
+    ConfigError:
+      type: object
+      description: One problem found in `ratchet.yaml`.
+      required:
+      - path
+      - message
+      properties:
+        message:
+          type: string
+        path:
+          type: string
+          description: YAML path, e.g. `guardrails[2].peak_rss` or `objective.direction`. Empty for whole-document errors.
+    ConfigSummary:
+      type: object
+      required:
+      - name
+      - pack
+      - metric
+      - direction
+      - minGain
+      - evaluator
+      - environment
+      - value
+      - guardrails
+      - protectedGlobs
+      - protectedEntries
+      - instanceTypes
+      properties:
+        direction:
+          $ref: '#/components/schemas/Direction'
+        environment:
+          $ref: '#/components/schemas/EnvironmentSummary'
+        evaluator:
+          $ref: '#/components/schemas/EvaluatorSummary'
+        guardrails:
+          type: array
+          items:
+            type: string
+        instanceTypes:
+          type: array
+          items:
+            type: string
+        metric:
+          type: string
+        minGain:
+          type: number
+          format: double
+        name:
+          type:
+          - string
+          - 'null'
+          description: '`objective.name`, the default optimization name.'
+        pack:
+          type:
+          - string
+          - 'null'
+        protectedEntries:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProtectedEntryVm'
+          description: Everything that is protected (automatic set plus the user's), with why.
+        protectedGlobs:
+          type: array
+          items:
+            type: string
+          description: The user's own `protected:` additions.
+        value:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ValueSummary'
+    ConnectionResultVm:
+      type: object
+      required:
+      - target
+      - ok
+      - detail
+      properties:
+        detail:
+          type: string
+          description: One line; never contains a key or token.
+        ok:
+          type: boolean
+        target:
+          $ref: '#/components/schemas/ConnectionTarget'
+    ConnectionTarget:
+      type: string
+      enum:
+      - aws
+      - github
+      - anthropic
+      - openai
+    ConnectorAgent:
+      type: string
+      description: The agent CLIs Ratchet drives.
+      enum:
+      - claude-code
+      - codex
+      - grok
+    ConnectorStatus:
+      type: string
+      description: |-
+        - `connected`: a GitHub account / AWS profile / agent login that works
+        - `expired`: it worked once and needs signing in again (GitHub token revoked, `aws sso login` needed)
+        - `signed-out`: nothing to use (an agent CLI that is not signed in or not installed, a GitHub account without a token)
+        - `valid`: an API key the provider accepted
+        - `invalid`: an API key (or static AWS keys) the provider rejected
+      enum:
+      - connected
+      - expired
+      - signed-out
+      - valid
+      - invalid
+    ConnectorTestVm:
+      type: object
+      description: Result of "Test connection" on one connector.
+      required:
+      - ok
+      - detail
+      - connector
+      properties:
+        connector:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ConnectorVm'
+            description: The connector with its fresh status (`null` if it no longer exists).
+        detail:
+          type: string
+          description: One line; never contains a key or token.
+        ok:
+          type: boolean
+    ConnectorVm:
+      oneOf:
+      - type: object
+        required:
+        - id
+        - name
+        - detail
+        - status
+        - isDefault
+        - login
+        - source
+        - kind
+        properties:
+          detail:
+            type: string
+            description: One muted line under the name. Backticks mark a command to show in monospace.
+          id:
+            type: string
+          isDefault:
+            type: boolean
+            description: The default of its kind (one per kind).
+          kind:
+            type: string
+            enum:
+            - github
+          login:
+            type:
+            - string
+            - 'null'
+            description: The account's login, `null` until it is known.
+          name:
+            type: string
+            description: What the user sees and can rename ("srikanth235").
+          source:
+            $ref: '#/components/schemas/GithubConnectorSource'
+          status:
+            $ref: '#/components/schemas/ConnectorStatus'
+      - type: object
+        required:
+        - id
+        - name
+        - detail
+        - status
+        - isDefault
+        - profile
+        - region
+        - auth
+        - monthlyCapUsd
+        - kind
+        properties:
+          auth:
+            $ref: '#/components/schemas/AwsAuthStyle'
+          detail:
+            type: string
+          id:
+            type: string
+          isDefault:
+            type: boolean
+          kind:
+            type: string
+            enum:
+            - aws
+          monthlyCapUsd:
+            type:
+            - number
+            - 'null'
+            format: double
+            description: Optional monthly spend cap in USD.
+          name:
+            type: string
+          profile:
+            type: string
+            description: Profile name in `~/.aws/config` (names only; credentials stay where AWS keeps them).
+          region:
+            type: string
+          status:
+            $ref: '#/components/schemas/ConnectorStatus'
+      - type: object
+        required:
+        - id
+        - name
+        - detail
+        - status
+        - isDefault
+        - agent
+        - source
+        - runsOn
+        - version
+        - keyHint
+        - kind
+        properties:
+          agent:
+            $ref: '#/components/schemas/ConnectorAgent'
+          detail:
+            type: string
+          id:
+            type: string
+          isDefault:
+            type: boolean
+            description: 'For agents: the one used when a run does not choose.'
+          keyHint:
+            type:
+            - string
+            - 'null'
+            description: Last characters of a stored key, e.g. `····4f2a`. Never the key.
+          kind:
+            type: string
+            enum:
+            - agent
+          name:
+            type: string
+          runsOn:
+            type: array
+            items:
+              $ref: '#/components/schemas/AgentsWhere'
+            description: '`login` runs on this Mac only; `api-key` can run here or on cloud runners.'
+          source:
+            $ref: '#/components/schemas/AgentConnectorSource'
+          status:
+            $ref: '#/components/schemas/ConnectorStatus'
+          version:
+            type:
+            - string
+            - 'null'
+            description: Detected CLI version (login) or `null`.
+      description: One saved connector. `kind` says which of the three it is; the first fields are common.
+    ConnectorsVm:
+      type: object
+      description: Everything the Connectors screen shows.
+      required:
+      - connectors
+      - githubFlow
+      - encryptionAvailable
+      - clientIdConfigured
+      properties:
+        clientIdConfigured:
+          type: boolean
+          description: True when a real OAuth client id is configured for "Sign in with GitHub".
+        connectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorVm'
+        encryptionAvailable:
+          type: boolean
+          description: 'False when the keychain is unavailable: tokens and keys cannot be stored (the environment is still honoured).'
+        githubFlow:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/GithubFlowVm'
+            description: The GitHub device flow in progress (or just ended), for the code to show.
+    CostReconcileLine:
+      type: object
+      description: One category of a reconcile run.
+      required:
+      - category
+      - ledgerUsd
+      - actualUsd
+      - deltaUsd
+      - written
+      properties:
+        actualUsd:
+          type: number
+          format: double
+          description: Billed amount for the category.
+        category:
+          $ref: '#/components/schemas/SpendCategory'
+        deltaUsd:
+          type: number
+          format: double
+          description: '`actual_usd - ledger_usd`; the correction row''s amount when `written`.'
+        ledgerUsd:
+          type: number
+          format: double
+          description: Ledger total for the category before this run (estimates plus earlier corrections).
+        written:
+          type: boolean
+    CostReconcileReport:
+      type: object
+      required:
+      - optimizationId
+      - at
+      - status
+      - window
+      - lines
+      - writtenUsd
+      properties:
+        at:
+          type: integer
+          format: int64
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/CostReconcileLine'
+        optimizationId:
+          $ref: '#/components/schemas/OptimizationId'
+        reason:
+          type:
+          - string
+          - 'null'
+          description: Set when `status` is `pending`.
+        status:
+          $ref: '#/components/schemas/CostReconcileStatus'
+        window:
+          $ref: '#/components/schemas/TimeWindow'
+        writtenUsd:
+          type: number
+          format: double
+          description: Sum of the correction rows written by this run.
+    CostReconcileStatus:
+      type: string
+      description: |-
+        - `reconciled`: at least one correction row was written.
+        - `unchanged`: billing data is complete and already matches the ledger (re-runs land here).
+        - `pending`: billing data is incomplete or missing; nothing was written. Try again after ~24 h.
+      enum:
+      - reconciled
+      - unchanged
+      - pending
+    CreateEnvironmentDraftInput:
+      type: object
+      description: '`POST /v1/environment-drafts`.'
+      required:
+      - repo
+      - goal
+      - agentConnector
+      properties:
+        agentConnector:
+          $ref: '#/components/schemas/AgentKind'
+          description: The user's agent connector that does the drafting (their own login, run on this machine).
+        awsProfile:
+          type:
+          - string
+          - 'null'
+          description: 'The AWS profile selected in Settings: `tofu plan` is checked against that account.'
+        baseRef:
+          type:
+          - string
+          - 'null'
+          description: The protected ref the files are committed to / the PR targets. Default `main`.
+        configPath:
+          type:
+          - string
+          - 'null'
+          description: Path of the config inside the repo (default `ratchet.yaml`).
+        goal:
+          type: string
+          description: What the user wants optimized, in their words.
+        region:
+          type:
+          - string
+          - 'null'
+          description: 'Region of the sandbox (default: `environment.region` of ratchet.yaml, else the default region).'
+        repo:
+          type: string
+          description: 'The repository: `owner/name` or its GitHub URL.'
+        timeLimitSeconds:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: The run's time limit, for the cost estimate (default 2 h).
+    CreateOptimizationInput:
+      type: object
+      description: '`POST /v1/optimizations`.'
+      required:
+      - agents
+      - budgetUsd
+      - timeLimitSeconds
+      - plateauEvals
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentKind'
+        agentsWhere:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/AgentsWhere'
+        baseRef:
+          type: string
+        budgetUsd:
+          type: number
+          format: double
+        connections:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/RepoConnections'
+            description: |-
+              The connectors this run uses (GitHub account, AWS profile, each agent and where it runs). Remembered for the
+              repo. Without it the repo's remembered choice is used, else the defaults. When given, `agents` and
+              `agentsWhere` follow it.
+        demo:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/DemoId'
+            description: Run a demo template in simulation (mock agents, no setup) instead of a repo.
+        environmentDraftId:
+          type:
+          - string
+          - 'null'
+          description: 'Provisional (environment drafts): the approved draft whose environment this run uses.'
+        name:
+          type:
+          - string
+          - 'null'
+        plateauEvals:
+          type: integer
+          format: int32
+          minimum: 0
+        repoUrl:
+          type: string
+          description: A GitHub repo (`owner/name` or a GitHub URL). Ignored for a demo.
+        timeLimitSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+    CreatedOptimization:
+      type: object
+      required:
+      - id
+      properties:
+        id:
+          type: string
+    DaemonStatus:
+      type: object
+      description: '`GET /v1/status`: who is answering.'
+      required:
+      - version
+      - apiVersion
+      - engine
+      - pid
+      - startedAt
+      - uptimeS
+      - socketPath
+      - ledgerPath
+      - lastEventId
+      properties:
+        apiVersion:
+          type: string
+          description: Contract version (`v1`).
+        engine:
+          $ref: '#/components/schemas/EngineInfo'
+        lastEventId:
+          type: integer
+          format: int64
+          description: Id of the newest event on `/v1/events` (resume point for a fresh client).
+          minimum: 0
+        ledgerPath:
+          type:
+          - string
+          - 'null'
+          description: The ledger file; `None` for an in-memory ledger.
+        pid:
+          type: integer
+          format: int32
+          minimum: 0
+        socketPath:
+          type:
+          - string
+          - 'null'
+          description: The unix socket this daemon listens on.
+        startedAt:
+          type: integer
+          format: int64
+          description: Epoch ms.
+        uptimeS:
+          type: integer
+          format: int64
+        version:
+          type: string
+          description: Crate version of `ratchetd`.
+    DemoId:
+      type: string
+      enum:
+      - demo-search
+      - demo-cli
+      - demo-forecast
+    DiffExcerpt:
+      type: object
+      required:
+      - path
+      - lines
+      properties:
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiffLine'
+        path:
+          type: string
+    DiffFileVm:
+      type: object
+      required:
+      - path
+      - additions
+      - deletions
+      - binary
+      properties:
+        additions:
+          type: integer
+          format: int64
+          minimum: 0
+        binary:
+          type: boolean
+        deletions:
+          type: integer
+          format: int64
+          minimum: 0
+        path:
+          type: string
+    DiffLine:
+      type: object
+      required:
+      - kind
+      - text
+      properties:
+        kind:
+          $ref: '#/components/schemas/DiffLineKind'
+        text:
+          type: string
+    DiffLineKind:
+      type: string
+      enum:
+      - add
+      - del
+      - ctx
+      - hunk
+    Direction:
+      type: string
+      description: Which way the objective metric improves.
+      enum:
+      - minimize
+      - maximize
+    EffectiveConnections:
+      type: object
+      description: |-
+        What a run would use right now: the saved choice where there is one, else the defaults. `null` = nothing
+        connected of that kind.
+      required:
+      - github
+      - aws
+      - agents
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentSelection'
+        aws:
+          type:
+          - string
+          - 'null'
+        github:
+          type:
+          - string
+          - 'null'
+    EffectiveProtected:
+      type: object
+      required:
+      - entries
+      - globs
+      - evaluatorGlobs
+      - installGlobs
+      - required
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProtectedEntry'
+          description: 'Everything, de-duplicated, in the order: config, evaluator, environment, install, user.'
+        evaluatorGlobs:
+          type: array
+          items:
+            type: string
+          description: |-
+            Everything except lockfiles and install config: what the bench takes from the evaluator ref and requires
+            to be non-empty. (Lockfiles are pinned separately through the dependency strategy.)
+        globs:
+          type: array
+          items:
+            type: string
+          description: 'Every glob: what the engine blocks candidates on.'
+        installGlobs:
+          type: array
+          items:
+            type: string
+          description: Only the lockfiles and install config.
+        required:
+          type: array
+          items:
+            type: string
+          description: |-
+            The evaluator's own files and the user's list: the globs of which at least one must match a file in the
+            evaluator ref, or the bench refuses to run (an evaluator ref that holds none of them is not trusted).
+            `ratchet.yaml`, the environment and the lockfiles are protected too but do not count here.
+    EngineInfo:
+      type: object
+      description: Which engine answers.
+      required:
+      - kind
+      - mode
+      properties:
+        kind:
+          $ref: '#/components/schemas/EngineKind'
+        mode:
+          $ref: '#/components/schemas/Mode'
+    EngineKind:
+      type: string
+      enum:
+      - sim
+      - real
+    EnvironmentApprovalMode:
+      type: string
+      enum:
+      - commit
+      - pr
+    EnvironmentApprovalVm:
+      type: object
+      description: Where the approved files went.
+      required:
+      - mode
+      - sha
+      - files
+      - locked
+      - at
+      properties:
+        at:
+          type: integer
+          format: int64
+        branch:
+          type: string
+          description: '`pr` only.'
+        files:
+          type: array
+          items:
+            type: string
+          description: Repo paths written.
+        locked:
+          type: boolean
+          description: |-
+            Always true: the environment is locked from here (for `pr`: once the PR is merged), a candidate that touches it
+            is blocked.
+        mode:
+          $ref: '#/components/schemas/EnvironmentApprovalMode'
+        prUrl:
+          type: string
+          description: '`pr` only: "Open as PR".'
+        sha:
+          type: string
+          description: The commit holding the files (on the base ref for `commit`, on `branch` for `pr`).
+    EnvironmentCheckVm:
+      type: object
+      description: 'One of Ratchet''s checks on a draft: isolated, results sealed, same hardware every time, full teardown, ...'
+      required:
+      - id
+      - label
+      - ok
+      - detail
+      properties:
+        detail:
+          type: string
+          description: Why it passed or failed, one line.
+        id:
+          type: string
+        label:
+          type: string
+          description: Plain words for the UI.
+        ok:
+          type: boolean
+    EnvironmentCostVm:
+      type: object
+      required:
+      - usdPerHour
+      - startupMinutes
+      - estimateForRunUsd
+      properties:
+        estimateForRunUsd:
+          type: number
+          format: double
+          description: '`usd_per_hour x (run hours + start-up)` for the run''s time limit.'
+        startupMinutes:
+          type: integer
+          format: int32
+          description: Minutes until the environment is ready to measure.
+          minimum: 0
+        usdPerHour:
+          type: number
+          format: double
+          description: Sum of the resources' hourly prices (excludes the sandbox's fixed private-network cost, ~$0.04/h).
+    EnvironmentDraftPhase:
+      type: string
+      description: |-
+        What a machine of the environment does (the `role` of the base module's `machines` map).
+        Which step an environment draft is in while its agent works.
+      enum:
+      - reading
+      - drafting
+      - validating
+      - done
+      - failed
+    EnvironmentDraftStatus:
+      type: string
+      enum:
+      - drafting
+      - ready
+      - failed
+      - approved
+    EnvironmentDraftVm:
+      type: object
+      description: A draft and where it stands in the draft / revise / approve loop.
+      required:
+      - id
+      - repo
+      - baseRef
+      - goal
+      - region
+      - status
+      - revision
+      - draft
+      - messages
+      - createdAt
+      - updatedAt
+      properties:
+        approval:
+          $ref: '#/components/schemas/EnvironmentApprovalVm'
+          description: Set once approved.
+        awsProfile:
+          type: string
+          description: The AWS profile `tofu plan` is checked against.
+        baseRef:
+          type: string
+        createdAt:
+          type: integer
+          format: int64
+        draft:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/EnvironmentProposalVm'
+            description: '`null` until the first draft is ready (and when it failed).'
+        error:
+          type: string
+          description: Why drafting (or the last revision) failed.
+        goal:
+          type: string
+          description: The goal the user typed ("Make checkout p95 faster").
+        id:
+          type: string
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentMessageVm'
+          description: The user's change requests and the agent's replies.
+        region:
+          type: string
+        repo:
+          type: string
+        revision:
+          type: integer
+          format: int32
+          description: 1 for the first draft, +1 for every revision; 0 while the first draft is being made.
+          minimum: 0
+        status:
+          $ref: '#/components/schemas/EnvironmentDraftStatus'
+        updatedAt:
+          type: integer
+          format: int64
+    EnvironmentDraftsVm:
+      type: object
+      description: '`GET /v1/environment-drafts`.'
+      required:
+      - drafts
+      properties:
+        drafts:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentDraftVm'
+          description: Newest first.
+    EnvironmentFileVm:
+      type: object
+      description: 'A file of the draft: `ratchet.yaml`, or a file under `infra/ratchet/` (OpenTofu, Dockerfile, seed script).'
+      required:
+      - path
+      - content
+      properties:
+        content:
+          type: string
+        path:
+          type: string
+          description: Repo-relative POSIX path.
+    EnvironmentMessageFrom:
+      type: string
+      enum:
+      - user
+      - agent
+    EnvironmentMessageVm:
+      type: object
+      description: One turn of the revise loop.
+      required:
+      - from
+      - text
+      - at
+      properties:
+        at:
+          type: integer
+          format: int64
+          description: Epoch ms.
+        from:
+          $ref: '#/components/schemas/EnvironmentMessageFrom'
+        text:
+          type: string
+    EnvironmentPhase:
+      type: string
+      description: 'Phase of an environment (sandbox) as seen from outside. `none`: the ledger has it, nothing reported a phase.'
+      enum:
+      - none
+      - creating
+      - ready
+      - idle
+      - destroying
+      - destroyed
+      - failed
+    EnvironmentProposalVm:
+      type: object
+      description: What the setup agent proposed, as "New optimization > Environment" shows it.
+      required:
+      - scope
+      - reason
+      - resources
+      - files
+      - checks
+      - cost
+      - agent
+      - durationS
+      - usdSpent
+      properties:
+        agent:
+          $ref: '#/components/schemas/AgentKind'
+          description: Which connector drafted it.
+        checks:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentCheckVm'
+        cost:
+          $ref: '#/components/schemas/EnvironmentCostVm'
+        durationS:
+          type: integer
+          format: int64
+          description: How long drafting took, seconds (all revisions).
+          minimum: 0
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentFileVm'
+          description: 'What would be committed: `ratchet.yaml` plus the files under `infra/ratchet/`, with their content ("View files").'
+        reason:
+          type: string
+          description: Why this scope, in a sentence or two.
+        resources:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentResourceVm'
+        scope:
+          $ref: '#/components/schemas/EnvironmentScope'
+        usdSpent:
+          type: number
+          format: double
+          description: What the setup agent cost in model tokens, USD (all revisions).
+    EnvironmentResourceVm:
+      type: object
+      description: One row of "What gets created".
+      required:
+      - name
+      - role
+      - machine
+      - detail
+      - usdPerHour
+      properties:
+        detail:
+          type: string
+          description: 'One plain line: "shop-api in the repo''s container".'
+        machine:
+          type: string
+          description: Instance type, "c7i.2xlarge".
+        name:
+          type: string
+          description: '"API", "Postgres 16", "Load generator".'
+        role:
+          $ref: '#/components/schemas/EnvironmentRole'
+        usdPerHour:
+          type: number
+          format: double
+    EnvironmentRole:
+      type: string
+      enum:
+      - app
+      - database
+      - cache
+      - load
+      - evaluator
+      - other
+    EnvironmentScope:
+      type: string
+      description: |-
+        How much infrastructure an optimization's environment needs (`environment.scope`, docs/SIMPLIFIED_MODEL.md,
+        "Dynamic environments"). `none`: pure code / tests, the evaluator's container is all there is; `single`: one
+        machine on pinned hardware; `full`: a stack (app + databases + seeded data + a load generator) written as
+        OpenTofu under `infra/ratchet/` on top of the base module Ratchet ships.
+      enum:
+      - none
+      - single
+      - full
+    EnvironmentSummary:
+      type: object
+      description: '`environment:` of ratchet.yaml (all optional). `image` null = the evaluator runs on the host.'
+      required:
+      - image
+      - machine
+      - region
+      - network
+      properties:
+        image:
+          type:
+          - string
+          - 'null'
+        machine:
+          type: string
+        network:
+          type: array
+          items:
+            type: string
+        region:
+          type:
+          - string
+          - 'null'
+    EnvironmentVm:
+      type: object
+      description: One automatic environment, as seen from outside.
+      required:
+      - sandboxId
+      - region
+      - phase
+      - text
+      - simulated
+      - activeRuns
+      - instancesRunning
+      - spendUsd
+      - destroyAt
+      - idleSince
+      - canEnd
+      properties:
+        activeRuns:
+          type: array
+          items:
+            type: string
+        canEnd:
+          type: boolean
+          description: Ending it now is possible (no run is active).
+        destroyAt:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: When the automatic destroy is due.
+        idleSince:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        instancesRunning:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        phase:
+          $ref: '#/components/schemas/EnvironmentPhase'
+        region:
+          type:
+          - string
+          - 'null'
+        sandboxId:
+          type: string
+        simulated:
+          type: boolean
+        spendUsd:
+          type: number
+          format: double
+          description: Estimated spend of the runs that are active in it.
+        text:
+          type: string
+          description: The last phase message ("environment ready").
+    EnvironmentsVm:
+      type: object
+      required:
+      - environments
+      - lastReceipt
+      - idleMinutes
+      properties:
+        environments:
+          type: array
+          items:
+            $ref: '#/components/schemas/EnvironmentVm'
+        idleMinutes:
+          type: integer
+          format: int32
+          description: Idle window before an unused environment is removed, minutes.
+          minimum: 0
+        lastReceipt:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TeardownReceiptVm'
+            description: The most recent teardown across environments.
+    ErrorCode:
+      type: string
+      description: |-
+        Machine-readable error class. The HTTP status follows it: `unauthorized` 401, `not_found` 404,
+        `invalid_request` 400, `conflict` 409, `not_ready` 409, `unsupported` 501, `upstream` 502, `internal` 500.
+      enum:
+      - unauthorized
+      - not_found
+      - invalid_request
+      - conflict
+      - not_ready
+      - unsupported
+      - upstream
+      - internal
+    EvaluatorKind:
+      type: string
+      description: What kind of trusted evaluation produces the objective metric.
+      enum:
+      - benchmark
+      - backtest
+      - eval
+      - simulation
+    EvaluatorSummary:
+      type: object
+      required:
+      - kind
+      - ref
+      - run
+      - repeats
+      - hardware
+      - holdout
+      - template
+      properties:
+        hardware:
+          type: string
+        holdout:
+          type:
+          - string
+          - 'null'
+        kind:
+          $ref: '#/components/schemas/EvaluatorKind'
+        ref:
+          type: string
+        repeats:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        run:
+          type: string
+        template:
+          type:
+          - string
+          - 'null'
+    FieldError:
+      type: object
+      description: One problem with one field of a request (a YAML path, a JSON field, a setting name).
+      required:
+      - path
+      - message
+      properties:
+        message:
+          type: string
+        path:
+          type: string
+    GithubConnectorSource:
+      type: string
+      enum:
+      - device
+      - token
+      - env
+    GithubFlowState:
+      type: string
+      enum:
+      - pending
+      - expired
+      - denied
+      - error
+    GithubFlowVm:
+      type: object
+      required:
+      - state
+      - userCode
+      - verificationUri
+      - expiresAt
+      - message
+      properties:
+        expiresAt:
+          type: integer
+          format: int64
+        message:
+          type:
+          - string
+          - 'null'
+        state:
+          $ref: '#/components/schemas/GithubFlowState'
+        userCode:
+          type: string
+          description: Shown to the user, who types it at `verificationUri`.
+        verificationUri:
+          type: string
+    GithubSource:
+      type: string
+      description: '`device`: "Sign in with GitHub"; `token`: pasted (Advanced); `env`: GITHUB_TOKEN / GH_TOKEN.'
+      enum:
+      - device
+      - token
+      - env
+    GithubStatusVm:
+      type: object
+      description: The GitHub row of Settings. The token itself never leaves the daemon.
+      required:
+      - signedIn
+      - login
+      - source
+      - clientIdConfigured
+      - flow
+      properties:
+        clientIdConfigured:
+          type: boolean
+          description: False while the built-in placeholder OAuth client id is in use.
+        flow:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/GithubFlowVm'
+            description: The device-flow sign-in in progress (or the reason the last one ended).
+        login:
+          type:
+          - string
+          - 'null'
+        signedIn:
+          type: boolean
+        source:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/GithubSource'
+    HarnessAuth:
+      type: string
+      enum:
+      - signed-in
+      - api-key
+      - signed-out
+    HarnessKind:
+      type: string
+      enum:
+      - claude-code
+      - codex
+      - grok
+    HarnessVm:
+      type: object
+      description: One detected agent CLI.
+      required:
+      - kind
+      - installed
+      - version
+      - path
+      - auth
+      - hint
+      properties:
+        auth:
+          $ref: '#/components/schemas/HarnessAuth'
+        hint:
+          type: string
+          description: What to do next, or what was found. Never contains a credential.
+        installed:
+          type: boolean
+        kind:
+          $ref: '#/components/schemas/HarnessKind'
+        path:
+          type:
+          - string
+          - 'null'
+        version:
+          type:
+          - string
+          - 'null'
+    InspectRepoInput:
+      type: object
+      required:
+      - source
+      properties:
+        connectorId:
+          type:
+          - string
+          - 'null'
+          description: 'Read the repo with this GitHub connector (default: the default one).'
+        source:
+          $ref: '#/components/schemas/RepoSource'
+    Kpi:
+      type: object
+      required:
+      - id
+      - label
+      - value
+      - change
+      - foot
+      - trend
+      properties:
+        change:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/KpiChange'
+            description: '`null` when the previous window has no data to compare with.'
+        foot:
+          type: string
+        id:
+          type: string
+        label:
+          type: string
+        trend:
+          type: array
+          items:
+            type: number
+            format: double
+        unit:
+          type: string
+        value:
+          type: string
+    KpiChange:
+      type: object
+      description: Change vs the previous equal-length window, e.g. `+3`, `+6 pts`, `-12%`.
+      required:
+      - text
+      - tone
+      properties:
+        text:
+          type: string
+        tone:
+          $ref: '#/components/schemas/Tone'
+    KpiRange:
+      type: string
+      description: Window the Optimizations KPI cards cover (compared with the equal-length window before it).
+      enum:
+      - 7d
+      - 30d
+      - 90d
+    LabeledUsd:
+      type: object
+      required:
+      - label
+      - usd
+      properties:
+        label:
+          type: string
+        usd:
+          type: number
+          format: double
+    LiveSettings:
+      type: object
+      description: Everything a client may read and write for live mode (no secrets). Empty string = not set / use the default.
+      required:
+      - awsProfile
+      - awsRegion
+      - awsAuth
+      - runnerImageRef
+      - benchImageRef
+      - tofuBinary
+      - moduleDir
+      properties:
+        awsAuth:
+          $ref: '#/components/schemas/AwsAuthKind'
+        awsProfile:
+          type: string
+        awsRegion:
+          type: string
+        benchImageRef:
+          type: string
+          description: AMI that bench / confirm instances boot from.
+        moduleDir:
+          type: string
+          description: Directory of the OpenTofu module; empty = the bundled `infra/aws`.
+        runnerImageRef:
+          type: string
+          description: AMI that agent runners boot from.
+        tofuBinary:
+          type: string
+          description: Path to the `tofu` binary; empty = the bundled one, else `tofu` on PATH.
+    LiveSettingsInput:
+      type: object
+      description: |-
+        `PUT /v1/settings/advanced`: any subset of the live settings; validated as a whole, nothing is saved if any
+        field is invalid.
+      properties:
+        awsAuth:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/AwsAuthKind'
+        awsProfile:
+          type:
+          - string
+          - 'null'
+        awsRegion:
+          type:
+          - string
+          - 'null'
+        benchImageRef:
+          type:
+          - string
+          - 'null'
+        moduleDir:
+          type:
+          - string
+          - 'null'
+        runnerImageRef:
+          type:
+          - string
+          - 'null'
+        tofuBinary:
+          type:
+          - string
+          - 'null'
+    MessageAgentInput:
+      type: object
+      required:
+      - text
+      properties:
+        text:
+          type: string
+    MetricOption:
+      type: object
+      description: |-
+        A metric the evaluator reports that belongs with the objective: the objective's siblings
+        (`http_req_duration.p50` next to `.p95`), or for a top-level objective the other top-level metrics that are not
+        guardrails (`mape`, `bias` next to `wape`).
+      required:
+      - key
+      - label
+      - unit
+      - objective
+      properties:
+        key:
+          type: string
+          description: Flattened metric name, e.g. `http_req_duration.p99`.
+        label:
+          type: string
+          description: Short label, e.g. `p99`.
+        objective:
+          type: boolean
+        unit:
+          type: string
+    Mode:
+      type: string
+      description: Whether the engine talks to real systems or to the simulation.
+      enum:
+      - live
+      - simulation
+    NoticeLevel:
+      type: string
+      enum:
+      - info
+      - warning
+      - error
+    OptimizationDetail:
+      type: object
+      required:
+      - summary
+      - baseRef
+      - minGain
+      - timeLimitS
+      - startedAt
+      - endedAt
+      - elapsedS
+      - baselineSamples
+      - baselineStats
+      - noiseFloor
+      - agents
+      - pipeline
+      - prUrl
+      - receipt
+      - calibration
+      - configYaml
+      - metrics
+      - compare
+      - spans
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentVm'
+        baseRef:
+          type: string
+        baselineSamples:
+          type: array
+          items:
+            type: number
+            format: double
+        baselineStats:
+          type: object
+          additionalProperties:
+            type: number
+            format: double
+          propertyNames:
+            type: string
+        calibration:
+          type:
+          - string
+          - 'null'
+          description: Plain-words calibration ("this metric is noisy (+-9%); wins must beat 9%"); `null` until the baseline ran.
+        compare:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompareRow'
+          description: Baseline vs best verified, objective family first, then guardrail metrics; empty before the first win.
+        configYaml:
+          type: string
+          description: 'Read-only: the repo owns ratchet.yaml, changes go through a pull request.'
+        elapsedS:
+          type: number
+          format: double
+        endedAt:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        metrics:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricOption'
+          description: Metrics comparable with the objective, from the baseline's stats.
+        minGain:
+          type: number
+          format: double
+        noiseFloor:
+          type:
+          - number
+          - 'null'
+          format: double
+        pipeline:
+          $ref: '#/components/schemas/BenchPipelineVm'
+        prUrl:
+          type:
+          - string
+          - 'null'
+        receipt:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TeardownReceiptVm'
+            description: The sandbox teardown receipt; `null` while the environment is still alive (or the run never used one).
+        spans:
+          type:
+          - array
+          - 'null'
+          items:
+            $ref: '#/components/schemas/SpanRow'
+          description: '`null` when the evaluator reports no spans or there is no verified win yet.'
+        startedAt:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        summary:
+          $ref: '#/components/schemas/OptimizationVm'
+        timeLimitS:
+          type: integer
+          format: int64
+    OptimizationId:
+      type: string
+      description: Id of an optimization (`opt_...`).
+    OptimizationStatus:
+      type: string
+      description: Optimization lifecycle state.
+      enum:
+      - draft
+      - baselining
+      - running
+      - stopping
+      - completed
+      - stopped
+      - failed
+    OptimizationVm:
+      type: object
+      description: One row of the Optimizations table (and the header of the detail screen).
+      required:
+      - id
+      - name
+      - repo
+      - metric
+      - unit
+      - direction
+      - baseline
+      - best
+      - gainPct
+      - status
+      - agents
+      - spendUsd
+      - budgetUsd
+      - updated
+      - candidateCount
+      - verifiedWins
+      - createdAt
+      - pack
+      - evaluatorKind
+      - value
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentKind'
+        baseline:
+          type:
+          - number
+          - 'null'
+          format: double
+        best:
+          type:
+          - number
+          - 'null'
+          format: double
+        budgetUsd:
+          type: number
+          format: double
+        candidateCount:
+          type: integer
+          format: int64
+        createdAt:
+          type: integer
+          format: int64
+        direction:
+          $ref: '#/components/schemas/Better'
+        evaluatorKind:
+          $ref: '#/components/schemas/EvaluatorKind'
+        gainPct:
+          type:
+          - number
+          - 'null'
+          format: double
+        id:
+          type: string
+        metric:
+          type: string
+        name:
+          type: string
+        pack:
+          type:
+          - string
+          - 'null'
+          description: Template category and evaluator kind from ratchet.yaml (ledger columns).
+        repo:
+          type: string
+        spendUsd:
+          type: number
+          format: double
+        status:
+          $ref: '#/components/schemas/UiStatus'
+        unit:
+          type: string
+        updated:
+          type: string
+          description: '"live" while running, else a relative time ("3h ago").'
+        value:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ValueVm'
+            description: Dollar value of the improvement so far; `null` without `objective.value` or without an improvement.
+        verifiedWins:
+          type: integer
+          format: int64
+    OptimizationsSnapshot:
+      type: object
+      description: '`GET /v1/optimizations`: everything the Optimizations screen shows in one snapshot.'
+      required:
+      - range
+      - kpis
+      - featuredId
+      - featuredSeries
+      - optimizations
+      - activity
+      - engine
+      properties:
+        activity:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActivityVm'
+        engine:
+          $ref: '#/components/schemas/EngineInfo'
+        featuredId:
+          type:
+          - string
+          - 'null'
+        featuredSeries:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/RatchetSeries'
+            description: Series for the featured optimization's chart.
+        kpis:
+          type: array
+          items:
+            $ref: '#/components/schemas/Kpi'
+        optimizations:
+          type: array
+          items:
+            $ref: '#/components/schemas/OptimizationVm'
+        range:
+          $ref: '#/components/schemas/KpiRange'
+    OverviewDirection:
+      type: string
+      description: '`lower` = a smaller metric is better.'
+      enum:
+      - lower
+      - higher
+    OverviewNeed:
+      type: object
+      required:
+      - id
+      - kind
+      - optimizationId
+      - title
+      - sub
+      - action
+      properties:
+        action:
+          type: string
+          description: Button label.
+        id:
+          type: string
+        kind:
+          $ref: '#/components/schemas/OverviewNeedKind'
+        optimizationId:
+          type: string
+        sub:
+          type: string
+        title:
+          type: string
+    OverviewNeedKind:
+      type: string
+      enum:
+      - ship
+      - failed
+    OverviewRange:
+      type: string
+      description: Window the Overview covers. `all` = everything in the ledger.
+      enum:
+      - 30d
+      - 90d
+      - all
+    OverviewReturn:
+      type: object
+      description: Yearly value per $1 spent, and days until the spend is earned back.
+      required:
+      - ratio
+      - paybackDays
+      properties:
+        paybackDays:
+          type: number
+          format: double
+        ratio:
+          type: number
+          format: double
+    OverviewRow:
+      type: object
+      required:
+      - id
+      - name
+      - repo
+      - status
+      - statusLabel
+      - tone
+      - remainingS
+      - metric
+      - unit
+      - direction
+      - baseline
+      - best
+      - gainPct
+      - verifiedWins
+      - spentUsd
+      - budgetUsd
+      - live
+      - valueUsdPerYear
+      properties:
+        baseline:
+          type:
+          - number
+          - 'null'
+          format: double
+        best:
+          type:
+          - number
+          - 'null'
+          format: double
+        budgetUsd:
+          type: number
+          format: double
+        direction:
+          $ref: '#/components/schemas/OverviewDirection'
+        gainPct:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: Signed gain vs baseline in percent (positive = better); `null` without a baseline.
+        id:
+          type: string
+        live:
+          type: boolean
+        metric:
+          type: string
+        name:
+          type: string
+        remainingS:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: Seconds left of the time limit while running, else `null`.
+        repo:
+          type: string
+        spentUsd:
+          type: number
+          format: double
+          description: Spend in the range (lifetime when the range is `all`).
+        status:
+          $ref: '#/components/schemas/UiStatus'
+          description: Ledger status as the pills use it (`pr-open` once a pull request exists).
+        statusLabel:
+          type: string
+          description: The status word shown next to the dot ("Running", "Waiting on you", "No win").
+        tone:
+          $ref: '#/components/schemas/StatusTone'
+        unit:
+          type: string
+        valueUsdPerYear:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: Value of the wins in the range, USD per year; `null` without a value model.
+        verifiedWins:
+          type: integer
+          format: int64
+    OverviewSpent:
+      type: object
+      required:
+      - usd
+      - budgetUsd
+      - optimizations
+      properties:
+        budgetUsd:
+          type: number
+          format: double
+          description: Budget of the optimizations listed in `rows`.
+        optimizations:
+          type: integer
+          format: int64
+        usd:
+          type: number
+          format: double
+    OverviewValue:
+      type: object
+      required:
+      - usdPerYear
+      - wins
+      - basis
+      properties:
+        basis:
+          $ref: '#/components/schemas/ValueBasis'
+        usdPerYear:
+          type: number
+          format: double
+        wins:
+          type: integer
+          format: int64
+    OverviewVm:
+      type: object
+      required:
+      - range
+      - from
+      - to
+      - empty
+      - spent
+      - value
+      - returnOnSpend
+      - wins
+      - needsYou
+      - rows
+      properties:
+        empty:
+          type: boolean
+          description: The ledger has no optimization at all (the Overview shows one calm empty state).
+        from:
+          type: integer
+          format: int64
+          description: The window, epoch ms. `from` is the first activity for `all`.
+        needsYou:
+          type: array
+          items:
+            $ref: '#/components/schemas/OverviewNeed'
+        range:
+          $ref: '#/components/schemas/OverviewRange'
+        returnOnSpend:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/OverviewReturn'
+            description: '`null` without value or spend.'
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/OverviewRow'
+          description: Optimizations with activity in the range (drafts created in it included), newest first.
+        spent:
+          $ref: '#/components/schemas/OverviewSpent'
+        to:
+          type: integer
+          format: int64
+        value:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/OverviewValue'
+            description: '`null` when no optimization has a value model ("Set a value").'
+        wins:
+          type: array
+          items:
+            $ref: '#/components/schemas/OverviewWin'
+          description: Staircase of cumulative value, oldest first; empty without a value model or wins in the range.
+    OverviewWin:
+      type: object
+      description: 'One step of the "value locked in" staircase: a verified win with a value model.'
+      required:
+      - at
+      - cumulativeUsdPerYear
+      - usdPerYear
+      - optimizationId
+      - optimization
+      properties:
+        at:
+          type: integer
+          format: int64
+          description: When the ratchet moved (epoch ms).
+        cumulativeUsdPerYear:
+          type: number
+          format: double
+          description: Cumulative value locked in after this win, USD per year.
+        optimization:
+          type: string
+        optimizationId:
+          type: string
+        usdPerYear:
+          type: number
+          format: double
+          description: What this win added, USD per year.
+    PipelineCandidate:
+      type: object
+      required:
+      - id
+      - sha
+      - agent
+      properties:
+        agent:
+          $ref: '#/components/schemas/AgentKind'
+        id:
+          type: string
+        sha:
+          type: string
+    PipelineStage:
+      type: object
+      required:
+      - id
+      - label
+      - state
+      - detail
+      properties:
+        detail:
+          type: string
+        id:
+          $ref: '#/components/schemas/StageId'
+        label:
+          type: string
+        state:
+          $ref: '#/components/schemas/StageState'
+    PreflightInput:
+      type: object
+      required:
+      - agents
+      - agentsWhere
+      - source
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentKind'
+        agentsWhere:
+          $ref: '#/components/schemas/AgentsWhere'
+        repo:
+          type:
+          - string
+          - 'null'
+          description: '`owner/name`: check the connectors remembered for this repo instead of the defaults.'
+        source:
+          $ref: '#/components/schemas/PreflightSource'
+    PreflightItem:
+      type: object
+      required:
+      - id
+      - label
+      - state
+      - detail
+      properties:
+        detail:
+          type: string
+        id:
+          type: string
+        label:
+          type: string
+        state:
+          $ref: '#/components/schemas/PreflightState'
+    PreflightSource:
+      type: string
+      description: '`POST /v1/preflight`: "what''s missing" for a run.'
+      enum:
+      - demo
+      - github
+      - local
+    PreflightState:
+      type: string
+      enum:
+      - ok
+      - warn
+      - fail
+    ProposeTemplateInput:
+      type: object
+      description: 'What `EngineApi::propose_template` needs: a repository, the branch the PR targets, and the template.'
+      required:
+      - repoUrl
+      - baseRef
+      - templateId
+      properties:
+        baseRef:
+          type: string
+          description: The branch the PR targets (and the files are added on top of).
+        direction:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/Direction'
+        metric:
+          type:
+          - string
+          - 'null'
+        overwrite:
+          type:
+          - boolean
+          - 'null'
+          description: 'Add the files even when some already exist on `base_ref` (they are replaced). Default false: refuse.'
+        repoUrl:
+          type: string
+        templateId:
+          type: string
+          description: A template id from `list_templates()` (a legacy `--pack` name is accepted). Demos cannot be proposed.
+        valueUsd:
+          type:
+          - number
+          - 'null'
+          format: double
+    ProposeTemplateResult:
+      type: object
+      required:
+      - prUrl
+      - branch
+      - sha
+      - templateId
+      - files
+      properties:
+        branch:
+          type: string
+          description: The branch the PR was opened from.
+        files:
+          type: array
+          items:
+            type: string
+          description: Repo paths added by the commit.
+        prUrl:
+          type: string
+        sha:
+          type: string
+          description: The commit on `branch`.
+        templateId:
+          type: string
+    ProtectedEntry:
+      type: object
+      required:
+      - glob
+      - source
+      - reason
+      properties:
+        glob:
+          type: string
+        reason:
+          type: string
+          description: Plain words, for the UI and for the reason shown when a candidate is blocked.
+        source:
+          $ref: '#/components/schemas/ProtectedSource'
+    ProtectedEntryVm:
+      type: object
+      required:
+      - glob
+      - reason
+      properties:
+        glob:
+          type: string
+        reason:
+          type: string
+    ProtectedSource:
+      type: string
+      description: Why a glob is protected.
+      enum:
+      - ratchet
+      - evaluator
+      - environment
+      - install
+      - user
+    PullRequestVm:
+      type: object
+      required:
+      - url
+      properties:
+        url:
+          type: string
+    RatchetPoint:
+      type: object
+      description: One candidate on the ratchet chart. `verified` = it moved the ratchet.
+      required:
+      - t
+      - value
+      - agent
+      - verified
+      properties:
+        agent:
+          $ref: '#/components/schemas/AgentKind'
+        label:
+          type: string
+        t:
+          type: number
+          format: double
+          description: Minutes since start.
+        value:
+          type: number
+          format: double
+        verified:
+          type: boolean
+    RatchetSeries:
+      type: object
+      required:
+      - metric
+      - options
+      - unit
+      - direction
+      - baseline
+      - steps
+      - points
+      - noiseFloor
+      - tMax
+      properties:
+        baseline:
+          type:
+          - number
+          - 'null'
+          format: double
+        direction:
+          $ref: '#/components/schemas/Better'
+        metric:
+          type: string
+          description: The metric this series plots (the objective unless another option was asked for).
+        noiseFloor:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: Absolute noise floor of the baseline (metric units).
+        options:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricOption'
+          description: Switch options (objective included); the screen shows a switch only when there are several.
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/RatchetPoint'
+          description: Every candidate that has a bench result.
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/StepPoint'
+          description: Staircase of the best value; the first step is the baseline at t=0.
+        tMax:
+          type: number
+          format: double
+        unit:
+          type: string
+    ReceiptRemoved:
+      type: object
+      description: What a sandbox teardown removed (counts; ids stay in the ledger).
+      required:
+      - instances
+      - agentIdentities
+      - secrets
+      - resources
+      properties:
+        agentIdentities:
+          type: integer
+          format: int64
+        instances:
+          type: integer
+          format: int64
+        resources:
+          type: array
+          items:
+            type: string
+        secrets:
+          type: integer
+          format: int64
+    ReceiptRun:
+      type: object
+      required:
+      - optimizationId
+      - status
+      - spendUsd
+      properties:
+        optimizationId:
+          type: string
+        spendUsd:
+          type: number
+          format: double
+        status:
+          type: string
+    ReceiptTrigger:
+      type: string
+      enum:
+      - idle
+      - manual
+    RepoConnections:
+      type: object
+      description: 'What one repo''s runs use: one GitHub account, one AWS profile, and one connector per agent with where it runs.'
+      required:
+      - github
+      - aws
+      - agents
+      properties:
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentSelection'
+        aws:
+          type: string
+        github:
+          type: string
+    RepoConnectionsVm:
+      type: object
+      description: '`GET /v1/connector-selections?repo=`.'
+      required:
+      - repo
+      - saved
+      - effective
+      properties:
+        effective:
+          $ref: '#/components/schemas/EffectiveConnections'
+        repo:
+          type: string
+          description: '`owner/name`, lower-cased: the key the selection is remembered under.'
+        saved:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/RepoConnections'
+            description: What was saved for this repo last time (only entries that still exist); `null` if nothing usable was saved.
+    RepoInspectVm:
+      type: object
+      description: What step 1 learned about the chosen repo (read from the default branch, never typed).
+      required:
+      - source
+      - repo
+      - baseRef
+      - configYaml
+      - config
+      - errors
+      - templates
+      - problem
+      properties:
+        baseRef:
+          type: string
+        config:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ConfigSummary'
+            description: Parsed summary; `null` when there is no ratchet.yaml or it does not parse.
+        configYaml:
+          type:
+          - string
+          - 'null'
+          description: The ratchet.yaml text, read-only; `null` when the repo has none.
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigError'
+        problem:
+          type:
+          - string
+          - 'null'
+          description: Why the repo cannot be used here (a local folder with no GitHub remote, not a git repo, ...).
+        repo:
+          type:
+          - string
+          - 'null'
+          description: '`owner/name` (also for a local folder, from its `origin`); `null` for a local folder with no GitHub remote.'
+        source:
+          $ref: '#/components/schemas/RepoSource'
+        templates:
+          type: array
+          items:
+            $ref: '#/components/schemas/TemplateInfo'
+          description: 'Offered when there is no ratchet.yaml: "Add via pull request".'
+    RepoSource:
+      oneOf:
+      - type: object
+        required:
+        - repo
+        - kind
+        properties:
+          kind:
+            type: string
+            enum:
+            - github
+          repo:
+            type: string
+      - type: object
+        required:
+        - path
+        - kind
+        properties:
+          kind:
+            type: string
+            enum:
+            - local
+          path:
+            type: string
+      description: 'Where an optimization starts from: a GitHub repo of the signed-in account, or a local folder (this-machine runs).'
+    RepoVm:
+      type: object
+      required:
+      - fullName
+      - defaultBranch
+      - private
+      - description
+      - pushedAt
+      properties:
+        defaultBranch:
+          type: string
+        description:
+          type:
+          - string
+          - 'null'
+        fullName:
+          type: string
+          description: '`owner/name`'
+        private:
+          type: boolean
+        pushedAt:
+          type:
+          - string
+          - 'null'
+    ReportVm:
+      type: object
+      description: The markdown report of an optimization (the app offers it in a save dialog, the CLI writes it to a file).
+      required:
+      - fileName
+      - markdown
+      properties:
+        fileName:
+          type: string
+        markdown:
+          type: string
+    ReviseEnvironmentDraftInput:
+      type: object
+      description: '`POST /v1/environment-drafts/{id}/revisions`: "Ask for a change", or "Use a smaller setup".'
+      required:
+      - message
+      properties:
+        message:
+          type: string
+          description: 'Plain words: "use a smaller setup", "use RDS instead of a Postgres container".'
+    SandboxPhase:
+      type: string
+      description: |-
+        `creating` -> `ready` -> (`idle` while no run is active) -> `destroying` -> `destroyed`; `failed` when a step
+        failed.
+      enum:
+      - creating
+      - ready
+      - idle
+      - destroying
+      - destroyed
+      - failed
+    SaveRepoConnectionsInput:
+      type: object
+      description: '`PUT /v1/connector-selections`: remember the choice for a repo.'
+      required:
+      - repo
+      - selection
+      properties:
+        repo:
+          type: string
+        selection:
+          $ref: '#/components/schemas/RepoConnections'
+    SecretName:
+      type: string
+      enum:
+      - anthropicApiKey
+      - openaiApiKey
+      - githubToken
+    SecretsPresent:
+      type: object
+      description: Which secrets are stored (never their values).
+      required:
+      - anthropicApiKey
+      - openaiApiKey
+      - githubToken
+      properties:
+        anthropicApiKey:
+          type: boolean
+        githubToken:
+          type: boolean
+        openaiApiKey:
+          type: boolean
+    SetAwsProfileInput:
+      type: object
+      required:
+      - profile
+      properties:
+        profile:
+          type: string
+    SetSecretInput:
+      type: object
+      required:
+      - value
+      properties:
+        value:
+          type: string
+    SettingsVm:
+      type: object
+      required:
+      - awsProfile
+      - awsRegion
+      - secrets
+      - advanced
+      - encryptionAvailable
+      - engine
+      properties:
+        advanced:
+          $ref: '#/components/schemas/AdvancedSettingsVm'
+        awsProfile:
+          type: string
+        awsRegion:
+          type: string
+        encryptionAvailable:
+          type: boolean
+          description: False when the OS keychain is unavailable, so secrets cannot be stored.
+        engine:
+          $ref: '#/components/schemas/EngineInfo'
+        secrets:
+          $ref: '#/components/schemas/SecretsPresent'
+    SpanRow:
+      type: object
+      description: '"Where the time went": one evaluator-reported span, baseline vs best verified, in ms.'
+      required:
+      - name
+      - baseline
+      - best
+      properties:
+        baseline:
+          type: number
+          format: double
+        best:
+          type: number
+          format: double
+        name:
+          type: string
+    SpendByAgent:
+      type: object
+      required:
+      - agentId
+      - kind
+      - branch
+      - usd
+      properties:
+        agentId:
+          type:
+          - string
+          - 'null'
+        branch:
+          type:
+          - string
+          - 'null'
+        kind:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/AgentKind'
+        usd:
+          type: number
+          format: double
+    SpendCategory:
+      type: string
+      description: Spend categories of the ledger. `tokens` are model API spend, which AWS does not bill.
+      enum:
+      - agent_runner
+      - experiment
+      - bench_runner
+      - storage_egress
+      - tokens
+    SpendLine:
+      type: object
+      required:
+      - id
+      - label
+      - usd
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        usd:
+          type: number
+          format: double
+    SpendPoint:
+      type: object
+      required:
+      - t
+      - usd
+      properties:
+        t:
+          type: number
+          format: double
+        usd:
+          type: number
+          format: double
+    SpendVm:
+      type: object
+      required:
+      - total
+      - estimated
+      - actual
+      - budgetUsd
+      - byCategory
+      - byAgent
+      - series
+      properties:
+        actual:
+          type: number
+          format: double
+        budgetUsd:
+          type: number
+          format: double
+        byAgent:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpendByAgent'
+        byCategory:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpendLine'
+        estimated:
+          type: number
+          format: double
+        series:
+          type: array
+          items:
+            $ref: '#/components/schemas/SpendPoint'
+          description: Cumulative spend over minutes since start.
+        total:
+          type: number
+          format: double
+    StageId:
+      type: string
+      enum:
+      - checkout
+      - guardrails
+      - bench
+      - confirm
+      - verdict
+    StageState:
+      type: string
+      enum:
+      - done
+      - active
+      - idle
+      - failed
+    StartGithubSignInInput:
+      type: object
+      description: '`POST /v1/connectors/github/sign-in`: start the device flow for a new account, or sign `connectorId` in again.'
+      properties:
+        connectorId:
+          type:
+          - string
+          - 'null'
+          description: 'Re-sign-in: store the new token on this connector (default: a new one, or the one with the same login).'
+    StatusTone:
+      type: string
+      description: 'Dot colour of a status word: brass (running), amber (waiting on you), mint (done), grey (nothing), rose (failed).'
+      enum:
+      - run
+      - wait
+      - ok
+      - off
+      - bad
+    StepPoint:
+      type: object
+      required:
+      - t
+      - value
+      properties:
+        t:
+          type: number
+          format: double
+        value:
+          type: number
+          format: double
+    StopOptimizationInput:
+      type: object
+      properties:
+        reason:
+          type:
+          - string
+          - 'null'
+    TeardownReceiptVm:
+      type: object
+      description: The receipt of the sandbox teardown that covered a run (core `SandboxTeardownReceipt`, trimmed for the UI).
+      required:
+      - sandboxId
+      - region
+      - trigger
+      - destroyedAt
+      - spendUsd
+      - spendByCategory
+      - runs
+      - removed
+      - nothingRunning
+      - orphans
+      - errors
+      - summary
+      properties:
+        destroyedAt:
+          type: integer
+          format: int64
+        errors:
+          type: array
+          items:
+            type: string
+        nothingRunning:
+          type: boolean
+          description: 'Verified after the destroy: nothing tagged is left, so nothing is billing.'
+        orphans:
+          type: array
+          items:
+            type: string
+        region:
+          type: string
+        removed:
+          $ref: '#/components/schemas/ReceiptRemoved'
+        runs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReceiptRun'
+        sandboxId:
+          type: string
+        spendByCategory:
+          type: array
+          items:
+            $ref: '#/components/schemas/LabeledUsd'
+        spendUsd:
+          type: number
+          format: double
+        summary:
+          type: string
+        trigger:
+          $ref: '#/components/schemas/ReceiptTrigger'
+    TemplateCategory:
+      type: string
+      description: Gallery grouping of templates (formerly "domain packs").
+      enum:
+      - perf
+      - forecasting
+      - llm
+    TemplateInfo:
+      type: object
+      description: 'Public, UI-friendly description of one template. Stable shape: the app''s gallery renders it.'
+      required:
+      - id
+      - kind
+      - category
+      - title
+      - description
+      - measures
+      - holdout
+      - machine
+      - evaluatorKind
+      - objective
+      - defaultValueUsd
+      - files
+      properties:
+        category:
+          $ref: '#/components/schemas/TemplateCategory'
+        defaultValueUsd:
+          type: number
+          format: double
+          description: Placeholder USD per unit of improvement per year, written to the generated config (replace it).
+        description:
+          type: string
+          description: 'One sentence: what improving this means.'
+        evaluatorKind:
+          $ref: '#/components/schemas/EvaluatorKind'
+        example:
+          type:
+          - string
+          - 'null'
+          description: 'Demos only: the example project, relative to the repository root (e.g. `examples/demo-search`).'
+        files:
+          type: array
+          items:
+            type: string
+          description: Repo paths the template adds (empty for demos).
+        holdout:
+          type:
+          - string
+          - 'null'
+          description: The hidden workload that re-checks every win, or `None` when the template has none.
+        id:
+          type: string
+          description: Id used by `evaluator.template`, `ratchet init --template` and `build_template_proposal`.
+        kind:
+          $ref: '#/components/schemas/TemplateKind'
+        machine:
+          type: string
+          description: Default bench machine (instance type).
+        measures:
+          type: string
+          description: What the evaluator reports, in plain words (e.g. "k6 p50/p95/p99, error rate").
+        objective:
+          $ref: '#/components/schemas/TemplateObjective'
+        title:
+          type: string
+    TemplateKind:
+      type: string
+      description: Whether a template is a real, runnable evaluator or a "Try a demo" entry.
+      enum:
+      - template
+      - demo
+    TemplateObjective:
+      type: object
+      description: The default objective of a template.
+      required:
+      - metric
+      - direction
+      - unit
+      properties:
+        direction:
+          $ref: '#/components/schemas/Direction'
+        metric:
+          type: string
+          description: Key the evaluator prints, as a dotted path.
+        unit:
+          type: string
+    TestConnectionInput:
+      type: object
+      required:
+      - target
+      properties:
+        target:
+          $ref: '#/components/schemas/ConnectionTarget'
+    TimeWindow:
+      type: object
+      required:
+      - startMs
+      - endMs
+      properties:
+        endMs:
+          type: integer
+          format: int64
+        startMs:
+          type: integer
+          format: int64
+    Tone:
+      type: string
+      enum:
+      - good
+      - bad
+      - neutral
+    UiStatus:
+      type: string
+      description: 'The optimization status as the screens show it: the ledger status, or `pr-open` once a pull request exists.'
+      enum:
+      - draft
+      - baselining
+      - running
+      - stopping
+      - completed
+      - stopped
+      - failed
+      - pr-open
+    UpdateConnectorInput:
+      type: object
+      description: '`PATCH /v1/connectors/{id}`: rename; AWS: region and monthly cap.'
+      properties:
+        monthlyCapUsd:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: AWS only; `null` removes the cap, absent leaves it alone.
+        name:
+          type:
+          - string
+          - 'null'
+        region:
+          type:
+          - string
+          - 'null'
+          description: AWS only.
+    ValidateConfigInput:
+      type: object
+      required:
+      - yaml
+      properties:
+        yaml:
+          type: string
+          description: The ratchet.yaml text.
+    ValidateConfigResult:
+      type: object
+      description: 'Result of validating `ratchet.yaml` text: a summary when it is valid, the problems when it is not.'
+      required:
+      - ok
+      - summary
+      - errors
+      properties:
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConfigError'
+        ok:
+          type: boolean
+        summary:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ConfigSummary'
+    ValueBasis:
+      type: string
+      description: '`estimated` until the value has been measured in production.'
+      enum:
+      - estimated
+      - measured
+    ValuePeriod:
+      type: string
+      description: The period a value-model amount is quoted for.
+      enum:
+      - month
+      - year
+    ValueSummary:
+      type: object
+      required:
+      - usdPerUnit
+      - period
+      - basis
+      - unit
+      properties:
+        basis:
+          $ref: '#/components/schemas/ValueBasis'
+        period:
+          $ref: '#/components/schemas/ValuePeriod'
+        unit:
+          type:
+          - string
+          - 'null'
+        usdPerUnit:
+          type: number
+          format: double
+    ValueVm:
+      type: object
+      description: '`objective.value` applied to baseline -> best (core `estimate_value` / `return_on_spend`).'
+      required:
+      - usdPerUnit
+      - unit
+      - period
+      - basis
+      - usdPerYear
+      - returnOnSpend
+      properties:
+        basis:
+          $ref: '#/components/schemas/ValueBasis'
+        period:
+          $ref: '#/components/schemas/ValuePeriod'
+        returnOnSpend:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: Yearly value per dollar spent; `null` when nothing was spent.
+        unit:
+          type:
+          - string
+          - 'null'
+        usdPerUnit:
+          type: number
+          format: double
+        usdPerYear:
+          type: number
+          format: double
+    WinningChangeVm:
+      type: object
+      description: 'The squashed result: best verified commit vs the base ref, as the pull request will show it.'
+      required:
+      - commits
+      - sha
+      - baseRef
+      - files
+      - additions
+      - deletions
+      - excerpt
+      - unavailable
+      properties:
+        additions:
+          type: integer
+          format: int64
+          minimum: 0
+        baseRef:
+          type: string
+        commits:
+          type: integer
+          format: int64
+          description: Verified commits (ratchet moves) the PR squashes.
+        deletions:
+          type: integer
+          format: int64
+          minimum: 0
+        excerpt:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/DiffExcerpt'
+            description: First hunk of the most-changed file.
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiffFileVm'
+        sha:
+          type:
+          - string
+          - 'null'
+          description: Short sha of the best verified commit; `null` before the first win.
+        unavailable:
+          type:
+          - string
+          - 'null'
+          description: Why there is no diff (no wins yet, the engine has no git access, git failed); `null` when `files` is real.
+  responses:
+    BadRequest:
+      description: The request is malformed or a field is invalid (see `fields`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Failure:
+      description: Any other failure; `code` says which.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    NotFound:
+      description: No such resource.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Unauthorized:
+      description: Missing or wrong bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+security:
+- bearer: []
+tags:
+- name: status
+  description: The daemon itself.
+- name: events
+  description: The live event stream (server-sent events).
+- name: optimizations
+  description: Optimizations, their candidates, ratchet history and spend.
+- name: agents
+  description: 'Agents: log, pause, resume, messages.'
+- name: reports
+  description: Reports and pull requests.
+- name: config
+  description: ratchet.yaml validation and preflight.
+- name: settings
+  description: Settings, secrets, connection tests.
+- name: github
+  description: GitHub sign-in, repos, inspecting a repo.
+- name: aws
+  description: AWS profiles.
+- name: harnesses
+  description: Detected agent CLIs.
+- name: templates
+  description: Evaluator templates (Benchmarks).
+- name: environments
+  description: 'Sandboxes: what is running, end now, receipts.'
+- name: overview
+  description: 'Overview: spent, value locked in, return, the value staircase, needs you, the table.'
+- name: connectors
+  description: Saved GitHub accounts, AWS profiles and agent credentials, and the choice remembered per repo.
+- name: environment drafts
+  description: 'Dynamic environments: a setup agent drafts the environment a goal needs, the user asks for changes and approves, the files are committed and locked.'
