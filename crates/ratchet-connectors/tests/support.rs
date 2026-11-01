@@ -134,6 +134,9 @@ impl ConnectorProbe for Tester {
     async fn openai(&self, _: &str) -> (bool, String) {
         self.answer("openai".into(), "OpenAI accepted the key")
     }
+    async fn xai(&self, _: &str) -> (bool, String) {
+        self.answer("xai".into(), "xAI accepted the key")
+    }
 }
 
 // ------------------------------------------------------------------ harnesses

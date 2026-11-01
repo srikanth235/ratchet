@@ -115,6 +115,7 @@ pub fn default_secret_names(kind: AgentKind) -> Vec<String> {
     match kind {
         AgentKind::ClaudeCode => vec!["ANTHROPIC_API_KEY".into(), "GITHUB_TOKEN".into()],
         AgentKind::Codex => vec!["OPENAI_API_KEY".into(), "GITHUB_TOKEN".into()],
+        AgentKind::Grok => vec!["XAI_API_KEY".into(), "GITHUB_TOKEN".into()],
         AgentKind::Mock => vec![],
     }
 }

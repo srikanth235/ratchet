@@ -22,6 +22,7 @@ use crate::clock::AcceleratedClock;
 use crate::codex::{CodexAdapter, CodexOptions};
 use crate::demo_scripts::{DemoVariant, load_demo_search_script, load_script};
 use crate::git::{SharedGit, exec_git};
+use crate::grok::{GrokAdapter, GrokOptions};
 use crate::process::{RunProcessOptions, SharedSpawner, TokioSpawner, run_process};
 use crate::runner_loop::{
     LoopTuning, RunnerLoopOptions, RunnerLoopResult, RunnerStopReason, run_runner_loop,
@@ -209,6 +210,10 @@ pub fn default_adapter(
         AgentKind::Codex => Arc::new(CodexAdapter::new(CodexOptions {
             cli: cli("RATCHET_CODEX_BIN"),
             ..CodexOptions::default()
+        })),
+        AgentKind::Grok => Arc::new(GrokAdapter::new(GrokOptions {
+            cli: cli("RATCHET_GROK_BIN"),
+            ..GrokOptions::default()
         })),
         AgentKind::Mock => {
             let which = env

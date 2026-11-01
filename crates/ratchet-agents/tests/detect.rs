@@ -15,6 +15,7 @@ use ratchet_agents::{
 const HOME: &str = "/home/u";
 const CLAUDE_BIN: &str = "/usr/local/bin/claude";
 const CODEX_BIN: &str = "/usr/local/bin/codex";
+const GROK_BIN: &str = "/usr/local/bin/grok";
 
 #[derive(Default)]
 struct FakeFs {
@@ -895,6 +896,68 @@ async fn codex_no_status_no_file_an_api_key_variable_is_api_key_nothing_is_signe
     );
 }
 
+// ---------------------------------------------------------------- grok
+
+async fn grok(over: impl FnOnce(&mut DetectOptions), fake_fs: FakeFs) -> HarnessInfo {
+    let fake = spawner_of(vec![
+        shell_rule("/usr/local/bin", ""),
+        version_rule(None, "grok 1.0.67 (2fe064390d07)"),
+    ]);
+    detect_harnesses(&opts(&fake, |o| {
+        o.fs = fs(fake_fs);
+        o.kinds = Some(vec![HarnessKind::Grok]);
+        over(o);
+    }))
+    .await
+    .remove(0)
+}
+
+#[tokio::test]
+async fn grok_is_probed_by_default_after_claude_and_codex_and_not_installed_gets_an_install_hint() {
+    let fake = spawner_of(vec![shell_rule("/usr/bin", "")]);
+    let found = detect_harnesses(&opts(&fake, |_| {})).await;
+    assert_eq!(
+        found.iter().map(|h| h.kind).collect::<Vec<_>>(),
+        [
+            HarnessKind::ClaudeCode,
+            HarnessKind::Codex,
+            HarnessKind::Grok
+        ]
+    );
+    let gk = &found[2];
+    assert_eq!((gk.installed, gk.path.clone()), (false, None));
+    assert!(gk.hint.contains("@xai-official/grok"));
+}
+
+#[tokio::test]
+async fn grok_the_login_file_in_dot_grok_is_signed_in_and_only_its_existence_is_checked() {
+    let r = grok(
+        |_| {},
+        FakeFs::new(&[GROK_BIN], &[&format!("{HOME}/.grok/auth.json")]),
+    )
+    .await;
+    assert_eq!(
+        (r.installed, r.version.as_deref(), r.auth),
+        (true, Some("1.0.67"), HarnessAuth::SignedIn)
+    );
+    assert_eq!(r.path.as_deref(), Some(GROK_BIN));
+    assert!(r.hint.contains("auth.json"));
+}
+
+#[tokio::test]
+async fn grok_without_a_login_file_an_api_key_variable_is_api_key_nothing_is_signed_out() {
+    let keyed = grok(
+        |o| o.env = Some(env_of(&[("PATH", "/usr/bin"), ("XAI_API_KEY", "xai-z")])),
+        FakeFs::new(&[GROK_BIN], &[]),
+    )
+    .await;
+    assert_eq!(keyed.auth, HarnessAuth::ApiKey);
+    assert!(!keyed.hint.contains("xai-z"));
+    let none = grok(|_| {}, FakeFs::new(&[GROK_BIN], &[])).await;
+    assert_eq!(none.auth, HarnessAuth::SignedOut);
+    assert!(none.hint.contains("grok login"));
+}
+
 // ---------------------------------------------------------------- environment for local agents
 
 fn base_env() -> HashMap<String, String> {
@@ -906,6 +969,7 @@ fn base_env() -> HashMap<String, String> {
         ("ANTHROPIC_API_KEY", "sk-ant"),
         ("OPENAI_API_KEY", "sk-oai"),
         ("CODEX_API_KEY", "sk-cx"),
+        ("XAI_API_KEY", "xai-k"),
         ("GITHUB_TOKEN", "ghp_x"),
         ("GH_TOKEN", "ghp_y"),
         ("AWS_ACCESS_KEY_ID", "AKIA"),
@@ -963,6 +1027,13 @@ fn local_agent_env_passes_the_model_key_only_for_a_harness_that_reports_api_key_
     assert!(
         !local_agent_env(HarnessKind::Codex, HarnessAuth::SignedIn, &base, "/p")
             .contains_key("OPENAI_API_KEY")
+    );
+    let grok = local_agent_env(HarnessKind::Grok, HarnessAuth::ApiKey, &base, "/p");
+    assert_eq!(grok.get("XAI_API_KEY").map(String::as_str), Some("xai-k"));
+    assert!(!grok.contains_key("OPENAI_API_KEY") && !grok.contains_key("ANTHROPIC_API_KEY"));
+    assert!(
+        !local_agent_env(HarnessKind::Grok, HarnessAuth::SignedIn, &base, "/p")
+            .contains_key("XAI_API_KEY")
     );
 }
 

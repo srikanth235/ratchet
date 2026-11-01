@@ -135,6 +135,10 @@ impl ConnectorProbe for SimProbe {
     async fn openai(&self, _api_key: &str) -> (bool, String) {
         (true, "OpenAI accepted the key".into())
     }
+
+    async fn xai(&self, _api_key: &str) -> (bool, String) {
+        (true, "xAI accepted the key".into())
+    }
 }
 
 /// Claude Code is installed and signed in; Codex is not installed.

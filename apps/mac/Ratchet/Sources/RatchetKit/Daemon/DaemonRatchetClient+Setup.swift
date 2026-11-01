@@ -110,11 +110,11 @@ extension DaemonRatchetClient {
         try await calling {
             var kinds: [String] = []
             if request.source == .demo {
-                kinds = ["claude-code", "codex"]
+                kinds = ["claude-code", "codex", "grok"]
             } else if let list = try? await api.listConnectors().ok.body.json.connectors {
                 for id in request.agentIDs.sorted() {
                     if case .case3(let agent)? = list.first(where: { DaemonMapping.connectorID($0) == id }) {
-                        let kind = agent.agent == .codex ? "codex" : "claude-code"
+                        let kind = agent.agent.rawValue
                         if !kinds.contains(kind) { kinds.append(kind) }
                     }
                 }

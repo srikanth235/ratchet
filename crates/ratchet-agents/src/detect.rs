@@ -4,8 +4,8 @@
 //!  - PATH. A macOS GUI app inherits launchd's bare PATH, not the user's shell PATH, so `claude` / `codex` (installed by npm,
 //!    Homebrew, nvm, volta, ...) are invisible. The PATH is resolved the way a login shell would (`$SHELL -lc`), merged with the
 //!    process PATH and the usual install directories.
-//!  - Auth. The CLIs' own non-interactive status command is asked first (`codex login status`, `claude auth status`); then the
-//!    signals they use (credential files, the macOS keychain item), then API-key environment variables.
+//!  - Auth. The CLIs' own non-interactive status command is asked first (`codex login status`, `claude auth status`; Grok has none);
+//!    then the signals they use (credential files, the macOS keychain item), then API-key environment variables.
 //!  - Secrets. Only the existence of credentials is ever checked. No credential file is opened and no key value is returned,
 //!    logged or put in a hint (`security find-generic-password` runs without `-w` / `-g`, so the secret is not even fetched).
 //!
@@ -29,6 +29,8 @@ pub enum HarnessKind {
     ClaudeCode,
     #[serde(rename = "codex")]
     Codex,
+    #[serde(rename = "grok")]
+    Grok,
 }
 
 impl HarnessKind {
@@ -36,6 +38,7 @@ impl HarnessKind {
         match self {
             HarnessKind::ClaudeCode => "claude-code",
             HarnessKind::Codex => "codex",
+            HarnessKind::Grok => "grok",
         }
     }
 
@@ -43,6 +46,7 @@ impl HarnessKind {
         match self {
             HarnessKind::ClaudeCode => ratchet_core::enums::AgentKind::ClaudeCode,
             HarnessKind::Codex => ratchet_core::enums::AgentKind::Codex,
+            HarnessKind::Grok => ratchet_core::enums::AgentKind::Grok,
         }
     }
 }
@@ -138,7 +142,7 @@ pub struct DetectOptions {
     pub timeout: Option<Duration>,
     /// Timeout of the login-shell PATH probe (rc files can be slow). Default 8 s.
     pub shell_timeout: Option<Duration>,
-    /// Which harnesses to look for. Default both.
+    /// Which harnesses to look for. Default all three.
     pub kinds: Option<Vec<HarnessKind>>,
     /// A PATH already resolved by `resolve_login_path` (skips the login-shell probe).
     pub login_path: Option<String>,
@@ -485,6 +489,7 @@ fn key_vars(kind: HarnessKind) -> &'static [&'static str] {
     match kind {
         HarnessKind::ClaudeCode => &["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"],
         HarnessKind::Codex => &["OPENAI_API_KEY", "CODEX_API_KEY"],
+        HarnessKind::Grok => &["XAI_API_KEY"],
     }
 }
 
@@ -493,6 +498,7 @@ pub fn model_key_vars(kind: HarnessKind) -> &'static [&'static str] {
     match kind {
         HarnessKind::ClaudeCode => &["ANTHROPIC_API_KEY"],
         HarnessKind::Codex => &["OPENAI_API_KEY", "CODEX_API_KEY"],
+        HarnessKind::Grok => &["XAI_API_KEY"],
     }
 }
 
@@ -649,6 +655,18 @@ async fn codex_auth(ctx: &Ctx, binary: &str, env: &HashMap<String, String>) -> O
     None
 }
 
+/// Grok has no non-interactive status command, so the login is the credential file it keeps in `~/.grok` (existence only; the
+/// token inside expires after a week and the CLI asks to sign in again), then `XAI_API_KEY`.
+async fn grok_auth(ctx: &Ctx) -> Option<AuthSignal> {
+    if ctx.fs.exists(&join(&ctx.home, &[".grok", "auth.json"])) {
+        return signal(HarnessAuth::SignedIn, "auth.json");
+    }
+    if has_key(&ctx.env, HarnessKind::Grok) {
+        return signal(HarnessAuth::ApiKey, "XAI_API_KEY");
+    }
+    None
+}
+
 // ---------------------------------------------------------------- per-harness
 
 struct HarnessSpec {
@@ -671,6 +689,12 @@ fn spec_of(kind: HarnessKind) -> HarnessSpec {
             label: "Codex",
             install: "Install it with `npm install -g @openai/codex` or `brew install --cask codex`, then run `codex login`.",
             sign_in: "Run `codex login` (ChatGPT account or API key), or set OPENAI_API_KEY.",
+        },
+        HarnessKind::Grok => HarnessSpec {
+            binary: "grok",
+            label: "Grok",
+            install: "Install it with `npm install -g @xai-official/grok`, then run `grok login`.",
+            sign_in: "Run `grok login` (grok.com account), or set XAI_API_KEY.",
         },
     }
 }
@@ -741,6 +765,7 @@ async fn detect_one(kind: HarnessKind, ctx: &Ctx, search_path: &str) -> HarnessI
     let found = match kind {
         HarnessKind::ClaudeCode => claude_auth(ctx, &path, &env).await,
         HarnessKind::Codex => codex_auth(ctx, &path, &env).await,
+        HarnessKind::Grok => grok_auth(ctx).await,
     };
     let auth = found.as_ref().map_or(HarnessAuth::SignedOut, |s| s.auth);
     let hint = match &found {
@@ -761,19 +786,26 @@ async fn detect_one(kind: HarnessKind, ctx: &Ctx, search_path: &str) -> HarnessI
     }
 }
 
-/// Probe this machine for the Claude Code and Codex CLIs. Never fails: a probe that fails or times out yields a result with a hint.
-/// Results come back in a stable order (claude-code, codex).
+/// Probe this machine for the Claude Code, Codex and Grok CLIs. Never fails: a probe that fails or times out yields a result with a
+/// hint. Results come back in a stable order (claude-code, codex, grok).
 pub async fn detect_harnesses(opts: &DetectOptions) -> Vec<HarnessInfo> {
     let ctx = ctx_of(opts);
     let search_path = match &opts.login_path {
         Some(p) => p.clone(),
         None => resolve_login_path(opts).await.path,
     };
-    let kinds = opts
-        .kinds
-        .clone()
-        .unwrap_or_else(|| vec![HarnessKind::ClaudeCode, HarnessKind::Codex]);
-    let order = [HarnessKind::ClaudeCode, HarnessKind::Codex];
+    let kinds = opts.kinds.clone().unwrap_or_else(|| {
+        vec![
+            HarnessKind::ClaudeCode,
+            HarnessKind::Codex,
+            HarnessKind::Grok,
+        ]
+    });
+    let order = [
+        HarnessKind::ClaudeCode,
+        HarnessKind::Codex,
+        HarnessKind::Grok,
+    ];
     let wanted: Vec<HarnessKind> = order.into_iter().filter(|k| kinds.contains(k)).collect();
     futures::future::join_all(
         wanted

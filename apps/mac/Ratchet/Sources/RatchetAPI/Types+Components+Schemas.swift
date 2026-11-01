@@ -298,6 +298,7 @@ extension Components {
         @frozen public enum AgentKind: String, Codable, Hashable, Sendable, CaseIterable {
             case claudeCode = "claude-code"
             case codex = "codex"
+            case grok = "grok"
             case mock = "mock"
         }
         /// - Remark: Generated from `#/components/schemas/AgentRecentEval`.
@@ -1568,12 +1569,13 @@ extension Components {
                 case value
             }
         }
-        /// The two agent CLIs Ratchet drives.
+        /// The agent CLIs Ratchet drives.
         ///
         /// - Remark: Generated from `#/components/schemas/ConnectorAgent`.
         @frozen public enum ConnectorAgent: String, Codable, Hashable, Sendable, CaseIterable {
             case claudeCode = "claude-code"
             case codex = "codex"
+            case grok = "grok"
         }
         /// - `connected`: a GitHub account / AWS profile / agent login that works
         /// - `expired`: it worked once and needs signing in again (GitHub token revoked, `aws sso login` needed)

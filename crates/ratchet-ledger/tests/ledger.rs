@@ -272,6 +272,22 @@ async fn lists_agents_created_together_in_the_order_they_were_added() {
 
 // "adds, lists and updates agents"
 #[tokio::test]
+async fn stores_a_grok_agent() {
+    let l = ledger().await;
+    let o = mk_opt(&l).await;
+    let g = l
+        .add_agent(AddAgentInput::new(
+            o.id.clone(),
+            AgentKind::Grok,
+            "ratchet/x/grok",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(g.kind, AgentKind::Grok);
+    assert_eq!(l.list_agents(&o.id).await.unwrap()[0].kind, AgentKind::Grok);
+}
+
+#[tokio::test]
 async fn adds_lists_and_updates_agents() {
     let l = ledger().await;
     let o = mk_opt(&l).await;
@@ -324,7 +340,7 @@ async fn adds_lists_and_updates_agents() {
             .await)
         .contains("not found")
     );
-    let e = raw_error(&l, "insert into agents (id, optimization_id, kind, branch, status, created_at) select 'g', id, 'grok', 'b', 'pending', 1 from optimizations limit 1").await;
+    let e = raw_error(&l, "insert into agents (id, optimization_id, kind, branch, status, created_at) select 'g', id, 'gemini', 'b', 'pending', 1 from optimizations limit 1").await;
     assert!(e.contains("CHECK"), "{e}");
     assert!(
         msg(l

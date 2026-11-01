@@ -18,5 +18,13 @@ expression: found
     "path": null,
     "auth": "signed-out",
     "hint": "Codex was not found on PATH. Install it with `npm install -g @openai/codex` or `brew install --cask codex`, then run `codex login`."
+  },
+  {
+    "kind": "grok",
+    "installed": false,
+    "version": null,
+    "path": null,
+    "auth": "signed-out",
+    "hint": "Grok was not found on PATH. Install it with `npm install -g @xai-official/grok`, then run `grok login`."
   }
 ]

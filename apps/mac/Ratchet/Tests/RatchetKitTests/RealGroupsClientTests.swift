@@ -66,6 +66,16 @@ struct RealGroupsClientTests {
         #expect(json["agent"] as? String == "codex")
     }
 
+    @Test func aGrokAgentWithoutAKeyAdoptsTheCliLogin() async throws {
+        let daemon = FakeDaemon()
+        daemon.route("POST /v1/connectors/agents", 200, Fixtures.connectors)
+        _ = try await make(daemon).addConnector(NewConnector(kind: .agent, name: "Grok", secret: nil))
+        let sent = try #require(daemon.requests.first { $0.key == "POST /v1/connectors/agents" })
+        let json = try #require(JSONSerialization.jsonObject(with: Data(sent.body.utf8)) as? [String: Any])
+        #expect(json["source"] as? String == "login")
+        #expect(json["agent"] as? String == "grok")
+    }
+
     @Test func aSecretIsNeverEncodedOrCached() throws {
         let data = try JSONEncoder().encode(NewConnector(kind: .agent, name: "Claude Code", secret: "sk-ant-test"))
         #expect(!String(decoding: data, as: UTF8.self).contains("sk-ant"))

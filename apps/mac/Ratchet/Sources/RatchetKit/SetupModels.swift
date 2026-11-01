@@ -379,8 +379,8 @@ public struct DetectedAgent: Identifiable, Hashable, Sendable {
     /// What to say when there is nothing to add.
     public static func emptyNote(_ found: [DetectedAgent]) -> String {
         found.contains { $0.installed }
-            ? "Your Claude Code and Codex logins are already listed."
-            : "Neither Claude Code nor Codex was found."
+            ? "Your Claude Code, Codex and Grok logins are already listed."
+            : "None of Claude Code, Codex or Grok was found."
     }
 }
 
@@ -524,7 +524,7 @@ public enum SettingsCheck {
 
 /// Which secret a pasted value must look like.
 public enum SecretKind: String, Sendable {
-    case anthropicKey, openaiKey, githubToken
+    case anthropicKey, openaiKey, xaiKey, githubToken
 
     /// Loose prefix checks that catch the common paste mistakes (the wrong key in the wrong box, stray spaces).
     public func problem(_ value: String) -> String? {
@@ -537,6 +537,8 @@ public enum SecretKind: String, Sendable {
             return matches("^sk-ant-[A-Za-z0-9_-]{8,}$") ? nil : "Anthropic keys start with sk-ant-"
         case .openaiKey:
             return matches("^sk-(?!ant-)[A-Za-z0-9_-]{16,}$") ? nil : "OpenAI keys start with sk- (not sk-ant-) and are at least 20 characters"
+        case .xaiKey:
+            return matches("^xai-[A-Za-z0-9_-]{16,}$") ? nil : "xAI keys start with xai-"
         case .githubToken:
             return matches("^(gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255}|[0-9a-f]{40})$")
                 ? nil : "GitHub tokens start with ghp_, gho_, ghu_, ghs_ or github_pat_"

@@ -90,6 +90,9 @@ impl ConnectionProbe for FakeProbe {
     async fn openai(&self, key: &str) -> (bool, String) {
         self.reply("openai", key.to_owned(), "OpenAI accepted the key")
     }
+    async fn xai(&self, key: &str) -> (bool, String) {
+        self.reply("xai", key.to_owned(), "xAI accepted the key")
+    }
 }
 
 fn claude(over: impl FnOnce(&mut HarnessInfo)) -> HarnessInfo {

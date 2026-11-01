@@ -18,6 +18,7 @@ enum DaemonMapping {
         switch kind {
         case .claudeCode: "Claude Code"
         case .codex: "Codex"
+        case .grok: "Grok"
         case .mock: "Sample agent"
         }
     }
@@ -243,7 +244,7 @@ enum DaemonMapping {
                 id: agent.id, kind: .agent, name: agent.name, detail: agent.detail,
                 state: state(agent.status, kind: .agent), isDefault: agent.isDefault,
                 canRunInCloud: agent.runsOn.contains(.cloud), origin: agent.source == .apiKey ? .apiKey : .login,
-                cli: agent.agent == .codex ? .codex : .claudeCode)
+                cli: AgentCLI(rawValue: agent.agent.rawValue))
         }
     }
 

@@ -425,11 +425,12 @@ async fn runs_the_detection_probes_when_no_harnesses_are_given_and_says_what_is_
             .collect::<Vec<_>>(),
         [
             (HarnessKind::ClaudeCode, false),
-            (HarnessKind::Codex, false)
+            (HarnessKind::Codex, false),
+            (HarnessKind::Grok, false)
         ]
     );
     assert!(
-        joined(&rt.missing).contains("install and sign in to Claude Code or Codex"),
+        joined(&rt.missing).contains("install and sign in to Claude Code, Codex or Grok"),
         "{:?}",
         rt.missing
     );
@@ -442,7 +443,7 @@ async fn a_signed_out_harness_does_not_count_as_usable_a_signed_in_one_does() {
         o.harnesses = Some(vec![ok(HarnessKind::ClaudeCode, HarnessAuth::SignedOut)])
     })
     .await;
-    assert!(joined(&out.missing).contains("sign in to Claude Code or Codex"));
+    assert!(joined(&out.missing).contains("sign in to Claude Code, Codex or Grok"));
     let (usable, _r2) = hybrid(&ledger().await, |o| {
         o.harnesses = Some(vec![
             ok(HarnessKind::ClaudeCode, HarnessAuth::SignedOut),

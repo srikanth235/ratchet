@@ -674,7 +674,7 @@ mod real_runs {
         let b = build(BuildOpts::default()).await;
         *b.missing.lock().unwrap() = vec![
             "set the bench AMI (Settings)".into(),
-            "install and sign in to Claude Code or Codex on this machine (Settings > Agents)"
+            "install and sign in to Claude Code, Codex or Grok on this machine (Settings > Agents)"
                 .into(),
         ];
         let e = err_of(b.product.create_optimization(&input("acme/api")).await);
@@ -686,7 +686,7 @@ mod real_runs {
         );
         assert!(
             e.message
-                .contains("Install and sign in to Claude Code or Codex"),
+                .contains("Install and sign in to Claude Code, Codex or Grok"),
             "{e}"
         );
         assert_eq!(b.product.missing_for("acme/api").await.unwrap().len(), 2);

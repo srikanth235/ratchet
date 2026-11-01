@@ -1,0 +1,2 @@
+{"type":"available_commands","tools":["run_terminal_command","read_file"],"commands":["compact","context"]}
+{"type":"error","message":"429 Too Many Requests: rate limit"}

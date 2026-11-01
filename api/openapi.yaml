@@ -1838,6 +1838,7 @@ components:
       enum:
       - claude-code
       - codex
+      - grok
       - mock
     AgentRecentEval:
       type: object
@@ -2610,10 +2611,11 @@ components:
       - openai
     ConnectorAgent:
       type: string
-      description: The two agent CLIs Ratchet drives.
+      description: The agent CLIs Ratchet drives.
       enum:
       - claude-code
       - codex
+      - grok
     ConnectorStatus:
       type: string
       description: |-
@@ -3704,6 +3706,7 @@ components:
       enum:
       - claude-code
       - codex
+      - grok
     HarnessVm:
       type: object
       description: One detected agent CLI.

@@ -281,7 +281,7 @@ public final class DaemonRatchetClient: RatchetClient {
             if let list = try? await api.listConnectors().ok.body.json.connectors {
                 for id in request.selection.agents.keys.sorted() {
                     if case .case3(let agent)? = list.first(where: { DaemonMapping.connectorID($0) == id }) {
-                        let kind: VM.AgentKind = agent.agent == .codex ? .codex : .claudeCode
+                        let kind = VM.AgentKind(rawValue: agent.agent.rawValue) ?? .claudeCode
                         if !kinds.contains(kind) { kinds.append(kind) }
                     }
                 }
@@ -444,7 +444,7 @@ public final class DaemonRatchetClient: RatchetClient {
                     list = try await api.addAwsConnector(body: .json(.init(profile: new.name))).ok.body.json
                 }
             case .agent:
-                let agent: VM.ConnectorAgent = new.name.lowercased().contains("codex") ? .codex : .claudeCode
+                let agent = VM.ConnectorAgent(rawValue: AgentCLI(named: new.name).rawValue) ?? .claudeCode
                 if let key = new.secret?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty {
                     // The key goes to the daemon once; it files it in the Keychain and never returns it.
                     let label = new.name.trimmingCharacters(in: .whitespacesAndNewlines)

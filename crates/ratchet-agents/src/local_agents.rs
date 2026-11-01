@@ -12,6 +12,7 @@ use crate::control::local::{
     AdapterFor, LocalRunnerControl, LocalRunnerControlOptions, WorkdirMode,
 };
 use crate::detect::{HarnessAuth, HarnessInfo, HarnessKind, local_agent_env};
+use crate::grok::{GrokAdapter, GrokOptions};
 use crate::process::SharedSpawner;
 use crate::runner_loop::LoopTuning;
 use ratchet_core::enums::AgentKind;
@@ -33,6 +34,7 @@ pub struct LocalAdapterOptions {
     /// Overrides for the Claude Code adapter (everything but the binary, environment and subscription auth, unless set).
     pub claude: Option<ClaudeCodeOptions>,
     pub codex: Option<CodexOptions>,
+    pub grok: Option<GrokOptions>,
     /// Without it a mock agent is an error.
     pub mock: Option<MockFactory>,
 }
@@ -42,6 +44,7 @@ pub fn local_agent_problem(harnesses: &[HarnessInfo], kind: HarnessKind) -> Opti
     let label = match kind {
         HarnessKind::ClaudeCode => "Claude Code",
         HarnessKind::Codex => "Codex",
+        HarnessKind::Grok => "Grok",
     };
     let Some(info) = harnesses.iter().find(|h| h.kind == kind) else {
         return Some(format!("{label} was not probed on this machine"));
@@ -117,6 +120,7 @@ fn build_local_adapter(
     let kind = match agent_kind {
         AgentKind::ClaudeCode => HarnessKind::ClaudeCode,
         AgentKind::Codex => HarnessKind::Codex,
+        AgentKind::Grok => HarnessKind::Grok,
         AgentKind::Mock => return Err("mock agents are not available in this runtime".to_string()),
     };
     if let Some(problem) = local_agent_problem(&opts.harnesses, kind) {
@@ -149,6 +153,14 @@ fn build_local_adapter(
         HarnessKind::Codex => {
             let over = opts.codex.clone().unwrap_or_default();
             Arc::new(CodexAdapter::new(CodexOptions {
+                cli: merge_cli(common, &over.cli),
+                allow_subscription_auth: true,
+                ..over
+            })) as Arc<dyn AgentAdapter>
+        }
+        HarnessKind::Grok => {
+            let over = opts.grok.clone().unwrap_or_default();
+            Arc::new(GrokAdapter::new(GrokOptions {
                 cli: merge_cli(common, &over.cli),
                 allow_subscription_auth: true,
                 ..over

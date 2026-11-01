@@ -165,6 +165,7 @@ string_enum!(
     AgentKind {
         ClaudeCode => "claude-code",
         Codex => "codex",
+        Grok => "grok",
         Mock => "mock",
     }
 );

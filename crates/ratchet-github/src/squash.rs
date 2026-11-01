@@ -40,6 +40,7 @@ fn co_author(kind: AgentKind) -> &'static str {
     match kind {
         AgentKind::ClaudeCode => "Claude Code <noreply@anthropic.com>",
         AgentKind::Codex => "Codex <noreply@openai.com>",
+        AgentKind::Grok => "Grok <noreply@x.ai>",
         AgentKind::Mock => "Ratchet Mock Agent <mock-agent@ratchet.invalid>",
     }
 }

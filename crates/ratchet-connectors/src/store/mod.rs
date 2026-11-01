@@ -37,7 +37,11 @@ use crate::validate::{
 pub const DEFAULT_AWS_REGION: &str = "us-east-1";
 /// The connector made of `GITHUB_TOKEN` / `GH_TOKEN` in the environment (not stored, not removable).
 pub const GITHUB_ENV_ID: &str = "github-env";
-const AGENTS: [ConnectorAgent; 2] = [ConnectorAgent::ClaudeCode, ConnectorAgent::Codex];
+const AGENTS: [ConnectorAgent; 3] = [
+    ConnectorAgent::ClaudeCode,
+    ConnectorAgent::Codex,
+    ConnectorAgent::Grok,
+];
 const MAX_CAP_USD: f64 = 10_000_000.0;
 /// `Number.MAX_SAFE_INTEGER`: the environment connector sorts after every stored one.
 const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
@@ -46,6 +50,7 @@ fn secret_for(agent: ConnectorAgent) -> SecretName {
     match agent {
         ConnectorAgent::ClaudeCode => SecretName::AnthropicApiKey,
         ConnectorAgent::Codex => SecretName::OpenaiApiKey,
+        ConnectorAgent::Grok => SecretName::XaiApiKey,
     }
 }
 
@@ -53,6 +58,7 @@ fn login_command(agent: ConnectorAgent) -> &'static str {
     match agent {
         ConnectorAgent::ClaudeCode => "`claude`",
         ConnectorAgent::Codex => "`codex login`",
+        ConnectorAgent::Grok => "`grok login`",
     }
 }
 
@@ -60,6 +66,7 @@ fn agent_of(kind: HarnessKind) -> ConnectorAgent {
     match kind {
         HarnessKind::ClaudeCode => ConnectorAgent::ClaudeCode,
         HarnessKind::Codex => ConnectorAgent::Codex,
+        HarnessKind::Grok => ConnectorAgent::Grok,
     }
 }
 
@@ -69,6 +76,7 @@ fn login_id(agent: ConnectorAgent) -> String {
         match agent {
             ConnectorAgent::ClaudeCode => "claude-code",
             ConnectorAgent::Codex => "codex",
+            ConnectorAgent::Grok => "grok",
         }
     )
 }
@@ -77,6 +85,7 @@ fn agent_slug(agent: ConnectorAgent) -> &'static str {
     match agent {
         ConnectorAgent::ClaudeCode => "claude-code",
         ConnectorAgent::Codex => "codex",
+        ConnectorAgent::Grok => "grok",
     }
 }
 
@@ -182,6 +191,7 @@ pub trait ConnectorProbe: Send + Sync {
     async fn aws(&self, region: &str, profile: &str) -> (bool, String);
     async fn anthropic(&self, api_key: &str) -> (bool, String);
     async fn openai(&self, api_key: &str) -> (bool, String);
+    async fn xai(&self, api_key: &str) -> (bool, String);
 }
 
 /// A profile of `~/.aws` (names and kinds only).
@@ -1073,7 +1083,7 @@ impl ConnectorStore {
         Ok(rec)
     }
 
-    /// An API key for Claude Code or Codex, kept in the keychain and checked with the provider (a rejected key is kept as
+    /// An API key for Claude Code, Codex or Grok, kept in the keychain and checked with the provider (a rejected key is kept as
     /// `invalid`); or adopt a detected CLI login that was removed earlier.
     pub async fn add_agent(
         &self,
@@ -1223,6 +1233,7 @@ impl ConnectorStore {
                 self.env_secret(SecretName::GithubToken),
                 self.env_secret(SecretName::AnthropicApiKey),
                 self.env_secret(SecretName::OpenaiApiKey),
+                self.env_secret(SecretName::XaiApiKey),
             ]);
             (r, known)
         };
@@ -1353,6 +1364,7 @@ impl ConnectorStore {
                     let (ok, detail) = match agent {
                         ConnectorAgent::ClaudeCode => probe.anthropic(&api_key).await,
                         ConnectorAgent::Codex => probe.openai(&api_key).await,
+                        ConnectorAgent::Grok => probe.xai(&api_key).await,
                     };
                     if ok {
                         (true, detail, Some(ConnectorStatus::Valid))
@@ -1420,6 +1432,9 @@ impl ConnectorStore {
                 .or_else(|| self.env_secret(name)),
             SecretName::OpenaiApiKey => self
                 .key_of(ConnectorAgent::Codex)
+                .or_else(|| self.env_secret(name)),
+            SecretName::XaiApiKey => self
+                .key_of(ConnectorAgent::Grok)
                 .or_else(|| self.env_secret(name)),
         }
     }
@@ -1778,7 +1793,7 @@ fn key_hint(key: &str) -> String {
     format!("····{tail}")
 }
 
-/// Logins before keys, Claude Code before Codex (`sortAgents`).
+/// Logins before keys, Claude Code before Codex before Grok (`sortAgents`).
 fn sort_agents(mut list: Vec<ConnectorRecord>) -> Vec<ConnectorRecord> {
     let rank = |r: &ConnectorRecord| match &r.kind {
         RecordKind::Agent { agent, source, .. } => {

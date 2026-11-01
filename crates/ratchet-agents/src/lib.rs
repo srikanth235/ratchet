@@ -1,6 +1,6 @@
-//! Agent adapters and the runner: everything that makes Claude Code and Codex work on a repository for Ratchet.
+//! Agent adapters and the runner: everything that makes Claude Code, Codex and Grok work on a repository for Ratchet.
 //!
-//! - `claude_code`, `codex`, `cli_agent`, `process`: adapters that spawn the CLIs and map their streams to `AgentEvent`s
+//! - `claude_code`, `codex`, `grok`, `cli_agent`, `process`: adapters that spawn the CLIs and map their streams to `AgentEvent`s
 //! - `detect`, `local_agents`: finds the CLIs installed and signed in on this machine and runs them in git worktrees
 //! - `git`, `workdir`, `context`: git helpers, per-agent worktrees, the brief and context the agent sees
 //! - `inbox`, `artifacts`: the engine/runner message channels (in memory, filesystem, S3 through the `aws` CLI)
@@ -21,6 +21,7 @@ pub mod control;
 pub mod demo_scripts;
 pub mod detect;
 pub mod git;
+pub mod grok;
 pub mod inbox;
 pub mod local_agents;
 pub mod process;
@@ -64,6 +65,7 @@ pub use git::{
     CANDIDATE_TRAILER, ExecGit, Git, GitCall, GitError, GitResult, GitRunner, exec_git,
     has_candidate_trailer, with_candidate_trailer,
 };
+pub use grok::{GrokAdapter, GrokOptions, GrokStreamParser, GrokTurnResult};
 pub use inbox::MemoryInbox;
 pub use local_agents::{
     LocalAdapterOptions, LocalAgentControlOptions, create_local_agent_control,

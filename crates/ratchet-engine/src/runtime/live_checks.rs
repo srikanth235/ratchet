@@ -20,6 +20,7 @@ pub enum ConnectionTarget {
     Github,
     Anthropic,
     Openai,
+    Xai,
     Tofu,
 }
 
@@ -248,6 +249,19 @@ impl ConnectionTester {
             self.probe_models(
                 "OpenAI",
                 "https://api.openai.com/v1/models",
+                &[("authorization", format!("Bearer {api_key}"))],
+            ),
+        )
+        .await
+    }
+
+    pub async fn xai(&self, api_key: &str) -> ConnectionResult {
+        wrap(
+            ConnectionTarget::Xai,
+            &[api_key],
+            self.probe_models(
+                "xAI",
+                "https://api.x.ai/v1/models",
                 &[("authorization", format!("Bearer {api_key}"))],
             ),
         )

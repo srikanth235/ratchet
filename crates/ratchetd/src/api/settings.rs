@@ -284,6 +284,8 @@ pub enum HarnessKind {
     ClaudeCode,
     #[serde(rename = "codex")]
     Codex,
+    #[serde(rename = "grok")]
+    Grok,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

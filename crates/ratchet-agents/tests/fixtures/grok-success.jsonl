@@ -1,0 +1,21 @@
+{"type":"available_commands","tools":["run_terminal_command","read_file"],"commands":["compact","context"]}
+{"type":"thought","data":"I will profile"}
+{"type":"thought","data":" the filter."}
+{"type":"text","data":"Let me "}
+{"type":"text","data":"profile it."}
+{"type":"tool_call","toolCallId":"call-1","title":"run_terminal_command","kind":"execute","status":"pending","toolName":"run_terminal_command","rawInput":{"command":"node --cpu-prof dist/src/main.js","description":"profile"},"content":[],"locations":[]}
+{"type":"tool_call_update","toolCallId":"call-1","status":null,"content":[],"rawOutput":null,"locations":[]}
+{"type":"tool_call_update","toolCallId":"call-1","status":"in_progress","content":[{"type":"content","content":{"type":"text","text":"partial\n"}}],"rawOutput":{"type":"Bash","exit_code":0},"locations":[]}
+{"type":"tool_call_update","toolCallId":"call-1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"hot: filter()\n"}}],"rawOutput":{"type":"Bash","exit_code":0,"command":"node --cpu-prof dist/src/main.js"},"locations":[]}
+{"type":"available_commands","tools":["run_terminal_command","read_file"],"commands":["compact","context"]}
+{"type":"usage","usage":{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"reasoning_tokens":5}}
+{"type":"text","data":"Now "}
+{"type":"text","data":"edit it."}
+{"type":"tool_call","toolCallId":"call-2","title":"search_replace","kind":"execute","status":"pending","toolName":"search_replace","rawInput":{"file_path":"/work/agent-2/src/filter.ts","old_string":"a","new_string":"b"},"content":[],"locations":[]}
+{"type":"tool_call_update","toolCallId":"call-2","status":"completed","content":[{"type":"content","content":{"type":"text","text":"edited\n"}}],"rawOutput":{"type":"SearchReplace"},"locations":[]}
+{"type":"tool_call","toolCallId":"call-3","title":"run_terminal_command","kind":"execute","status":"pending","toolName":"run_terminal_command","rawInput":{"command":"pnpm test"},"content":[],"locations":[]}
+{"type":"tool_call_update","toolCallId":"call-3","status":"completed","content":[{"type":"content","content":{"type":"text","text":"1 failed\n"}}],"rawOutput":{"type":"Bash","exit_code":1},"locations":[]}
+{"type":"text","data":"Tests fail, "}
+{"type":"text","data":"reverting."}
+{"type":"usage","usage":{"input_tokens":50,"output_tokens":10,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"reasoning_tokens":5}}
+{"type":"end","stopReason":"end_turn","sessionId":"01a195ae-1291-7af1-8f7b-691a16d61c18","requestId":"35cf0189-aa2b-4af9-8ad4-40c197f1ae83","cwd":"/work/agent-2","usage":{"input_tokens":26124,"cache_read_input_tokens":45952,"cache_creation_input_tokens":100,"output_tokens":410,"reasoning_tokens":314,"total_tokens":72486},"num_turns":3,"total_cost_usd":0.155368}

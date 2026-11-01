@@ -635,6 +635,9 @@ impl ProductEngine {
                 ConnectorAgent::Codex => {
                     adapters.codex.get_or_insert_with(Default::default).api_key = Some(api_key);
                 }
+                ConnectorAgent::Grok => {
+                    adapters.grok.get_or_insert_with(Default::default).api_key = Some(api_key);
+                }
             }
         }
         let factory = cfg
@@ -958,7 +961,7 @@ impl ProductEngine {
         rt.engine.environment_drafter().ok_or_else(|| {
             err(
                 EngineErrorCode::Unavailable,
-                "No setup agent is available: sign in to Claude Code or Codex on this machine and connect GitHub (Settings).",
+                "No setup agent is available: sign in to Claude Code, Codex or Grok on this machine and connect GitHub (Settings).",
             )
         })
     }

@@ -861,6 +861,7 @@ fn agent_kind(a: AgentArg) -> AgentKind {
     match a {
         AgentArg::ClaudeCode => AgentKind::ClaudeCode,
         AgentArg::Codex => AgentKind::Codex,
+        AgentArg::Grok => AgentKind::Grok,
         AgentArg::Mock => AgentKind::Mock,
     }
 }

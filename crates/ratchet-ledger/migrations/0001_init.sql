@@ -25,7 +25,7 @@ CREATE TABLE `agents` (
 	`status` text DEFAULT 'pending' NOT NULL,
 	`created_at` integer NOT NULL,
 	FOREIGN KEY (`optimization_id`) REFERENCES `optimizations`(`id`) ON UPDATE no action ON DELETE no action,
-	CONSTRAINT "agents_kind_check" CHECK("agents"."kind" in ('claude-code', 'codex', 'mock')),
+	CONSTRAINT "agents_kind_check" CHECK("agents"."kind" in ('claude-code', 'codex', 'grok', 'mock')),
 	CONSTRAINT "agents_status_check" CHECK("agents"."status" in ('pending', 'launching', 'running', 'paused', 'stopped', 'done', 'failed'))
 );
 

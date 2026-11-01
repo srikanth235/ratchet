@@ -263,7 +263,7 @@ public actor MockRatchetClient: RatchetClient {
         let isAWS = new.kind == .aws
         let isAgent = new.kind == .agent
         let cap: Double? = isAWS ? (new.monthlyCapUSD ?? (new.region == nil ? 100 : nil)) : nil
-        let cli: AgentCLI? = isAgent ? (name.lowercased().contains("codex") ? AgentCLI.codex : AgentCLI.claudeCode) : nil
+        let cli: AgentCLI? = isAgent ? AgentCLI(named: name) : nil
         let connector = Connector(
             id: "\(new.kind.rawValue)-added-\(counter)", kind: new.kind, name: name,
             detail: new.detail.isEmpty ? "Added just now" : new.detail,

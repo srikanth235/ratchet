@@ -47,17 +47,45 @@ public enum ConnectorOrigin: String, Codable, Sendable {
     case apiKey
 }
 
-/// The two agent CLIs Ratchet drives.
+/// The agent CLIs Ratchet drives.
 public enum AgentCLI: String, CaseIterable, Codable, Sendable, Identifiable {
     case claudeCode = "claude-code"
     case codex
+    case grok
 
     public var id: String { rawValue }
 
-    public var title: String { self == .claudeCode ? "Claude Code" : "Codex" }
+    public var title: String {
+        switch self {
+        case .claudeCode: "Claude Code"
+        case .codex: "Codex"
+        case .grok: "Grok"
+        }
+    }
+
+    /// Who issues the API key.
+    public var vendor: String {
+        switch self {
+        case .claudeCode: "Anthropic"
+        case .codex: "OpenAI"
+        case .grok: "xAI"
+        }
+    }
 
     /// The key a pasted API key must look like.
-    public var secretKind: SecretKind { self == .claudeCode ? .anthropicKey : .openaiKey }
+    public var secretKind: SecretKind {
+        switch self {
+        case .claudeCode: .anthropicKey
+        case .codex: .openaiKey
+        case .grok: .xaiKey
+        }
+    }
+
+    /// The agent named in free text ("Codex · team key"); Claude Code when it names none.
+    public init(named name: String) {
+        let lower = name.lowercased()
+        self = lower.contains("codex") ? .codex : lower.contains("grok") ? .grok : .claudeCode
+    }
 }
 
 public struct Connector: Identifiable, Codable, Hashable, Sendable {

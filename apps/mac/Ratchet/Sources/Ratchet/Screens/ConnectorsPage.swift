@@ -72,7 +72,7 @@ struct ConnectorsPage: View {
         switch kind {
         case .github: "No GitHub account yet. Ratchet pushes candidate branches and opens the pull request as you."
         case .aws: "No AWS profile yet. The evaluator runs in a sandbox in your AWS account, removed after each run."
-        case .agent: "No agent yet. Install Claude Code or Codex on this Mac, or add an API key."
+        case .agent: "No agent yet. Install Claude Code, Codex or Grok on this Mac, or add an API key."
         }
     }
 }
@@ -618,12 +618,11 @@ struct AddConnectorSheet: View {
                     .kitType(.caption).foregroundStyle(Ink.textFaint).fixedSize(horizontal: false, vertical: true)
                 if !canStore { keychainNotice("an API key") }
                 Picker("Agent", selection: $cli) {
-                    Text("Claude Code (Anthropic key)").tag(AgentCLI.claudeCode)
-                    Text("Codex (OpenAI key)").tag(AgentCLI.codex)
+                    ForEach(AgentCLI.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
-                FieldBlock("API key", problem: apiKey.isEmpty ? nil : cli.secretKind.problem(apiKey)) {
+                FieldBlock("\(cli.vendor) API key", problem: apiKey.isEmpty ? nil : cli.secretKind.problem(apiKey)) {
                     SecureField("", text: $apiKey).kitField().disabled(!canStore).accessibilityLabel("API key")
                 }
                 FieldBlock("Name, optional") {

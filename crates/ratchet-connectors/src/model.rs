@@ -17,7 +17,7 @@ pub enum ConnectorKind {
     Agent,
 }
 
-/// The two agent CLIs Ratchet drives.
+/// The agent CLIs Ratchet drives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum ConnectorAgent {
@@ -25,6 +25,8 @@ pub enum ConnectorAgent {
     ClaudeCode,
     #[serde(rename = "codex")]
     Codex,
+    #[serde(rename = "grok")]
+    Grok,
 }
 
 impl ConnectorAgent {
@@ -33,6 +35,7 @@ impl ConnectorAgent {
         match self {
             Self::ClaudeCode => "Claude Code",
             Self::Codex => "Codex",
+            Self::Grok => "Grok",
         }
     }
 
@@ -41,6 +44,7 @@ impl ConnectorAgent {
         match self {
             Self::ClaudeCode => ratchet_core::enums::AgentKind::ClaudeCode,
             Self::Codex => ratchet_core::enums::AgentKind::Codex,
+            Self::Grok => ratchet_core::enums::AgentKind::Grok,
         }
     }
 }

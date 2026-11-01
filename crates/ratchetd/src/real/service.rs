@@ -56,6 +56,7 @@ pub trait ConnectionProbe: Send + Sync {
     async fn aws(&self, region: &str, profile: &str) -> (bool, String);
     async fn anthropic(&self, api_key: &str) -> (bool, String);
     async fn openai(&self, api_key: &str) -> (bool, String);
+    async fn xai(&self, api_key: &str) -> (bool, String);
 }
 
 #[async_trait]
@@ -71,6 +72,10 @@ impl ConnectionProbe for ratchet_engine::runtime::ConnectionTester {
     }
     async fn openai(&self, api_key: &str) -> (bool, String) {
         let r = ratchet_engine::runtime::ConnectionTester::openai(self, api_key).await;
+        (r.ok, r.detail)
+    }
+    async fn xai(&self, api_key: &str) -> (bool, String) {
+        let r = ratchet_engine::runtime::ConnectionTester::xai(self, api_key).await;
         (r.ok, r.detail)
     }
 }
@@ -91,6 +96,9 @@ impl ConnectorProbe for ProbeAdapter {
     }
     async fn openai(&self, api_key: &str) -> (bool, String) {
         self.0.openai(api_key).await
+    }
+    async fn xai(&self, api_key: &str) -> (bool, String) {
+        self.0.xai(api_key).await
     }
 }
 
@@ -937,12 +945,10 @@ impl Inner {
                 "the evaluator runs in a sandbox in your AWS account",
             ),
         });
-        let named = |k: AgentKind| {
-            if k == AgentKind::Codex {
-                "Codex"
-            } else {
-                "Claude Code"
-            }
+        let named = |k: AgentKind| match k {
+            AgentKind::Codex => "Codex",
+            AgentKind::Grok => "Grok",
+            _ => "Claude Code",
         };
         if input.agents_where == AgentsWhere::Local {
             let found = self.harnesses.get().await.harnesses;
@@ -950,7 +956,12 @@ impl Inner {
                 .agents
                 .iter()
                 .copied()
-                .filter(|a| matches!(a, AgentKind::ClaudeCode | AgentKind::Codex))
+                .filter(|a| {
+                    matches!(
+                        a,
+                        AgentKind::ClaudeCode | AgentKind::Codex | AgentKind::Grok
+                    )
+                })
                 .collect();
             if kinds.is_empty() {
                 items.push(item(
@@ -992,19 +1003,25 @@ impl Inner {
             }
         } else {
             for a in &input.agents {
-                let (name, who) = match a {
-                    AgentKind::ClaudeCode => (SecretName::AnthropicApiKey, "Anthropic"),
-                    AgentKind::Codex => (SecretName::OpenaiApiKey, "OpenAI"),
+                let (agent, who) = match a {
+                    AgentKind::ClaudeCode => (ConnectorAgent::ClaudeCode, "Anthropic"),
+                    AgentKind::Codex => (ConnectorAgent::Codex, "OpenAI"),
+                    AgentKind::Grok => (ConnectorAgent::Grok, "xAI"),
                     _ => continue,
                 };
                 let id = format!("key-{}", a.as_str());
                 let label = format!("{who} API key");
-                let agent = match a {
-                    AgentKind::Codex => ConnectorAgent::Codex,
-                    _ => ConnectorAgent::ClaudeCode,
+                let in_env = match a {
+                    AgentKind::ClaudeCode => self
+                        .settings
+                        .env_secret(SecretName::AnthropicApiKey)
+                        .is_some(),
+                    AgentKind::Codex => {
+                        self.settings.env_secret(SecretName::OpenaiApiKey).is_some()
+                    }
+                    _ => std::env::var("XAI_API_KEY").is_ok_and(|k| !k.is_empty()),
                 };
-                let has_key = chosen.cloud_keys.contains_key(&agent)
-                    || self.settings.env_secret(name).is_some();
+                let has_key = chosen.cloud_keys.contains_key(&agent) || in_env;
                 items.push(if has_key {
                     item(&id, &label, PreflightState::Ok, "stored in the keychain")
                 } else {
@@ -1026,6 +1043,7 @@ fn harness_vm(h: &HarnessInfo) -> HarnessVm {
         kind: match h.kind {
             DetectKind::ClaudeCode => HarnessKind::ClaudeCode,
             DetectKind::Codex => HarnessKind::Codex,
+            DetectKind::Grok => HarnessKind::Grok,
         },
         installed: h.installed,
         version: h.version.clone(),

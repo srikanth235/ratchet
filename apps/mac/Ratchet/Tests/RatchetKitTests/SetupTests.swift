@@ -77,6 +77,16 @@ struct SettingsCheckTests {
         #expect(SecretKind.openaiKey.problem("sk-abcdefghijklmnopqrstuvwx") == nil)
         #expect(SecretKind.openaiKey.problem("sk-ant-abcdefghijklmnop") != nil)
         #expect(AgentCLI.codex.secretKind == .openaiKey && AgentCLI.claudeCode.secretKind == .anthropicKey)
+        #expect(SecretKind.xaiKey.problem("xai-abcdefghijklmnopqrstuv") == nil)
+        #expect(SecretKind.xaiKey.problem("sk-abcdefghijklmnopqrstuvwx")?.hasPrefix("xAI keys start with xai-") == true)
+        #expect(AgentCLI.grok.secretKind == .xaiKey && AgentCLI.grok.vendor == "xAI" && AgentCLI.grok.title == "Grok")
+    }
+
+    @Test func anAgentIsNamedInFreeText() {
+        #expect(AgentCLI(named: "Grok · team key") == .grok)
+        #expect(AgentCLI(named: "codex") == .codex)
+        #expect(AgentCLI(named: "Claude Code") == .claudeCode)
+        #expect(AgentCLI(named: "something else") == .claudeCode)
     }
 
     @Test func theAddButtonNeedsALongEnoughKeyWithNoProblem() {
@@ -480,7 +490,7 @@ struct ConnectorFormTests {
         let seen = try await client.detectedAgents(redetect: false)
         let connected = try await client.connectors()
         #expect(DetectedAgent.addable(seen, connected: connected).isEmpty)
-        #expect(DetectedAgent.emptyNote(seen) == "Your Claude Code and Codex logins are already listed.")
+        #expect(DetectedAgent.emptyNote(seen) == "Your Claude Code, Codex and Grok logins are already listed.")
 
         let after = try await client.detectedAgents(redetect: true)
         let addable = DetectedAgent.addable(after, connected: connected)
@@ -494,8 +504,8 @@ struct ConnectorFormTests {
     }
 
     @Test func noCLIAtAllHasItsOwnNote() {
-        let none = [DetectedAgent(cli: .claudeCode, installed: false), DetectedAgent(cli: .codex, installed: false)]
-        #expect(DetectedAgent.emptyNote(none) == "Neither Claude Code nor Codex was found.")
+        let none = AgentCLI.allCases.map { DetectedAgent(cli: $0, installed: false) }
+        #expect(DetectedAgent.emptyNote(none) == "None of Claude Code, Codex or Grok was found.")
     }
 
     @Test func anAgentKeyIsListedAsACloudCapableKey() async throws {
@@ -691,12 +701,12 @@ struct SetupDaemonTests {
         #expect(items.first?.detail == "Run `codex login`.")
     }
 
-    @Test func aDemoChecksBothAgentsOnThisMac() async throws {
+    @Test func aDemoChecksEveryAgentOnThisMac() async throws {
         let recorder = RouteRecorder()
         recorder.route("POST /v1/preflight", 200, "[]")
         _ = try await make(recorder).preflight(PreflightRequest(source: .demo, repo: "ignored", agentIDs: [], placement: .cloud))
         let sent = try #require(recorder.last("POST", "/v1/preflight")?.json)
-        #expect(sent["agents"] as? [String] == ["claude-code", "codex"])
+        #expect(sent["agents"] as? [String] == ["claude-code", "codex", "grok"])
         #expect(sent["agentsWhere"] as? String == "local")
         #expect(sent["repo"] == nil)
     }

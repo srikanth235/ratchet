@@ -37,8 +37,8 @@ pub fn friendly_missing(missing: &[String]) -> Vec<String> {
                 "The evaluator image for this app version was not found in your AWS account (connect AWS in Settings, or build the image)".to_string()
             } else if m.contains("runner AMI") {
                 "The cloud runner image was not found in your AWS account (use \"This Mac\", or build the image)".to_string()
-            } else if m.contains("install and sign in to Claude Code or Codex") {
-                "Install and sign in to Claude Code or Codex on this machine (Settings > Agents)".to_string()
+            } else if m.contains("install and sign in to Claude Code, Codex or Grok") {
+                "Install and sign in to Claude Code, Codex or Grok on this machine (Settings > Agents)".to_string()
             } else {
                 m.clone()
             }
@@ -88,13 +88,13 @@ mod tests {
     fn friendly_missing_rewrites_known_lines_and_keeps_others() {
         let out = friendly_missing(&[
             "set the bench AMI (Settings)".into(),
-            "install and sign in to Claude Code or Codex on this machine (Settings > Agents)"
+            "install and sign in to Claude Code, Codex or Grok on this machine (Settings > Agents)"
                 .into(),
             "needs a GitHub repository and token".into(),
             "set the runner AMI".into(),
         ]);
         assert!(out[0].starts_with("The evaluator image for this app version was not found"));
-        assert!(out[1].starts_with("Install and sign in to Claude Code or Codex"));
+        assert!(out[1].starts_with("Install and sign in to Claude Code, Codex or Grok"));
         assert_eq!(out[2], "Sign in with GitHub (Settings)");
         assert!(out[3].starts_with("The cloud runner image was not found"));
         assert_eq!(

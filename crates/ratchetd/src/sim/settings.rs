@@ -613,7 +613,7 @@ impl Inner {
                 let (present, vendor) = match a {
                     AgentKind::ClaudeCode => (secrets.anthropic_api_key, "Anthropic"),
                     AgentKind::Codex => (secrets.openai_api_key, "OpenAI"),
-                    AgentKind::Mock => continue,
+                    AgentKind::Grok | AgentKind::Mock => continue,
                 };
                 items.push(if present {
                     item(

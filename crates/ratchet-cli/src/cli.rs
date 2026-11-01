@@ -334,6 +334,8 @@ pub enum AgentArg {
     ClaudeCode,
     #[value(name = "codex")]
     Codex,
+    #[value(name = "grok")]
+    Grok,
     #[value(name = "mock")]
     Mock,
 }

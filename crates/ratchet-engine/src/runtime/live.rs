@@ -619,7 +619,7 @@ pub async fn create_live_runtime(opts: LiveOptions) -> EngineResult<LiveRuntime>
             .any(|h| h.installed && h.auth != ratchet_agents::HarnessAuth::SignedOut)
     {
         missing.push(
-            "install and sign in to Claude Code or Codex on this machine (Settings > Agents)"
+            "install and sign in to Claude Code, Codex or Grok on this machine (Settings > Agents)"
                 .to_owned(),
         );
     }
