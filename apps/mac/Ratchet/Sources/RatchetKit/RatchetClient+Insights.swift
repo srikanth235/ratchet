@@ -66,7 +66,7 @@ extension AppStore {
         do {
             insight.insights[optimizationID] = try await client.insights(optimizationID: optimizationID)
         } catch {
-            lastError = error.localizedDescription
+            reportProblem(error.localizedDescription)
         }
     }
 
@@ -77,7 +77,7 @@ extension AppStore {
             insight.results[optimizationID] = try await client.candidateResults(optimizationID: optimizationID)
             if insight.insights[optimizationID] == nil { await loadInsights(optimizationID) }
         } catch {
-            lastError = error.localizedDescription
+            reportProblem(error.localizedDescription)
         }
     }
 }
