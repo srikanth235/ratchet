@@ -229,7 +229,7 @@ struct BenchmarkRunTests {
     @Test func rejectedPointsCanBeHidden() async throws {
         let series = try await MockRatchetClient(now: testNow).benchmarkSeries(optimizationID: "opt-checkout", metric: nil)
         #expect(series.visiblePoints(showRejected: true).count > series.visiblePoints(showRejected: false).count)
-        #expect(series.visiblePoints(showRejected: false).allSatisfy(\.verified))
+        #expect(series.visiblePoints(showRejected: false).allSatisfy { $0.verified })
         #expect(series.agents.count == 2)
     }
 
