@@ -212,7 +212,7 @@ struct BenchmarkRunTests {
         #expect(p95.metric == "p95" && p95.selected?.isObjective == true)
         #expect(p95.noiseFloor != nil)
         #expect(p95.best == 288 && p95.locks == 2)
-        #expect(p95.improvement == 412 - 288)
+        #expect(abs((p95.improvement ?? 0) - 124) < 1e-9)
 
         let p99 = try await client.benchmarkSeries(optimizationID: "opt-checkout", metric: "p99")
         #expect(p99.metric == "p99" && p99.selected?.isObjective == false)
