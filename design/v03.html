@@ -122,6 +122,26 @@ td .s{color:var(--fa);font-size:12.5px}
 .tile .n{font-weight:500}.tile .d{color:var(--fa);font-size:12.5px;margin-top:3px}
 .tile .plus{margin-left:auto;width:28px;height:28px;border-radius:8px;border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;color:var(--mu);flex:none}
 .win{min-height:860px}table{width:100%}.main table td{padding:12px 0}.side{background:#0E1420}.btn{white-space:nowrap}
+
+.row{display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--line)}
+.row .n{font-weight:500}.row .d{color:var(--fa);font-size:12.5px;margin-top:2px}
+.logo{width:34px;height:34px;border-radius:9px;border:1px solid var(--line2);display:flex;align-items:center;justify-content:center;font:600 11px 'JetBrains Mono',monospace;color:var(--mu);flex:none;background:#101724}
+.st{width:130px;display:flex;align-items:center;gap:7px;color:var(--mu);font-size:12.5px}
+.more{color:var(--fa);letter-spacing:2px}
+.grp{font-size:12.5px;color:var(--fa);margin:6px 0 2px;display:flex;align-items:baseline;gap:10px}.grp b{color:var(--tx);font-size:14px;font-weight:600}
+.dflt{font-size:11.5px;color:var(--br2);opacity:.8}
+.overlay{position:absolute;inset:0;background:rgba(3,5,9,.62);display:flex;align-items:center;justify-content:center}
+.modal{width:1000px;height:720px;background:#0D131E;border:1px solid var(--line2);border-radius:16px;display:flex;overflow:hidden;box-shadow:0 40px 120px rgba(0,0,0,.6)}
+.mnav{width:240px;border-right:1px solid var(--line);padding:18px 12px;display:flex;flex-direction:column;gap:1px}
+.mnav .h{font-size:11.5px;color:var(--fa);padding:14px 10px 6px}
+.mnav .i{padding:7px 10px;border-radius:8px;color:var(--mu);display:flex;gap:10px;align-items:center}
+.mnav .i.on{background:rgba(148,163,190,.1);color:var(--tx)}
+.mbody{flex:1;padding:26px 34px;overflow:hidden}
+.set{display:flex;gap:24px;padding:16px 0;border-bottom:1px solid var(--line);align-items:center}
+.set .t{font-weight:500}.set .d{color:var(--fa);font-size:12.5px;margin-top:3px;max-width:520px}
+.tog{width:38px;height:22px;border-radius:11px;background:#2A3242;position:relative;flex:none;margin-left:auto}
+.tog.on{background:var(--br)}.tog::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:8px;background:#ECEFF4}.tog.on::after{left:19px;background:#16110A}
+.sel{margin-left:auto;border:1px solid var(--line2);border-radius:8px;padding:6px 12px;color:var(--mu);white-space:nowrap}
 </style></head><body>
 <section class="screen" id="s1"><div class="win"><div class="side"><div class="lights" style="padding:4px 8px 14px"><i></i><i></i><i></i></div>
 <div style="display:flex;align-items:center;gap:10px;padding:0 10px 14px"><svg width="26" height="15" viewBox="218 338 600 369"><defs><linearGradient id="brassM" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8E4B8"/><stop offset=".6" stop-color="#E2BE7C"/><stop offset="1" stop-color="#BE8F49"/></linearGradient></defs><path d="M397.8 434.8L397.8 466.2A31.5 31.5 0 0 1 366.4 434.8Z" fill="#8E9BB2" fill-opacity="0.12"/><path d="M407.7 434.8L407.7 466.2A31.5 31.5 0 0 0 439.2 434.8Z" fill="#8E9BB2" fill-opacity="0.18"/><path d="M361.6 424.9L439.2 424.9A77.6 77.6 0 0 0 361.6 347.3Z" fill="#8E9BB2" fill-opacity="0.28"/><path d="M351.7 471.0L227.9 471.0A123.8 123.8 0 0 1 351.7 347.3Z" fill="#8E9BB2" fill-opacity="0.42"/><path d="M444.0 480.9L444.0 697.0A216.1 216.1 0 0 1 227.9 480.9Z" fill="#8E9BB2" fill-opacity="0.6"/><path d="M453.9 342.5L453.9 697.0A354.5 354.5 0 0 0 808.4 342.5Z" fill="url(#brassM)"/></svg><span class="serif" style="font-size:22px">Ratchet</span></div>
@@ -218,4 +238,65 @@ td .s{color:var(--fa);font-size:12.5px}
 <div class="tile"><span class="ico">▤</span><div><div class="n">Memory</div><div class="d">Peak RSS under a hidden workload.</div></div><span class="plus">+</span></div>
 </div></div>
 </div></div></section>
-</body></html>
+<section class="screen" id="s5"><div class="win" style="position:relative"><div class="side"><div class="lights" style="padding:4px 8px 14px"><i></i><i></i><i></i></div>
+<div style="display:flex;align-items:center;gap:10px;padding:0 10px 14px"><svg width="26" height="15" viewBox="218 338 600 369"><defs><linearGradient id="brassM" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8E4B8"/><stop offset=".6" stop-color="#E2BE7C"/><stop offset="1" stop-color="#BE8F49"/></linearGradient></defs><path d="M397.8 434.8L397.8 466.2A31.5 31.5 0 0 1 366.4 434.8Z" fill="#8E9BB2" fill-opacity="0.12"/><path d="M407.7 434.8L407.7 466.2A31.5 31.5 0 0 0 439.2 434.8Z" fill="#8E9BB2" fill-opacity="0.18"/><path d="M361.6 424.9L439.2 424.9A77.6 77.6 0 0 0 361.6 347.3Z" fill="#8E9BB2" fill-opacity="0.28"/><path d="M351.7 471.0L227.9 471.0A123.8 123.8 0 0 1 351.7 347.3Z" fill="#8E9BB2" fill-opacity="0.42"/><path d="M444.0 480.9L444.0 697.0A216.1 216.1 0 0 1 227.9 480.9Z" fill="#8E9BB2" fill-opacity="0.6"/><path d="M453.9 342.5L453.9 697.0A354.5 354.5 0 0 0 808.4 342.5Z" fill="url(#brassM)"/></svg><span class="serif" style="font-size:22px">Ratchet</span></div>
+<div class="nv "><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M3 8h10"/></svg><span>New optimization</span></div>
+<div class="nv "><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg><span>Search</span><kbd>⌘K</kbd></div>
+<div class="nv "><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 11.5a5.5 5.5 0 1 1 11 0"/><path d="M8 11.5l2.8-3.6"/></svg><span>Overview</span></div>
+<div class="nv "><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h10M3 8h10M3 12h6"/></svg><span>Optimizations</span></div>
+<div class="nv on"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="11" height="8" rx="2"/><path d="M6 4.5V3.5h4v1"/></svg><span>Customize</span></div>
+<div class="sec">Recent runs</div><div class="run "><span class="spin"></span><div style="flex:1;min-width:0"><div class="ttl">Checkout p95</div><div class="meta">shop-api · 1 h 12 m left</div></div></div><div class="run "><span class="ic gold"></span><div style="flex:1;min-width:0"><div class="ttl">Search relevance · nightly</div><div class="meta">+5.9% · PR #311</div></div></div><div class="run "><span class="ic gold"></span><div style="flex:1;min-width:0"><div class="ttl">Forecast accuracy</div><div class="meta">−13% · PR #198</div></div></div><div class="run "><span class="ic no"></span><div style="flex:1;min-width:0"><div class="ttl">Bundle size · on push</div><div class="meta">no win · within noise</div></div></div><div class="run "><span class="ic fail"></span><div style="flex:1;min-width:0"><div class="ttl">CLI cold start</div><div class="meta">AWS session expired</div></div></div><div class="run "><span class="ic q"></span><div style="flex:1;min-width:0"><div class="ttl">Checkout p95 · nightly</div><div class="meta">queued · 02:00</div></div></div><div style="margin-top:auto;padding:10px;color:var(--fa);font-size:12px"><span class="dot d-ok"></span>Sandbox on · acme-prod · $1.20</div></div><div class="main">
+<div class="rh"><div class="serif" style="font-size:30px">Customize</div></div>
+<div style="display:flex;align-items:center;gap:14px"><div class="tabs"><span>Templates</span><span class="on">Connectors</span><span>Agents</span></div><span style="width:1px;height:20px;background:var(--line2)"></span><div class="seg2"><span class="on">Yours</span><span>Discover</span></div>
+<div class="field" style="max-width:260px;margin-left:auto">Search connectors</div><span class="btn pri">+ Add</span></div>
+<div style="max-width:980px">
+<div class="grp"><b>GitHub</b> where optimizations read code and open pull requests</div>
+<div class="row"><span class="logo">GH</span><div style="flex:1"><div class="n">srikanth235 <span class="dflt">· default</span></div><div class="d">Personal · signed in with GitHub · 42 repos</div></div><span class="st"><span class="dot d-ok"></span>Connected</span><span class="more">···</span></div>
+<div class="row"><span class="logo">GH</span><div style="flex:1"><div class="n">acme-org</div><div class="d">GitHub App · 18 repos selected</div></div><span class="st"><span class="dot d-ok"></span>Connected</span><span class="more">···</span></div>
+<div class="grp" style="margin-top:22px"><b>Cloud</b> where the evaluator and environments run</div>
+<div class="row"><span class="logo">AWS</span><div style="flex:1"><div class="n">acme-prod <span class="dflt">· default</span></div><div class="d">SSO · us-east-1 · cap $500 / month · $412 left</div></div><span class="st"><span class="dot d-ok"></span>Connected</span><span class="more">···</span></div>
+<div class="row"><span class="logo">AWS</span><div style="flex:1"><div class="n">personal-dev</div><div class="d">~/.aws profile · us-west-2 · cap $100 / month</div></div><span class="st"><span class="dot d-ok"></span>Connected</span><span class="more">···</span></div>
+<div class="row"><span class="logo">AWS</span><div style="flex:1"><div class="n">acme-staging</div><div class="d">SSO · eu-west-1 · used by “CLI cold start”, whose last run failed</div></div><span class="btn sm">Sign in</span><span class="st"><span class="dot d-bad"></span>Expired</span><span class="more">···</span></div>
+<div class="grp" style="margin-top:22px"><b>Notifications</b> where results go</div>
+<div class="row"><span class="logo">#</span><div style="flex:1"><div class="n">Slack · #perf-wins</div><div class="d">Pull requests opened and failed runs</div></div><span class="st"><span class="dot d-ok"></span>Connected</span><span class="more">···</span></div>
+</div>
+<div style="max-width:980px;margin-top:4px"><div class="grp"><b>Discover</b> more connectors</div><div class="grid2c">
+<div class="tile"><span class="ico">GCP</span><div><div class="n">Google Cloud</div><div class="d">Run the evaluator in your GCP project.</div></div><span class="plus">+</span></div>
+<div class="tile"><span class="ico">LN</span><div><div class="n">Linear</div><div class="d">Link wins to issues; open one when a run fails.</div></div><span class="plus">+</span></div>
+</div></div></div></div></section><section class="screen" id="s6"><div class="win" style="position:relative"><div class="side"><div class="lights" style="padding:4px 8px 14px"><i></i><i></i><i></i></div>
+<div style="display:flex;align-items:center;gap:10px;padding:0 10px 14px"><svg width="26" height="15" viewBox="218 338 600 369"><defs><linearGradient id="brassM" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8E4B8"/><stop offset=".6" stop-color="#E2BE7C"/><stop offset="1" stop-color="#BE8F49"/></linearGradient></defs><path d="M397.8 434.8L397.8 466.2A31.5 31.5 0 0 1 366.4 434.8Z" fill="#8E9BB2" fill-opacity="0.12"/><path d="M407.7 434.8L407.7 466.2A31.5 31.5 0 0 0 439.2 434.8Z" fill="#8E9BB2" fill-opacity="0.18"/><path d="M361.6 424.9L439.2 424.9A77.6 77.6 0 0 0 361.6 347.3Z" fill="#8E9BB2" fill-opacity="0.28"/><path d="M351.7 471.0L227.9 471.0A123.8 123.8 0 0 1 351.7 347.3Z" fill="#8E9BB2" fill-opacity="0.42"/><path d="M444.0 480.9L444.0 697.0A216.1 216.1 0 0 1 227.9 480.9Z" fill="#8E9BB2" fill-opacity="0.6"/><path d="M453.9 342.5L453.9 697.0A354.5 354.5 0 0 0 808.4 342.5Z" fill="url(#brassM)"/></svg><span class="serif" style="font-size:22px">Ratchet</span></div>
+<div class="nv on"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M3 8h10"/></svg><span>New optimization</span></div>
+<div class="nv "><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg><span>Search</span><kbd>⌘K</kbd></div>
+<div class="nv "><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 11.5a5.5 5.5 0 1 1 11 0"/><path d="M8 11.5l2.8-3.6"/></svg><span>Overview</span></div>
+<div class="nv "><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h10M3 8h10M3 12h6"/></svg><span>Optimizations</span></div>
+<div class="nv "><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="11" height="8" rx="2"/><path d="M6 4.5V3.5h4v1"/></svg><span>Customize</span></div>
+<div class="sec">Recent runs</div><div class="run "><span class="spin"></span><div style="flex:1;min-width:0"><div class="ttl">Checkout p95</div><div class="meta">shop-api · 1 h 12 m left</div></div></div><div class="run "><span class="ic gold"></span><div style="flex:1;min-width:0"><div class="ttl">Search relevance · nightly</div><div class="meta">+5.9% · PR #311</div></div></div><div class="run "><span class="ic gold"></span><div style="flex:1;min-width:0"><div class="ttl">Forecast accuracy</div><div class="meta">−13% · PR #198</div></div></div><div class="run "><span class="ic no"></span><div style="flex:1;min-width:0"><div class="ttl">Bundle size · on push</div><div class="meta">no win · within noise</div></div></div><div class="run "><span class="ic fail"></span><div style="flex:1;min-width:0"><div class="ttl">CLI cold start</div><div class="meta">AWS session expired</div></div></div><div class="run "><span class="ic q"></span><div style="flex:1;min-width:0"><div class="ttl">Checkout p95 · nightly</div><div class="meta">queued · 02:00</div></div></div><div style="margin-top:auto;padding:10px;color:var(--fa);font-size:12px"><span class="dot d-ok"></span>Sandbox on · acme-prod · $1.20</div></div><div class="main"><div class="main">
+<div class="strip" style="justify-content:space-between">
+  <div style="display:flex;gap:44px">
+    <div><div class="l">Spent · 90 days</div><div class="v serif">$184</div></div>
+    <div><div class="l">Value locked in</div><div class="v serif">$15.4k<span style="font-size:15px;color:var(--mu)"> / yr</span></div></div>
+    <div><div class="l">Return</div><div class="v serif">84×</div></div>
+  </div>
+  <div class="l" style="text-align:right">3 optimizations · 2 PRs opened this week<br><span style="color:var(--rose)">1 run failed</span> · CLI cold start</div>
+</div>
+<div style="margin-top:40px;text-align:center"><div class="serif" style="font-size:34px">What should get better?</div>
+<div style="color:var(--fa);margin-top:6px">Describe it once. Ratchet runs it unattended and opens a pull request with what it proves.</div></div>
+<div class="composer" style="max-width:820px;margin:0 auto;width:100%">
+  <div class="ph">Make checkout p95 faster in shop-api. Run it every night.</div>
+  <div class="chips"><span class="chip">acme-org/shop-api</span><span class="chip">acme-prod · AWS</span><span class="chip">Claude Code ×2</span><span class="chip">$50 · 2 h per run</span><span class="chip">Nightly 02:00</span><span class="send">↑</span></div>
+</div>
+<div class="sugg" style="max-width:820px;margin:0 auto;width:100%;justify-content:center"><span>Cut CLI cold start</span><span>Shrink the bundle</span><span>Speed up the test suite</span><span>Improve forecast accuracy</span><span>Try a demo</span></div>
+</div><div class="overlay"><div class="modal">
+<div class="mnav"><div style="font-weight:600;padding:2px 10px 10px">Settings</div><div class="field" style="flex:none;height:32px;margin:0 2px 4px">Search</div>
+<div class="h">Preferences</div><div class="i on">General</div><div class="i">Notifications</div><div class="i">Spend and limits</div><div class="i">Appearance</div>
+<div class="h">This Mac</div><div class="i">Background service</div><div class="i">Agents on this Mac</div><div class="i">Command-line tool</div>
+<div class="h">Customize</div><div class="i">Templates</div><div class="i">Connectors</div><div class="i">Agents</div>
+<div class="i" style="margin-top:auto;color:var(--fa)">Advanced (development)</div></div>
+<div class="mbody"><div style="font-size:18px;font-weight:600;margin-bottom:6px">General</div>
+<div class="set"><div><div class="t">Default limits for a new optimization</div><div class="d">Each run stops on its own at either limit. You can change them per optimization.</div></div><span class="sel">$50 · 2 h per run</span></div>
+<div class="set"><div><div class="t">Default schedule</div><div class="d">When a new optimization runs if you don't say.</div></div><span class="sel">Once</span></div>
+<div class="set"><div><div class="t">Agents run on</div><div class="d">This Mac uses your own Claude Code, Codex or Grok login and is free while the Mac is awake; the cloud runs unattended with API keys.</div></div><span class="seg2" style="margin-left:auto"><span class="on">This Mac</span><span>Cloud</span></span></div>
+<div class="set"><div><div class="t">Auto-merge verified wins</div><div class="d">Off: Ratchet opens a pull request and you merge it. On: it merges once your CI passes.</div></div><span class="tog"></span></div>
+<div class="set"><div><div class="t">Ask about a run</div><div class="d">Answer questions like “why was this rejected?” in a run's log with your Claude Code login. Counts toward that run's spend. Never changes a verdict.</div></div><span class="tog on"></span></div>
+<div class="set"><div><div class="t">Run log opens in</div><div class="d">Summary hides agent chatter; Verbose shows every event.</div></div><span class="seg2" style="margin-left:auto"><span class="on">Summary</span><span>Agents</span><span>Verbose</span></span></div>
+</div></div></div></div></section></body></html>
