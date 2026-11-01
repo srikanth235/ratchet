@@ -101,7 +101,8 @@ if [[ -z "${RATCHET_SKIP_DAEMON:-}" ]]; then
     echo "warning: ratchetd was not built, so this copy of the app has no bundled daemon (RATCHET_SKIP_DAEMON=1 hides this)"
   fi
 fi
-xattr -cr "$app"
+# `xattr -cr` is not understood by every macOS: clear each file's attributes instead.
+find "$app" -exec xattr -c {} + 2>/dev/null || true
 codesign --force --sign "$identity" "$app" 2>&1 | grep -v "replacing existing signature" || true
 echo "installed $app (signed: ${identity})"
 

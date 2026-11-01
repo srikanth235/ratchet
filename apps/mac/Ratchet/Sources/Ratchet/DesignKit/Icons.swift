@@ -2,11 +2,11 @@ import SwiftUI
 
 /// The icon set. Views name a `KitIcon`; the drawing lives here. One 16 x 16 box, one round stroke.
 /// Shapes follow the SVGs of design/v02.html.
-enum KitIcon {
+nonisolated enum KitIcon {
     case overview, optimizations, benchmarks, connectors, check, back, plus
 }
 
-private struct KitGlyph: Shape {
+private nonisolated struct KitGlyph: Shape {
     let icon: KitIcon
 
     func path(in rect: CGRect) -> Path {

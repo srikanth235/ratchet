@@ -66,7 +66,7 @@ nonisolated struct RatchetMarkGeometry: Sendable {
 }
 
 /// One chamber as a SwiftUI shape.
-private struct ChamberShape: Shape {
+private nonisolated struct ChamberShape: Shape {
     let geometry: RatchetMarkGeometry
     let index: Int
 
