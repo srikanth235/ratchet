@@ -178,7 +178,7 @@ body{padding-block:16px;padding-left:max(16px,env(safe-area-inset-left,0px));pad
 :focus-visible{outline:2px solid var(--br2);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){.toast{transition:none}}
 </style>
-<div class="pbar"><span class="nm">Ratchet v0.3 · clickable prototype</span><button type="button" class="pj" data-go="s1">Home</button><button type="button" class="pj" data-go="s2">Run</button><button type="button" class="pj" data-go="s3">Optimization</button><button type="button" class="pj" data-go="s4">Templates</button><button type="button" class="pj" data-go="s5">Connectors</button><button type="button" class="pj" data-go="s6">Settings</button><button type="button" class="pj" data-go="s7">Agents</button><button type="button" class="pj" data-go="s8">New optimization</button><button type="button" class="hs" aria-pressed="false">Show hotspots</button></div>
+<div class="pbar"><span class="nm">Ratchet v0.3 · clickable prototype</span><button type="button" class="pj" data-go="s1">Home</button><button type="button" class="pj" data-go="s9">Overview</button><button type="button" class="pj" data-go="s2">Run</button><button type="button" class="pj" data-go="s3">Optimization</button><button type="button" class="pj" data-go="s4">Templates</button><button type="button" class="pj" data-go="s5">Connectors</button><button type="button" class="pj" data-go="s6">Settings</button><button type="button" class="pj" data-go="s7">Agents</button><button type="button" class="pj" data-go="s8">New optimization</button><button type="button" class="hs" aria-pressed="false">Show hotspots</button></div>
 <div class="stage"><section class="screen" id="s1"><div class="win"><div class="side"><div class="lights" style="padding:4px 8px 14px"><i></i><i></i><i></i></div>
 <div style="display:flex;align-items:center;gap:10px;padding:0 10px 14px"><svg width="26" height="15" viewBox="218 338 600 369"><defs><linearGradient id="brassM" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8E4B8"/><stop offset=".6" stop-color="#E2BE7C"/><stop offset="1" stop-color="#BE8F49"/></linearGradient></defs><path d="M397.8 434.8L397.8 466.2A31.5 31.5 0 0 1 366.4 434.8Z" fill="#8E9BB2" fill-opacity="0.12"/><path d="M407.7 434.8L407.7 466.2A31.5 31.5 0 0 0 439.2 434.8Z" fill="#8E9BB2" fill-opacity="0.18"/><path d="M361.6 424.9L439.2 424.9A77.6 77.6 0 0 0 361.6 347.3Z" fill="#8E9BB2" fill-opacity="0.28"/><path d="M351.7 471.0L227.9 471.0A123.8 123.8 0 0 1 351.7 347.3Z" fill="#8E9BB2" fill-opacity="0.42"/><path d="M444.0 480.9L444.0 697.0A216.1 216.1 0 0 1 227.9 480.9Z" fill="#8E9BB2" fill-opacity="0.6"/><path d="M453.9 342.5L453.9 697.0A354.5 354.5 0 0 0 808.4 342.5Z" fill="url(#brassM)"/></svg><span class="serif" style="font-size:22px">Ratchet</span></div>
 <div class="nv on"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M3 8h10"/></svg><span>New optimization</span></div>
@@ -202,6 +202,47 @@ body{padding-block:16px;padding-left:max(16px,env(safe-area-inset-left,0px));pad
   <div class="chips"><span class="chip">acme-org/shop-api</span><span class="chip">acme-prod · AWS</span><span class="chip">Claude Code ×2</span><span class="chip">$50 · 2 h per run</span><span class="chip">Nightly 02:00</span><span class="send">↑</span></div>
 </div>
 <div class="sugg" style="max-width:820px;margin:0 auto;width:100%;justify-content:center"><span>Cut CLI cold start</span><span>Shrink the bundle</span><span>Speed up the test suite</span><span>Improve forecast accuracy</span><span>Try a demo</span></div>
+</div></div></section><section class="screen" id="s9"><div class="win"><div class="side"><div class="lights" style="padding:4px 8px 14px"><i></i><i></i><i></i></div>
+<div style="display:flex;align-items:center;gap:10px;padding:0 10px 14px"><svg width="26" height="15" viewBox="218 338 600 369"><defs><linearGradient id="brassM" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8E4B8"/><stop offset=".6" stop-color="#E2BE7C"/><stop offset="1" stop-color="#BE8F49"/></linearGradient></defs><path d="M397.8 434.8L397.8 466.2A31.5 31.5 0 0 1 366.4 434.8Z" fill="#8E9BB2" fill-opacity="0.12"/><path d="M407.7 434.8L407.7 466.2A31.5 31.5 0 0 0 439.2 434.8Z" fill="#8E9BB2" fill-opacity="0.18"/><path d="M361.6 424.9L439.2 424.9A77.6 77.6 0 0 0 361.6 347.3Z" fill="#8E9BB2" fill-opacity="0.28"/><path d="M351.7 471.0L227.9 471.0A123.8 123.8 0 0 1 351.7 347.3Z" fill="#8E9BB2" fill-opacity="0.42"/><path d="M444.0 480.9L444.0 697.0A216.1 216.1 0 0 1 227.9 480.9Z" fill="#8E9BB2" fill-opacity="0.6"/><path d="M453.9 342.5L453.9 697.0A354.5 354.5 0 0 0 808.4 342.5Z" fill="url(#brassM)"/></svg><span class="serif" style="font-size:22px">Ratchet</span></div>
+<div class="nv "><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M3 8h10"/></svg><span>New optimization</span></div>
+<div class="nv "><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg><span>Search</span><kbd>⌘K</kbd></div>
+<div class="nv on"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 11.5a5.5 5.5 0 1 1 11 0"/><path d="M8 11.5l2.8-3.6"/></svg><span>Overview</span></div>
+<div class="nv "><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4h10M3 8h10M3 12h6"/></svg><span>Optimizations</span></div>
+<div class="nv "><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="11" height="8" rx="2"/><path d="M6 4.5V3.5h4v1"/></svg><span>Customize</span></div>
+<div class="sec">Recent runs</div><div class="run "><span class="spin"></span><div style="flex:1;min-width:0"><div class="ttl">Checkout p95</div><div class="meta">shop-api · 1 h 12 m left</div></div></div><div class="run "><span class="ic gold"></span><div style="flex:1;min-width:0"><div class="ttl">Search relevance · nightly</div><div class="meta">+5.9% · PR #311</div></div></div><div class="run "><span class="ic gold"></span><div style="flex:1;min-width:0"><div class="ttl">Forecast accuracy</div><div class="meta">−13% · PR #198</div></div></div><div class="run "><span class="ic no"></span><div style="flex:1;min-width:0"><div class="ttl">Bundle size · on push</div><div class="meta">no win · within noise</div></div></div><div class="run "><span class="ic fail"></span><div style="flex:1;min-width:0"><div class="ttl">CLI cold start</div><div class="meta">AWS session expired</div></div></div><div class="run "><span class="ic q"></span><div style="flex:1;min-width:0"><div class="ttl">Checkout p95 · nightly</div><div class="meta">queued · 02:00</div></div></div><div style="margin-top:auto;padding:10px;color:var(--fa);font-size:12px"><span class="dot d-ok"></span>Sandbox on · acme-prod · $1.20</div></div><div class="main">
+<div class="head"><h1 class="serif">Overview</h1><div class="seg2" style="margin-left:auto"><span>30 days</span><span class="on">90 days</span><span>All time</span></div><span class="btn pri">New optimization</span></div>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+ <div style="padding:22px 28px 22px 0"><div class="s">Spent</div><div class="serif" style="font-size:52px;line-height:1.05;margin-top:6px">$184</div>
+  <div style="height:3px;border-radius:2px;background:var(--line2);margin-top:12px;overflow:hidden"><div style="width:37%;height:100%;background:var(--br)"></div></div>
+  <div class="s" style="margin-top:8px">of $500 cap · AWS $121 · agents $63</div></div>
+ <div style="padding:22px 28px;border-left:1px solid var(--line)"><div class="s">Value delivered</div><div class="serif" style="font-size:52px;line-height:1.05;margin-top:6px">$12.5k<span style="font-size:20px;color:var(--mu)"> / yr</span></div>
+  <div class="s" style="margin-top:23px">from 3 merged wins · +$2.9k waiting in 1 PR</div></div>
+ <div style="padding:22px 0 22px 28px;border-left:1px solid var(--line)"><div class="s">Return</div><div class="serif" style="font-size:52px;line-height:1.05;margin-top:6px;color:var(--br2)">68×</div>
+  <div class="s" style="margin-top:23px">per $1 spent, yearly · paid back in 6 days</div></div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 300px;gap:48px">
+ <div><h2>Value delivered vs spend</h2><svg viewBox="-4 -14 732 240" width="100%" style="display:block;overflow:visible" role="img" aria-label="Value delivered per year grew from $0 to $12.5k over 90 days while spend reached $184">
+<defs><linearGradient id="ovA" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#D9B26F" stop-opacity=".22"/><stop offset="1" stop-color="#D9B26F" stop-opacity="0"/></linearGradient></defs>
+<line x1="0" x2="680" y1="200" y2="200" stroke="var(--line2)"/><text x="690" y="204" fill="var(--fa)" font-size="11" font-family="JetBrains Mono,monospace">$0</text><line x1="0" x2="680" y1="137.5" y2="137.5" stroke="var(--line)"/><text x="690" y="141.5" fill="var(--fa)" font-size="11" font-family="JetBrains Mono,monospace">$5k</text><line x1="0" x2="680" y1="75.0" y2="75.0" stroke="var(--line)"/><text x="690" y="79.0" fill="var(--fa)" font-size="11" font-family="JetBrains Mono,monospace">$10k</text><line x1="0" x2="680" y1="12.5" y2="12.5" stroke="var(--line)"/><text x="690" y="16.5" fill="var(--fa)" font-size="11" font-family="JetBrains Mono,monospace">$15k</text><text x="0.0" y="222" fill="var(--fa)" font-size="11" text-anchor="start">Aug 2</text><text x="226.7" y="222" fill="var(--fa)" font-size="11" text-anchor="middle">Sep 1</text><text x="453.3" y="222" fill="var(--fa)" font-size="11" text-anchor="middle">Oct 1</text><text x="680.0" y="222" fill="var(--fa)" font-size="11" text-anchor="end">Oct 31</text>
+<path d="M0 200 H75.6 V185.0 H241.8 V103.8 H513.8 V43.8 H680 V200 Z" fill="url(#ovA)"/>
+<path d="M0 200 H75.6 V185.0 H241.8 V103.8 H513.8 V43.8 H680" fill="none" stroke="var(--br)" stroke-width="2"/>
+<path d="M657.3 43.8 V7.5 H680" fill="none" stroke="var(--br2)" stroke-width="1.5" stroke-dasharray="4 4"/>
+<text x="649.3" y="11.5" fill="var(--br2)" font-size="11.5" text-anchor="end">+$2.9k if PR #311 merges</text>
+<polyline points="0.0,200.0 75.6,199.6 241.8,199.1 415.6,198.6 513.8,198.2 680.0,197.7" fill="none" stroke="var(--rose)" stroke-width="1.5"/>
+<text x="676" y="189.7" fill="var(--rose)" font-size="11.5" text-anchor="end">Spent $184</text>
+<circle cx="75.6" cy="185.0" r="3.5" fill="var(--br)"/><text x="83.6" y="177.0" fill="var(--mu)" font-size="11.5">CLI cold start</text><circle cx="241.8" cy="103.8" r="3.5" fill="var(--br)"/><text x="249.8" y="95.8" fill="var(--mu)" font-size="11.5">Forecast accuracy</text><circle cx="513.8" cy="43.8" r="3.5" fill="var(--br)"/><text x="521.8" y="35.8" fill="var(--mu)" font-size="11.5">Checkout p95</text></svg></div>
+ <div style="display:flex;flex-direction:column;gap:22px">
+  <div><h2>Unclaimed value</h2><div class="card"><div class="serif" style="font-size:30px">$2.9k<span style="font-size:15px;color:var(--mu)"> / yr</span></div>
+   <div class="s" style="margin-top:4px">Search relevance · +5.9% nDCG, verified by the evaluator. Value counts once the PR merges.</div>
+   <div style="margin-top:12px"><span class="btn sm">Open PR #311</span></div></div></div>
+  <div><h2>Next 30 days</h2><div class="kv" style="grid-template-columns:1fr auto">
+   <div class="k">Scheduled runs</div><div class="mono" style="text-align:right">62</div>
+   <div class="k">Expected spend</div><div class="mono" style="text-align:right">~$140</div>
+   <div class="k">Hard cap</div><div class="mono" style="text-align:right">$500</div></div></div>
+ </div>
+</div>
+<div><h2>Return by optimization</h2><table><thead><tr><th style="width:24%">Optimization</th><th>Status</th><th>Best result</th><th class="r">Spent</th><th class="r">Value / yr</th><th class="r">Return</th></tr></thead><tbody><tr><td>Forecast accuracy<div class="s">acme-org/demand-model</div></td><td><span class="dot d-ok"></span>Merged<div class="s" style="padding-left:14px">Weekly</div></td><td><span class="up mono">−13%</span> <span class="s">WAPE 18.2 → 15.9%</span></td><td class="r mono">$64</td><td class="r mono">$6.5k</td><td class="r mono" style="color:var(--br2)">102×</td></tr><tr><td>Checkout p95<div class="s">acme-org/shop-api</div></td><td><span class="dot d-ok"></span>Merged<div class="s" style="padding-left:14px">Nightly · running now</div></td><td><span class="up mono">−30%</span> <span class="s">412 → 288 ms</span></td><td class="r mono">$38</td><td class="r mono">$4.8k</td><td class="r mono" style="color:var(--br2)">126×</td></tr><tr><td>Search relevance<div class="s">acme-org/search-svc</div></td><td><span class="dot d-wait"></span>PR #311 open<div class="s" style="padding-left:14px">Nightly</div></td><td><span class="up mono">+5.9%</span> <span class="s">nDCG 0.612 → 0.648</span></td><td class="r mono">$22</td><td class="r mono"><span style="color:var(--fa)">$2.9k</span></td><td class="r mono" style="color:var(--br2)"><span style="color:var(--fa)">132×</span></td></tr><tr><td>CLI cold start<div class="s">srikanth235/acme-cli</div></td><td><span class="dot d-ok"></span>Merged<div class="s" style="padding-left:14px">Once</div></td><td><span class="up mono">−39%</span> <span class="s">840 → 510 ms</span></td><td class="r mono">$41</td><td class="r mono">$1.2k</td><td class="r mono" style="color:var(--br2)">29×</td></tr><tr><td>Bundle size<div class="s">acme-org/web-app</div></td><td><span class="dot d-off"></span>No win<div class="s" style="padding-left:14px">On push to main</div></td><td><span class="s">no win yet · within noise (±2%)</span></td><td class="r mono">$19</td><td class="r mono"><span class="s">—</span></td><td class="r mono" style="color:var(--br2)"><span class="s">—</span></td></tr></tbody></table>
+<div class="s" style="margin-top:10px">Value is Ratchet's estimate from each optimization's value model (for example, ms saved × checkout volume). Edit it on the optimization page.</div></div>
 </div></div></section><section class="screen" id="s2"><div class="win"><div class="side"><div class="lights" style="padding:4px 8px 14px"><i></i><i></i><i></i></div>
 <div style="display:flex;align-items:center;gap:10px;padding:0 10px 14px"><svg width="26" height="15" viewBox="218 338 600 369"><defs><linearGradient id="brassM" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8E4B8"/><stop offset=".6" stop-color="#E2BE7C"/><stop offset="1" stop-color="#BE8F49"/></linearGradient></defs><path d="M397.8 434.8L397.8 466.2A31.5 31.5 0 0 1 366.4 434.8Z" fill="#8E9BB2" fill-opacity="0.12"/><path d="M407.7 434.8L407.7 466.2A31.5 31.5 0 0 0 439.2 434.8Z" fill="#8E9BB2" fill-opacity="0.18"/><path d="M361.6 424.9L439.2 424.9A77.6 77.6 0 0 0 361.6 347.3Z" fill="#8E9BB2" fill-opacity="0.28"/><path d="M351.7 471.0L227.9 471.0A123.8 123.8 0 0 1 351.7 347.3Z" fill="#8E9BB2" fill-opacity="0.42"/><path d="M444.0 480.9L444.0 697.0A216.1 216.1 0 0 1 227.9 480.9Z" fill="#8E9BB2" fill-opacity="0.6"/><path d="M453.9 342.5L453.9 697.0A354.5 354.5 0 0 0 808.4 342.5Z" fill="url(#brassM)"/></svg><span class="serif" style="font-size:22px">Ratchet</span></div>
 <div class="nv "><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v10M3 8h10"/></svg><span>New optimization</span></div>
@@ -386,8 +427,8 @@ body{padding-block:16px;padding-left:max(16px,env(safe-area-inset-left,0px));pad
 <div class="toast" role="status" aria-live="polite"></div>
 <script>
 (function(){
-const N={"s1": "Home", "s2": "Run", "s3": "Optimization", "s4": "Templates", "s5": "Connectors", "s6": "Settings", "s7": "Agents", "s8": "New optimization"};
-let cur='s1',prev='s1';
+const N={"s1": "Home", "s2": "Run", "s3": "Optimization", "s4": "Templates", "s5": "Connectors", "s6": "Settings", "s7": "Agents", "s8": "New optimization", "s9": "Overview"};
+let cur='s9',prev='s9';
 const stage=document.querySelector('.stage');
 function fit(){const w=Math.min(1,(document.documentElement.clientWidth-32)/1440);stage.style.zoom=w;document.querySelector('.pbar').style.maxWidth=(1440*w)+'px'}
 addEventListener('resize',fit);fit();
@@ -398,7 +439,7 @@ function go(s){if(!document.getElementById(s))return;if(s!=='s6'&&cur!=='s6')pre
 let tt;function toast(m){const t=document.querySelector('.toast');t.textContent=m;t.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>t.classList.remove('show'),1800)}
 // settings entry in each sidebar footer
 document.querySelectorAll('.side').forEach(sd=>{const f=[...sd.children].find(c=>/Sandbox on/.test(c.textContent));const d=document.createElement('div');d.className='setnv';d.textContent='⚙ Settings';d.tabIndex=0;d.dataset.go='s6';(f?sd.insertBefore(d,f):sd.appendChild(d))});
-const nav={'New optimization':'s1','Search':'s1','Overview':'s1','Optimizations':'s3','Customize':'s4'};
+const nav={'New optimization':'s1','Search':'s1','Overview':'s9','Optimizations':'s3','Customize':'s4'};
 const tabs={'Templates':'s4','Connectors':'s5','Agents':'s7','Agents on this Mac':'s7'};
 const t=e=>e.textContent.trim();
 document.addEventListener('click',ev=>{
@@ -414,6 +455,8 @@ document.addEventListener('click',ev=>{
   if(k==='Create optimization'){toast('Created · first run tonight at 02:00');return go('s3')}
   if(k==='Run once now'||k==='Run now'){toast('Run started');return go('s2')}
   if(k==='Use template')return go('s8');
+  if(k==='New optimization')return go('s1');
+  if(/^Open PR/.test(k))return toast('Opens '+k.slice(5)+' on GitHub');
   if(k==='Pause'){x.textContent='Resume';return toast('Paused · no runs until you resume')}
   if(k==='Resume'){x.textContent='Pause';return toast('Resumed')}
   if(k==='Sign in')return toast('Opens codex login in Terminal');
@@ -425,6 +468,6 @@ document.addEventListener('click',ev=>{
 });
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&cur==='s6')go(prev);if((e.metaKey||e.ctrlKey)&&e.key===',' ){e.preventDefault();go('s6')}
  if(e.key==='Enter'&&e.target.matches('.setnv'))go('s6')});
-go('s1');
+go('s9');
 })();
 </script>
