@@ -2210,7 +2210,7 @@ async fn completes_a_kill_switch_that_was_interrupted() {
     h.engine.ready().await;
     h.until(
         async || h.status(&b.id).await == OptimizationStatus::Stopped,
-        5,
+        500, // the resumed kill switch runs on real I/O; five cycles failed once on a loaded machine
     )
     .await;
     assert!(h.compute.live(None).is_empty());

@@ -364,6 +364,13 @@ async fn runs_a_claude_code_agent_in_a_worktree_verifies_its_commit_then_removes
         "the idle teardown",
     )
     .await;
+    // the sandbox row is marked destroyed a moment before the receipt is written
+    until(
+        || async { engine.teardown_receipt(&id).await.unwrap().is_some() },
+        5000,
+        "the teardown receipt",
+    )
+    .await;
     let receipt = engine
         .teardown_receipt(&id)
         .await

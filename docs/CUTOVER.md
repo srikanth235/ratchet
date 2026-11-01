@@ -279,8 +279,9 @@ does not exist yet" and the XCUITest claim; `ratchet-sandbox` now lists `environ
 3. **Demo patch suites run their tests again**: after applying each cumulative patch run the demo's `tsc` and `vitest` (the
    TS tests did).
 4. **A real Packer build and launch of the runner and bench images** on AWS; the CI checks stop at the install scripts.
-5. **A flaky wait**: `core_loop::completes_a_kill_switch_that_was_interrupted` waits for five scheduler cycles and failed once on
-   a loaded machine.
+5. **Timing-sensitive tests** failed once each under load and were hardened: `core_loop::completes_a_kill_switch_that_was_interrupted`
+   (five scheduler cycles, now 500), `runtime_local_agents` (the receipt is written a moment after the sandbox row is marked
+   destroyed: now awaited), the `memory` template test on macOS (see above). Others of the kind may exist.
 6. **Packaged app, real-mode demos** need `examples/` and `node_modules` next to the daemon; the packaged app's demo mode is the
    daemon's own simulation and needs neither. `demo_scripts.rs` locates the scripts through `CARGO_MANIFEST_DIR`.
 7. **XCUITest flows, Spotlight, Quick Look** (promised by the architecture page, not built).
