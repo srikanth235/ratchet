@@ -5,7 +5,7 @@ import SwiftUI
 
 /// Lays its children out left to right and wraps to the next line when the width runs out (the Home chips, the suggestions).
 struct FlowLayout: SwiftUI.Layout {
-    var spacing: CGFloat = Space.sm
+    var spacing: CGFloat
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: LayoutSubviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? .infinity
