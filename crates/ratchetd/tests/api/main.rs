@@ -13,4 +13,5 @@ mod real_chat;
 mod real_service;
 mod sim;
 mod sse;
+mod value_story;
 mod views;

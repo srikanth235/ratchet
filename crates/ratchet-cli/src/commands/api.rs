@@ -10,8 +10,8 @@ use serde_json::json;
 
 use super::{emit_json, table, urlencode};
 use crate::cli::{
-    AgentArg, AgentCmd, AgentsCmd, ChatCmd, Command, CostCmd, DemoArg, EnvCmd, EventsArgs, RunArgs,
-    WhereArg,
+    AgentArg, AgentCmd, AgentsCmd, BasisArg, ChatCmd, Command, CostCmd, DemoArg, EnvCmd,
+    EventsArgs, PeriodArg, RunArgs, ScheduleArg, ScheduleCmd, ValueCmd, WhereArg,
 };
 use crate::client::{Client, ClientError};
 use crate::io::Io;
@@ -101,6 +101,20 @@ pub async fn run(c: &Client, cmd: Command, json: bool, io: &dyn Io) -> R {
         Command::Repos { query } => repos(c, query, json, io).await,
         Command::Inspect { target } => inspect(c, &target, json, io).await,
         Command::Overview { range } => overview(c, range.as_str(), json, io).await,
+        Command::Home { range } => home(c, range.as_str(), json, io).await,
+        Command::Value { action } => value(c, action, json, io).await,
+        Command::Schedule { action } => schedule(c, action, json, io).await,
+        Command::PrMerged { id } => {
+            let pr: PullRequestVm = c
+                .post_empty(&format!("/v1/optimizations/{id}/pull-request/merged"))
+                .await?;
+            done(
+                io,
+                json,
+                json!({"id": id, "merged": true, "url": pr.url}),
+                format!("{id}: pull request merged, its wins now count as delivered\n"),
+            )
+        }
         Command::Connectors => connectors(c, json, io).await,
         Command::Validate { .. }
         | Command::Init(_)
@@ -549,26 +563,15 @@ async fn overview(c: &Client, range: &str, json: bool, io: &dyn Io) -> R {
         emit_json(io, &o);
         return Ok(0);
     }
-    let value = match &o.value {
-        Some(v) => format!(
-            "${}/yr ({})",
-            to_fixed(v.usd_per_year, 0),
-            format!("{:?}", v.basis).to_lowercase()
-        ),
-        None => format!("{DASH} (set a value)"),
-    };
-    let ret = match &o.return_on_spend {
-        Some(r) => format!(
-            "{}x, paid back in {} days",
-            to_fixed(r.ratio, 1),
-            to_fixed(r.payback_days, 0)
-        ),
-        None => DASH.to_owned(),
-    };
-    io.out(&format!(
-        "spent {}   value locked in {value}   return {ret}\n",
-        money(o.spent.usd),
-    ));
+    if let Some(e) = &o.empty_state {
+        io.out(&format!("{}\n{}\n", e.title, e.body));
+        if o.phase == OverviewPhase::Empty {
+            return Ok(0);
+        }
+        io.out("\n");
+    }
+    io.out(&story_text(&o.story, &o.spent.detail));
+    io.out(&format!("next 30 days   {}\n", o.forecast.line));
     if o.needs_you.is_empty() {
         io.out("\nNothing is waiting on you.\n");
     } else {
@@ -600,6 +603,174 @@ async fn overview(c: &Client, range: &str, json: bool, io: &dyn Io) -> R {
             &rows
         )
     ));
+    Ok(0)
+}
+
+/// Spent / delivered / return, in the words Home and Overview share.
+fn story_text(s: &ValueStory, spend_detail: &str) -> String {
+    let ret = match (s.return_x, s.payback_days) {
+        (Some(r), Some(d)) => format!(
+            "{}x per $1 spent, paid back in {} days",
+            to_fixed(r, 1),
+            to_fixed(d, 0)
+        ),
+        _ => DASH.to_owned(),
+    };
+    let value = if s.line.is_empty() {
+        format!("{DASH} (set a value with `ratchet value set`)")
+    } else {
+        s.line.clone()
+    };
+    format!(
+        "spent {} ({spend_detail})\nvalue per year   {value}\nreturn          {ret}\n",
+        money(s.spent_usd)
+    )
+}
+
+async fn home(c: &Client, range: &str, json: bool, io: &dyn Io) -> R {
+    let h: HomeVm = c.get(&format!("/v1/home?range={range}")).await?;
+    if json {
+        emit_json(io, &h);
+        return Ok(0);
+    }
+    if h.empty {
+        io.out("No optimizations yet. Describe what should get better with `ratchet run`.\n");
+        return Ok(0);
+    }
+    io.out(&format!(
+        "spent {}   value per year {}\n",
+        money(h.story.spent_usd),
+        if h.story.line.is_empty() {
+            DASH.to_owned()
+        } else {
+            h.story.line.clone()
+        }
+    ));
+    io.out(&format!(
+        "{}   {} open, {} merged pull request{}",
+        if h.optimizations == 1 {
+            "1 optimization".to_owned()
+        } else {
+            format!("{} optimizations", h.optimizations)
+        },
+        h.pull_requests.open,
+        h.pull_requests.merged,
+        if h.pull_requests.open + h.pull_requests.merged == 1 {
+            ""
+        } else {
+            "s"
+        }
+    ));
+    if let Some(f) = &h.failed {
+        io.out(&format!("   {}: {}", f.title, f.sub));
+    }
+    io.out("\n");
+    Ok(0)
+}
+
+fn value_text(v: &ValueModelVm) -> String {
+    if v.set {
+        format!("{}\n", v.summary)
+    } else {
+        format!(
+            "Not set. Example: ratchet value set <id> --usd-per-unit 1200 --unit {} --note \"ms saved x checkout volume\"\n",
+            "ms"
+        )
+    }
+}
+
+async fn value(c: &Client, action: ValueCmd, json: bool, io: &dyn Io) -> R {
+    let id = match &action {
+        ValueCmd::Show { optimization }
+        | ValueCmd::Set { optimization, .. }
+        | ValueCmd::Clear { optimization } => optimization.clone(),
+    };
+    let path = format!("/v1/optimizations/{id}/value");
+    let vm: ValueModelVm = match action {
+        ValueCmd::Show { .. } => c.get(&path).await?,
+        ValueCmd::Clear { .. } => c.delete(&path).await?,
+        ValueCmd::Set {
+            usd_per_unit,
+            period,
+            unit,
+            basis,
+            note,
+            ..
+        } => {
+            // PUT replaces the whole model; a flag left out keeps what the optimization has now.
+            let cur: ValueModelVm = c.get(&path).await?;
+            let Some(usd) = usd_per_unit.or(cur.usd_per_unit) else {
+                io.err(
+                    "ratchet: missing --usd-per-unit. Example: ratchet value set <id> --usd-per-unit 1200 --unit ms --note \"ms saved x checkout volume\"\n",
+                );
+                return Ok(2);
+            };
+            let body = SetValueModelInput {
+                usd_per_unit: usd,
+                period: period
+                    .map(|p| match p {
+                        PeriodArg::Month => ratchet_core::enums::ValuePeriod::Month,
+                        PeriodArg::Year => ratchet_core::enums::ValuePeriod::Year,
+                    })
+                    .or(cur.period),
+                basis: basis
+                    .map(|b| match b {
+                        BasisArg::Estimated => ratchet_core::enums::ValueBasis::Estimated,
+                        BasisArg::Measured => ratchet_core::enums::ValueBasis::Measured,
+                    })
+                    .or(cur.basis),
+                unit: unit.or(cur.unit),
+                note: note.or(cur.note),
+            };
+            c.put(&path, &body).await?
+        }
+    };
+    if json {
+        emit_json(io, &vm);
+    } else {
+        io.out(&value_text(&vm));
+    }
+    Ok(0)
+}
+
+async fn schedule(c: &Client, action: ScheduleCmd, json: bool, io: &dyn Io) -> R {
+    let (id, put) = match action {
+        ScheduleCmd::Show { optimization } => (optimization, None),
+        ScheduleCmd::Clear { optimization } => {
+            (optimization, Some(SetScheduleInput { schedule: None }))
+        }
+        ScheduleCmd::Set {
+            optimization,
+            every,
+        } => (
+            optimization,
+            Some(SetScheduleInput {
+                schedule: Some(match every {
+                    ScheduleArg::Once => ratchet_core::enums::ScheduleKind::Once,
+                    ScheduleArg::Nightly => ratchet_core::enums::ScheduleKind::Nightly,
+                    ScheduleArg::Weekdays => ratchet_core::enums::ScheduleKind::Weekdays,
+                    ScheduleArg::Weekly => ratchet_core::enums::ScheduleKind::Weekly,
+                    ScheduleArg::OnPush => ratchet_core::enums::ScheduleKind::OnPush,
+                }),
+            }),
+        ),
+    };
+    let path = format!("/v1/optimizations/{id}/schedule");
+    let vm: ScheduleVm = match put {
+        Some(body) => c.put(&path, &body).await?,
+        None => c.get(&path).await?,
+    };
+    if json {
+        emit_json(io, &vm);
+    } else {
+        io.out(&format!(
+            "{}{}\n",
+            vm.summary,
+            vm.runs_next_30_days.map_or(String::new(), |n| format!(
+                " ({n} runs in the next 30 days)"
+            ))
+        ));
+    }
     Ok(0)
 }
 

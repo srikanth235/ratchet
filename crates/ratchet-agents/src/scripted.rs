@@ -417,6 +417,7 @@ impl ScriptedAgent {
                             input_tokens: *input_tokens,
                             output_tokens: *output_tokens,
                             cost_usd: Some(cost),
+                            ..AgentUsage::default()
                         },
                     ),
                 );

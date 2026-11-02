@@ -94,7 +94,8 @@ fn parser_maps_a_full_transcript_to_status_message_tool_usage_events() {
         Some(AgentUsage {
             input_tokens: 16 + 12385 + 36131,
             output_tokens: 308,
-            cost_usd: Some(0.0841)
+            cost_usd: Some(0.0841),
+            ..AgentUsage::default()
         })
     );
     let result = parser.result.unwrap();
@@ -340,7 +341,8 @@ async fn resume_passes_resume_id_sends_the_message_and_keeps_the_session_id() {
         Some(AgentUsage {
             input_tokens: 12606,
             output_tokens: 120,
-            cost_usd: Some(0.0312)
+            cost_usd: Some(0.0312),
+            ..AgentUsage::default()
         })
     );
 }

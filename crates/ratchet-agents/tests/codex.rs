@@ -103,7 +103,8 @@ fn parser_maps_items_to_message_and_tool_events_and_turn_completed_to_usage() {
         Some(AgentUsage {
             input_tokens: 24763,
             output_tokens: 1122,
-            cost_usd: None
+            cost_usd: None,
+            ..AgentUsage::default()
         })
     ); // no cost without a price book
     assert_eq!(

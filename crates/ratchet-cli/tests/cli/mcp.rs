@@ -97,6 +97,14 @@ fn the_owner_tool_list_matches_the_cli_command_table() {
         "repos",
         "inspect",
         "overview",
+        "home",
+        "value_show",
+        "value_set",
+        "value_clear",
+        "schedule_show",
+        "schedule_set",
+        "schedule_clear",
+        "pr-merged",
         "connectors",
     ] {
         assert!(

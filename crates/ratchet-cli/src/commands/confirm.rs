@@ -7,7 +7,7 @@
 use clap::ValueEnum;
 use serde_json::{Value, json};
 
-use crate::cli::{AgentArg, Command, EnvCmd, RunArgs, WhereArg};
+use crate::cli::{AgentArg, Command, EnvCmd, RunArgs, ValueCmd, WhereArg};
 use crate::io::Io;
 
 /// Exit code of a refused command: the command line is missing something, as with any usage error.
@@ -43,6 +43,16 @@ pub fn preview(command: &Command) -> Option<Preview> {
             headline: format!("Would open the pull request with the verified wins of {id}."),
             lines: vec![("optimization", id.clone())],
             rerun: format!("ratchet pr {id} --yes"),
+        }),
+        Command::Value {
+            action: ValueCmd::Clear { optimization },
+        } => Some(Preview {
+            command: "value clear",
+            headline: format!(
+                "Would remove the value model of {optimization}: its wins would have no dollar value."
+            ),
+            lines: vec![("optimization", optimization.clone())],
+            rerun: format!("ratchet value clear {optimization} --yes"),
         }),
         Command::Env {
             action: EnvCmd::End { sandbox },

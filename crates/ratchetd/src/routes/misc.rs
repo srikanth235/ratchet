@@ -22,6 +22,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(status))
         .routes(routes!(events))
         .routes(routes!(overview))
+        .routes(routes!(home))
         .routes(routes!(validate_config))
         .routes(routes!(preflight))
         .routes(routes!(activity))
@@ -136,6 +137,22 @@ async fn overview(
     ApiQuery(q): ApiQuery<OverviewQuery>,
 ) -> ApiResult<Json<OverviewVm>> {
     Ok(Json(s.service.overview(q.range.unwrap_or_default()).await?))
+}
+
+/// Home: the line above the composer. `story` is the Overview's `story`, from the same computation.
+#[utoipa::path(
+    get,
+    path = "/v1/home",
+    tag = "overview",
+    operation_id = "getHome",
+    params(HomeQuery),
+    responses((status = 200, body = HomeVm))
+)]
+async fn home(
+    State(s): State<AppState>,
+    ApiQuery(q): ApiQuery<HomeQuery>,
+) -> ApiResult<Json<HomeVm>> {
+    Ok(Json(s.service.home(q.range.unwrap_or_default()).await?))
 }
 
 /// Parse ratchet.yaml text (read-only; the repo owns the file). Always 200: problems are in the result.

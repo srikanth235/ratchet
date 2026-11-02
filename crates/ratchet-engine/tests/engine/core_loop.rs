@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use ratchet_core::enums::CandidateVerdict;
+use ratchet_core::enums::{Billing, CandidateVerdict};
 use ratchet_core::ports::{
     AgentUsage, BenchLaunchPurpose, BenchLaunchSpec, CloudCompute, GitHost, InstanceState,
     NoticeLevel, PortError,
@@ -923,11 +923,13 @@ async fn records_token_usage_from_runner_events_as_spend_category_tokens() {
                 input_tokens: 1_000_000,
                 output_tokens: 100_000,
                 cost_usd: None,
+                ..AgentUsage::default()
             }), // 3 + 1.5
             ev(AgentEventType::Usage).with_usage(AgentUsage {
                 input_tokens: 0,
                 output_tokens: 0,
                 cost_usd: Some(0.25),
+                ..AgentUsage::default()
             }),
         ],
     );
@@ -950,6 +952,75 @@ async fn records_token_usage_from_runner_events_as_spend_category_tokens() {
             .tokens,
         4.75,
     ); // not re-counted
+}
+
+#[tokio::test]
+async fn subscription_usage_is_counted_in_tokens_and_never_trips_the_budget() {
+    let h = Harness::new(Default::default()).await;
+    let b = begun(&h).await; // budget $1
+    let claude = b.agent(ClaudeCode);
+    h.runners.emit(
+        &claude,
+        vec![ev(AgentEventType::Usage).with_usage(AgentUsage {
+            input_tokens: 5_000_000,
+            output_tokens: 400_000,
+            cost_usd: Some(50.0), // a list-price estimate: the plan already covers it
+            billing: Billing::Subscription,
+        })],
+    );
+    h.cycle(1).await;
+    let br = h.ledger.spend_breakdown(&oid(&b.id)).await.unwrap();
+    approx(br.by_category.tokens, 0.0);
+    assert_eq!(br.included_tokens, 5_400_000);
+    assert_eq!(h.status(&b.id).await, OptimizationStatus::Running);
+    let rows: Vec<(String, f64, i64)> = sqlx::query_as(
+        "SELECT billing, usd, input_tokens + output_tokens FROM spend_events WHERE category = 'tokens'",
+    )
+    .fetch_all(h.ledger.pool())
+    .await
+    .unwrap();
+    assert_eq!(rows, vec![("subscription".to_owned(), 0.0, 5_400_000)]);
+}
+
+#[tokio::test]
+async fn api_usage_beside_subscription_usage_is_split_and_only_the_dollars_trip_the_budget() {
+    let h = Harness::new(Default::default()).await;
+    let b = begun(&h).await; // budget $1
+    let claude = b.agent(ClaudeCode);
+    h.runners.emit(
+        &claude,
+        vec![
+            ev(AgentEventType::Usage).with_usage(AgentUsage {
+                input_tokens: 1_000,
+                output_tokens: 100,
+                cost_usd: Some(0.25),
+                billing: Billing::Api,
+            }),
+            ev(AgentEventType::Usage).with_usage(AgentUsage {
+                input_tokens: 2_000,
+                output_tokens: 200,
+                cost_usd: Some(40.0),
+                billing: Billing::Subscription,
+            }),
+        ],
+    );
+    h.cycle(1).await;
+    let br = h.ledger.spend_breakdown(&oid(&b.id)).await.unwrap();
+    approx(br.by_category.tokens, 0.25);
+    assert_eq!(br.included_tokens, 2_200);
+    assert_eq!(h.status(&b.id).await, OptimizationStatus::Running);
+    // a key-billed turn that crosses the budget still stops the run
+    h.runners.emit(
+        &claude,
+        vec![ev(AgentEventType::Usage).with_usage(AgentUsage {
+            input_tokens: 1,
+            output_tokens: 1,
+            cost_usd: Some(5.0),
+            billing: Billing::Api,
+        })],
+    );
+    h.cycle(1).await;
+    assert_eq!(h.status(&b.id).await, OptimizationStatus::Stopped);
 }
 
 #[tokio::test]
@@ -1050,6 +1121,7 @@ async fn a_token_spend_overrun_also_trips_the_kill_switch() {
             input_tokens: 0,
             output_tokens: 0,
             cost_usd: Some(5.0),
+            ..AgentUsage::default()
         })],
     );
     h.cycle(1).await;

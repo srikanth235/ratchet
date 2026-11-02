@@ -20,6 +20,7 @@ pub mod repos;
 pub mod settings;
 pub mod summary;
 pub mod validate;
+pub mod value;
 pub mod vm;
 
 pub use agents::*;
@@ -33,4 +34,5 @@ pub use overview::*;
 pub use repos::*;
 pub use settings::*;
 pub use summary::validate_config_text;
+pub use value::*;
 pub use vm::*;

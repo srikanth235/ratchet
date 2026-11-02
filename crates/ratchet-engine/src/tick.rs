@@ -5,7 +5,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use ratchet_core::enums::{AgentStatus, BenchPhase, CandidateVerdict, OptimizationStatus, Verdict};
+use ratchet_core::enums::{
+    AgentStatus, BenchPhase, Billing, CandidateVerdict, OptimizationStatus, Verdict,
+};
 use ratchet_core::numfmt::{js_number_to_string, to_fixed};
 use ratchet_core::ports::{
     AgentEvent, AgentEventType, BaselineMetrics, BenchJob, BenchJobPhase, BenchOutcome,
@@ -523,12 +525,20 @@ impl Engine {
             return Ok(());
         }
 
-        let token_usd: f64 = res
-            .events
-            .iter()
-            .filter_map(|e| e.usage.as_ref())
-            .map(|u| token_cost_usd(u, &self.settings.token_pricing))
-            .sum();
+        // Tokens on a key are real dollars; tokens on the user's own plan are counted and never charged.
+        let mut token_usd = 0.0_f64;
+        let (mut api_tokens, mut plan_tokens) = ((0u64, 0u64), (0u64, 0u64));
+        for u in res.events.iter().filter_map(|e| e.usage.as_ref()) {
+            let side = match u.billing {
+                Billing::Api => {
+                    token_usd += token_cost_usd(u, &self.settings.token_pricing);
+                    &mut api_tokens
+                }
+                Billing::Subscription => &mut plan_tokens,
+            };
+            side.0 = side.0.saturating_add(u.input_tokens);
+            side.1 = side.1.saturating_add(u.output_tokens);
+        }
         let now = self.clock.now();
         let new_status = status_from_events(&res.events);
         // Events, token spend and the cursor commit together: a crash can neither lose nor replay events.
@@ -556,16 +566,25 @@ impl Engine {
                         })
                         .await?;
                     }
-                    if token_usd > 0.0 {
+                    for (billing, usd, (input, output)) in [
+                        (Billing::Api, token_usd, api_tokens),
+                        (Billing::Subscription, 0.0, plan_tokens),
+                    ] {
+                        if usd <= 0.0 && input + output == 0 {
+                            continue;
+                        }
                         let mut s = RecordSpendInput::new(
                             opt_id.clone(),
                             ratchet_core::enums::SpendCategory::Tokens,
-                            token_usd,
+                            usd,
                             format!("tokens:{aid_}"),
                         );
                         s.agent_id = Some(aid_.clone());
                         s.estimated = Some(true);
                         s.at = Some(now);
+                        s.billing = Some(billing);
+                        s.input_tokens = input;
+                        s.output_tokens = output;
                         tx.record_spend(s).await?;
                     }
                     tx.kv_set(&cursor_key, &new_cursor).await?;

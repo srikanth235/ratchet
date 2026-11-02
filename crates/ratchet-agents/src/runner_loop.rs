@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ratchet_core::enums::{AgentKind, CandidateVerdict};
+use ratchet_core::enums::{AgentKind, Billing, CandidateVerdict};
 use ratchet_core::ports::{
     AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
     CancellationToken, Clock, McpServer, PortError, PortResult, Preflight, RunnerConfig,
@@ -364,10 +364,13 @@ impl Core {
                 shared.last_message = text.clone();
             }
             if let (AgentEventType::Usage, Some(usage)) = (e.event_type, e.usage.as_ref()) {
-                shared.spend_usd += usage
-                    .cost_usd
-                    .or_else(|| self.tuning.estimate_cost.as_ref().map(|f| f(usage)))
-                    .unwrap_or(0.0);
+                // Only real dollars count against the budget: tokens on the user's own plan cost nothing extra.
+                if usage.billing == Billing::Api {
+                    shared.spend_usd += usage
+                        .cost_usd
+                        .or_else(|| self.tuning.estimate_cost.as_ref().map(|f| f(usage)))
+                        .unwrap_or(0.0);
+                }
                 if shared.spend_usd >= self.config.budget_usd {
                     shared.over_budget = true;
                 }
@@ -1205,6 +1208,13 @@ async fn body(
         };
 
         // -- agent turn
+        // The harness that runs this turn says how its tokens are paid for; every usage event carries it on.
+        let stamped = |mut e: AgentEvent| {
+            if let Some(u) = e.usage.as_mut() {
+                u.billing = slot.adapter.billing();
+            }
+            callback(e);
+        };
         let turn_result: PortResult<()> = if let Some(s) = session.as_mut() {
             core.status(
                 "agent turn started",
@@ -1214,7 +1224,7 @@ async fn body(
             );
             let message = message(&entry, &notes, no_change);
             slot.adapter
-                .resume(s, &spec, &message, &callback, Some(&core.ctl))
+                .resume(s, &spec, &message, &stamped, Some(&core.ctl))
                 .await
         } else {
             core.status(
@@ -1232,7 +1242,7 @@ async fn body(
             let start_spec = AgentSpec { prompt, ..spec };
             match slot
                 .adapter
-                .start(&start_spec, &callback, Some(&core.ctl))
+                .start(&start_spec, &stamped, Some(&core.ctl))
                 .await
             {
                 Ok(s) => {

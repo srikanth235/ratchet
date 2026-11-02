@@ -61,6 +61,7 @@ async fn hand_made(
             period: ValuePeriod::Month,
             basis: ValueBasis::Measured,
             unit: Some("ms".into()),
+            note: None,
         });
     }
     l.create_optimization(c).await.unwrap();

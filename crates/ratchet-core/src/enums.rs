@@ -116,6 +116,59 @@ string_enum!(
 );
 
 string_enum!(
+    /// How a model's tokens are paid for. `api`: a key, billed per token (real dollars). `subscription`: the user's own signed-in
+    /// plan on this Mac, already paid for; its tokens are counted but cost nothing extra. Detection decides: a login is
+    /// `subscription`, a key is `api`.
+    Billing {
+        Api => "api",
+        Subscription => "subscription",
+    }
+);
+
+impl Default for Billing {
+    fn default() -> Self {
+        Self::Api
+    }
+}
+
+impl Billing {
+    /// For `skip_serializing_if`: `api` is the default and stays off the wire.
+    pub const fn is_api(&self) -> bool {
+        matches!(self, Self::Api)
+    }
+}
+
+string_enum!(
+    /// How often an optimization runs by itself (the Overview's "Next 30 days" counts these).
+    ScheduleKind {
+        /// One run, started by hand.
+        Once => "once",
+        /// Every night.
+        Nightly => "nightly",
+        /// Every weekday night.
+        Weekdays => "weekdays",
+        /// Once a week.
+        Weekly => "weekly",
+        /// On every push to the base branch. Not forecast: how often it happens is not known in advance.
+        OnPush => "on-push",
+    }
+);
+
+impl ScheduleKind {
+    /// How many runs this schedule starts in the next 30 days (`None`: cannot be forecast). `once` counts as 0: it only runs when
+    /// started by hand.
+    pub const fn runs_in_30_days(self) -> Option<u32> {
+        match self {
+            Self::Once => Some(0),
+            Self::Nightly => Some(30),
+            Self::Weekdays => Some(21),
+            Self::Weekly => Some(4),
+            Self::OnPush => None,
+        }
+    }
+}
+
+string_enum!(
     /// Who runs a sandbox: the AWS tofu provider, or the simulation.
     SandboxProviderKind {
         Aws => "aws",

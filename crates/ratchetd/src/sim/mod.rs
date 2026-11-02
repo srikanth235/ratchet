@@ -73,6 +73,10 @@ pub struct SimOptions {
     pub github_flow_ms: u64,
     /// Pause between the chunks the scripted chat streams (the typing effect); zero streams at full speed.
     pub chat_chunk_delay: std::time::Duration,
+    /// Seed the value story too (what the app's mock data shows): the Codex optimization runs on a subscription, the others on
+    /// a key; schedules, a merged and an open pull request, and the value models' plain words. Off by default so the seeded
+    /// ledger the older tests count on stays as it was.
+    pub seed_value_story: bool,
 }
 
 impl Default for SimOptions {
@@ -89,6 +93,7 @@ impl Default for SimOptions {
             resume_runs: true,
             github_flow_ms: 2000,
             chat_chunk_delay: std::time::Duration::ZERO,
+            seed_value_story: false,
         }
     }
 }
@@ -122,6 +127,8 @@ pub(crate) struct Inner {
     pub opts: SimOptions,
     pub rng: Mutex<Rng>,
     pub pr_urls: Arc<Mutex<HashMap<String, String>>>,
+    /// Optimizations whose pull request was recorded as merged.
+    pub merged_prs: Arc<Mutex<std::collections::HashSet<String>>>,
     pub state: Mutex<State>,
     /// Environment drafts: the real `ratchet-env` flow with its deterministic mock drafter (no agent, no AWS).
     pub drafts: crate::drafts::EnvDrafts,
@@ -214,6 +221,7 @@ pub(crate) fn new_optimization_input(
         period: v.period,
         basis: v.basis,
         unit: v.unit.clone(),
+        note: v.note.clone(),
     });
     input
 }
@@ -272,8 +280,18 @@ impl SimService {
                     .cloned()
             })
         };
+        let merged_prs: Arc<Mutex<std::collections::HashSet<String>>> = Arc::default();
+        let merged_lookup: crate::views::PrMergedLookup = {
+            let m = Arc::clone(&merged_prs);
+            Arc::new(move |id| {
+                m.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .contains(id)
+            })
+        };
         let (tx, _) = broadcast::channel(1024);
-        let views = LedgerViews::new(ledger.clone(), Arc::clone(&clock), lookup);
+        let views = LedgerViews::new(ledger.clone(), Arc::clone(&clock), lookup)
+            .with_pr_merged(merged_lookup);
         let (hub, sim_github) = {
             let tx = tx.clone();
             connectors::build_hub(
@@ -317,6 +335,7 @@ impl SimService {
             clock: Arc::clone(&clock),
             rng: Mutex::new(Rng::new(opts.rng_seed)),
             pr_urls,
+            merged_prs,
             state: Mutex::new(State::default()),
             chat: crate::chat::ScriptedChatEngine::new(crate::chat::ScriptedOptions {
                 chunk_delay: opts.chat_chunk_delay,
@@ -327,7 +346,10 @@ impl SimService {
         });
         inner.st().settings = SettingsState::demo();
         if opts.seed_demo && seed::is_ledger_empty(&inner.ledger).await? {
-            seed::seed_demo(&inner.ledger, clock.now()).await?;
+            seed::seed_demo(&inner.ledger, clock.now(), opts.seed_value_story).await?;
+            if opts.seed_value_story {
+                inner.seed_value_story().await?;
+            }
             inner.seed_environment().await?;
         }
         if opts.resume_runs {
@@ -594,6 +616,49 @@ impl AppService for SimService {
             .unwrap_or_else(PoisonError::into_inner)
             .insert(id.to_owned(), url.clone());
         Ok(PullRequestVm { url })
+    }
+
+    async fn mark_pull_request_merged(&self, id: &str) -> ServiceResult<PullRequestVm> {
+        let url = self
+            .0
+            .pr_urls
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+            .cloned()
+            .ok_or_else(|| {
+                ServiceError::Conflict("this optimization has no pull request yet".into())
+            })?;
+        self.0
+            .merged_prs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id.to_owned());
+        Ok(PullRequestVm { url })
+    }
+
+    async fn get_value_model(&self, id: &str) -> ServiceResult<ValueModelVm> {
+        self.0.views.value_model(id).await
+    }
+
+    async fn set_value_model(
+        &self,
+        id: &str,
+        input: SetValueModelInput,
+    ) -> ServiceResult<ValueModelVm> {
+        self.0.views.set_value_model(id, input).await
+    }
+
+    async fn clear_value_model(&self, id: &str) -> ServiceResult<ValueModelVm> {
+        self.0.views.clear_value_model(id).await
+    }
+
+    async fn get_schedule(&self, id: &str) -> ServiceResult<ScheduleVm> {
+        self.0.views.schedule(id).await
+    }
+
+    async fn set_schedule(&self, id: &str, input: SetScheduleInput) -> ServiceResult<ScheduleVm> {
+        self.0.views.set_schedule(id, input).await
     }
 
     async fn report(&self, id: &str) -> ServiceResult<ReportVm> {

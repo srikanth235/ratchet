@@ -14,7 +14,7 @@ use crate::grok_acp::GrokLiveSession;
 use crate::harness::{Scratch, TurnRunner, open_with_fallback};
 use crate::models::resolve_model;
 use crate::process::LineSplitter;
-use ratchet_core::enums::AgentKind;
+use ratchet_core::enums::{AgentKind, Billing};
 use ratchet_core::ports::{
     Access, AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
     CancellationToken, Capabilities, EventSink, Harness, LiveSession, McpServer, PortError,
@@ -218,6 +218,7 @@ impl GrokStreamParser {
                 .get("total_cost_usd")
                 .and_then(Value::as_f64)
                 .filter(|c| c.is_finite() && *c >= 0.0),
+            ..AgentUsage::default()
         };
         let mut events = vec![
             AgentEvent::new(at, AgentEventType::Usage)
@@ -701,6 +702,10 @@ impl TurnRunner for GrokAdapter {
 impl AgentAdapter for GrokAdapter {
     fn kind(&self) -> AgentKind {
         AgentKind::Grok
+    }
+
+    fn billing(&self) -> Billing {
+        self.cli.billing
     }
 
     async fn preflight(&self) -> PortResult<Preflight> {

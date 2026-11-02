@@ -54,6 +54,14 @@ pub const MARKS: &[(&str, Mark)] = &[
     ("repos", Mark::ReadOnly),
     ("inspect", Mark::ReadOnly),
     ("overview", Mark::ReadOnly),
+    ("home", Mark::ReadOnly),
+    ("value show", Mark::ReadOnly),
+    ("value set", Mark::Write),
+    ("value clear", Mark::Destructive),
+    ("schedule show", Mark::ReadOnly),
+    ("schedule set", Mark::Write),
+    ("schedule clear", Mark::Write),
+    ("pr-merged", Mark::Write),
     ("connectors", Mark::ReadOnly),
 ];
 

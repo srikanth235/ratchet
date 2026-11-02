@@ -10,8 +10,9 @@ use serde_json::Value;
 
 use crate::config::GuardrailResult;
 use crate::enums::{
-    AgentKind, AgentStatus, BenchPhase, CandidateVerdict, Direction, EvaluatorKind,
-    OptimizationStatus, SandboxProviderKind, SandboxStatus, SpendCategory, ValueBasis, ValuePeriod,
+    AgentKind, AgentStatus, BenchPhase, Billing, CandidateVerdict, Direction, EvaluatorKind,
+    OptimizationStatus, SandboxProviderKind, SandboxStatus, ScheduleKind, SpendCategory,
+    ValueBasis, ValuePeriod,
 };
 use crate::ids::{AgentId, CandidateId, OptimizationId, SandboxId};
 
@@ -134,6 +135,10 @@ pub struct Optimization {
     pub value_period: Option<ValuePeriod>,
     pub value_basis: Option<ValueBasis>,
     pub value_unit: Option<String>,
+    /// The value model in plain words ("ms saved x checkout volume"), shown next to the number it explains.
+    pub value_note: Option<String>,
+    /// How often the optimization runs by itself; `None` = not scheduled (started by hand).
+    pub schedule: Option<ScheduleKind>,
     pub sandbox_id: Option<SandboxId>,
 }
 
@@ -222,6 +227,11 @@ pub struct SpendEvent {
     pub estimated: bool,
     pub source: String,
     pub at: i64,
+    /// `api`: real dollars. `subscription`: the user's own plan; `usd` is 0 and only the tokens count.
+    pub billing: Billing,
+    /// Tokens this row accounts for (0 for rows that are not model usage, and for rows written before tokens were counted).
+    pub input_tokens: i64,
+    pub output_tokens: i64,
 }
 
 /// Live log of an agent's parsed event stream.
@@ -324,6 +334,8 @@ pub struct SpendBreakdown {
     pub by_category: CategoryTotals,
     /// Per agent (creation order), plus one entry with `agent_id: None` for optimization-level spend (if any).
     pub by_agent: Vec<AgentSpend>,
+    /// Tokens used on the user's own plan (`billing = subscription`): counted, not in `total`.
+    pub included_tokens: i64,
 }
 
 /// An item of the merged, newest-first feed of verdicts and ratchet moves.

@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use ratchet_core::config::GuardrailResult;
 use ratchet_core::enums::{
-    AgentKind, AgentStatus, BenchPhase, CandidateVerdict, Direction, EvaluatorKind,
-    OptimizationStatus, SandboxStatus, SpendCategory, ValueBasis, ValuePeriod,
+    AgentKind, AgentStatus, BenchPhase, Billing, CandidateVerdict, Direction, EvaluatorKind,
+    OptimizationStatus, SandboxStatus, ScheduleKind, SpendCategory, ValueBasis, ValuePeriod,
 };
 use ratchet_core::ids::{AgentId, CandidateId, OptimizationId, SandboxId};
 use ratchet_core::ledger::{LedgerError, Patch, RecordSandboxInput, SandboxStatusPatch};
@@ -64,6 +64,8 @@ pub struct CreateOptimizationInput {
     pub evaluator_kind: Option<EvaluatorKind>,
     /// `objective.value` from ratchet.yaml; `None` when the config has no value model.
     pub value: Option<ValueInput>,
+    /// How often it runs by itself.
+    pub schedule: Option<ScheduleKind>,
     pub sandbox_id: Option<SandboxId>,
 }
 
@@ -73,6 +75,8 @@ pub struct ValueInput {
     pub period: ValuePeriod,
     pub basis: ValueBasis,
     pub unit: Option<String>,
+    /// The model in plain words ("ms saved x checkout volume").
+    pub note: Option<String>,
 }
 
 impl CreateOptimizationInput {
@@ -105,6 +109,7 @@ impl CreateOptimizationInput {
             objective_name: None,
             evaluator_kind: None,
             value: None,
+            schedule: None,
             sandbox_id: None,
         }
     }
@@ -198,6 +203,12 @@ pub struct RecordSpendInput {
     pub estimated: Option<bool>,
     pub source: String,
     pub at: Option<i64>,
+    /// Who paid for it. Default `api`. A `subscription` row is stored with `usd = 0` whatever `usd` says: only real dollars are
+    /// ever summed.
+    pub billing: Option<Billing>,
+    /// Tokens the row accounts for (model usage only).
+    pub input_tokens: u64,
+    pub output_tokens: u64,
 }
 
 impl RecordSpendInput {
@@ -215,6 +226,9 @@ impl RecordSpendInput {
             estimated: None,
             source: source.into(),
             at: None,
+            billing: None,
+            input_tokens: 0,
+            output_tokens: 0,
         }
     }
 }
@@ -399,6 +413,54 @@ impl Ledger {
         rowmap::optimization(&row)
     }
 
+    /// Set (or clear, with `None`) the value model of an optimization: what a metric improvement is worth. The wins already in the
+    /// ledger are valued with the new model from now on (value is computed from the model, not stored per win).
+    pub async fn set_value_model(
+        &self,
+        id: &OptimizationId,
+        value: Option<&ValueInput>,
+    ) -> Result<Optimization> {
+        if let Some(v) = value {
+            assert_finite("usdPerUnit", v.usd_per_unit)?;
+            if v.usd_per_unit <= 0.0 {
+                return Err(LedgerError::invalid("usdPerUnit must be > 0"));
+            }
+        }
+        let mut conn = self.conn().await?;
+        require_optimization(&mut conn, id.as_str()).await?;
+        let row = sqlx::query(
+            "UPDATE optimizations SET value_usd_per_unit = ?1, value_period = ?2, value_basis = ?3, value_unit = ?4, \
+             value_note = ?5 WHERE id = ?6 RETURNING *",
+        )
+        .bind(value.map(|v| v.usd_per_unit))
+        .bind(value.map(|v| v.period.as_str()))
+        .bind(value.map(|v| v.basis.as_str()))
+        .bind(value.and_then(|v| v.unit.clone()))
+        .bind(value.and_then(|v| v.note.clone()))
+        .bind(id.as_str())
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(db)?;
+        rowmap::optimization(&row)
+    }
+
+    /// Set (or clear) how often an optimization runs by itself.
+    pub async fn set_schedule(
+        &self,
+        id: &OptimizationId,
+        schedule: Option<ScheduleKind>,
+    ) -> Result<Optimization> {
+        let mut conn = self.conn().await?;
+        require_optimization(&mut conn, id.as_str()).await?;
+        let row = sqlx::query("UPDATE optimizations SET schedule = ?1 WHERE id = ?2 RETURNING *")
+            .bind(schedule.map(ScheduleKind::as_str))
+            .bind(id.as_str())
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(db)?;
+        rowmap::optimization(&row)
+    }
+
     /// Point an optimization at the sandbox it runs in (the engine creates the sandbox lazily, at the first run start).
     pub async fn set_optimization_sandbox(
         &self,
@@ -473,7 +535,7 @@ impl Ledger {
         }
 
         let mut spend: HashMap<String, f64> = HashMap::new();
-        for r in sqlx::query("SELECT optimization_id, coalesce(sum(usd), 0.0) AS total FROM spend_events GROUP BY optimization_id")
+        for r in sqlx::query("SELECT optimization_id, coalesce(sum(usd), 0.0) AS total FROM spend_events WHERE billing = 'api' GROUP BY optimization_id")
             .fetch_all(&mut *conn)
             .await
             .map_err(db)?
@@ -972,7 +1034,7 @@ impl Ledger {
 
     pub async fn total_spend(&self, optimization_id: &OptimizationId) -> Result<f64> {
         let r = sqlx::query(
-            "SELECT coalesce(sum(usd), 0.0) AS total FROM spend_events WHERE optimization_id = ?1",
+            "SELECT coalesce(sum(usd), 0.0) AS total FROM spend_events WHERE optimization_id = ?1 AND billing = 'api'",
         )
         .bind(optimization_id.as_str())
         .fetch_one(&mut *self.conn().await?)
@@ -1282,6 +1344,7 @@ async fn record_spend(
     now: i64,
 ) -> Result<SpendEvent> {
     assert_finite("usd", input.usd)?;
+    let billing = input.billing.unwrap_or_default();
     require_optimization(conn, input.optimization_id.as_str()).await?;
     if let Some(agent_id) = &input.agent_id {
         let agent = require_agent(conn, agent_id.as_str()).await?;
@@ -1293,16 +1356,19 @@ async fn record_spend(
         }
     }
     let row = sqlx::query(
-        "INSERT INTO spend_events (optimization_id, agent_id, category, usd, estimated, source, at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING *",
+        "INSERT INTO spend_events (optimization_id, agent_id, category, usd, estimated, source, at, billing, input_tokens, \
+         output_tokens) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) RETURNING *",
     )
     .bind(input.optimization_id.as_str())
     .bind(input.agent_id.as_ref().map(AgentId::as_str))
     .bind(input.category.as_str())
-    .bind(input.usd)
+    .bind(if billing == Billing::Subscription { 0.0 } else { input.usd })
     .bind(i64::from(input.estimated.unwrap_or(true)))
     .bind(&input.source)
     .bind(input.at.unwrap_or(now))
+    .bind(billing.as_str())
+    .bind(i64::try_from(input.input_tokens).unwrap_or(i64::MAX))
+    .bind(i64::try_from(input.output_tokens).unwrap_or(i64::MAX))
     .fetch_one(&mut *conn)
     .await
     .map_err(db)?;
@@ -1314,8 +1380,8 @@ async fn spend_breakdown(
     optimization_id: &str,
 ) -> Result<SpendBreakdown> {
     let rows = sqlx::query(
-        "SELECT agent_id, category, estimated, sum(usd) AS total FROM spend_events WHERE optimization_id = ?1 \
-         GROUP BY agent_id, category, estimated",
+        "SELECT agent_id, category, estimated, billing, sum(usd) AS total, sum(input_tokens + output_tokens) AS tokens \
+         FROM spend_events WHERE optimization_id = ?1 GROUP BY agent_id, category, estimated, billing",
     )
     .bind(optimization_id)
     .fetch_all(&mut *conn)
@@ -1329,6 +1395,7 @@ async fn spend_breakdown(
         actual: 0.0,
         by_category: CategoryTotals::default(),
         by_agent: Vec::new(),
+        included_tokens: 0,
     };
     // keyed by agent id (None: optimization-level spend), in first-seen order
     let mut per_agent: Vec<(Option<String>, AgentSpend)> = Vec::new();
@@ -1337,6 +1404,11 @@ async fn spend_breakdown(
         let category: SpendCategory = col_enum(r, "category")?;
         let estimated = col::<i64>(r, "estimated")? != 0;
         let total: f64 = col(r, "total")?;
+        if col_enum::<Billing>(r, "billing")? == Billing::Subscription {
+            // the user's own plan: tokens only, no dollars (the sum of `usd` is 0)
+            out.included_tokens += col::<i64>(r, "tokens")?;
+            continue;
+        }
         out.total += total;
         if estimated {
             out.estimated += total;
@@ -1400,7 +1472,7 @@ async fn create_optimization(
     let row = sqlx::query(
         "INSERT INTO optimizations (id, name, repo, base_ref, metric, direction, min_gain, budget_usd, time_limit_s, status, \
          created_at, config_yaml, pack, objective_name, evaluator_kind, value_usd_per_unit, value_period, value_basis, \
-         value_unit, sandbox_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20) \
+         value_unit, value_note, schedule, sandbox_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22) \
          RETURNING *",
     )
     .bind(id.as_str())
@@ -1422,6 +1494,8 @@ async fn create_optimization(
     .bind(value.map(|v| v.period.as_str()))
     .bind(value.map(|v| v.basis.as_str()))
     .bind(value.and_then(|v| v.unit.clone()))
+    .bind(value.and_then(|v| v.note.clone()))
+    .bind(input.schedule.map(ScheduleKind::as_str))
     .bind(input.sandbox_id.as_ref().map(SandboxId::as_str))
     .fetch_one(&mut *conn)
     .await

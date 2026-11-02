@@ -28,6 +28,9 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(protected_paths))
         .routes(routes!(receipt))
         .routes(routes!(open_pull_request))
+        .routes(routes!(mark_pull_request_merged))
+        .routes(routes!(get_value_model, set_value_model, clear_value_model))
+        .routes(routes!(get_schedule, set_schedule))
         .routes(routes!(report))
 }
 
@@ -280,6 +283,107 @@ async fn open_pull_request(
         StatusCode::CREATED,
         Json(s.service.open_pull_request(&id).await?),
     ))
+}
+
+/// Record that the optimization's pull request was merged: its wins count as delivered from then on. 409 without a pull request.
+#[utoipa::path(
+    post,
+    path = "/v1/optimizations/{id}/pull-request/merged",
+    tag = "reports",
+    operation_id = "markPullRequestMerged",
+    params(("id" = String, Path, description = "Optimization id")),
+    responses((status = 200, body = PullRequestVm), (status = 409, body = ApiError, description = "No pull request yet"))
+)]
+async fn mark_pull_request_merged(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<PullRequestVm>> {
+    Ok(Json(s.service.mark_pull_request_merged(&id).await?))
+}
+
+/// The Value row: what an improvement of this optimization's metric is worth, in numbers and in plain words.
+#[utoipa::path(
+    get,
+    path = "/v1/optimizations/{id}/value",
+    tag = "optimizations",
+    operation_id = "getValueModel",
+    params(("id" = String, Path, description = "Optimization id")),
+    responses((status = 200, body = ValueModelVm))
+)]
+async fn get_value_model(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<ValueModelVm>> {
+    Ok(Json(s.service.get_value_model(&id).await?))
+}
+
+/// Replace the value model. The wins already in the ledger are valued with it from now on; 400 for a `usdPerUnit` that is not
+/// greater than 0.
+#[utoipa::path(
+    put,
+    path = "/v1/optimizations/{id}/value",
+    tag = "optimizations",
+    operation_id = "setValueModel",
+    params(("id" = String, Path, description = "Optimization id")),
+    request_body = SetValueModelInput,
+    responses((status = 200, body = ValueModelVm))
+)]
+async fn set_value_model(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    ApiJson(input): ApiJson<SetValueModelInput>,
+) -> ApiResult<Json<ValueModelVm>> {
+    Ok(Json(s.service.set_value_model(&id, input).await?))
+}
+
+/// Remove the value model: the optimization's wins have no dollar value afterwards.
+#[utoipa::path(
+    delete,
+    path = "/v1/optimizations/{id}/value",
+    tag = "optimizations",
+    operation_id = "clearValueModel",
+    params(("id" = String, Path, description = "Optimization id")),
+    responses((status = 200, body = ValueModelVm))
+)]
+async fn clear_value_model(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<ValueModelVm>> {
+    Ok(Json(s.service.clear_value_model(&id).await?))
+}
+
+/// How often the optimization runs by itself (what the Overview's "Next 30 days" counts).
+#[utoipa::path(
+    get,
+    path = "/v1/optimizations/{id}/schedule",
+    tag = "optimizations",
+    operation_id = "getSchedule",
+    params(("id" = String, Path, description = "Optimization id")),
+    responses((status = 200, body = ScheduleVm))
+)]
+async fn get_schedule(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<ScheduleVm>> {
+    Ok(Json(s.service.get_schedule(&id).await?))
+}
+
+/// Set (or, with `null`, clear) the schedule.
+#[utoipa::path(
+    put,
+    path = "/v1/optimizations/{id}/schedule",
+    tag = "optimizations",
+    operation_id = "setSchedule",
+    params(("id" = String, Path, description = "Optimization id")),
+    request_body = SetScheduleInput,
+    responses((status = 200, body = ScheduleVm))
+)]
+async fn set_schedule(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    ApiJson(input): ApiJson<SetScheduleInput>,
+) -> ApiResult<Json<ScheduleVm>> {
+    Ok(Json(s.service.set_schedule(&id, input).await?))
 }
 
 /// The markdown report of the optimization.

@@ -107,7 +107,8 @@ fn parser_joins_text_deltas_into_messages_and_maps_tool_calls_and_the_end_line_t
         Some(AgentUsage {
             input_tokens: 26124 + 45952 + 100,
             output_tokens: 410,
-            cost_usd: Some(0.155368)
+            cost_usd: Some(0.155368),
+            ..AgentUsage::default()
         })
     );
     assert!(parser.turn.completed && !parser.turn.failed);

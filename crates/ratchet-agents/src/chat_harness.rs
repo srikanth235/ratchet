@@ -28,6 +28,11 @@ fn merge_cli(common: CliAgentOptions, over: &CliAgentOptions) -> CliAgentOptions
         },
         kill_grace: over.kill_grace.or(common.kill_grace),
         disable_live_session: over.disable_live_session || common.disable_live_session,
+        billing: if over.billing.is_api() {
+            common.billing
+        } else {
+            over.billing
+        },
     }
 }
 
@@ -60,6 +65,11 @@ pub fn local_harness_for(
         env: Some(env),
         spawner: opts.spawner.clone(),
         clock: opts.clock.clone(),
+        billing: if info.auth == crate::detect::HarnessAuth::SignedIn {
+            ratchet_core::enums::Billing::Subscription
+        } else {
+            ratchet_core::enums::Billing::Api
+        },
         ..CliAgentOptions::default()
     };
     Ok(match kind {

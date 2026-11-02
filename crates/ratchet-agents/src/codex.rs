@@ -15,7 +15,7 @@ use crate::detect::HarnessKind;
 use crate::harness::{Scratch, TurnRunner, open_with_fallback};
 use crate::models::{ModelCatalog, ModelUse, TokenPrice, resolve_model};
 use crate::process::LineSplitter;
-use ratchet_core::enums::AgentKind;
+use ratchet_core::enums::{AgentKind, Billing};
 use ratchet_core::ports::{
     Access, AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
     CancellationToken, Capabilities, EventSink, Harness, LiveSession, McpServer, PortError,
@@ -307,6 +307,7 @@ impl CodexStreamParser {
             input_tokens: num(u.get("input_tokens")),
             output_tokens: num(u.get("output_tokens")),
             cost_usd: None,
+            ..AgentUsage::default()
         };
         if let Some(p) = &self.pricing {
             let uncached = usage.input_tokens.saturating_sub(cached) as f64;
@@ -787,6 +788,10 @@ impl TurnRunner for CodexAdapter {
 impl AgentAdapter for CodexAdapter {
     fn kind(&self) -> AgentKind {
         AgentKind::Codex
+    }
+
+    fn billing(&self) -> Billing {
+        self.cli.billing
     }
 
     async fn preflight(&self) -> PortResult<Preflight> {

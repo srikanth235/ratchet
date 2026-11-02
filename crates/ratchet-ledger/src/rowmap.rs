@@ -100,6 +100,8 @@ pub(crate) fn optimization(r: &SqliteRow) -> Result<Optimization> {
         value_period: get_opt_enum(r, "value_period")?,
         value_basis: get_opt_enum(r, "value_basis")?,
         value_unit: get(r, "value_unit")?,
+        value_note: get(r, "value_note")?,
+        schedule: get_opt_enum(r, "schedule")?,
         sandbox_id: get::<Option<String>>(r, "sandbox_id")?.map(Into::into),
     })
 }
@@ -175,6 +177,9 @@ pub(crate) fn spend_event(r: &SqliteRow) -> Result<SpendEvent> {
         estimated: get::<i64>(r, "estimated")? != 0,
         source: get(r, "source")?,
         at: get(r, "at")?,
+        billing: get_enum(r, "billing")?,
+        input_tokens: get(r, "input_tokens")?,
+        output_tokens: get(r, "output_tokens")?,
     })
 }
 

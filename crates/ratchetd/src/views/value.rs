@@ -5,7 +5,10 @@ use ratchet_core::enums::{ValueBasis, ValuePeriod};
 use ratchet_core::rows::Optimization;
 use ratchet_core::{estimate_value, return_on_spend};
 
-use crate::api::ValueVm;
+use ratchet_ledger::ValueInput;
+
+use super::format::usd_plain;
+use crate::api::{SetValueModelInput, ValueModelVm, ValueVm};
 
 /// Improvement of `value` over `baseline` in percent, positive = better in the objective's direction.
 pub fn gain_vs_baseline(direction: ratchet_core::Direction, baseline: f64, value: f64) -> f64 {
@@ -63,4 +66,131 @@ pub fn value_of(
         usd_per_year: est.usd_per_year,
         return_on_spend: return_on_spend(est.usd_per_year, spend_usd),
     })
+}
+
+/// The Value row of an optimization: its model in numbers and in plain words.
+pub fn value_model_vm(row: &Optimization) -> ValueModelVm {
+    let unit = row.value_unit.clone().filter(|u| !u.is_empty());
+    let note = row.value_note.clone().filter(|n| !n.is_empty());
+    let summary = match row.value_usd_per_unit {
+        None => "Not set".to_owned(),
+        Some(usd) => {
+            let per = unit.as_deref().unwrap_or("unit");
+            let period = match row.value_period.unwrap_or(ValuePeriod::Year) {
+                ValuePeriod::Month => "a month",
+                ValuePeriod::Year => "a year",
+            };
+            let basis = row.value_basis.unwrap_or(ValueBasis::Estimated);
+            let mut line = format!("${} per {per} {period} \u{b7} {basis}", usd_plain(usd));
+            if let Some(n) = &note {
+                line.push_str(" \u{b7} ");
+                line.push_str(n);
+            }
+            line
+        }
+    };
+    ValueModelVm {
+        set: row.value_usd_per_unit.is_some(),
+        metric: row.metric.clone(),
+        direction: row.direction,
+        usd_per_unit: row.value_usd_per_unit,
+        period: row
+            .value_usd_per_unit
+            .map(|_| row.value_period.unwrap_or(ValuePeriod::Year)),
+        unit: row.value_usd_per_unit.and(unit),
+        basis: row
+            .value_usd_per_unit
+            .map(|_| row.value_basis.unwrap_or(ValueBasis::Estimated)),
+        note: row.value_usd_per_unit.and(note),
+        summary,
+    }
+}
+
+/// A `PUT .../value` body as the ledger takes it; the message is for the 400.
+pub fn value_input(input: SetValueModelInput) -> Result<ValueInput, (&'static str, String)> {
+    if !input.usd_per_unit.is_finite() || input.usd_per_unit <= 0.0 {
+        return Err((
+            "usdPerUnit",
+            "usdPerUnit must be a number greater than 0 (dollars per one unit of improvement)"
+                .into(),
+        ));
+    }
+    let text = |v: Option<String>, field: &'static str, max: usize| {
+        let t = v.map(|t| t.trim().to_owned()).filter(|t| !t.is_empty());
+        match t {
+            Some(t) if t.chars().count() > max => {
+                Err((field, format!("{field} is at most {max} characters")))
+            }
+            other => Ok(other),
+        }
+    };
+    Ok(ValueInput {
+        usd_per_unit: input.usd_per_unit,
+        period: input.period.unwrap_or(ValuePeriod::Year),
+        basis: input.basis.unwrap_or(ValueBasis::Estimated),
+        unit: text(input.unit, "unit", 24)?,
+        note: text(input.note, "note", 200)?,
+    })
+}
+
+use ratchet_core::ids::OptimizationId;
+
+use super::ledger_views::LedgerViews;
+use crate::api::{FieldError, ScheduleVm, SetScheduleInput};
+use crate::service::{ServiceError, ServiceResult};
+
+fn invalid_field(path: &str, message: String) -> ServiceError {
+    ServiceError::InvalidFields {
+        message: message.clone(),
+        fields: vec![FieldError::new(path, message)],
+    }
+}
+
+impl LedgerViews {
+    /// The Value row of an optimization.
+    pub async fn value_model(&self, id: &str) -> ServiceResult<ValueModelVm> {
+        Ok(value_model_vm(&self.require(id).await?))
+    }
+
+    /// Replace the value model. The wins already in the ledger are valued with it from now on.
+    pub async fn set_value_model(
+        &self,
+        id: &str,
+        input: SetValueModelInput,
+    ) -> ServiceResult<ValueModelVm> {
+        self.require(id).await?;
+        let value = value_input(input).map_err(|(field, message)| invalid_field(field, message))?;
+        let row = self
+            .ledger
+            .set_value_model(&OptimizationId::new(id), Some(&value))
+            .await?;
+        Ok(value_model_vm(&row))
+    }
+
+    /// Remove the value model: the optimization's wins have no dollar value afterwards.
+    pub async fn clear_value_model(&self, id: &str) -> ServiceResult<ValueModelVm> {
+        self.require(id).await?;
+        let row = self
+            .ledger
+            .set_value_model(&OptimizationId::new(id), None)
+            .await?;
+        Ok(value_model_vm(&row))
+    }
+
+    pub async fn schedule(&self, id: &str) -> ServiceResult<ScheduleVm> {
+        Ok(ScheduleVm::of(self.require(id).await?.schedule))
+    }
+
+    pub async fn set_schedule(
+        &self,
+        id: &str,
+        input: SetScheduleInput,
+    ) -> ServiceResult<ScheduleVm> {
+        self.require(id).await?;
+        let row = self
+            .ledger
+            .set_schedule(&OptimizationId::new(id), input.schedule)
+            .await?;
+        Ok(ScheduleVm::of(row.schedule))
+    }
 }

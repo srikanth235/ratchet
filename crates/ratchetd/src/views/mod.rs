@@ -10,4 +10,4 @@ pub mod overview;
 pub mod value;
 
 pub use crate::api::summary::validate_config_text;
-pub use ledger_views::{LedgerViews, PrUrlLookup};
+pub use ledger_views::{LedgerViews, PrMergedLookup, PrUrlLookup};

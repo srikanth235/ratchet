@@ -404,6 +404,7 @@ impl CodexAppServerParser {
                 input_tokens: tokens.input,
                 output_tokens: tokens.output,
                 cost_usd: None,
+                ..AgentUsage::default()
             };
             if let Some(price) = &self.pricing {
                 let uncached = tokens.input.saturating_sub(tokens.cached) as f64;

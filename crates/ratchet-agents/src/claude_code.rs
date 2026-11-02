@@ -17,7 +17,7 @@ use crate::harness::{CLOSE_GRACE, Scratch, TurnRunner, open_with_fallback};
 use crate::live::LiveProcess;
 use crate::models::resolve_model;
 use crate::process::{LineSplitter, ProcessExit, SpawnOptions};
-use ratchet_core::enums::AgentKind;
+use ratchet_core::enums::{AgentKind, Billing};
 use ratchet_core::ports::{
     Access, AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
     CancellationToken, Capabilities, EventSink, Harness, LiveSession, McpServer, PortError,
@@ -331,6 +331,7 @@ impl ClaudeStreamParser {
             input_tokens: num(u.get("input_tokens")) + cache_create + cache_read,
             output_tokens: num(u.get("output_tokens")),
             cost_usd: None,
+            ..AgentUsage::default()
         };
         usage.cost_usd = raw
             .get("total_cost_usd")
@@ -794,6 +795,10 @@ impl TurnRunner for ClaudeCodeAdapter {
 impl AgentAdapter for ClaudeCodeAdapter {
     fn kind(&self) -> AgentKind {
         AgentKind::ClaudeCode
+    }
+
+    fn billing(&self) -> Billing {
+        self.cli.billing
     }
 
     async fn preflight(&self) -> PortResult<Preflight> {

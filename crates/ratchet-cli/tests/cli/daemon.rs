@@ -807,3 +807,199 @@ async fn chat_talks_to_the_scripted_assistant_and_ends() {
     assert_eq!(bad.code, 2);
     env.stop().await;
 }
+
+// ---- value model, schedule, home (P7) -----------------------------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_value_model_round_trips_through_the_cli_and_the_daemon() {
+    let env = Env::start().await;
+    let id = "opt_demo_ingest";
+    let before: ValueModelVm = parse(&env.ratchet(&["value", "show", id, "--json"]).await);
+    assert!(before.set);
+
+    // flags left out keep what is there: only the words change
+    let o = env
+        .ratchet(&[
+            "value",
+            "set",
+            id,
+            "--note",
+            "events per second x pipeline value",
+        ])
+        .await;
+    assert_eq!(o.code, 0, "{}", o.stderr);
+    assert!(
+        o.stdout.contains("events per second x pipeline value"),
+        "{}",
+        o.stdout
+    );
+    let after: ValueModelVm = parse(&env.ratchet(&["value", "show", id, "--json"]).await);
+    assert_eq!(
+        (
+            after.usd_per_unit,
+            after.period,
+            after.unit.clone(),
+            after.basis
+        ),
+        (
+            before.usd_per_unit,
+            before.period,
+            before.unit.clone(),
+            before.basis
+        )
+    );
+    assert_eq!(
+        after.note.as_deref(),
+        Some("events per second x pipeline value")
+    );
+
+    // every field, then read back through the API the app uses
+    let o = env
+        .ratchet(&[
+            "value",
+            "set",
+            id,
+            "--usd-per-unit",
+            "750",
+            "--period",
+            "month",
+            "--unit",
+            "k/s",
+            "--basis",
+            "measured",
+            "--note",
+            "k/s x revenue per event",
+            "--json",
+        ])
+        .await;
+    assert_eq!(o.code, 0, "{}", o.stderr);
+    let set: ValueModelVm = parse(&o);
+    assert_eq!(
+        set.summary,
+        "$750 per k/s a month \u{b7} measured \u{b7} k/s x revenue per event"
+    );
+    let client = ratchet_cli::client::Client::new(env.socket(), env.daemon.token.clone());
+    let via_api: serde_json::Value = client
+        .get(&format!("/v1/optimizations/{id}/value"))
+        .await
+        .unwrap();
+    assert_eq!(serde_json::to_value(&set).unwrap(), via_api);
+
+    // the overview re-values the wins with it
+    let ov: OverviewVm = parse(&env.ratchet(&["overview", "--json"]).await);
+    let row = ov.rows.iter().find(|r| r.id == id).unwrap();
+    assert_eq!(row.value_model.as_ref(), Some(&set));
+
+    // clearing needs --yes, like every command that removes something
+    let refused = env.ratchet(&["value", "clear", id]).await;
+    assert_eq!(refused.code, 2);
+    assert!(refused.stderr.contains("--yes"), "{}", refused.stderr);
+    assert!(parse::<ValueModelVm>(&env.ratchet(&["value", "show", id, "--json"]).await).set);
+    let cleared: ValueModelVm = parse(
+        &env.ratchet(&["value", "clear", id, "--yes", "--json"])
+            .await,
+    );
+    assert!(!cleared.set);
+    let shown = env.ratchet(&["value", "show", id]).await;
+    assert!(shown.stdout.starts_with("Not set."), "{}", shown.stdout);
+
+    // a first model needs its number, and says how to give it
+    let missing = env.ratchet(&["value", "set", id, "--unit", "ms"]).await;
+    assert_eq!(missing.code, 2);
+    assert!(
+        missing.stderr.contains("--usd-per-unit"),
+        "{}",
+        missing.stderr
+    );
+    let zero = env
+        .ratchet(&["value", "set", id, "--usd-per-unit", "0"])
+        .await;
+    assert_eq!(zero.code, 1);
+    assert!(zero.stderr.contains("greater than 0"), "{}", zero.stderr);
+    let unknown = env.ratchet(&["value", "show", "nope"]).await;
+    assert_eq!(unknown.code, 1);
+    env.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn schedule_and_merge_commands_and_the_forecast_they_feed() {
+    let env = Env::start().await;
+    let id = "opt_demo_ingest";
+    assert_eq!(
+        env.ratchet(&["schedule", "show", id]).await.stdout,
+        "Not scheduled\n"
+    );
+    let o = env
+        .ratchet(&["schedule", "set", id, "--every", "nightly"])
+        .await;
+    assert_eq!(
+        o.stdout, "Every night (30 runs in the next 30 days)\n",
+        "{}",
+        o.stderr
+    );
+    let ov: OverviewVm = parse(&env.ratchet(&["overview", "--json"]).await);
+    assert_eq!(ov.forecast.scheduled_runs, 30);
+    assert!(ov.forecast.expected_usd > 0.0);
+    let j: ScheduleVm = parse(&env.ratchet(&["schedule", "clear", id, "--json"]).await);
+    assert_eq!(j.schedule, None);
+    assert_eq!(
+        env.ratchet(&["schedule", "set", id, "--every", "hourly"])
+            .await
+            .code,
+        2
+    );
+
+    // a merge needs a pull request first
+    let none = env.ratchet(&["pr-merged", id]).await;
+    assert_eq!(none.code, 1);
+    assert!(none.stderr.contains("no pull request"), "{}", none.stderr);
+    assert_eq!(env.ratchet(&["pr", id, "--yes"]).await.code, 0);
+    let merged = env.ratchet(&["pr-merged", id]).await;
+    assert_eq!(merged.code, 0, "{}", merged.stderr);
+    let home: HomeVm = parse(&env.ratchet(&["home", "--json"]).await);
+    assert_eq!(home.pull_requests.merged, 1);
+    assert!(home.story.delivered.usd_per_year > 0.0);
+    env.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn home_and_overview_print_the_same_value_story() {
+    let env = Env::with(SimOptions {
+        auto_run: false,
+        github_flow_ms: 0,
+        seed_value_story: true,
+        ..SimOptions::default()
+    })
+    .await;
+    let home = env.ratchet(&["home"]).await;
+    let overview = env.ratchet(&["overview"]).await;
+    assert_eq!(
+        (home.code, overview.code),
+        (0, 0),
+        "{}{}",
+        home.stderr,
+        overview.stderr
+    );
+    let story: ValueStory = parse::<OverviewVm>(&env.ratchet(&["overview", "--json"]).await).story;
+    assert!(
+        story.line.contains("delivered") && story.line.contains("pending"),
+        "{}",
+        story.line
+    );
+    // both screens carry the sentence verbatim
+    assert!(home.stdout.contains(&story.line), "{}", home.stdout);
+    assert!(overview.stdout.contains(&story.line), "{}", overview.stdout);
+    assert!(
+        overview.stdout.contains("next 30 days"),
+        "{}",
+        overview.stdout
+    );
+    assert!(
+        overview.stdout.contains("in your plan"),
+        "{}",
+        overview.stdout
+    );
+    let h: HomeVm = parse(&env.ratchet(&["home", "--json"]).await);
+    assert_eq!(h.story, story);
+    env.stop().await;
+}

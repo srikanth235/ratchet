@@ -58,6 +58,7 @@ fn event_wire_shape_matches_ts() {
         input_tokens: 1,
         output_tokens: 2,
         cost_usd: None,
+        ..AgentUsage::default()
     });
     assert_eq!(
         serde_json::to_string(&e).unwrap(),
