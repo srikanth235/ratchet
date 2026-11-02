@@ -18,8 +18,8 @@ All four are newline-delimited JSON-RPC 2.0 on stdio. `initialize` answers with 
 
 ## Session tokens
 
-`McpHub::sessions.issue(set, scope)` (in `ratchetd::mcp`) returns `{id, token, set}`; `revoke(id)` ends it. The chat engine (P4) issues
-one when a chat opens and revokes it on close; P6 does the same for local optimization agents. A token
+`McpHub::sessions.issue(set, scope)` (in `ratchetd::mcp`) returns `{id, token, set}`; `revoke(id)` ends it. The chat engine (P4, [ratchet-chat.md](ratchet-chat.md)) issues
+one when a chat's session opens and revokes it on close, idle close and delete; P6 does the same for local optimization agents. A token
 
 - opens `/v1/mcp/session` and `/v1/mcp/call` and nothing else (every other route answers 401), and the owner's bearer token does
   not open those two;
