@@ -1,0 +1,17 @@
+name: F6 swift only
+on:
+  push:
+    branches: ["claude/harness-f6-swift"]
+jobs:
+  swift:
+    runs-on: macos-26
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/mac/Ratchet
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift build only (no daemon)
+        env:
+          RATCHET_SKIP_DAEMON: "1"
+        run: ./build.sh
