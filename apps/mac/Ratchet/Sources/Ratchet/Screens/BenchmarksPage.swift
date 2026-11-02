@@ -32,7 +32,7 @@ struct BenchmarksPage: View {
             KitSection("Try a demo") { gallery(.demo) }
                 .gridProbe("demos", area: "benchmarks")
         }
-        .gridArea("benchmarks")
+        .gridArea("benchmarks", inset: Space.pageX)
     }
 
     // MARK: History

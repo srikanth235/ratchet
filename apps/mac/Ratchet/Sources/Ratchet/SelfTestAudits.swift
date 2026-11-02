@@ -33,6 +33,19 @@ extension SelfTest {
         let file = main?.items.compactMap(\.submenu).first { $0.items.contains { $0.title == "New Optimization" } }
         let new = file?.items.first { $0.title == "New Optimization" }
         check("New Optimization is in a menu with Command-N", new?.keyEquivalent == "n" && new?.keyEquivalentModifierMask.contains(.command) == true)
+        // The Optimization menu acts on the selected optimization (focused values); the rest of the commands are in File, Edit, View.
+        let optimization = main?.items.first { $0.title == "Optimization" }?.submenu
+        check("the Optimization menu exists", optimization != nil)
+        for title in ["Open", "Run Now", "Stop…", "Open Pull Request", "Copy Link"] {
+            check("the Optimization menu has \(title)", optimization?.items.contains { $0.title == title } == true)
+        }
+        check("Stop… is Command-Period", optimization?.items.first { $0.title == "Stop…" }?.keyEquivalent == ".")
+        let everyItem = (main?.items.compactMap(\.submenu) ?? []).flatMap(\.items)
+        check("Add Connector… is in a menu", everyItem.contains { $0.title == "Add Connector…" })
+        check("Export Report… is in a menu", everyItem.contains { $0.title == "Export Report…" })
+        check("Find… is Command-F", everyItem.first { $0.title == "Find…" }?.keyEquivalent == "f")
+        check("View has the sidebar command", everyItem.contains { $0.title.hasSuffix("Sidebar") })
+        check("View has the toolbar command", everyItem.contains { $0.title.hasSuffix("Toolbar") })
         // No two commands of the Go menu share a key.
         let keys = (go?.items ?? []).map(\.keyEquivalent).filter { !$0.isEmpty }
         check("no two Go commands share a key", Set(keys).count == keys.count)

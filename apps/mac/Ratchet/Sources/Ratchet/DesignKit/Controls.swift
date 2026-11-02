@@ -222,6 +222,19 @@ struct KitComposer<Chips: View>: View {
         let state = PartState.resolve(forced: forced, isEnabled: isEnabled, pressed: false, hovering: hovering,
                                       focused: focused)
         let shape = RoundedRectangle(cornerRadius: Dim.radiusLarge, style: .continuous)
+        KitGlassContainer {
+            composerBody
+        }
+        .overlay(shape.strokeBorder(state == .focused || state == .hover ? Ink.brassBorder : Ink.controlBorder,
+                                    lineWidth: Dim.hairline))
+        .kitFocusRing(radius: Dim.radiusLarge, visible: state == .focused)
+        .opacity(state == .disabled ? Dim.disabledOpacity : 1)
+        .onHover { hovering = $0 }
+        .animation(Motion.hover, value: hovering)
+    }
+
+    /// The floating card: Liquid Glass, so the page scrolls under it. The control edge and the focus ring stay the kit's.
+    private var composerBody: some View {
         VStack(alignment: .leading, spacing: Space.md) {
             TextField(placeholder, text: $text, axis: .vertical)
                 .textFieldStyle(.plain)
@@ -246,13 +259,7 @@ struct KitComposer<Chips: View>: View {
         .padding(.horizontal, Space.lg)
         .padding(.top, Space.lg)
         .padding(.bottom, Space.md)
-        .background(shape.fill(Ink.raisedSoft))
-        .overlay(shape.strokeBorder(state == .focused || state == .hover ? Ink.brassBorder : Ink.controlBorder,
-                                    lineWidth: Dim.hairline))
-        .kitFocusRing(radius: Dim.radiusLarge, visible: state == .focused)
-        .opacity(state == .disabled ? Dim.disabledOpacity : 1)
-        .onHover { hovering = $0 }
-        .animation(Motion.hover, value: hovering)
+        .kitGlass()
     }
 }
 

@@ -82,6 +82,18 @@ struct MockClientTests {
         await #expect(throws: RatchetClientError.self) { try await client.stopOptimization(id: "nope") }
     }
 
+    @Test func runNowStartsAnOptimizationThatHasNotStartedAndRefusesAFinishedOne() async throws {
+        let client = MockRatchetClient(now: testNow)
+        let list = try await client.optimizations()
+        let waiting = try #require(list.first { $0.status == .waiting })
+        let started = try await client.runOptimization(id: waiting.id)
+        #expect(started.status == .running)
+        let after = try await client.optimization(id: waiting.id)
+        #expect(after.optimization.status == .running)
+        await #expect(throws: RatchetClientError.self) { try await client.runOptimization(id: "opt-cli") }  // finished
+        await #expect(throws: RatchetClientError.self) { try await client.runOptimization(id: "nope") }
+    }
+
     @Test func aPullRequestNeedsAWinAndGetsAnAddress() async throws {
         let client = MockRatchetClient(now: testNow)
         let url = try await client.openPullRequest(optimizationID: "opt-checkout")

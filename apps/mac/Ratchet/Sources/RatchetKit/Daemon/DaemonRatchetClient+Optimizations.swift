@@ -145,6 +145,14 @@ extension DaemonRatchetClient {
         }
     }
 
+    public func runOptimization(id: String) async throws -> Optimization {
+        try await wire.calling {
+            _ = try await api.startOptimization(path: .init(id: id)).noContent
+            await cache.forget()
+            return try await fetchOptimization(id)
+        }
+    }
+
     /// The connectors a run on `repo` uses, when the sheet chose some: the GitHub account is the one chosen or the repo's default.
     private func repoConnections(_ repo: String, _ selection: ConnectionSelection, demo: Bool) async -> VM.RepoConnections? {
         guard !demo, !selection.agents.isEmpty, let aws = selection.awsID else { return nil }

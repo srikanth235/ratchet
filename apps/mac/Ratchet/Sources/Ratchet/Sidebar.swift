@@ -1,183 +1,144 @@
 import RatchetKit
 import SwiftUI
 
+/// The system sidebar: the pages, then the recent runs, two levels at most and no action rows (New Optimization and search are
+/// in the toolbar). The system paints it (glass, the scroll edge, the selection); nothing here has a background or an edge of its
+/// own. A selected run wears a brass wash so it reads apart from a selected page.
 struct SidebarView: View {
     @Environment(AppRouter.self) private var router
     @Environment(AppStore.self) private var store
-    @Environment(DaemonController.self) private var daemon
+    @Environment(\.appearsActive) private var appearsActive
+
+    /// How many recent runs the sidebar lists.
+    private static let recentLimit = 8
+
+    /// The selected row: the open optimization (a run), else the page. No row while the New Optimization flow is open.
+    private var selection: Binding<SidebarItem?> {
+        Binding(
+            get: {
+                if router.wizard != nil { return nil }
+                if router.page == .optimizations, let id = router.optimizationID { return .run(id) }
+                return .page(router.page)
+            },
+            set: { item in
+                switch item {
+                case .page(let page)?: router.show(page)
+                case .run(let id)?: router.open(optimization: id)
+                case nil: break
+                }
+            })
+    }
+
+    private var recentRuns: [Optimization] {
+        let sorted = store.optimizationStore.optimizations.sorted {
+            ($0.startedAt ?? .distantPast) > ($1.startedAt ?? .distantPast)
+        }
+        return Array(sorted.prefix(Self.recentLimit))
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.xxl) {
-            HStack(spacing: Space.sm) {
-                RatchetMarkView(height: 20)
-                Text("Ratchet").kitType(.brand).foregroundStyle(Ink.text)
-            }
-            .padding(.horizontal, Space.md)
-            .accessibilityElement(children: .combine)
-
-            VStack(spacing: Space.xs / 2) {
+        List(selection: selection) {
+            Section {
                 ForEach(Page.sidebar) { page in
-                    SidebarRow(title: page.title, icon: page.icon, isSelected: router.page == page && router.wizard == nil
-                               || (page == .optimizations && router.wizard != nil)) {
-                        router.show(page)
+                    Label {
+                        Text(page.title).kitType(.body)
+                    } icon: {
+                        KitIconView(icon: page.icon)
                     }
+                    .tag(SidebarItem.page(page))
                     .help(page.shortcutNumber.map { "\(page.title) (Command-\($0))" } ?? page.title)
+                    .accessibilityLabel(page.title)
+                    .accessibilityHint(page.shortcutNumber.map { "Command-\($0)" } ?? "")
                 }
             }
-
-            Spacer(minLength: 0)
-            VStack(alignment: .leading, spacing: Space.xs) {
-                if !daemon.phase.isRunning && daemon.management != .none {
-                    Text("Starting Ratchet…")
-                        .kitType(.caption).foregroundStyle(Ink.textFaint)
-                        .padding(.horizontal, Space.md)
-                        .help("The background service is starting. What you see is from the last time.")
-                } else if case .reconnecting = store.streamState {
-                    Text("Reconnecting…")
-                        .kitType(.caption).foregroundStyle(Ink.textFaint)
-                        .padding(.horizontal, Space.md)
-                        .help("The live connection to the background service dropped and is being retried. What you see may be a little old.")
-                } else if store.isDemoData {
-                    Text("Demo data")
-                        .kitType(.caption).foregroundStyle(Ink.textFaint)
-                        .padding(.horizontal, Space.md)
-                        .help("Demo mode: Ratchet shows made-up data and uses no accounts. Turn it off in Settings.")
-                        .accessibilityLabel("Demo data, no accounts are used")
-                }
-                SandboxStatusLine()
+            Section {
+                recentRunRows
+            } header: {
+                Text("Recent runs").kitType(.microStrong).foregroundStyle(Ink.textFaint)
             }
         }
-        .padding(.horizontal, Space.sm)
-        .padding(.top, Space.sm)
-        .padding(.bottom, Space.lg)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(Ink.sidebar.ignoresSafeArea())
-        .overlay(alignment: .trailing) {
-            Ink.sidebarEdge.frame(width: Dim.hairline).ignoresSafeArea()
+        .listStyle(.sidebar)
+        .accessibilityLabel("Sidebar")
+    }
+
+    @ViewBuilder
+    private var recentRunRows: some View {
+        if !store.isLoaded {
+            ForEach(0..<5, id: \.self) { _ in
+                HStack(spacing: Space.sm) {
+                    SkeletonBlock(width: Dim.icon, height: Dim.icon)
+                    VStack(alignment: .leading, spacing: Space.xs) {
+                        SkeletonBlock(width: Space.section * 3, height: Space.md)
+                        SkeletonBlock(width: Space.section * 2, height: Space.sm)
+                    }
+                }
+                .accessibilityHidden(true)
+            }
+        } else if recentRuns.isEmpty {
+            Text("No runs yet. Runs appear here.")
+                .kitType(.caption).foregroundStyle(Ink.textFaint)
+        } else {
+            ForEach(recentRuns) { optimization in
+                let isSelected = router.page == .optimizations && router.optimizationID == optimization.id && router.wizard == nil
+                RunRow(optimization: optimization, isSelected: isSelected)
+                    .tag(SidebarItem.run(optimization.id))
+                    .listRowBackground(isSelected ? RunSelectionBackground(isActive: appearsActive) : nil)
+            }
         }
     }
 }
 
-/// "Sandbox on · acme-prod / $1.20 so far · off at 15:40". Opens the popover with End now and the last receipt.
-struct SandboxStatusLine: View {
-    @Environment(AppStore.self) private var store
-    @State private var showing = false
+/// One recent run: its status shape (never colour alone), its name and one line with the status word.
+struct RunRow: View {
+    let optimization: Optimization
+    let isSelected: Bool
 
     var body: some View {
-        Button {
-            showing.toggle()
-        } label: {
-            HStack(alignment: .top, spacing: Space.xs) {
-                StatusDot(tone: store.sandboxStore.sandbox.isOn ? .ok : .off).frame(height: Dim.textLine)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(headline).kitType(.caption).foregroundStyle(Ink.textMuted)
-                    Text(detail).kitType(.caption).foregroundStyle(Ink.textFaint)
-                }
-                Spacer(minLength: 0)
+        HStack(alignment: .top, spacing: Space.sm) {
+            StatusShape(tone: optimization.status.tone, size: Dim.icon)
+                .frame(height: Dim.textLine)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(optimization.title)
+                    .kitType(isSelected ? .bodyStrong : .body)
+                    .foregroundStyle(Ink.text)
+                    .lineLimit(1)
+                Text(statusLine)
+                    .kitType(.caption)
+                    .foregroundStyle(Ink.textFaint)
+                    .lineLimit(1)
             }
-            .padding(.horizontal, Space.md)
-            .padding(.vertical, Space.sm)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(.rect)
         }
-        .buttonStyle(.plain)
-        .help("Sandbox status, End now, last receipt")
-        .popover(isPresented: $showing, arrowEdge: .trailing) {
-            SandboxPopover()
-        }
-        .accessibilityLabel("Sandbox status")
-        .accessibilityValue(headline + ", " + detail)
+        .dimsWhenInactive()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(optimization.title), \(statusLine)")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .help("\(optimization.title): \(statusLine)")
     }
 
-    private var headline: String {
-        let sandbox = store.sandboxStore.sandbox
-        guard sandbox.isOn else { return "Sandbox off" }
-        return "Sandbox on · " + (sandbox.account ?? "AWS")
-    }
-
-    private var detail: String {
-        let sandbox = store.sandboxStore.sandbox
-        guard sandbox.isOn else { return "Nothing running in the cloud" }
-        var line = Money.exact(sandbox.costSoFarUSD) + " so far"
-        if let offAt = sandbox.offAt { line += " · off at " + Elapsed.timeOfDay(offAt) }
+    /// "Running · 1 h 12 m left", "Merged · −13%", "No win · within noise".
+    var statusLine: String {
+        var line = optimization.status.title
+        if optimization.status == .running, let left = optimization.secondsLeft {
+            line += " · " + Elapsed.hm(left) + " left"
+        } else if let change = optimization.change {
+            line += " · " + Percent.signed(change)
+        } else if optimization.status == .noWin {
+            line += " · within noise"
+        }
         return line
     }
 }
 
-struct SandboxPopover: View {
-    @Environment(AppStore.self) private var store
-    @State private var confirming = false
+/// The selected run's row: a brass wash and a brass edge, so a run reads apart from a page. Dims with the window.
+private struct RunSelectionBackground: View {
+    let isActive: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.lg) {
-            HStack(spacing: Space.sm) {
-                StatusDot(tone: store.sandboxStore.sandbox.isOn ? .ok : .off)
-                Text(store.sandboxStore.sandbox.isOn ? "Sandbox on" : "Sandbox off").kitType(.bodyStrong).foregroundStyle(Ink.text)
-            }
-            if store.sandboxStore.sandbox.isOn {
-                VStack(alignment: .leading, spacing: Space.xs) {
-                    detailLine("Account", store.sandboxStore.sandbox.account ?? "AWS")
-                    detailLine("Cost so far", Money.exact(store.sandboxStore.sandbox.costSoFarUSD))
-                    if let offAt = store.sandboxStore.sandbox.offAt { detailLine("Switches off at", Elapsed.timeOfDay(offAt)) }
-                }
-                if confirming {
-                    Text("Running agents stop and everything in the sandbox is torn down.")
-                        .kitType(.meta).foregroundStyle(Ink.textMuted)
-                    HStack(spacing: Space.sm) {
-                        Button("Cancel") { confirming = false }.buttonStyle(.kit(.quiet, small: true))
-                        Button("End now") {
-                            confirming = false
-                            Task { await store.sandboxStore.endSandbox() }
-                        }
-                        .buttonStyle(.kit(.primary, small: true))
-                    }
-                } else {
-                    Button("End now") { confirming = true }
-                        .buttonStyle(.kit(.quiet, small: true))
-                }
-            } else {
-                Text("Nothing is running in your AWS account.").kitType(.meta).foregroundStyle(Ink.textMuted)
-            }
-            if let receipt = store.sandboxStore.receipt {
-                Hairline()
-                VStack(alignment: .leading, spacing: Space.sm) {
-                    Text("Last teardown").kitType(.section).foregroundStyle(Ink.textMuted)
-                    ReceiptView(receipt: receipt)
-                }
-            }
-        }
-        .padding(Space.lg)
-        .frame(width: 320, alignment: .leading)
-        .background(Ink.canvas)
-    }
-
-    private func detailLine(_ label: String, _ value: String) -> some View {
-        HStack {
-            Text(label).kitType(.meta).foregroundStyle(Ink.textFaint)
-            Spacer()
-            Text(value).kitType(.mono).foregroundStyle(Ink.text)
-        }
-    }
-}
-
-/// What a teardown left behind: nothing. Shared by the popover and the result page.
-struct ReceiptView: View {
-    let receipt: TeardownReceipt
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Space.sm) {
-            Text(receipt.account + " · " + Elapsed.hm(receipt.duration) + " · " + Money.exact(receipt.costUSD))
-                .kitType(.meta).foregroundStyle(Ink.textMuted)
-            ForEach(receipt.destroyed, id: \.self) { item in
-                HStack(spacing: Space.sm) {
-                    KitIconView(icon: .check, size: Dim.icon - 4, weight: 1.8).foregroundStyle(Ink.ok)
-                    Text(item + " destroyed").kitType(.meta).foregroundStyle(Ink.text)
-                }
-            }
-            if receipt.allGone {
-                Text("Nothing is left running or billing.").kitType(.caption).foregroundStyle(Ink.textFaint)
-            }
-        }
-        .accessibilityElement(children: .combine)
+        let shape = RoundedRectangle(cornerRadius: Dim.radiusRow, style: .continuous)
+        shape
+            .fill(Ink.brassWash)
+            .overlay(shape.strokeBorder(Ink.brassBorder, lineWidth: Dim.hairline))
+            .padding(.horizontal, Space.xs)
+            .opacity(isActive ? 1 : Dim.inactiveOpacity)
     }
 }

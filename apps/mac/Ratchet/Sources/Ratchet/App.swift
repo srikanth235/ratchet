@@ -49,9 +49,12 @@ struct RatchetApp: App {
         .windowToolbarStyle(.unified)
         .commands {
             SidebarCommands()
+            ToolbarCommands()
+            OptimizationCommands(store: store, router: router, daemon: daemon, connectors: connectorsState)
             CommandGroup(replacing: .newItem) {
                 Button("New Optimization") { router.startWizard(client: store.client) }
                     .keyboardShortcut("n")
+                    .disabled(!daemon.phase.isRunning)
             }
             CommandMenu("Go") {
                 ForEach(Page.sidebar) { page in
@@ -61,6 +64,7 @@ struct RatchetApp: App {
                 Divider()
                 Button("Refresh") { Task { await store.refresh() } }
                     .keyboardShortcut("r")
+                    .disabled(!daemon.phase.isRunning)
             }
         }
 

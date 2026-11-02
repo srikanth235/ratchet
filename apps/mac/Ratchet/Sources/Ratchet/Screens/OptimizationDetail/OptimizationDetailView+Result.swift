@@ -20,19 +20,20 @@ extension OptimizationDetailView {
                 label: "Spent", value: Money.short(optimization.spentUSD),
                 note: spentNote(optimization), progress: optimization.budgetFraction)
         }
-        HStack(alignment: .top, spacing: Space.pageX) {
-            if (detail?.moves ?? []).isEmpty {
-                KitSection("Result") {
-                    Text("Nothing beat the noise, so there is nothing to merge. The sandbox is gone and nothing is billing.")
-                        .kitType(.body).foregroundStyle(Ink.textMuted)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                KitSection("Best over time") { chart(optimization) }
+        // What changed sits beside the chart when there is room, and under it when there is not.
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: Space.pageX) {
+                resultMain(optimization)
+                    .frame(minWidth: Space.section * 12, idealWidth: Space.section * 12, maxWidth: .infinity, alignment: .leading)
+                KitSection("What changed") { changeBlock(optimization) }
+                    .frame(width: Layout.sideColumnNarrow, alignment: .leading)
+            }
+            VStack(alignment: .leading, spacing: Space.block) {
+                resultMain(optimization)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                KitSection("What changed") { changeBlock(optimization) }
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            KitSection("What changed") { changeBlock(optimization) }
-                .frame(width: 320, alignment: .leading)
         }
         if let insights = store.insight.model(for: id).insights {
             resultInsights(insights, optimization)
@@ -71,6 +72,19 @@ extension OptimizationDetailView {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .id("spend")
+        }
+    }
+
+    /// The chart of a finished run, or why there is none.
+    @ViewBuilder
+    func resultMain(_ optimization: Optimization) -> some View {
+        if (detail?.moves ?? []).isEmpty {
+            KitSection("Result") {
+                Text("Nothing beat the noise, so there is nothing to merge. The sandbox is gone and nothing is billing.")
+                    .kitType(.body).foregroundStyle(Ink.textMuted)
+            }
+        } else {
+            KitSection("Best over time") { chart(optimization) }
         }
     }
 

@@ -50,19 +50,22 @@ struct MenuBarView: View {
                 ForEach(store.needsYou) { item in
                     Button { show { router.open(optimization: item.optimizationID) } } label: {
                         HStack(alignment: .top, spacing: Space.sm) {
-                            StatusDot(tone: .wait)
+                            StatusShape(tone: .wait, size: Dim.icon - Space.xs).frame(height: Dim.textLine)
                             TitleStack(title: item.title, subtitle: item.detail)
                             Spacer(minLength: 0)
                         }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Needs you: \(item.title), \(item.detail)")
                     }
                     .buttonStyle(.plain)
                 }
             }
             Hairline()
             HStack(alignment: .top, spacing: Space.xs) {
-                StatusDot(tone: store.sandboxStore.sandbox.isOn ? .ok : .off)
+                StatusShape(tone: store.sandboxStore.sandbox.isOn ? .ok : .off, size: Dim.icon - Space.xs).frame(height: Dim.textLine)
                 Text(MenuBarRules.sandboxLine(store.sandboxStore.sandbox)).kitType(.caption).foregroundStyle(Ink.textMuted)
             }
+            .accessibilityElement(children: .combine)
             HStack(spacing: Space.sm) {
                 Button("Open Ratchet") { show {} }.buttonStyle(.kit(.quiet, small: true))
                 Button("New optimization") { show { router.startWizard(client: store.client) } }
@@ -73,7 +76,7 @@ struct MenuBarView: View {
         }
         .padding(Space.lg)
         .frame(width: Layout.popoverWidth)
-        .background(Ink.canvas)
+        .gridArea("menubar", inset: Space.lg)
         .tint(Ink.brass)
     }
 

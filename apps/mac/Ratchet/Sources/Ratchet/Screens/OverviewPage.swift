@@ -6,43 +6,87 @@ struct OverviewPage: View {
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
     @Environment(AppNotifier.self) private var notifier
+    @State private var query = ""
+    @FocusState private var searching: Bool
+
+    /// The first load is under way (or snapshot mode says so): grey blocks stand where the numbers will be.
+    private var isLoading: Bool {
+        SnapshotFocus.shared.showsLoading || (!store.isLoaded && store.overview == nil)
+    }
+
+    private var isEmpty: Bool { store.isLoaded && store.optimizationStore.optimizations.isEmpty && !isLoading }
 
     var body: some View {
         KitPage {
             PageHeader("Overview") {
-                RangeSwitch(selection: store.range) { range in
-                    Task { await store.setRange(range) }
+                if isLoading {
+                    HStack(spacing: Space.sm) {
+                        ProgressView().controlSize(.small)
+                        Text("Loading your optimizations…").kitType(.meta).foregroundStyle(Ink.textMuted)
+                    }
                 }
-                Button("New optimization") { router.startWizard(client: store.client) }
-                    .buttonStyle(.kit(.primary))
             }
             .gridProbe("header", area: "overview")
 
-            if notifier.shouldOfferPrompt && !store.optimizationStore.optimizations.isEmpty {
-                NotificationPrompt()
-                    .gridProbe("notification-prompt", area: "overview")
+            if isLoading {
+                OverviewSkeleton()
+                    .gridProbe("skeleton", area: "overview")
+            } else if isEmpty {
+                EmptyOverview()
+                    .gridProbe("empty", area: "overview")
+            } else {
+                loaded
             }
+        }
+        .gridArea("overview", inset: Space.pageX)
+        .toolbar {
+            ToolbarItem {
+                Picker("Range", selection: Binding(get: { store.range }, set: { range in Task { await store.setRange(range) } })) {
+                    ForEach(TimeRange.allCases) { range in Text(range.title).tag(range) }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .help("Show wins from the last 30 days, 90 days or all time")
+            }
+        }
+        .searchable(text: $query, placement: .toolbar, prompt: "Search optimizations")
+        .searchFocused($searching)
+        .focusedSceneValue(\.findAction, FindAction { searching = true })
+    }
 
-            hero
-                .gridProbe("hero", area: "overview")
+    @ViewBuilder
+    private var loaded: some View {
+        let shown = OptimizationSearch.filter(store.optimizationStore.optimizations, query: query)
+        if notifier.shouldOfferPrompt && !store.optimizationStore.optimizations.isEmpty {
+            NotificationPrompt()
+                .gridProbe("notification-prompt", area: "overview")
+        }
 
+        hero
+            .gridProbe("hero", area: "overview")
+
+        // The needs-you column sits beside the chart when there is room, and under it when there is not.
+        ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: Space.pageX) {
+                chartBlock.frame(minWidth: Space.section * 12, idealWidth: Space.section * 12, maxWidth: .infinity, alignment: .leading)
+                needsYouBlock.frame(width: Layout.sideColumnNarrow - Space.section * 2, alignment: .leading)
+            }
+            VStack(alignment: .leading, spacing: Space.block) {
                 chartBlock.frame(maxWidth: .infinity, alignment: .leading)
-                needsYouBlock.frame(width: 256, alignment: .leading)
+                needsYouBlock.frame(maxWidth: .infinity, alignment: .leading)
             }
-            .gridProbe("chart-and-needs", area: "overview")
+        }
+        .gridProbe("chart-and-needs", area: "overview")
 
-            KitSection("Optimizations") {
-                OptimizationTable(optimizations: store.optimizationStore.optimizations) { router.open(optimization: $0.id) }
-            }
-            .gridProbe("table", area: "overview")
-        }
-        .gridArea("overview")
-        .overlay {
-            if !store.isLoaded && store.overview == nil {
-                ProgressView().controlSize(.small)
+        KitSection("Optimizations") {
+            if shown.isEmpty {
+                ContentUnavailableView.search(text: query)
+                    .frame(maxWidth: .infinity)
+            } else {
+                OptimizationTable(optimizations: shown, sizesToRows: true)
             }
         }
+        .gridProbe("table", area: "overview")
     }
 
     @ViewBuilder

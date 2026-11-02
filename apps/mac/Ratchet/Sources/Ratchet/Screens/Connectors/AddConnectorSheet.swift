@@ -23,7 +23,8 @@ struct AddConnectorSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.lg) {
-            Text("Add connector").kitType(.pageTitle).foregroundStyle(Ink.text)
+            Text("Add Connector").kitType(.pageTitle).foregroundStyle(Ink.text)
+                .gridProbe("title", area: "add-connector")
             Picker("Kind", selection: $form.kind) {
                 ForEach(ConnectorKind.allCases) { kind in Text(kind.title).tag(kind) }
             }
@@ -45,8 +46,8 @@ struct AddConnectorSheet: View {
             }
         }
         .padding(Space.xxl)
-        .frame(width: 520)
-        .background(Ink.canvas)
+        .frame(width: Layout.sheetWidth)
+        .gridArea("add-connector", inset: Space.xxl)
         .onChange(of: form.kind) { failure = nil }
     }
 

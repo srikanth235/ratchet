@@ -30,17 +30,30 @@ struct CommandText: View {
     }
 }
 
-/// A dot and one line: the result of a check, or a note about a state.
+/// A status shape and one line: the result of a check, or a note about a state. The shape (a tick, a triangle, a diamond) says
+/// what kind of note it is without the colour, and VoiceOver reads the kind first.
 struct NoteLine: View {
     let tone: StatusTone
     let text: String
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: Space.sm) {
-            StatusDot(tone: tone)
+        HStack(alignment: .top, spacing: Space.sm) {
+            StatusShape(tone: tone, size: Dim.icon - Space.xs)
+                .frame(height: Dim.textLine)
             CommandText(text: text, type: .body, color: Ink.textMuted)
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(kind + ": " + text)
+    }
+
+    private var kind: String {
+        switch tone {
+        case .ok: "OK"
+        case .bad: "Problem"
+        case .wait: "Needs attention"
+        case .run: "In progress"
+        case .off: "Note"
+        }
     }
 }
 

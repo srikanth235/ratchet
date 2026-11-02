@@ -15,11 +15,20 @@ checked for contrast in both modes. Revisit only if a user-facing accent picker 
 | --- | --- |
 | Title bar, toolbar, menus, alerts, sheets, popovers (chrome) | native macOS. No custom backgrounds behind them |
 | Settings window (`Form`, tabs) | native layout and controls; text through `.kitType`, colour through `Ink`; 520 wide |
-| Sidebar | brand for now (kit rows); F4 moves it to the system sidebar with brass only in the content |
+| Sidebar, toolbar, window title | native macOS (F4): the system sidebar (`List` with `.listStyle(.sidebar)`), a `.toolbar`, `.navigationTitle`. No background or edge of our own; brass only in the content. A selected recent run wears a `brassWash` |
+| Tables and lists of optimizations | native `Table` (selection, sorting, context menu, drag); cell text through `.kitType`, colour through `Ink` |
 | Pages: Overview, Optimizations, Benchmarks, Connectors, detail | brand: kit page, parts, serif titles |
-| Composer, draft card, chips | brand parts; F4 puts glass behind the floating ones |
+| Composer, steering field | brand parts on Liquid Glass: `.glassEffect()` inside one `KitGlassContainer`, control edge and focus ring stay the kit's. Never glass on glass |
+| Draft card, chips | brand parts |
 | Menu bar window | native window, brand content |
 | Dock icon, menu bar mark | the app icon / template mark |
+
+## Chrome that follows the window
+
+- Sheets, popovers, bars, the menu bar window: no `.background` (the system paints glass). Custom fills are for content only.
+- Custom chrome (page titles, status items, segments, the daemon banner) calls `.dimsWhenInactive()` (`appearsActive`, `Dim.inactiveOpacity`).
+- Radii nest through `ConcentricRectangle` inside a `.containerShape`; one `Layout.contentWidth` per page; the page margin is `Space.pageX`.
+- Inputs that stay at the bottom edge are `.safeAreaInset(edge: .bottom)`. Side columns use `ViewThatFits`.
 
 ## Colour (Ink)
 

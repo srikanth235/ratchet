@@ -9,8 +9,7 @@ private let cardColumns = Array(repeating: GridItem(.flexible(), spacing: Dim.ca
 
 struct GoalStep: View {
     @Bindable var flow: NewOptimizationFlow
-    @Environment(AppRouter.self) private var router
-    @Environment(\.openSettings) private var openSettings
+    @State private var addRequest: ConnectorSheetRequest?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.block) {
@@ -22,6 +21,8 @@ struct GoalStep: View {
             KitSection("Repo") { repoPicker }
             KitSection("Benchmark") { RepoReview(flow: flow) }
         }
+        // Signing in happens here, in a sheet: the flow keeps its place.
+        .sheet(item: $addRequest) { AddConnectorSheet(request: $0) }
     }
 
     // MARK: Repo search
@@ -42,12 +43,9 @@ struct GoalStep: View {
             if !flow.isSignedInToGitHub {
                 HStack(spacing: Space.xs) {
                     Text("You are not signed in to GitHub.").kitType(.meta).foregroundStyle(Ink.textFaint)
-                    Button("Open Connectors") {
-                        router.settingsTab = .connectors
-                        openSettings()
-                    }
-                    .buttonStyle(.kit(.link))
-                    Text("to sign in, or choose a local folder.").kitType(.meta).foregroundStyle(Ink.textFaint)
+                    Button("Sign in with GitHub…") { addRequest = ConnectorSheetRequest(kind: .github) }
+                        .buttonStyle(.kit(.link))
+                    Text("or choose a local folder.").kitType(.meta).foregroundStyle(Ink.textFaint)
                 }
             }
             if let folder = flow.localFolder {

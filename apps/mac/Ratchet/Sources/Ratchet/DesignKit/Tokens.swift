@@ -141,6 +141,8 @@ enum Dim {
     static let composerMinHeight: CGFloat = 48
     /// One opacity for every disabled part.
     static let disabledOpacity: Double = 0.45
+    /// Custom chrome while its window is not in front (`dimsWhenInactive`).
+    static let inactiveOpacity: Double = 0.6
     static let focusRing: CGFloat = 2
     static let focusOffset: CGFloat = 2
 

@@ -6,12 +6,12 @@ struct UseTemplateSheet: View {
     @Bindable var flow: TemplateProposalFlow
     @Environment(\.dismiss) private var dismiss
     @Environment(AppRouter.self) private var router
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.lg) {
             VStack(alignment: .leading, spacing: Space.xs) {
                 Text("Use “\(flow.template.title)”").kitType(.pageTitle).foregroundStyle(Ink.text).lineLimit(2)
+                    .gridProbe("title", area: "use-template")
                 Text("Ratchet opens a pull request on the repo that adds the template's files. Nothing changes until you merge it.")
                     .kitType(.body).foregroundStyle(Ink.textFaint).fixedSize(horizontal: false, vertical: true)
             }
@@ -19,8 +19,8 @@ struct UseTemplateSheet: View {
                 HStack(spacing: Space.xs) {
                     Text("You are not signed in to GitHub.").kitType(.meta).foregroundStyle(Ink.textFaint)
                     Button("Open Connectors") {
-                        router.settingsTab = .connectors
-                        openSettings()
+                        dismiss()
+                        router.show(.connectors)
                     }
                     .buttonStyle(.kit(.link))
                 }
@@ -54,7 +54,7 @@ struct UseTemplateSheet: View {
         }
         .padding(Space.xxl)
         .frame(width: Layout.sheetWidth)
-        .background(Ink.canvas)
+        .gridArea("use-template", inset: Space.xxl)
         .task { await flow.load() }
     }
 

@@ -21,22 +21,18 @@ enum Page: String, CaseIterable, Identifiable {
 
     var icon: KitIcon {
         switch self {
-        // Home and Agents get their own icons with their screens (P5, the design kit); until then they are not shown.
-        case .home, .overview: .overview
+        case .home: .home
+        case .overview: .overview
         case .optimizations: .optimizations
-        case .agents, .connectors: .connectors
+        case .agents: .agents
+        case .connectors: .connectors
         case .benchmarks: .benchmarks
         }
     }
 
-    /// Whether the page has a screen yet. Home (the composer) and Agents come with the chat work (P5): turn them on there and the
-    /// sidebar, the Go menu and the shortcuts follow.
-    var isAvailable: Bool {
-        switch self {
-        case .home, .agents: false
-        case .overview, .optimizations, .benchmarks, .connectors: true
-        }
-    }
+    /// Whether the page has a destination. All of them do: Home and Agents show a placeholder until P5b fills `HomePage` and
+    /// `AgentsPage`; the sidebar, the Go menu and the shortcuts follow this list.
+    var isAvailable: Bool { true }
 
     /// The pages the sidebar and the Go menu list, in order.
     static var sidebar: [Page] { allCases.filter(\.isAvailable) }
@@ -55,11 +51,18 @@ enum Page: String, CaseIterable, Identifiable {
     /// What the window shows for this page.
     @ViewBuilder var destination: some View {
         switch self {
+        case .home: HomePage()
         case .overview: OverviewPage()
         case .optimizations: OptimizationsPage()
+        case .agents: AgentsPage()
         case .benchmarks: BenchmarksPage()
         case .connectors: ConnectorsPage()
-        case .home, .agents: Text(title).kitType(.pageTitle).foregroundStyle(Ink.textMuted)
         }
     }
+}
+
+/// One row of the sidebar: a page, or one of the recent runs under it. At most two levels: the section, then its rows.
+enum SidebarItem: Hashable {
+    case page(Page)
+    case run(String)
 }

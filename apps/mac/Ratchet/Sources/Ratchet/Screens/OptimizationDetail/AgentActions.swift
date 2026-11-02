@@ -39,7 +39,6 @@ struct AgentActions: View {
             }
         }
         .padding(Space.lg)
-        .background(Ink.canvas)
     }
 
     private func send() {

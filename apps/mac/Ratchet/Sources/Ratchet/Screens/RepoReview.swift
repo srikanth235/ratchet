@@ -169,8 +169,7 @@ struct RepoReview: View {
 /// "What's missing" on the Connections step: what the daemon says would stop this run, or that nothing does.
 struct WhatsMissing: View {
     @Bindable var flow: NewOptimizationFlow
-    @Environment(AppRouter.self) private var router
-    @Environment(\.openSettings) private var openSettings
+    @State private var addRequest: ConnectorSheetRequest?
 
     private var shown: [PreflightItem] { flow.preflight.filter { $0.state != .ok } }
 
@@ -194,14 +193,13 @@ struct WhatsMissing: View {
                         .accessibilityElement(children: .combine)
                     }
                     if !flow.blockers.isEmpty {
-                        Button("Open Connectors") {
-                            router.settingsTab = .connectors
-                            openSettings()
-                        }
-                        .buttonStyle(.kit(.quiet, small: true))
+                        Button("Add Connector…") { addRequest = ConnectorSheetRequest(kind: .github) }
+                            .buttonStyle(.kit(.quiet, small: true))
                     }
                 }
             }
         }
+        // The fix happens in a sheet: the flow keeps its place.
+        .sheet(item: $addRequest) { AddConnectorSheet(request: $0) }
     }
 }

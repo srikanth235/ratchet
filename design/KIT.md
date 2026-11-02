@@ -40,7 +40,7 @@ Increase Contrast: `hairline`/`hairlineStrong` 40%/60%, `controlBorder` 90%+, `b
 ### Dim, Layout, Motion
 
 Radii: `radiusXS` 4 (checkbox, tag), `radiusButton`/`Row`/`Field` 8, `radiusCard` 12, `radiusLarge` 16 (composer, window). Heights: button 32, small 28
-(the smallest hit target), field 36, sidebar row 32, chip 28, segmented 32, send 32, toggle 40 x 24 (knob 16). One `disabledOpacity` .45. Focus ring 2 / offset 2.
+(the smallest hit target), field 36, sidebar row 32, chip 28, segmented 32, send 32, toggle 40 x 24 (knob 16). One `disabledOpacity` .45, one `inactiveOpacity` .6 (custom chrome while its window is not in front). Focus ring 2 / offset 2.
 Status dot 8, status shape 16, bar 4, mark 16, icon 16. Row padding 12, section gap 12, card gap 12. Everything is 0, 1, 2 or a multiple of 4 (`tools/grid-lint.sh`);
 the exceptions say why (text line heights 18, stroke 1.5).
 
@@ -67,7 +67,7 @@ The mockup scale is 11 / 12.5 / 14. The app keeps 12 (`caption`) and 13.5 (`body
 ## Icons
 
 Drawn `Shape`s on a 16 x 16 box, one 1.5 round stroke, never an SF Symbol outside `DesignKit/` (`grid-lint.sh` checks). Views name a `KitIcon`; `KitIconView`
-sets size and weight. Set: overview, optimizations, benchmarks, connectors, check, back, plus, chevronDown, arrowUp, close, sliders, bell, terminal. An icon-only
+sets size and weight. Set: overview, optimizations, benchmarks, connectors, home, agents, check, back, plus, alert, chevronDown, arrowUp, close, sliders, bell, terminal. The toolbar and the ⋯ menu use SF Symbols (system chrome). An icon-only
 button is a `KitIconButton`, which requires a label (VoiceOver and tooltip).
 
 ## Parts
@@ -85,13 +85,16 @@ States for every part: rest, hover, pressed, selected, focused, disabled. `force
 | Icon button (`KitIconButton`) | 32 square (28 small), `controlBorder` | always labelled |
 | Choice card (`Choice`) | radio or checkbox mark 16, title + meta, `radiusCard`, `hairlineStrong` edge | selected: `brassWash` + `brassBorder`; the whole card wears the focus ring |
 | Step progress | segments 28 x 4, done in brass | |
-| Sidebar row (`Rows`) | 32 high, icon 16, `body`, `radiusRow` | selected: `hover` fill (dims when the window is inactive), brass icon |
+| Sidebar row (`Rows`) | 32 high, icon 16, `body`, `radiusRow` | for settings areas inside a page; the window's own sidebar is the system one (`Sidebar.swift`) |
 | Table row | full width, hairline under, `hover` fill | focus ring inside |
 | Hairline list and row | 12 vertical padding | |
 | Status label | dot (8) or shape (16) + word + caption | the word carries the meaning |
 | Status shape (`Controls`) | circle with tick (done), turning arc (running), diamond (waiting), triangle (failed), dashed circle (off) | colour-independent, 1.4.1 |
 | Field (`Page`) | 36 high, `radiusField`, `controlBorder`, focus: brass edge + ring | single line |
-| Composer (`Controls`) | `radiusLarge` card, multi-line field (2 to 6 lines), chips row, 32 send button | Command-Return sends; sending shows a stop button |
+| Composer (`Controls`) | `radiusLarge` glass card in a `KitGlassContainer`, multi-line field (2 to 6 lines), chips row, 32 send button | Command-Return sends; sending shows a stop button. The control edge and the focus ring are the kit's, the surface is Liquid Glass |
+| Steering field (`Glass`) | `KitSteeringField`: glass container, control edge, concentric inner area; the screen fills it and passes `isFocused` | states: rest, hover, focused, disabled. Anchor with `.safeAreaInset(edge: .bottom)` |
+| Glass container (`Glass`) | `KitGlassContainer`, `.kitGlass()` | one per floating group; no glass on glass; tint only to carry meaning |
+| More menu (`Buttons`) | `KitMoreMenu`: an `ellipsis` symbol in a 28 pt hit area, opens the row's actions | always labelled; every action is also in the context menu and the menu bar |
 | Popover chip | 28 high, title + chevron, `controlBorder` | open: brass edge; the caller attaches the popover |
 | Segmented control | 32 high, bordered, segments split by `hairlineStrong` | selected: lifted + brass underline; Left/Right move |
 | Range switch (`KitSwitch`) | text-only segments | chart ranges |
@@ -102,7 +105,7 @@ States for every part: rest, hover, pressed, selected, focused, disabled. `force
 
 ## Window and icon
 
-Chrome (title bar, toolbar, menus, sheets, popovers) is system. The window opens at 1280 x 820, minimum 1080 x 640. `.tint(Ink.brass)` is set on the main window,
+Chrome (title bar, toolbar, sidebar, menus, sheets, popovers) is system, with no custom background behind it. The window opens at 1280 x 820, minimum 1080 x 640. `.tint(Ink.brass)` is set on the main window,
 Settings and the menu bar window.
 
 App icon: one source, `apps/mac/Ratchet/Icon/AppIcon.icon` (`Assets/*.svg` come from `design/tools/build-icon.py`, which also writes the flat `design/icon/ratchet-icon.svg`).

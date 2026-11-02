@@ -6,6 +6,13 @@ import SwiftUI
 /// What snapshot mode shoots, one PNG per scene and mode.
 enum SnapScene: String, CaseIterable {
     case overview, optimizations, benchmarks, connectors
+    // The pages whose screens come with the chat work (P5b): the shell around them is shot already.
+    case home, agents
+    // v0.3.1 screens 12 and 14, and 13 (a connector that needs signing in again): the service is down with data on screen,
+    // the first load is under way, a failed connector with its fix beside it.
+    case daemonDown = "daemon-down"
+    case loadingOverview = "loading-overview"
+    case failedConnector = "failed-connector"
     case detailLive = "detail-live"
     case detailResult = "detail-result"
     case detailNoWin = "detail-nowin"
@@ -106,6 +113,7 @@ enum SnapScene: String, CaseIterable {
         // Every scene starts from the calm state.
         SnapshotFocus.shared.target = nil
         SnapshotFocus.shared.metric = nil
+        SnapshotFocus.shared.showsLoading = false
         daemon.preview(nil)
         notifier.preview(.allowed, prompt: false)
         store.dismissError()
@@ -126,6 +134,14 @@ enum SnapScene: String, CaseIterable {
         case .overview, .emptyOverview, .menuBar, .menuBarEmpty, .galleryActions, .galleryChoices, .galleryRows, .galleryInputs,
             .galleryStatus, .galleryIdentity, .galleryType, .galleryTokens:
             break
+        case .home: router.show(.home)
+        case .agents: router.show(.agents)
+        case .daemonDown: daemon.preview(.stopped, statusScreen: false)
+        case .loadingOverview: SnapshotFocus.shared.showsLoading = true
+        case .failedConnector:
+            router.show(.connectors)
+            connectors.rowNotes["aws-acme-staging"] = ConnectorNote(
+                ok: false, text: "The AWS session expired Oct 31. “CLI cold start” failed on it. Sign in again.")
         case .emptyOptimizations: router.show(.optimizations)
         case .emptyBenchmarks: router.show(.benchmarks)
         case .daemonFailed: daemon.preview(.failed("Ratchet's background service did not start."))
@@ -289,15 +305,16 @@ enum Snapshot {
                         capture(to: "\(dir)/settings-\(tab.rawValue)-\(mode).png", window: settings)
                     }
                     // Advanced (development), opened.
-                    router.settingsTab = .general
+                    router.settingsTab = .advanced
                     router.advancedExpanded = true
                     try? await Task.sleep(for: .seconds(1))
                     let advanced = NSApp.windows.first {
                         $0.isVisible && $0 !== main && !$0.isSheet && $0.styleMask.contains(.titled)
                     }
-                    capture(to: "\(dir)/settings-advanced-\(mode).png", window: advanced)
+                    capture(to: "\(dir)/settings-advanced-open-\(mode).png", window: advanced)
                     router.advancedExpanded = false
                     // Launch at login, waiting for the OK in System Settings.
+                    router.settingsTab = .thisMac
                     loginItem.preview(.needsApproval)
                     try? await Task.sleep(for: .seconds(0.8))
                     let pending = NSApp.windows.first {
@@ -314,10 +331,9 @@ enum Snapshot {
         }
     }
 
-    /// The app's main window: titled "Ratchet", not Settings and not a sheet.
+    /// The app's main window (its title is the page now, so it registers itself), not Settings and not a sheet.
     static var mainWindow: NSWindow? {
-        NSApp.windows.first { $0.canBecomeMain && !$0.isSheet && $0.title == "Ratchet" }
-            ?? NSApp.windows.first { $0.canBecomeMain && !$0.isSheet }
+        MainWindow.window ?? NSApp.windows.first { $0.canBecomeMain && !$0.isSheet }
     }
 
     /// Takes the picture of a scene whose state is already applied: the main window, the menu bar panel in a window of its

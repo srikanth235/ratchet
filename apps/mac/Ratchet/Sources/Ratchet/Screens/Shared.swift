@@ -88,54 +88,83 @@ enum TableColumns {
     static let value: CGFloat = 72
 }
 
-/// The optimizations table of the Overview and the Optimizations page.
+extension Optimization {
+    // Sort keys of the table's columns: the columns whose value is not Comparable as it stands.
+    var statusRank: Int {
+        switch status {
+        case .running: 0
+        case .waiting: 1
+        case .merged: 2
+        case .done: 3
+        case .noWin: 4
+        }
+    }
+
+    var changeSort: Double { change ?? 0 }
+    var valueSort: Double { valuePerYearUSD ?? 0 }
+}
+
+/// The optimizations table of the Overview and the Optimizations page: a native `Table` with selection (one or several rows),
+/// sorting by any column, a context menu (Open, Run Now, Stop…, Open Pull Request, Copy Link), a drag that carries the pull
+/// request's link, and Return or a double click to open. The selection is published to the menu bar (`optimizationSelection`).
 struct OptimizationTable: View {
     let optimizations: [Optimization]
-    let onOpen: (Optimization) -> Void
+    /// True inside a scrolling page (the Overview): the table takes the height its rows need and scrolls with the page. False:
+    /// it fills the space it is given and scrolls itself.
+    var sizesToRows = false
+    @Environment(AppRouter.self) private var router
+    @State private var selection = Set<Optimization.ID>()
+    @State private var sortOrder: [KeyPathComparator<Optimization>] = []
+
+    /// A two-line row and the header, with room to spare: the table has no way to say how tall its rows came out.
+    private static let rowHeight: CGFloat = 56
+    private static let headerHeight: CGFloat = 32
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: Space.lg) {
-                header("Optimization").frame(maxWidth: .infinity, alignment: .leading)
-                header("Status").frame(width: TableColumns.status, alignment: .leading)
-                header("Result").frame(width: TableColumns.result, alignment: .leading)
-                header("Spent").frame(width: TableColumns.spent, alignment: .trailing)
-                header("Value / yr").frame(width: TableColumns.value, alignment: .trailing)
+        let rows = sortOrder.isEmpty ? optimizations : optimizations.sorted(using: sortOrder)
+        Table(of: Optimization.self, selection: $selection, sortOrder: $sortOrder) {
+            TableColumn("Optimization", value: \.title) { optimization in
+                TitleStack(title: optimization.title, subtitle: optimization.repo)
             }
-            .padding(.bottom, Space.sm + 2)
-            .overlay(alignment: .bottom) { Hairline() }
-
-            ForEach(optimizations) { optimization in
-                Button { onOpen(optimization) } label: { row(optimization) }
-                    .buttonStyle(TableRowButtonStyle())
-                    .accessibilityHint("Opens the optimization")
+            TableColumn("Status", value: \.statusRank) { optimization in
+                StatusLabel(tone: optimization.status.tone, text: optimization.status.title, caption: Self.caption(optimization))
+            }
+            .width(min: 112, ideal: 128, max: 160)
+            TableColumn("Result", value: \.changeSort) { optimization in
+                ResultCell(optimization: optimization)
+            }
+            .width(min: 144, ideal: 176)
+            TableColumn("Spent", value: \.spentUSD) { optimization in
+                SpentCell(optimization: optimization).frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .width(min: 72, ideal: 88, max: 120)
+            TableColumn("Value / yr", value: \.valueSort) { optimization in
+                Text(optimization.valuePerYearUSD.map(Money.short) ?? "—")
+                    .kitType(.mono)
+                    .foregroundStyle(optimization.valuePerYearUSD == nil ? Ink.textFaint : Ink.text)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .width(min: 72, ideal: 96, max: 120)
+        } rows: {
+            ForEach(rows) { optimization in
+                TableRow(optimization)
+                    .draggable(OptimizationAction.link(for: optimization))
             }
         }
-    }
-
-    private func header(_ title: String) -> some View {
-        Text(title).kitType(.caption).foregroundStyle(Ink.textFaint)
-    }
-
-    private func row(_ optimization: Optimization) -> some View {
-        HStack(spacing: Space.lg) {
-            TitleStack(title: optimization.title, subtitle: optimization.repo)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            StatusLabel(tone: optimization.status.tone, text: optimization.status.title, caption: caption(optimization))
-                .frame(width: TableColumns.status, alignment: .leading)
-            ResultCell(optimization: optimization)
-                .frame(width: TableColumns.result, alignment: .leading)
-            SpentCell(optimization: optimization)
-                .frame(width: TableColumns.spent, alignment: .trailing)
-            Text(optimization.valuePerYearUSD.map(Money.short) ?? "—")
-                .kitType(.mono)
-                .foregroundStyle(optimization.valuePerYearUSD == nil ? Ink.textFaint : Ink.text)
-                .frame(width: TableColumns.value, alignment: .trailing)
+        .tableStyle(.inset)
+        .scrollContentBackground(.hidden)
+        .contextMenu(forSelectionType: Optimization.ID.self) { ids in
+            OptimizationMenuItems(ids: Array(ids))
+        } primaryAction: { ids in
+            if ids.count == 1, let id = ids.first { router.open(optimization: id) }
         }
-        .padding(.vertical, Dim.rowPadding)
+        .focusedSceneValue(\.optimizationSelection, Array(selection))
+        .frame(height: sizesToRows ? CGFloat(rows.count) * Self.rowHeight + Self.headerHeight : nil)
+        .scrollDisabled(sizesToRows)
+        .accessibilityLabel("Optimizations")
     }
 
-    private func caption(_ optimization: Optimization) -> String? {
+    private static func caption(_ optimization: Optimization) -> String? {
         guard optimization.status == .running, let left = optimization.secondsLeft else { return nil }
         return Elapsed.hm(left) + " left"
     }

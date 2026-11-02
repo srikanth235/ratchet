@@ -118,6 +118,17 @@ public final class OptimizationsStore {
         }
     }
 
+    /// "Run Now": starts an optimization that has not started. Reloads it so the screen shows the run.
+    public func runNow(_ id: String) async {
+        errors.beginAction()
+        do {
+            _ = try await client.runOptimization(id: id)
+            await refreshOptimization(id)
+        } catch {
+            errors.fail(error, "Couldn't start the run")
+        }
+    }
+
     /// Opens the pull request for the verified wins. Returns where it is, or nil (and the error line) when it could not.
     public func openPullRequest(_ id: String) async -> URL? {
         errors.beginAction()

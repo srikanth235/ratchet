@@ -4,7 +4,7 @@ import SwiftUI
 /// Shapes follow the SVGs of design/v02.html.
 nonisolated enum KitIcon: CaseIterable {
     case overview, optimizations, benchmarks, connectors, check, back, plus, alert
-    case chevronDown, arrowUp, close, sliders, bell, terminal
+    case chevronDown, arrowUp, close, sliders, bell, terminal, home, agents
 }
 
 private nonisolated struct KitGlyph: Shape {
@@ -93,6 +93,16 @@ private nonisolated struct KitGlyph: Shape {
             path.addLines([CGPoint(x: 3, y: 4.5), CGPoint(x: 7, y: 8), CGPoint(x: 3, y: 11.5)])
             path.move(to: CGPoint(x: 8.5, y: 11.5))
             path.addLine(to: CGPoint(x: 13, y: 11.5))
+        case .home:
+            path.addLines([CGPoint(x: 2.5, y: 8), CGPoint(x: 8, y: 3), CGPoint(x: 13.5, y: 8)])
+            path.addLines([CGPoint(x: 4, y: 7), CGPoint(x: 4, y: 13), CGPoint(x: 12, y: 13), CGPoint(x: 12, y: 7)])
+        case .agents:
+            // A four-point spark: the agents that do the work.
+            path.addLines([
+                CGPoint(x: 8, y: 2.5), CGPoint(x: 9.4, y: 6.6), CGPoint(x: 13.5, y: 8), CGPoint(x: 9.4, y: 9.4),
+                CGPoint(x: 8, y: 13.5), CGPoint(x: 6.6, y: 9.4), CGPoint(x: 2.5, y: 8), CGPoint(x: 6.6, y: 6.6),
+            ])
+            path.closeSubpath()
         }
         let scale = rect.width / 16
         return path.applying(CGAffineTransform(scaleX: scale, y: scale))

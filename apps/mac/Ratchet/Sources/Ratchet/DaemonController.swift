@@ -47,17 +47,18 @@ final class DaemonController {
         if statusForced { return true }
         switch phase {
         case .running, .checking: return false
-        case .starting: return !storeLoaded
-        case .needsApproval, .failed, .stopped: return true
+        // With data on screen the page stays and a banner on every page says the service is down; without, the status screen.
+        case .starting, .needsApproval, .failed, .stopped: return !storeLoaded
         }
     }
 
     /// Snapshot mode: pretend the daemon is in this phase.
-    func preview(_ phase: DaemonPhase?) {
+    /// `statusScreen: false` shows the phase as the banner over the page does (the data stays on screen).
+    func preview(_ phase: DaemonPhase?, statusScreen: Bool = true) {
         unbundledPreview = false
         if let phase {
             lifecycle = DaemonLifecycle(mode: mode, phase: phase)
-            statusForced = true
+            statusForced = statusScreen
         } else {
             lifecycle = DaemonLifecycle.running(mode: mode)
             statusForced = false
