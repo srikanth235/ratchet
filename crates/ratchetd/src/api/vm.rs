@@ -247,6 +247,10 @@ pub struct ActivityVm {
 pub struct EngineInfo {
     pub kind: EngineKind,
     pub mode: Mode,
+    /// The daemon is holding the prevent-sleep assertion because a run's agents are running on this Mac (the menu bar
+    /// shows "Keeping your Mac awake"). Never true for a run in the cloud.
+    #[serde(default)]
+    pub keeping_awake: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

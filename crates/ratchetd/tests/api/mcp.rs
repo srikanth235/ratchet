@@ -566,3 +566,165 @@ async fn ratchetd_mcp_serves_the_optimization_set_for_an_optimization_token_and_
     assert!(String::from_utf8_lossy(&out.stderr).contains("revoked"));
     rig.stop().await;
 }
+
+// ---------------------------------------------------------------------------------------------------- P6: the optimization tools, locally
+
+struct Answers;
+
+#[async_trait]
+impl ratchetd::mcp::ConnectorQuery for Answers {
+    async fn query(&self, connector: &str, query: &str) -> ServiceResult<Value> {
+        match connector {
+            "datadog" => Ok(json!({"connector": "datadog", "series": [1, 2, 3], "query": query})),
+            "grafana" => Err(ratchetd::service::ServiceError::NotReady(
+                "Needs you: Grafana is signed out. Sign in again in Customize > Connectors; this optimization carries on without it."
+                    .into(),
+            )),
+            other => Err(ratchetd::service::ServiceError::NotFound(format!(
+                "no connector named \"{other}\""
+            ))),
+        }
+    }
+}
+
+#[tokio::test]
+async fn connector_query_and_submit_candidate_work_for_a_local_agent_and_stay_inside_its_scope() {
+    let rig = Rig::start().await;
+    let agent = "opt_demo_search_agt_0".to_owned();
+    let (opt, _) = rig.session(
+        ToolSet::Optimization,
+        Scope {
+            optimization: Some("opt_demo_search".into()),
+            agent: Some(agent.clone()),
+            ..Scope::default()
+        },
+    );
+
+    // no connector can be asked until the daemon has someone to ask
+    let (status, body) = call(
+        &opt,
+        "connector_query",
+        json!({"connector": "datadog", "query": "p95"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED, "{body}");
+
+    rig.daemon.mcp.set_connector_query(Arc::new(Answers));
+    let (status, body) = call(
+        &opt,
+        "connector_query",
+        json!({"connector": "datadog", "query": "p95"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["result"]["series"], json!([1, 2, 3]));
+    // a signed-out connector is the one thing that needs a person: the agent is told, and carries on
+    let (status, body) = call(
+        &opt,
+        "connector_query",
+        json!({"connector": "grafana", "query": "p95"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("Needs you: Grafana is signed out")
+    );
+    // a query is read-only text of bounded size
+    let (status, _) = call(
+        &opt,
+        "connector_query",
+        json!({"connector": "datadog", "query": "x".repeat(2001)}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // submit_candidate goes to the agent's own runner and shows in its log
+    let (status, body) = call(
+        &opt,
+        "submit_candidate",
+        json!({"sha": "abc1234", "note": "cache the parse"}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["result"]["submitted"], "abc1234");
+    let log = rig
+        .owner
+        .get_json(&format!("/v1/agents/{agent}/events"))
+        .await;
+    assert!(
+        log["events"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["text"] == "submit_candidate named abc1234"),
+        "{log}"
+    );
+    // a session with no agent cannot name a candidate
+    let (no_agent, _) = rig.session(
+        ToolSet::Optimization,
+        Scope {
+            optimization: Some("opt_demo_search".into()),
+            ..Scope::default()
+        },
+    );
+    let (status, _) = call(&no_agent, "submit_candidate", json!({"sha": "abc1234"})).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    rig.stop().await;
+}
+
+#[tokio::test]
+async fn the_agents_list_is_readable_and_changeable_through_the_api() {
+    let rig = Rig::start().await;
+    let got = rig
+        .owner
+        .get_json("/v1/optimizations/opt_demo_search/agents")
+        .await;
+    assert_eq!(got["source"], "settings");
+    assert!(!got["harnesses"].as_array().unwrap().is_empty());
+    assert_eq!(got["waitLimitS"], 1800);
+    assert_eq!(got["crashStrikes"], 3);
+    assert_eq!(got["recheckS"], 300);
+
+    let put = rig
+        .owner
+        .send(
+            "PUT",
+            "/v1/optimizations/opt_demo_search/agents",
+            Some(json!({"harnesses": ["claude-code", "codex", "grok"], "crashStrikes": 2})),
+        )
+        .await;
+    assert_eq!(put.status, StatusCode::OK, "{}", put.text());
+    let v = put.json();
+    assert_eq!(v["summary"], "Claude Code \u{2192} Codex \u{2192} Grok");
+    assert_eq!(v["crashStrikes"], 2);
+    let again = rig
+        .owner
+        .get_json("/v1/optimizations/opt_demo_search/agents")
+        .await;
+    assert_eq!(again["harnesses"], json!(["claude-code", "codex", "grok"]));
+
+    for (body, why) in [
+        (json!({"harnesses": []}), "an empty list"),
+        (json!({"harnesses": ["mock"]}), "mock is not an agent"),
+        (
+            json!({"harnesses": ["codex"], "crashStrikes": 0}),
+            "zero strikes",
+        ),
+    ] {
+        let r = rig
+            .owner
+            .send(
+                "PUT",
+                "/v1/optimizations/opt_demo_search/agents",
+                Some(body),
+            )
+            .await;
+        assert_eq!(r.status, StatusCode::BAD_REQUEST, "{why}: {}", r.text());
+    }
+    let missing = rig.owner.get("/v1/optimizations/nope/agents").await;
+    assert_eq!(missing.status, StatusCode::NOT_FOUND);
+    rig.stop().await;
+}

@@ -33,6 +33,17 @@ impl DrafterSource for FixedDrafter {
     }
 }
 
+/// How long a new optimization waits for the setup agent's draft to finish its checks.
+const SETTLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+const SETTLE_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// How [`EnvDrafts::settle`] ended. Nothing in it asks the user for anything.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Settled {
+    /// Set when the drafted environment was dropped: what happened, in the user's words (shown as a notice).
+    pub note: Option<String>,
+}
+
 pub type Emit = Arc<dyn Fn(ApiEvent) + Send + Sync>;
 
 pub struct EnvDrafts {
@@ -220,13 +231,105 @@ impl EnvDrafts {
         Ok(draft_vm(&rec))
     }
 
-    /// 409 unless the draft exists and is approved: what `environmentDraftId` of `POST /v1/optimizations` needs.
-    pub fn require_approved(&self, id: &str) -> ServiceResult<()> {
-        match self.record(id)?.1.status {
-            Status::Approved => Ok(()),
-            _ => Err(ServiceError::NotReady(
-                "approve the environment before starting the optimization".into(),
-            )),
+    /// Settles the environment draft an optimization starts with, with nobody asked. The checks ran on their own when the
+    /// draft was made:
+    ///
+    /// * already approved, or ready with every check passed: the environment is committed (straight onto the draft's base
+    ///   ref) and used;
+    /// * a check failed, or drafting failed: the setup agent is asked once for a smaller setup (fewer resources, one machine,
+    ///   or none) and the new draft is checked the same way;
+    /// * still failing: the optimization carries on without the drafted environment, and says why in [`Settled::note`].
+    ///
+    /// Only a draft that does not exist is an error. The engine fails a run whose sandbox cannot be created at all.
+    pub async fn settle(&self, id: &str) -> ServiceResult<Settled> {
+        let (drafter, _) = self.record(id)?;
+        let mut asked_smaller = false;
+        let deadline = tokio::time::Instant::now() + SETTLE_TIMEOUT;
+        loop {
+            let rec = drafter
+                .get(id)
+                .ok_or_else(|| ServiceError::not_found("environment draft", id))?;
+            let why = match rec.status {
+                Status::Approved => return Ok(Settled::default()),
+                Status::Drafting => {
+                    if tokio::time::Instant::now() >= deadline {
+                        "the setup agent took too long".to_owned()
+                    } else {
+                        tokio::time::sleep(SETTLE_POLL).await;
+                        continue;
+                    }
+                }
+                Status::Ready => match rec.draft.as_ref() {
+                    Some(d) if ratchet_env::draft_passed(d) => {
+                        match drafter
+                            .approve(
+                                id,
+                                ApproveEnvironmentOptions {
+                                    mode: Some(ratchet_env::EnvironmentApprovalMode::Commit),
+                                },
+                            )
+                            .await
+                        {
+                            Ok(done) => {
+                                self.announce(&done);
+                                return Ok(Settled::default());
+                            }
+                            Err(e) => {
+                                format!("the environment could not be committed: {}", e.message)
+                            }
+                        }
+                    }
+                    Some(d) => format!(
+                        "these checks did not pass: {}",
+                        d.checks
+                            .iter()
+                            .filter(|c| !c.ok)
+                            .map(|c| c.label.clone())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    None => "the setup agent produced no environment".to_owned(),
+                },
+                Status::Failed => rec
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "the setup agent failed".to_owned()),
+            };
+            if asked_smaller || rec.status == Status::Drafting {
+                return Ok(Settled {
+                    note: Some(format!(
+                        "The environment was not used: {why}. The optimization runs with the standard setup."
+                    )),
+                });
+            }
+            asked_smaller = true;
+            let message = format!(
+                "The checks did not pass ({why}). Propose a smaller setup: fewer resources, a single machine, or no extra infrastructure at all."
+            );
+            if rec.status == Status::Failed && rec.draft.is_none() {
+                // nothing to revise: the first draft never existed
+                return Ok(Settled {
+                    note: Some(format!(
+                        "The environment was not used: {why}. The optimization runs with the standard setup."
+                    )),
+                });
+            }
+            match drafter.begin_revise(id, &message) {
+                Ok(started) => {
+                    self.announce(&started);
+                    if let Ok(done) = drafter.run_revise(id).await {
+                        self.announce(&done);
+                    }
+                }
+                Err(e) => {
+                    return Ok(Settled {
+                        note: Some(format!(
+                            "The environment was not used: {}. The optimization runs with the standard setup.",
+                            e.message
+                        )),
+                    });
+                }
+            }
         }
     }
 

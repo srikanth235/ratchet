@@ -165,6 +165,10 @@ pub struct RealServiceOptions {
     pub create_runtime: Option<ratchet_engine::desktop::LiveFactory>,
     pub resolve_images: Option<ratchet_engine::desktop::ImageResolver>,
     pub create_simulation: Option<ratchet_engine::desktop::SimFactory>,
+    /// The socket local agents' `ratchetd mcp` children reach the daemon on (default: the daemon's default socket).
+    pub mcp_socket: Option<PathBuf>,
+    /// The `ratchetd` binary local agents start as their MCP server (default: the running executable).
+    pub mcp_exe: Option<PathBuf>,
 }
 
 impl RealServiceOptions {
@@ -194,6 +198,8 @@ impl RealServiceOptions {
             create_runtime: None,
             resolve_images: None,
             create_simulation: None,
+            mcp_socket: None,
+            mcp_exe: None,
         }
     }
 }
@@ -275,6 +281,8 @@ struct Inner {
     drafts: EnvDrafts,
     /// Chat: the user's own agent CLIs, a read-only checkout per chat.
     chat: Arc<super::chat::CliChatEngine>,
+    /// MCP session tokens: one per local agent, issued when its loop starts and revoked when it ends.
+    mcp_sessions: Arc<crate::mcp::Sessions>,
 }
 
 /// The setup agent of a repository comes from its live runtime.
@@ -320,10 +328,57 @@ fn demo_name(id: &str) -> String {
     format!("{capital} (demo)")
 }
 
+/// The MCP hooks of local agents: `ratchetd mcp --session <token>` with a token for the optimization tool set, bound to the
+/// agent's own optimization and agent id (it can see its steering notes and name its own candidate, nothing else).
+fn local_agent_mcp(
+    sessions: Arc<crate::mcp::Sessions>,
+    exe: Option<PathBuf>,
+    socket: Option<PathBuf>,
+) -> (ratchet_agents::McpFor, ratchet_agents::McpDone) {
+    use crate::mcp::Scope;
+    let issued: Arc<Mutex<HashMap<String, String>>> = Arc::default();
+    let key =
+        |h: &ratchet_core::ports::RunnerHandle| format!("{}/{}", h.optimization_id, h.agent_id);
+    let exe = exe
+        .or_else(|| std::env::current_exe().ok())
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "ratchetd".to_owned());
+    let (s, i) = (sessions.clone(), issued.clone());
+    let for_agent: ratchet_agents::McpFor = Arc::new(move |_config, handle| {
+        let issue = s.issue(
+            ratchet_mcp::ToolSet::Optimization,
+            Scope {
+                repo: None,
+                optimization: Some(handle.optimization_id.to_string()),
+                agent: Some(handle.agent_id.to_string()),
+            },
+        );
+        if let Some(old) = lock(&i).insert(key(handle), issue.id.clone()) {
+            s.revoke(&old);
+        }
+        vec![ratchet_mcp::launch::ratchetd_server(
+            &exe,
+            &issue.token,
+            socket.as_deref(),
+        )]
+    });
+    let done: ratchet_agents::McpDone = Arc::new(move |handle| {
+        if let Some(id) = lock(&issued).remove(&key(handle)) {
+            sessions.revoke(&id);
+        }
+    });
+    (for_agent, done)
+}
+
 impl RealService {
     /// True while any run is active (what the `run-active` event last said, read directly).
     pub fn run_active(&self) -> bool {
         self.0.product.run_active()
+    }
+
+    /// True while a run whose agents run on this machine is live: what the keep-awake resyncs to after a lag.
+    pub fn keeping_awake(&self) -> bool {
+        self.0.product.keeping_awake()
     }
 
     pub async fn new(opts: RealServiceOptions) -> ServiceResult<Self> {
@@ -375,6 +430,15 @@ impl RealService {
             },
         ));
 
+        // Every turn of a local agent gets the Ratchet optimization tools: the daemon issues the agent a session token bound to
+        // its optimization and agent when its loop starts, and revokes it when the loop ends.
+        let mcp_sessions: Arc<crate::mcp::Sessions> = Arc::default();
+        let (mcp_for, mcp_done) = local_agent_mcp(
+            mcp_sessions.clone(),
+            opts.mcp_exe.clone(),
+            opts.mcp_socket.clone(),
+        );
+
         let product = match opts.product.clone() {
             Some(p) => p,
             None => {
@@ -399,6 +463,8 @@ impl RealService {
                         env: None,
                         create_runtime: opts.create_runtime.clone(),
                         resolve_images: opts.resolve_images.clone(),
+                        mcp_for: Some(mcp_for),
+                        mcp_done: Some(mcp_done),
                     }),
                 })
             }
@@ -462,6 +528,7 @@ impl RealService {
                     let _ = tx.send(e);
                 })
             }),
+            mcp_sessions,
         });
 
         // engine events -> API events (and the sandbox phases the Environments screen shows)
@@ -535,6 +602,7 @@ impl Inner {
         EngineInfo {
             kind: EngineKind::Real,
             mode: ratchet_core::enums::Mode::Live,
+            keeping_awake: crate::host::KEEP_AWAKE_SUPPORTED && self.product.keeping_awake(),
         }
     }
 
@@ -1188,6 +1256,79 @@ impl crate::mcp::ConfigHosts for RealService {
             )),
         }
     }
+
+    fn sessions(&self) -> Option<Arc<crate::mcp::Sessions>> {
+        Some(self.0.mcp_sessions.clone())
+    }
+
+    fn connector_query(&self) -> Option<Arc<dyn crate::mcp::ConnectorQuery>> {
+        Some(Arc::new(self.clone()))
+    }
+}
+
+/// `connector_query`: a read-only question to a connector the user signed in. A connector that is signed out or expired is
+/// the one thing a person must fix, and the answer says which; everything else is answered without anyone being asked.
+#[async_trait]
+impl crate::mcp::ConnectorQuery for RealService {
+    async fn query(&self, connector: &str, query: &str) -> ServiceResult<serde_json::Value> {
+        use ratchet_connectors::{ConnectorStatus, ConnectorVm};
+        let wanted = connector.to_ascii_lowercase();
+        let all = self.0.hub.view().await.connectors;
+        let Some(vm) = all.iter().find(|c| {
+            c.id().eq_ignore_ascii_case(connector)
+                || c.name().to_ascii_lowercase() == wanted
+                || kind_word(c) == wanted
+        }) else {
+            return Err(ServiceError::NotFound(format!(
+                "no connector named \"{connector}\"; the signed-in connectors are: {}",
+                all.iter().map(|c| c.name()).collect::<Vec<_>>().join(", ")
+            )));
+        };
+        if matches!(
+            vm.status(),
+            ConnectorStatus::SignedOut | ConnectorStatus::Expired | ConnectorStatus::Invalid
+        ) {
+            return Err(ServiceError::NotReady(format!(
+                "Needs you: {} is signed out. Sign in again in Customize > Connectors; this optimization carries on without it.",
+                vm.name()
+            )));
+        }
+        match vm {
+            ConnectorVm::Github { id, .. } => {
+                let (Some(api), Some(token)) = (
+                    self.0.github.clone(),
+                    self.0.connectors.github_token(Some(id)),
+                ) else {
+                    return Err(ServiceError::NotReady(
+                        "Needs you: GitHub is signed out. Sign in again in Customize > Connectors."
+                            .into(),
+                    ));
+                };
+                let Some(repo) = query.strip_prefix("repo:").map(str::trim) else {
+                    return Err(ServiceError::Invalid(
+                        "a GitHub query is `repo:<owner>/<name>`".into(),
+                    ));
+                };
+                let repo = api
+                    .repo(&token, repo)
+                    .await
+                    .map_err(crate::connectors_hub::github_error)?;
+                Ok(serde_json::json!({"connector": vm.name(), "repo": repo}))
+            }
+            other => Err(ServiceError::Unsupported(format!(
+                "the {} connector does not answer queries yet",
+                kind_word(other)
+            ))),
+        }
+    }
+}
+
+fn kind_word(c: &ratchet_connectors::ConnectorVm) -> &'static str {
+    match c {
+        ratchet_connectors::ConnectorVm::Github { .. } => "github",
+        ratchet_connectors::ConnectorVm::Aws { .. } => "aws",
+        ratchet_connectors::ConnectorVm::Agent { .. } => "agent",
+    }
 }
 
 #[async_trait]
@@ -1223,9 +1364,12 @@ impl AppService for RealService {
         input: CreateOptimizationInput,
     ) -> ServiceResult<CreatedOptimization> {
         validate_create(&input)?;
-        if let Some(draft) = &input.environment_draft_id {
-            self.0.drafts.require_approved(draft)?;
-        }
+        // The environment checks run on their own: a ready draft is committed, a failing one is retried as a smaller setup,
+        // and nobody is asked to approve anything.
+        let settled = match &input.environment_draft_id {
+            Some(draft) => Some(self.0.drafts.settle(draft).await?),
+            None => None,
+        };
         let base = EngineCreateOptimizationInput {
             name: input.name.clone(),
             repo_url: String::new(),
@@ -1281,6 +1425,13 @@ impl AppService for RealService {
             self.0.product.create_optimization(&i).await
         }
         .map_err(service_error)?;
+        if let Some(note) = settled.and_then(|s| s.note) {
+            let _ = self.0.tx.send(ApiEvent::Notice {
+                optimization_id: id.to_string(),
+                level: ratchet_core::ports::NoticeLevel::Warning,
+                text: note,
+            });
+        }
         Ok(CreatedOptimization { id: id.to_string() })
     }
 
@@ -1454,6 +1605,56 @@ impl AppService for RealService {
         self.0
             .product
             .resume_agent(agent_id)
+            .await
+            .map_err(service_error)
+    }
+
+    async fn get_agents_policy(&self, id: &str) -> ServiceResult<AgentsPolicyVm> {
+        let effective = self
+            .0
+            .product
+            .agents_policy(id)
+            .await
+            .map_err(service_error)?
+            .ok_or_else(|| {
+                ServiceError::Unsupported("this optimization keeps no agents list".into())
+            })?;
+        Ok(AgentsPolicyVm::new(
+            &effective.policy,
+            if effective.from_config {
+                AgentsPolicySource::Config
+            } else {
+                AgentsPolicySource::Settings
+            },
+        ))
+    }
+
+    async fn set_agents_policy(
+        &self,
+        id: &str,
+        input: SetAgentsPolicyInput,
+    ) -> ServiceResult<AgentsPolicyVm> {
+        let policy = input.policy();
+        if let Some(problem) = policy.problem() {
+            return Err(invalid_field("harnesses", problem));
+        }
+        self.0
+            .product
+            .set_agents_policy(id, policy)
+            .await
+            .map_err(service_error)?;
+        self.get_agents_policy(id).await
+    }
+
+    async fn submit_candidate(
+        &self,
+        agent_id: &str,
+        sha: &str,
+        note: Option<String>,
+    ) -> ServiceResult<()> {
+        self.0
+            .product
+            .submit_candidate(agent_id, sha, note.as_deref())
             .await
             .map_err(service_error)
     }
@@ -1710,7 +1911,12 @@ impl AppService for RealService {
     // ---- overview ----------------------------------------------------------------------------------------
 
     async fn overview(&self, range: OverviewRange) -> ServiceResult<OverviewVm> {
-        self.0.views.overview(range).await
+        let mut vm = self.0.views.overview(range).await?;
+        // A signed-out connector is something only a person can fix; it joins the list after the wins and failures.
+        vm.needs_you.extend(crate::connectors_hub::sign_in_needs(
+            &self.0.hub.view().await.connectors,
+        ));
+        Ok(vm)
     }
 
     // ---- connectors --------------------------------------------------------------------------------------

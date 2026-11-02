@@ -28,6 +28,30 @@ pub fn github_error(e: ratchet_github::Error) -> ServiceError {
     }
 }
 
+/// What only a person can fix: one "Sign in again" entry per connector that is signed out or whose sign-in expired.
+pub fn sign_in_needs(
+    connectors: &[ratchet_connectors::ConnectorVm],
+) -> Vec<crate::api::OverviewNeed> {
+    use ratchet_connectors::ConnectorStatus;
+    connectors
+        .iter()
+        .filter(|c| {
+            matches!(
+                c.status(),
+                ConnectorStatus::SignedOut | ConnectorStatus::Expired
+            )
+        })
+        .map(|c| crate::api::OverviewNeed {
+            id: format!("connector:{}", c.id()),
+            kind: crate::api::OverviewNeedKind::Connector,
+            optimization_id: String::new(),
+            title: format!("Sign in to {} again", c.name()),
+            sub: "Optimizations carry on without it".to_owned(),
+            action: "Sign In".to_owned(),
+        })
+        .collect()
+}
+
 impl From<ConnectorError> for ServiceError {
     fn from(e: ConnectorError) -> Self {
         match e {

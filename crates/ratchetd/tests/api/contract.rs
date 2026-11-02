@@ -340,6 +340,27 @@ async fn every_route_round_trips_its_types() {
         Some(json!({"text": "try the index first"})),
     )
     .await;
+    let policy: AgentsPolicyVm = c
+        .rt(
+            "GET",
+            "/v1/optimizations/{id}/agents",
+            "/v1/optimizations/opt_demo_search/agents",
+            None,
+            200,
+        )
+        .await;
+    assert!(!policy.harnesses.is_empty());
+    let policy: AgentsPolicyVm = c
+        .rt(
+            "PUT",
+            "/v1/optimizations/{id}/agents",
+            "/v1/optimizations/opt_demo_search/agents",
+            Some(json!({"harnesses": ["codex", "claude-code"], "recheckS": 60})),
+            200,
+        )
+        .await;
+    assert_eq!(policy.summary, "Codex \u{2192} Claude Code");
+    assert_eq!(policy.recheck_s, 60);
 
     // ---- config ---------------------------------------------------------------------------------------
     let ok: ValidateConfigResult = c

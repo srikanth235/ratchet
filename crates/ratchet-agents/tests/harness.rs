@@ -83,6 +83,7 @@ fn session_spec_defaults_reproduce_what_agent_spec_callers_always_got() {
         model: Some("m".into()),
         env: Some([("A".to_string(), "1".to_string())].into()),
         max_turns: Some(7),
+        mcp: Vec::new(),
     };
     let s = SessionSpec::from(&agent);
     assert_eq!(s.access, Access::Edit { network: true });

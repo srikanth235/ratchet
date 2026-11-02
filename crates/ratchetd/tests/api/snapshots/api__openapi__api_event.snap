@@ -219,7 +219,7 @@ expression: "d[\"components\"][\"schemas\"][\"ApiEvent\"]"
     },
     {
       "type": "object",
-      "description": "True while any run is active (the app turns it into \"prevent system sleep\").",
+      "description": "True while a run whose agents run on this Mac is live: the daemon holds its prevent-sleep assertion exactly then\n(`keepingAwake`), and the menu bar shows \"Keeping your Mac awake\". A run in the cloud does not count; the Mac may\nsleep under it. `optimizationIds` are the local runs.",
       "required": [
         "active",
         "optimizationIds",
@@ -228,6 +228,10 @@ expression: "d[\"components\"][\"schemas\"][\"ApiEvent\"]"
       "properties": {
         "active": {
           "type": "boolean"
+        },
+        "keepingAwake": {
+          "type": "boolean",
+          "description": "The daemon is holding the power assertion (always `active` on a Mac; never on hosts without the assertion)."
         },
         "optimizationIds": {
           "type": "array",

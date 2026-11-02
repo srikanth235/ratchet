@@ -11,6 +11,9 @@ use tokio::sync::broadcast::{self, error::RecvError};
 
 use crate::api::ApiEvent;
 
+pub use crate::power::KEEP_AWAKE_SUPPORTED;
+use crate::power::{Held, IoKitAssertions};
+
 /// Keeps the machine awake by running a helper process for as long as the blocker is held (`caffeinate -i -w <pid>` on
 /// macOS: no idle sleep, and the helper exits by itself when the daemon does, so a crashed daemon cannot leave the Mac
 /// awake). Where the helper does not exist (Linux CI, other hosts) starting is a no-op.
@@ -19,6 +22,8 @@ pub struct CommandPowerBlocker {
     args: Vec<String>,
     children: Mutex<HashMap<u64, Child>>,
     next: Mutex<u64>,
+    /// An OS power assertion tried before the helper process (macOS: `IOPMAssertion`).
+    assertions: Option<Held>,
 }
 
 impl CommandPowerBlocker {
@@ -28,7 +33,14 @@ impl CommandPowerBlocker {
             args,
             children: Mutex::new(HashMap::new()),
             next: Mutex::new(1),
+            assertions: None,
         }
+    }
+
+    /// Hold `assertions` first; the helper process is only the fallback when the OS refuses.
+    pub fn with_assertions(mut self, assertions: Held) -> Self {
+        self.assertions = Some(assertions);
+        self
     }
 
     /// A blocker that does nothing (hosts without a sleep helper).
@@ -36,17 +48,22 @@ impl CommandPowerBlocker {
         Self::new("", vec![])
     }
 
-    /// `/usr/bin/caffeinate -i -w <this process>`.
+    /// What the daemon uses on a Mac: an `IOPMAssertion` (`PreventUserIdleSystemSleep`) held while local agents run, with
+    /// `/usr/bin/caffeinate -i -w <this process>` as the fallback when the assertion cannot be created.
     pub fn caffeinate() -> Self {
         Self::new(
             "/usr/bin/caffeinate",
             vec!["-i".into(), "-w".into(), std::process::id().to_string()],
         )
+        .with_assertions(Held::new(
+            Box::new(IoKitAssertions),
+            "Ratchet is running optimizations with agents on this Mac",
+        ))
     }
 
-    /// Is a helper process currently held?
+    /// How many holds are in force (OS assertions plus helper processes).
     pub fn held(&self) -> usize {
-        self.children.lock().expect("lock").len()
+        self.children.lock().expect("lock").len() + self.assertions.as_ref().map_or(0, Held::count)
     }
 }
 
@@ -55,6 +72,11 @@ impl PowerSaveBlocker for CommandPowerBlocker {
         let mut next = self.next.lock().expect("lock");
         let id = *next;
         *next += 1;
+        if let Some(a) = &self.assertions
+            && a.take(id)
+        {
+            return id;
+        }
         if self.program.as_os_str().is_empty() {
             return id; // disabled: this host has no such helper
         }
@@ -76,6 +98,9 @@ impl PowerSaveBlocker for CommandPowerBlocker {
     }
 
     fn stop(&self, id: u64) {
+        if let Some(a) = &self.assertions {
+            a.drop_handle(id);
+        }
         if let Some(mut child) = self.children.lock().expect("lock").remove(&id) {
             let _ = child.kill();
             let _ = child.wait();
@@ -85,6 +110,9 @@ impl PowerSaveBlocker for CommandPowerBlocker {
 
 impl Drop for CommandPowerBlocker {
     fn drop(&mut self) {
+        if let Some(a) = &self.assertions {
+            a.release_all();
+        }
         for (_, mut child) in self.children.lock().expect("lock").drain() {
             let _ = child.kill();
             let _ = child.wait();
@@ -150,6 +178,28 @@ mod tests {
         b.stop(id);
         assert_eq!(b.held(), 0);
         b.stop(id); // idempotent
+    }
+
+    #[test]
+    fn the_os_assertion_is_held_instead_of_a_helper_and_the_helper_is_the_fallback() {
+        use crate::power::fake::FakeAssertions;
+        let api = FakeAssertions::default();
+        let b = CommandPowerBlocker::new("sleep", vec!["60".into()])
+            .with_assertions(Held::new(Box::new(api.clone()), "agents"));
+        let id = b.start();
+        assert_eq!(b.held(), 1);
+        assert_eq!(api.log.lock().unwrap().len(), 1, "the assertion, no helper");
+        assert!(b.children.lock().unwrap().is_empty());
+        b.stop(id);
+        assert_eq!(b.held(), 0);
+        assert_eq!(api.log.lock().unwrap().len(), 2, "released");
+
+        // the OS refuses: the helper process holds the Mac awake instead
+        api.refuse.store(true, std::sync::atomic::Ordering::SeqCst);
+        let id = b.start();
+        assert_eq!(b.children.lock().unwrap().len(), 1);
+        b.stop(id);
+        assert_eq!(b.held(), 0);
     }
 
     #[test]

@@ -9,14 +9,21 @@ use crate::claude_code::{ClaudeCodeAdapter, ClaudeCodeOptions};
 use crate::cli_agent::CliAgentOptions;
 use crate::codex::{CodexAdapter, CodexOptions};
 use crate::control::local::{
-    AdapterFor, LocalRunnerControl, LocalRunnerControlOptions, WorkdirMode,
+    AdapterFor, ChainFor, LocalRunnerControl, LocalRunnerControlOptions, McpDone, McpFor,
+    WorkdirMode,
 };
-use crate::detect::{HarnessAuth, HarnessInfo, HarnessKind, local_agent_env};
+use crate::detect::{
+    DetectOptions, HarnessAuth, HarnessInfo, HarnessKind, detect_harnesses, local_agent_env,
+};
 use crate::grok::{GrokAdapter, GrokOptions};
 use crate::process::SharedSpawner;
 use crate::runner_loop::LoopTuning;
+use async_trait::async_trait;
 use ratchet_core::enums::AgentKind;
-use ratchet_core::ports::{AgentAdapter, Clock, RunnerConfig};
+use ratchet_core::ports::{
+    AgentAdapter, AgentSession, AgentSpec, CancellationToken, Clock, EventSink, PortError,
+    PortResult, Preflight, RunnerConfig,
+};
 
 /// Builds the adapter for `kind: mock` (a demo with scripted agents).
 pub type MockFactory = Arc<dyn Fn(&RunnerConfig) -> Arc<dyn AgentAdapter> + Send + Sync>;
@@ -179,6 +186,91 @@ pub struct LocalAgentControlOptions {
     pub git_env: Option<HashMap<String, String>>,
     pub loop_tuning: LoopTuning,
     pub stop_grace: Option<Duration>,
+    /// The Ratchet optimization tool set for every turn of an agent (the daemon issues a session token per agent).
+    pub mcp_for: Option<McpFor>,
+    /// Called when an agent's loop ends, to revoke what `mcp_for` issued.
+    pub mcp_done: Option<McpDone>,
+}
+
+/// A harness an agent may fall back to. Whether the CLI is installed and signed in can change while the optimization runs (the
+/// user signs in again), so `preflight` detects the machine afresh and the adapter is built from what it finds.
+pub struct RedetectingAdapter {
+    kind: AgentKind,
+    opts: LocalAdapterOptions,
+    inner: tokio::sync::Mutex<Option<Arc<dyn AgentAdapter>>>,
+}
+
+impl RedetectingAdapter {
+    pub fn new(kind: AgentKind, opts: LocalAdapterOptions) -> Self {
+        Self {
+            kind,
+            opts,
+            inner: tokio::sync::Mutex::new(None),
+        }
+    }
+
+    fn build(&self, opts: &LocalAdapterOptions) -> Result<Arc<dyn AgentAdapter>, String> {
+        local_adapter_for(opts, self.kind)
+    }
+
+    async fn current(&self) -> PortResult<Arc<dyn AgentAdapter>> {
+        let mut inner = self.inner.lock().await;
+        if let Some(a) = inner.as_ref() {
+            return Ok(a.clone());
+        }
+        let a = self.build(&self.opts).map_err(PortError::Failed)?;
+        *inner = Some(a.clone());
+        Ok(a)
+    }
+}
+
+#[async_trait]
+impl AgentAdapter for RedetectingAdapter {
+    fn kind(&self) -> AgentKind {
+        self.kind
+    }
+
+    async fn preflight(&self) -> PortResult<Preflight> {
+        let mut opts = self.opts.clone();
+        opts.harnesses = detect_harnesses(&DetectOptions {
+            login_path: Some(opts.login_path.clone()).filter(|p| !p.is_empty()),
+            ..DetectOptions::default()
+        })
+        .await;
+        match self.build(&opts) {
+            Ok(a) => {
+                *self.inner.lock().await = Some(a.clone());
+                a.preflight().await
+            }
+            Err(problem) => Ok(Preflight {
+                ok: false,
+                problems: vec![problem],
+            }),
+        }
+    }
+
+    async fn start(
+        &self,
+        spec: &AgentSpec,
+        events: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<AgentSession> {
+        self.current().await?.start(spec, events, cancel).await
+    }
+
+    async fn resume(
+        &self,
+        session: &mut AgentSession,
+        spec: &AgentSpec,
+        message: &str,
+        events: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<()> {
+        self.current()
+            .await?
+            .resume(session, spec, message, events, cancel)
+            .await
+    }
 }
 
 /// A `LocalRunnerControl` that runs the real adapters, one git worktree per agent.
@@ -186,6 +278,13 @@ pub fn create_local_agent_control(opts: LocalAgentControlOptions) -> LocalRunner
     let factory = local_adapter_factory(opts.adapters.clone());
     let adapter_for: AdapterFor = Arc::new(move |config, _handle| factory(config));
     let mut options = LocalRunnerControlOptions::new(opts.root_dir, adapter_for);
+    let chain_opts = opts.adapters.clone();
+    let chain_for: ChainFor = Arc::new(move |kind| {
+        Arc::new(RedetectingAdapter::new(kind, chain_opts.clone())) as Arc<dyn AgentAdapter>
+    });
+    options.chain_for = Some(chain_for);
+    options.mcp_for = opts.mcp_for;
+    options.mcp_done = opts.mcp_done;
     options.workdirs = WorkdirMode::Worktree;
     options.clock = opts.adapters.clock.clone();
     options.git_env = opts.git_env;

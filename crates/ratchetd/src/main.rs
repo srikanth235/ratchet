@@ -352,6 +352,8 @@ async fn real_service(args: &ServeArgs, ledger_path: Option<PathBuf>) -> Result<
     opts.repo_root = repo_root;
     opts.work_root = support.join("sim").join(std::process::id().to_string());
     opts.app_version = Some(ratchetd::VERSION.to_owned());
+    // local agents reach this daemon through `ratchetd mcp` on the same socket
+    opts.mcp_socket = Some(args.socket.clone().unwrap_or_else(paths::socket_path));
     opts.github = Some(Arc::new(HttpGithubApi::new(GithubApiOptions::from_env())));
     opts.connection_probe = Some(Arc::new(create_connection_tester(
         ConnectionTesterDeps::default(),
@@ -359,8 +361,8 @@ async fn real_service(args: &ServeArgs, ledger_path: Option<PathBuf>) -> Result<
     let service = RealService::new(opts)
         .await
         .context("cannot start the real engine")?;
-    // Keep the machine awake while a run is active (the Electron app did this with powerSaveBlocker): `caffeinate` on a
-    // Mac, nothing elsewhere.
+    // Keep the machine awake while local agents run (`run-active` events, and `keeping_awake()` after a lag): an
+    // `IOPMAssertion`, else `caffeinate`, on a Mac; nothing elsewhere.
     let hook = PowerSaveHook::new(if cfg!(target_os = "macos") {
         ratchetd::host::CommandPowerBlocker::caffeinate()
     } else {
@@ -369,7 +371,7 @@ async fn real_service(args: &ServeArgs, ledger_path: Option<PathBuf>) -> Result<
     let events = service.subscribe();
     let probe = service.clone();
     tokio::spawn(async move {
-        ratchetd::host::keep_awake(&hook, events, move || probe.run_active()).await;
+        ratchetd::host::keep_awake(&hook, events, move || probe.keeping_awake()).await;
     });
     Ok(service)
 }

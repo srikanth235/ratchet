@@ -77,7 +77,7 @@ fn status_word(s: &OptimizationSummary, ui: UiStatus, waiting: bool) -> (&'stati
         OptimizationStatus::Failed => ("Failed", StatusTone::Bad),
         OptimizationStatus::Completed | OptimizationStatus::Stopped => {
             if waiting {
-                ("Waiting on you", StatusTone::Wait)
+                ("Ready to ship", StatusTone::Wait)
             } else if ui == UiStatus::PrOpen {
                 ("PR open", StatusTone::Ok)
             } else if s.verified_wins == 0 {
@@ -102,7 +102,8 @@ impl LedgerViews {
     }
 
     /// What waits on the user, whatever the range: verified wins nobody has opened a pull request for, and recent
-    /// failed runs. (Environment approvals and expired connectors do not exist in the data model yet.)
+    /// failed runs. Only things a person has to do appear here: an optimization never waits for approval (its environment checks run
+    /// on their own), and a signed-out connector is the one other case.
     fn needs_you(&self, summaries: &[&OptimizationSummary], now: i64) -> Vec<OverviewNeed> {
         let mut ship = Vec::new();
         let mut failed = Vec::new();

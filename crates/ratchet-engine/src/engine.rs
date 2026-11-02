@@ -222,6 +222,8 @@ pub struct Inner {
     /// Optimizations whose `start()` is in flight (a sandbox may be created for them before their status changes).
     pub pending_starts: Mutex<HashSet<String>>,
     pub run_active: AtomicBool,
+    /// The live optimizations whose agents run on this machine, as last announced in `RunActive`.
+    pub local_run_ids: Mutex<Vec<String>>,
     pub events: broadcast::Sender<EngineEvent>,
     pub rt: Mutex<HashMap<String, Arc<Runtime>>>,
     pub starting: Mutex<HashSet<String>>,
@@ -303,6 +305,7 @@ impl Engine {
             sandboxes,
             pending_starts: Mutex::new(HashSet::new()),
             run_active: AtomicBool::new(false),
+            local_run_ids: Mutex::new(Vec::new()),
             events,
             rt: Mutex::new(HashMap::new()),
             starting: Mutex::new(HashSet::new()),
@@ -786,8 +789,33 @@ impl Engine {
         }
         .await;
         lock(&self.pending_starts).remove(id);
+        // No waiting state: the environment could not be created even as a smaller setup, so the run fails, and says why.
+        // (Nothing was launched yet, so there is nothing to tear down but the sandbox attempt itself.)
+        if let Err(err) = &r
+            && err.code == EngineErrorCode::SandboxUnavailable
+        {
+            self.fail_before_launch(id, &err.message).await;
+        }
         self.sync_run_active().await;
         r
+    }
+
+    /// End a draft that cannot start as failed, with the reason where "stop reason" is read.
+    async fn fail_before_launch(&self, id: &str, reason: &str) {
+        let r: EngineResult<()> = async {
+            self.kv.set(&k::stop_reason(id), reason).await?;
+            self.set_status(id, OptimizationStatus::Failed).await?;
+            self.emit(EngineEvent::Notice {
+                optimization_id: oid(id),
+                level: ratchet_core::ports::NoticeLevel::Error,
+                text: format!("The optimization could not start: {reason}"),
+            });
+            Ok(())
+        }
+        .await;
+        if let Err(e) = r {
+            self.report_error(e, &format!("fail {id}"));
+        }
     }
 
     pub(crate) async fn begin_start(&self, id: &str) -> EngineResult<()> {
@@ -1172,6 +1200,12 @@ impl Engine {
                 Some(d) => d,
                 None => self.clock.now() + opt.time_limit_s * 1000,
             };
+            // The harness order and fallback rules go along (`mock` agents have none: a demo has nothing to fall back to).
+            let agents = if agent.kind == ratchet_core::enums::AgentKind::Mock {
+                None
+            } else {
+                Some(self.agents_policy(opt_id).await?.policy)
+            };
             runners
                 .start(
                     &handle(&fresh),
@@ -1188,6 +1222,7 @@ impl Engine {
                         min_gain: cal.map(|c| c.min_gain),
                         budget_usd: opt.budget_usd,
                         deadline_at: deadline,
+                        agents,
                     },
                 )
                 .await?;
@@ -1660,16 +1695,34 @@ impl Engine {
         ids
     }
 
-    /// Emit `RunActive` when the "any run is live" signal flips (the app turns it into a prevent-sleep assertion).
+    /// Emit `RunActive` when the "any run is live" signal or the set of runs that need this Mac awake changes. Only runs
+    /// whose agents run on this machine (`local_ids`) hold the daemon's prevent-sleep assertion; a cloud run does not.
     pub(crate) async fn sync_run_active(&self) {
         let ids = self.active_run_ids().await;
         let active = !ids.is_empty();
-        if self.run_active.swap(active, Ordering::SeqCst) == active {
+        let mut local: Vec<String> = Vec::new();
+        for id in &ids {
+            if self.agents_where(id).await == AgentsWhere::Local {
+                local.push(id.clone());
+            }
+        }
+        let changed_active = self.run_active.swap(active, Ordering::SeqCst) != active;
+        let changed_local = {
+            let mut last = lock(&self.local_run_ids);
+            if *last == local {
+                false
+            } else {
+                last.clone_from(&local);
+                true
+            }
+        };
+        if !changed_active && !changed_local {
             return;
         }
         self.emit(EngineEvent::RunActive {
             active,
             optimization_ids: ids.iter().map(|i| oid(i)).collect(),
+            local_ids: local.iter().map(|i| oid(i)).collect(),
         });
     }
 

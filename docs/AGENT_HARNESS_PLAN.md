@@ -421,6 +421,8 @@ No CLI installs. Codex and Grok are not installed in sessions; Claude Code is (`
   "Needs you" only for what a person must do (#10 Fix first).
 - **Done when** simulation tests cover: rate limit → wait; rate limit long → switch; auth expired → switch; all down → pause →
   resume; steering note reaches the next turn.
+- **Status.** The Rust side is done; what it does and the event shapes are in [harness-matrix.md](harness-matrix.md#p6-notes-optimizations-agents-list-fallback-tools-no-human-gate-keep-awake).
+  The Mac app's part (Agents row, run-log entries, notifications, dropping the Approve step, "Keeping your Mac awake") belongs to F2/P5.
 
 ### P7 — Cost
 

@@ -242,7 +242,7 @@ fn missing(
         )
     };
     Err(EnvError::invalid_config(format!(
-        "{what} needs {}/ on {git_ref}, which does not exist there. Approve the environment (commit or merge its pull request) first.",
+        "{what} needs {}/ on {git_ref}, which does not exist there. Draft the environment again so Ratchet commits it first.",
         module.path
     )))
 }

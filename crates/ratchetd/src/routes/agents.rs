@@ -16,6 +16,41 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(pause_agent))
         .routes(routes!(resume_agent))
         .routes(routes!(message_agent))
+        .routes(routes!(get_agents_policy, set_agents_policy))
+}
+
+/// Which agents the optimization may use, in which order, and when it moves from one to the next.
+#[utoipa::path(
+    get,
+    path = "/v1/optimizations/{id}/agents",
+    tag = "agents",
+    operation_id = "getAgentsPolicy",
+    params(("id" = String, Path, description = "Optimization id")),
+    responses((status = 200, body = AgentsPolicyVm))
+)]
+async fn get_agents_policy(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<AgentsPolicyVm>> {
+    Ok(Json(s.service.get_agents_policy(&id).await?))
+}
+
+/// Set the agents list. It applies to agents launched from now on; 409 while `ratchet.yaml` has an `agents:` section.
+#[utoipa::path(
+    put,
+    path = "/v1/optimizations/{id}/agents",
+    tag = "agents",
+    operation_id = "setAgentsPolicy",
+    params(("id" = String, Path, description = "Optimization id")),
+    request_body = SetAgentsPolicyInput,
+    responses((status = 200, body = AgentsPolicyVm))
+)]
+async fn set_agents_policy(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    ApiJson(input): ApiJson<SetAgentsPolicyInput>,
+) -> ApiResult<Json<AgentsPolicyVm>> {
+    Ok(Json(s.service.set_agents_policy(&id, input).await?))
 }
 
 /// An agent's log. Without `cursor`: the newest events (oldest first). With it: only events newer than the cursor.

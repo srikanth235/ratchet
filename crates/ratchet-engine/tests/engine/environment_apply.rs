@@ -239,7 +239,7 @@ async fn refuses_to_start_without_the_environment_files() {
     assert_eq!(err.code, C::InvalidConfig);
     assert!(
         err.message.contains("infra/ratchet") && err.message.contains("does not exist")
-            || err.message.contains("Approve the environment"),
+            || err.message.contains("Draft the environment again"),
         "{}",
         err.message
     );
@@ -417,4 +417,61 @@ async fn the_protected_set_lists_the_environment_directory() {
             .globs
             .contains(&glob)
     );
+}
+
+// P6, no human gate: the environment checks run on their own. When the drafted environment cannot be created, a smaller setup (the
+// standard sandbox) is tried and the run goes on; nothing waits for anybody.
+#[tokio::test]
+async fn a_drafted_environment_that_cannot_be_created_falls_back_to_a_smaller_setup_without_waiting()
+ {
+    let mut h = with_environment(EnvironmentScope::Full, false, None).await;
+    *h.sandbox.fail_apply_with_environment.lock().unwrap() = Some(
+        ratchet_core::ports::PortError::failed("tofu apply failed: quota exceeded"),
+    );
+    create(&h, "run-a").await;
+    h.engine.start("run-a").await.unwrap();
+
+    // two applies: the full environment, then the standard sandbox
+    let applied = h.sandbox.applies.lock().unwrap().clone();
+    assert_eq!(applied.len(), 2);
+    assert!(applied[0].environment.is_some());
+    assert!(applied[1].environment.is_none());
+    // the run is running, not waiting on anyone
+    assert_eq!(h.status("run-a").await, OptimizationStatus::Running);
+    // the user is told once, in words
+    let notices: Vec<String> = h
+        .events()
+        .into_iter()
+        .filter_map(|e| match e {
+            ratchet_core::ports::EngineEvent::Notice { text, .. } => Some(text),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        notices
+            .iter()
+            .any(|t| t.contains("Trying a smaller setup") && t.contains("quota exceeded")),
+        "{notices:?}"
+    );
+}
+
+// ... and when even the smaller setup fails, the run fails with the reason; it does not stay a draft that waits.
+#[tokio::test]
+async fn when_even_the_smaller_setup_fails_the_run_fails_with_the_reason() {
+    let h = with_environment(EnvironmentScope::Full, false, None).await;
+    *h.sandbox.fail_apply.lock().unwrap() = Some(ratchet_core::ports::PortError::failed(
+        "tofu apply failed (exit 1)",
+    ));
+    create(&h, "run-a").await;
+    let err = h.engine.start("run-a").await.unwrap_err();
+    assert_eq!(err.code, C::SandboxUnavailable);
+    assert!(
+        err.message.contains("even with a smaller setup"),
+        "{}",
+        err.message
+    );
+    assert_eq!(h.status("run-a").await, OptimizationStatus::Failed);
+    let reason = h.engine.stop_reason("run-a").await.unwrap().unwrap();
+    assert!(reason.contains("tofu apply failed"), "{reason}");
+    assert!(!h.engine.run_active());
 }

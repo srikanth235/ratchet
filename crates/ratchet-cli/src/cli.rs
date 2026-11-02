@@ -113,6 +113,11 @@ pub enum Command {
         #[command(subcommand)]
         action: AgentCmd,
     },
+    /// An optimization's agents: which CLIs it may use, in which order, and when it moves from one to the next.
+    Agents {
+        #[command(subcommand)]
+        action: AgentsCmd,
+    },
     /// Stream the daemon's events (server-sent events).
     Events(EventsArgs),
     /// Talk to Ratchet's assistant: your own Claude Code, Codex or Grok, acting on Ratchet through its tools.
@@ -305,6 +310,29 @@ pub enum ChatCmd {
     Stop { id: String },
     /// End the chat: its session closes, its checkout and its history are removed.
     End { id: String },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AgentsCmd {
+    /// The agents list, most preferred first, and the fallback rules.
+    Show { optimization: String },
+    /// Set the agents list. The first agent runs; when it cannot (rate limit, expired sign-in, crashes) the next takes over.
+    /// Applies to agents launched from now on.
+    Set {
+        optimization: String,
+        /// The agents in order, e.g. `claude-code,codex,grok`.
+        #[arg(long = "order", value_enum, value_delimiter = ',', required = true)]
+        order: Vec<AgentArg>,
+        /// Wait for a rate limit that lifts within this many minutes (default 30); switch for a longer or unknown one.
+        #[arg(long, value_parser = positive_int, value_name = "MINUTES")]
+        wait_limit_minutes: Option<u64>,
+        /// Consecutive crashed turns on one agent before switching (default 3).
+        #[arg(long, value_parser = positive_int)]
+        crash_strikes: Option<u64>,
+        /// While every agent is unavailable, look again this often (default 5).
+        #[arg(long, value_parser = positive_int, value_name = "MINUTES")]
+        recheck_minutes: Option<u64>,
+    },
 }
 
 #[derive(Args, Debug, Clone, Default)]

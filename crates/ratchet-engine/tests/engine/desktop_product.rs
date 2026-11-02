@@ -353,6 +353,8 @@ async fn build(o: BuildOpts) -> Built {
             env: Some(HashMap::new()),
             create_runtime: Some(create_runtime),
             resolve_images: Some(resolve_images),
+            mcp_for: None,
+            mcp_done: None,
         }),
     });
     Built {
@@ -1024,6 +1026,7 @@ mod events {
         EngineEvent::RunActive {
             active,
             optimization_ids: ids.iter().map(|i| OptimizationId::new(*i)).collect(),
+            local_ids: Vec::new(),
         }
     }
 

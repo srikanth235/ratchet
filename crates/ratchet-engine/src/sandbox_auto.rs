@@ -18,9 +18,9 @@ use std::sync::{Arc, Mutex};
 use ratchet_core::config::RatchetConfig;
 use ratchet_core::enums::{EnvironmentScope, Mode, OptimizationStatus, SandboxStatus};
 use ratchet_core::ports::{
-    EngineEvent, InstanceState, SandboxActivity, SandboxEnvironment, SandboxInput, SandboxOutputs,
-    SandboxPhase, SandboxStateStatus, SandboxTeardownReceipt, TeardownOrphan, TeardownRemoved,
-    TeardownRun, TeardownTrigger,
+    EngineEvent, InstanceState, NoticeLevel, SandboxActivity, SandboxEnvironment, SandboxInput,
+    SandboxOutputs, SandboxPhase, SandboxStateStatus, SandboxTeardownReceipt, TeardownOrphan,
+    TeardownRemoved, TeardownRun, TeardownTrigger,
 };
 use ratchet_core::rows::Optimization;
 
@@ -119,13 +119,21 @@ impl Engine {
         } else {
             self.environment_of(optimization_id).await?
         };
-        let sandbox_id = match (&opt.sandbox_id, &environment) {
-            (Some(s), _) => s.to_string(),
-            (None, Some(env)) => ratchet_env::environment_sandbox_id(&region, &env.hash),
-            (None, None) => self.auto_sandbox_id_for(&region),
-        };
-
-        {
+        // The environment checks run on their own, and nobody is asked: when the drafted environment cannot be created, a
+        // smaller setup (the standard sandbox, no drafted stack) is tried; only when that fails too does the run fail, with
+        // the reason.
+        let mut attempts: Vec<Option<SandboxEnvironment>> = vec![environment.clone()];
+        if environment.is_some() {
+            attempts.push(None);
+        }
+        let last = attempts.len() - 1;
+        let mut created: Option<String> = None;
+        for (n, environment) in attempts.into_iter().enumerate() {
+            let sandbox_id = match (&opt.sandbox_id, &environment) {
+                (Some(s), _) => s.to_string(),
+                (None, Some(env)) => ratchet_env::environment_sandbox_id(&region, &env.hash),
+                (None, None) => self.auto_sandbox_id_for(&region),
+            };
             let q = self.queue_for(&sandbox_id);
             let _turn = q.lock().await;
             let row = self.ledger.get_sandbox(&sandbox_id).await?;
@@ -136,7 +144,9 @@ impl Engine {
                     Some(env) if env.scope == EnvironmentScope::Full => {
                         "the full-stack environment"
                     }
-                    _ => "the environment",
+                    Some(_) => "the environment",
+                    None if n > 0 => "a smaller environment",
+                    None => "the environment",
                 };
                 self.phase(
                     &sandbox_id,
@@ -149,14 +159,36 @@ impl Engine {
                         &sandbox_id,
                         SandboxPhase::Failed,
                         Some(&region),
-                        format!("could not create the environment: {}", err.message),
+                        format!("could not create {what}: {}", err.message),
                     );
+                    if n < last {
+                        let text = format!(
+                            "The environment could not be created in {region} ({}). Trying a smaller setup.",
+                            first_line(&err.message)
+                        );
+                        self.emit(EngineEvent::Notice {
+                            optimization_id: oid(optimization_id),
+                            level: NoticeLevel::Warning,
+                            text: text.clone(),
+                        });
+                        self.kv
+                            .set(&k::environment_fallback(optimization_id), &text)
+                            .await?;
+                        continue;
+                    }
                     return Err(EngineError::new(
                         EngineErrorCode::SandboxUnavailable,
-                        format!(
-                            "could not create the environment in {region}: {}",
-                            err.message
-                        ),
+                        if last > 0 {
+                            format!(
+                                "could not create the environment in {region}, even with a smaller setup: {}",
+                                err.message
+                            )
+                        } else {
+                            format!(
+                                "could not create the environment in {region}: {}",
+                                err.message
+                            )
+                        },
                     ));
                 }
                 // ours: destroyed automatically after the idle window
@@ -169,7 +201,10 @@ impl Engine {
                 );
             }
             self.kv.delete(&k::sandbox_idle(&sandbox_id)).await?;
+            created = Some(sandbox_id);
+            break;
         }
+        let sandbox_id = created.expect("the last attempt returns or creates");
         if opt.sandbox_id.as_ref().map(|s| s.as_str()) != Some(sandbox_id.as_str()) {
             self.ledger
                 .set_optimization_sandbox(&oid(optimization_id), Some(&sandbox_id.clone().into()))
@@ -630,6 +665,10 @@ impl Engine {
         self.kv.delete(&k::sandbox_auto(sandbox_id)).await?;
         self.kv.delete(&k::sandbox_idle(sandbox_id)).await
     }
+}
+
+fn first_line(s: &str) -> String {
+    s.lines().next().unwrap_or_default().trim().to_owned()
 }
 
 fn json_str<T: serde::Serialize>(v: &T) -> String {

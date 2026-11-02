@@ -163,6 +163,9 @@ pub struct LocalAgentsConfig {
     pub root_dir: Option<PathBuf>,
     pub loop_tuning: LoopTuning,
     pub stop_grace: Option<Duration>,
+    /// The Ratchet optimization tool set for every turn of a local agent, and the hook that ends its session.
+    pub mcp_for: Option<ratchet_agents::McpFor>,
+    pub mcp_done: Option<ratchet_agents::McpDone>,
 }
 
 pub struct LiveRuntime {
@@ -738,6 +741,8 @@ pub async fn create_live_runtime(opts: LiveOptions) -> EngineResult<LiveRuntime>
                 .map(|g| git_auth_env(&g.remote_url(), opts.github_token.as_deref().unwrap_or(""))),
             loop_tuning: la.loop_tuning.clone(),
             stop_grace: la.stop_grace,
+            mcp_for: la.mcp_for.clone(),
+            mcp_done: la.mcp_done.clone(),
         }))
     });
 

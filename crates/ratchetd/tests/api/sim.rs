@@ -499,7 +499,7 @@ async fn creating_validates_and_checks_readiness() {
         sim.create_optimization(live).await,
         Err(ServiceError::InvalidFields { .. })
     ));
-    // an unapproved environment draft blocks the run
+    // an environment draft never blocks the run: its checks ran on their own, and nobody is asked to approve it
     let draft = sim
         .create_environment_draft(CreateEnvironmentDraftInput {
             repo: "acme/search-api".into(),
@@ -516,14 +516,12 @@ async fn creating_validates_and_checks_readiness() {
     settled(&sim, &draft.id).await;
     let mut with_draft = demo_input(10.0, 5);
     with_draft.environment_draft_id = Some(draft.id.clone());
-    assert!(matches!(
-        sim.create_optimization(with_draft.clone()).await,
-        Err(ServiceError::NotReady(_))
-    ));
-    sim.approve_environment_draft(&draft.id, Default::default())
-        .await
-        .unwrap();
     sim.create_optimization(with_draft).await.unwrap();
+    assert_eq!(
+        sim.get_environment_draft(&draft.id).await.unwrap().status,
+        EnvironmentDraftStatus::Approved,
+        "a ready draft whose checks passed is committed for the run"
+    );
 }
 
 #[tokio::test]

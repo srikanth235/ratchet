@@ -233,7 +233,7 @@ async fn a_row_says_what_happened() {
     close(search.value_usd_per_year.unwrap(), 51.0 * 1200.0, 1e-3);
     assert_eq!(o.rows[0].id, "opt_demo_search"); // live first
     let ingest = row(&o, "opt_demo_ingest");
-    assert_eq!(ingest.status_label, "Waiting on you");
+    assert_eq!(ingest.status_label, "Ready to ship");
     assert_eq!(ingest.tone, StatusTone::Wait);
     assert_eq!(ingest.remaining_s, None);
     assert!(!ingest.live);
@@ -314,7 +314,7 @@ async fn measured_only_when_every_contributing_model_is_measured() {
 
 // ---- needs you -------------------------------------------------------------------------------------------------
 
-/// TS: `buildOverview: needs you` / lists finished runs with verified wins and no pull request, whatever the range; "Waiting on you" in the table
+/// TS: `buildOverview: needs you` / lists finished runs with verified wins and no pull request, whatever the range; "Ready to ship" in the table
 #[tokio::test]
 async fn lists_finished_runs_with_verified_wins_and_no_pull_request() {
     let (_sim, v) = seeded().await;

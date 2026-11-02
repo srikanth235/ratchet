@@ -108,6 +108,8 @@ pub(crate) struct State {
     pub last_active: Vec<String>,
     pub settings: SettingsState,
     pub env: EnvState,
+    /// The agents list an optimization was given with `PUT /v1/optimizations/{id}/agents`.
+    pub agents_policy: HashMap<String, ratchet_core::AgentsPolicy>,
 }
 
 pub(crate) struct Inner {
@@ -165,6 +167,8 @@ impl Inner {
             self.emit(ApiEvent::RunActive {
                 active: !ids.is_empty(),
                 optimization_ids: ids,
+                // the simulation's agents are scripted: nothing needs the Mac awake
+                keeping_awake: false,
             });
         }
     }
@@ -173,6 +177,7 @@ impl Inner {
         EngineInfo {
             kind: EngineKind::Sim,
             mode: Mode::Simulation,
+            keeping_awake: false,
         }
     }
 }
@@ -637,6 +642,64 @@ impl AppService for SimService {
         self.0.log_event(&aid, "status", "Resumed", None).await
     }
 
+    /// The simulation's scripted agents cannot act on a named commit; the call is only logged, so the run log shows it.
+    async fn submit_candidate(
+        &self,
+        agent_id: &str,
+        sha: &str,
+        note: Option<String>,
+    ) -> ServiceResult<()> {
+        let aid = self.0.require_agent(agent_id).await?;
+        self.0
+            .log_event(
+                &aid,
+                "status",
+                &format!("submit_candidate named {}", sha.trim()),
+                Some(serde_json::json!({"submit": {"sha": sha.trim(), "note": note}})),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn get_agents_policy(&self, id: &str) -> ServiceResult<AgentsPolicyVm> {
+        let opt = self
+            .0
+            .ledger
+            .get_optimization(&OptimizationId::new(id))
+            .await?
+            .ok_or_else(|| ServiceError::not_found("optimization", id))?;
+        let kept = self.0.st().agents_policy.get(id).cloned();
+        let policy = match kept {
+            Some(p) => p,
+            None => ratchet_core::AgentsPolicy::new(
+                self.0
+                    .ledger
+                    .list_agents(&opt.id)
+                    .await?
+                    .into_iter()
+                    .map(|a| a.kind),
+            ),
+        };
+        Ok(AgentsPolicyVm::new(&policy, AgentsPolicySource::Settings))
+    }
+
+    async fn set_agents_policy(
+        &self,
+        id: &str,
+        input: SetAgentsPolicyInput,
+    ) -> ServiceResult<AgentsPolicyVm> {
+        let policy = input.policy();
+        if let Some(problem) = policy.problem() {
+            return Err(ServiceError::InvalidFields {
+                message: problem.clone(),
+                fields: vec![FieldError::new("harnesses", problem)],
+            });
+        }
+        self.get_agents_policy(id).await?; // 404 for an unknown optimization
+        self.0.st().agents_policy.insert(id.to_owned(), policy);
+        self.get_agents_policy(id).await
+    }
+
     async fn message_agent(&self, agent_id: &str, text: &str) -> ServiceResult<()> {
         let text = text.trim();
         if text.is_empty() || text.chars().count() > 4000 {
@@ -766,7 +829,12 @@ impl AppService for SimService {
     // ---- overview ----------------------------------------------------------------------------------------
 
     async fn overview(&self, range: OverviewRange) -> ServiceResult<OverviewVm> {
-        self.0.views.overview(range).await
+        let mut vm = self.0.views.overview(range).await?;
+        // A signed-out connector is something only a person can fix; it joins the list after the wins and failures.
+        vm.needs_you.extend(crate::connectors_hub::sign_in_needs(
+            &self.0.hub.view().await.connectors,
+        ));
+        Ok(vm)
     }
 
     // ---- connectors --------------------------------------------------------------------------------------
@@ -957,9 +1025,11 @@ impl Inner {
                 (slug, yaml, input.name.clone())
             }
         };
-        if let Some(draft) = &input.environment_draft_id {
-            self.drafts.require_approved(draft)?;
-        }
+        // The environment checks run on their own; nobody is asked to approve anything.
+        let settled = match &input.environment_draft_id {
+            Some(draft) => Some(self.drafts.settle(draft).await?),
+            None => None,
+        };
         let cfg = ratchet_core::parse_config(&yaml).map_err(|e| {
             ServiceError::Invalid(format!("invalid ratchet.yaml: {}", join_errors(&e)))
         })?;
@@ -991,6 +1061,13 @@ impl Inner {
             optimization_id: opt.id.to_string(),
             status: OptimizationStatus::Draft,
         });
+        if let Some(note) = settled.and_then(|s| s.note) {
+            self.emit(ApiEvent::Notice {
+                optimization_id: opt.id.to_string(),
+                level: ratchet_core::ports::NoticeLevel::Warning,
+                text: note,
+            });
+        }
         Ok(CreatedOptimization {
             id: opt.id.to_string(),
         })

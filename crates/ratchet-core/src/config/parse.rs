@@ -17,7 +17,10 @@ use super::schema::{
     AgentConfig, DEFAULT_AGENT_INSTRUCTIONS, DEFAULT_BENCH_MACHINE, DEFAULT_EVALUATOR_REF,
     Environment, Evaluator, Objective, RatchetConfig, ValueModel,
 };
-use crate::enums::{DepsMode, Direction, EnvironmentScope, EvaluatorKind, ValueBasis, ValuePeriod};
+use crate::agents_policy::{AgentsPolicy, dedup};
+use crate::enums::{
+    AgentKind, DepsMode, Direction, EnvironmentScope, EvaluatorKind, ValueBasis, ValuePeriod,
+};
 use crate::templates::{evaluator_template_ids, find_evaluator_template};
 
 /// One problem found in `ratchet.yaml`.
@@ -1041,6 +1044,103 @@ fn agent(v: Option<&Value>, path: &[Seg], cx: &mut Cx) -> Option<RawAgent> {
     })
 }
 
+/// `agents:` the optional override of the optimization's harness list and fallback rules. Either a list of harness names
+/// (`[claude-code, codex]`) or a mapping with `order` and, optionally, `wait_limit_minutes`, `crash_strikes` and
+/// `recheck_minutes`.
+fn agents_section(v: Option<&Value>, path: &[Seg], cx: &mut Cx) -> Option<AgentsPolicy> {
+    let v = v?;
+    let list_msg = format!(
+        "agents must list harnesses from: {}",
+        names(&[AgentKind::ClaudeCode, AgentKind::Codex, AgentKind::Grok])
+    );
+    let harnesses = |v: &Value, p: &[Seg], cx: &mut Cx| -> Option<Vec<AgentKind>> {
+        let Value::Sequence(items) = untag(v) else {
+            cx.push(p, list_msg.clone());
+            return None;
+        };
+        let mut out = Vec::new();
+        let mut ok = true;
+        for (i, item) in items.iter().enumerate() {
+            match untag(item) {
+                Value::String(s) => match s.parse::<AgentKind>() {
+                    Ok(k) if k != AgentKind::Mock => out.push(k),
+                    _ => {
+                        cx.push(&at(p, i), list_msg.clone());
+                        ok = false;
+                    }
+                },
+                _ => {
+                    cx.push(&at(p, i), list_msg.clone());
+                    ok = false;
+                }
+            }
+        }
+        if !ok {
+            return None;
+        }
+        if out.is_empty() {
+            cx.push(p, "agents must list at least one harness");
+            return None;
+        }
+        Some(dedup(out))
+    };
+    match untag(v) {
+        Value::Sequence(_) => Some(AgentsPolicy {
+            harnesses: harnesses(v, path, cx)?,
+            ..AgentsPolicy::default()
+        }),
+        Value::Mapping(map) => {
+            let before = cx.hard;
+            let order = match get(map, "order") {
+                Some(o) => harnesses(o, &child(path, "order"), cx),
+                None => {
+                    cx.push(&child(path, "order"), "agents.order is required");
+                    None
+                }
+            };
+            let mut policy = AgentsPolicy::default();
+            let whole = |key: &str, cx: &mut Cx| -> Option<u64> {
+                let msg = format!("agents.{key} must be a whole number of at least 1");
+                let n = number(get(map, key), false, &msg, &child(path, key), cx)?;
+                if n < 1.0 || n.fract() != 0.0 {
+                    cx.push(&child(path, key), msg);
+                    return None;
+                }
+                Some(n as u64)
+            };
+            if let Some(m) = whole("wait_limit_minutes", cx) {
+                policy.wait_limit_s = m * 60;
+            }
+            if let Some(n) = whole("crash_strikes", cx) {
+                policy.crash_strikes = n.min(u32::MAX as u64) as u32;
+            }
+            if let Some(m) = whole("recheck_minutes", cx) {
+                policy.recheck_s = m * 60;
+            }
+            unknown_keys(
+                map,
+                &[
+                    "order",
+                    "wait_limit_minutes",
+                    "crash_strikes",
+                    "recheck_minutes",
+                ],
+                path,
+                cx,
+            );
+            if cx.hard > before {
+                return None;
+            }
+            policy.harnesses = order?;
+            Some(policy)
+        }
+        _ => {
+            cx.push(path, list_msg);
+            None
+        }
+    }
+}
+
 /// Validate a YAML document (already parsed to a generic value).
 pub(crate) fn validate(doc: &Value) -> Result<RatchetConfig, Vec<ConfigError>> {
     let Value::Mapping(top) = untag(doc) else {
@@ -1116,6 +1216,7 @@ pub(crate) fn validate(doc: &Value) -> Result<RatchetConfig, Vec<ConfigError>> {
         }
     }
     let agent = agent(get(top, "agent"), &child(&root, "agent"), &mut cx);
+    let agents = agents_section(get(top, "agents"), &child(&root, "agents"), &mut cx);
 
     // unknown top-level keys (a lone `bench:` is the alias, not unknown)
     let mut allowed = vec![
@@ -1128,6 +1229,7 @@ pub(crate) fn validate(doc: &Value) -> Result<RatchetConfig, Vec<ConfigError>> {
         "guardrails",
         "protected",
         "agent",
+        "agents",
     ];
     if bench_is_alias {
         allowed.push("bench");
@@ -1232,5 +1334,6 @@ pub(crate) fn validate(doc: &Value) -> Result<RatchetConfig, Vec<ConfigError>> {
         guardrails,
         protected,
         agent,
+        agents,
     })
 }

@@ -18,6 +18,8 @@ expression: names
 - AgentStats
 - AgentStatus
 - AgentVm
+- AgentsPolicySource
+- AgentsPolicyVm
 - AgentsWhere
 - ApiError
 - ApiEvent
@@ -173,6 +175,7 @@ expression: names
 - SecretName
 - SecretsPresent
 - SendChatMessageInput
+- SetAgentsPolicyInput
 - SetAwsProfileInput
 - SetSecretInput
 - SettingsVm

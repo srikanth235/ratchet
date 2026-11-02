@@ -579,6 +579,15 @@ impl Engine {
             })
             .await?;
         for e in res.events {
+            // A runner event that asks for a notification (an agent signed out and another took over, every agent
+            // unavailable) tells the user once, in the user's words; the event itself stays in the run log.
+            if let Some(text) = e.data_str("notify") {
+                self.emit(EngineEvent::Notice {
+                    optimization_id: opt.id.clone(),
+                    level: ratchet_core::ports::NoticeLevel::Warning,
+                    text: text.to_owned(),
+                });
+            }
             self.emit(EngineEvent::AgentEvent {
                 optimization_id: opt.id.clone(),
                 agent_id: agent.id.clone(),

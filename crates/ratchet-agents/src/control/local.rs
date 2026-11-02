@@ -7,15 +7,17 @@ use std::time::Duration;
 use async_trait::async_trait;
 use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
+use ratchet_core::enums::AgentKind;
 use ratchet_core::ids::OptimizationId;
 use ratchet_core::ports::mock::SystemClock;
 use ratchet_core::ports::{
-    AgentAdapter, AgentEvent, AgentEventType, CancellationToken, Clock, PolledEvents, PortError,
-    PortResult, RunnerConfig, RunnerControl, RunnerHandle, RunnerMessage,
+    AgentAdapter, AgentEvent, AgentEventType, CancellationToken, Clock, McpServer, PolledEvents,
+    PortError, PortResult, RunnerConfig, RunnerControl, RunnerHandle, RunnerMessage,
 };
 use serde_json::json;
 use tokio::sync::{Mutex as AsyncMutex, OnceCell};
 
+use crate::fallback::{AvailabilityProbe, FallbackPlan, HarnessSlot};
 use crate::git::{Git, SharedGit};
 use crate::inbox::MemoryInbox;
 use crate::runner_loop::{
@@ -30,6 +32,13 @@ use crate::workdir::{
 pub type AdapterFor = Arc<
     dyn Fn(&RunnerConfig, &RunnerHandle) -> Result<Arc<dyn AgentAdapter>, String> + Send + Sync,
 >;
+/// Builds the adapter of one of an agent's fallback harnesses. Never fails: a harness that is signed out now may be back
+/// when the fallback needs it, so the adapter looks again when asked.
+pub type ChainFor = Arc<dyn Fn(AgentKind) -> Arc<dyn AgentAdapter> + Send + Sync>;
+/// The MCP servers (the Ratchet optimization tool set) handed to every turn of one agent.
+pub type McpFor = Arc<dyn Fn(&RunnerConfig, &RunnerHandle) -> Vec<McpServer> + Send + Sync>;
+/// Called once when an agent's loop ends (its MCP session token is revoked here).
+pub type McpDone = Arc<dyn Fn(&RunnerHandle) + Send + Sync>;
 /// Extra environment for the agent processes of one agent (passed to the loop as `agent_env`).
 pub type AgentEnvFor =
     Arc<dyn Fn(&RunnerConfig, &RunnerHandle) -> Option<BTreeMap<String, String>> + Send + Sync>;
@@ -57,6 +66,13 @@ pub struct LocalRunnerControlOptions {
     pub stop_grace: Option<Duration>,
     pub workdirs: WorkdirMode,
     pub agent_env_for: Option<AgentEnvFor>,
+    /// Adapters for the harnesses an agent may fall back to (the optimization's `agents:` list). Without it an agent has only
+    /// its own harness.
+    pub chain_for: Option<ChainFor>,
+    /// Asks whether a harness is usable (detection). Without it each adapter's own `preflight` answers.
+    pub probe: Option<Arc<dyn AvailabilityProbe>>,
+    pub mcp_for: Option<McpFor>,
+    pub mcp_done: Option<McpDone>,
 }
 
 impl LocalRunnerControlOptions {
@@ -71,6 +87,10 @@ impl LocalRunnerControlOptions {
             stop_grace: None,
             workdirs: WorkdirMode::Clone,
             agent_env_for: None,
+            chain_for: None,
+            probe: None,
+            mcp_for: None,
+            mcp_done: None,
         }
     }
 }
@@ -308,17 +328,48 @@ impl RunnerControl for LocalRunnerControl {
             tuning.agent_env = Some(agent_env);
         }
 
+        // The optimization's harness list: this agent's own harness first, then the others in order, each looked at again
+        // when the fallback needs it.
+        if let Some(policy) = &config.agents {
+            let mut chain = vec![HarnessSlot::new(adapter.kind(), adapter.clone())];
+            if let Some(chain_for) = &self.options.chain_for {
+                for kind in policy.chain_from(config.kind).into_iter().skip(1) {
+                    chain.push(HarnessSlot::new(kind, chain_for(kind)));
+                }
+            }
+            tuning.fallback = Some(FallbackPlan {
+                chain,
+                policy: policy.clone(),
+                probe: self.options.probe.clone(),
+            });
+        }
+        // Every turn of a local agent gets the Ratchet optimization tools, like a cloud agent does.
+        if let Some(mcp_for) = &self.options.mcp_for {
+            tuning.mcp = mcp_for(config, handle);
+        }
+
         let sink_events = events.clone();
-        let task = tokio::spawn(run_runner_loop(RunnerLoopOptions {
-            config: config.clone(),
-            adapter,
-            workdir: workdir.clone(),
-            inbox: inbox.clone(),
-            emit: Arc::new(move |e| sink_events.lock().unwrap().push(e)),
-            clock: self.clock.clone(),
-            signal: Some(abort.clone()),
-            tuning,
-        }));
+        let (loop_config, loop_clock, loop_abort) =
+            (config.clone(), self.clock.clone(), abort.clone());
+        let (loop_workdir, loop_inbox) = (workdir.clone(), inbox.clone());
+        let (done_hook, done_handle) = (self.options.mcp_done.clone(), handle.clone());
+        let task = tokio::spawn(async move {
+            let result = run_runner_loop(RunnerLoopOptions {
+                config: loop_config,
+                adapter,
+                workdir: loop_workdir,
+                inbox: loop_inbox,
+                emit: Arc::new(move |e| sink_events.lock().unwrap().push(e)),
+                clock: loop_clock,
+                signal: Some(loop_abort),
+                tuning,
+            })
+            .await;
+            if let Some(done) = done_hook {
+                done(&done_handle);
+            }
+            result
+        });
         let done: Done = async move { task.await.unwrap_or_else(|_| lost_result()) }
             .boxed()
             .shared();
