@@ -89,3 +89,75 @@ Acceptance:
 Screens: 15-home-light.png, 16-overview-light.png, 17-run-light.png
 Acceptance:
 - [snap] Home, Overview and Run render in light with text at 4.5:1, control borders at 3:1 and brass text in `brassText`.
+
+## P5b — what the screens draw from the P5a models
+
+P5a (`RatchetKit`, no views) holds the logic; P5b draws it. Each story names the model it reads, so a snapshot or a self-test can drive it
+without a daemon: `MockChatClient`, `MockHarnessClient` and `MockRatchetClient`. Terms: "optimization", "agent" (one worker of an
+optimization), "harness" (an agent CLI), "note" (steering).
+
+### S-120 Home composer
+As the user, I describe what should get better, set chips if I want, and send with Return or ⌘↩.
+Model: `ComposerModel` (`ComposerOptions` from the repos, AWS accounts and `HarnessCatalog`).
+Acceptance:
+- [unit] Send needs words and a signed-in agent; with none the composer says "No agent is signed in. Sign in to Claude Code, Codex or Grok first." and keeps the words.
+- [unit] The chips repo, cloud, agents, limits and schedule are popover models (`ComposerChip.popoverTitle`: "Change agents"…); the message says only what the words do not (no "$50" twice).
+- [unit] The chat starts on the Agents page's default harness while it is ready, else on the first agent of the list.
+- [snap] Chips read "acme-org/shop-api", "acme-prod · AWS", "Claude Code + 2 more", "$50 · 2 h per run", "Weekdays at night"; a set chip has the accent.
+- [self] Send starts a chat, the conversation opens, the words are cleared.
+UX:
+- Flow: type → (chips) → Return or ⌘↩ → conversation with the steps streaming
+- Surface: composer inline; each chip a popover (a few related choices tied to one control)
+- States: empty (disabled send), sending, failed to start (inline, words kept)
+- Words: "Change agents" · "Change limits" · "Change schedule" · hint "⌘↩ sends"
+- Access: every chip is a button with its popover title as label; Escape closes the popover
+
+### S-121 Conversation: streamed reply, Retry, Copy, Stop, errors
+Model: `ConversationModel`, `ChatSession` (`live` text is its own observable), `ChatErrorPresentation`.
+Acceptance:
+- [unit] A reply is marked "Written by Claude Code · Opus" (no model part for the CLI's default); Retry sits only under the newest reply and not while replying; Copy gives its text.
+- [unit] While the chat replies the composer button is Stop; Stop keeps what was written and the steps so far.
+- [unit] A delta changes only the live text: messages, cards and the composer do not invalidate (`ChatSessionTests`).
+- [unit] A rate limit reads "Claude Code reached its usage limit", "Resets at 15:40", buttons Try Again (disabled until the reset) and Use Codex (starts the same words on Codex); an expired login offers Sign In only; a crash offers Try Again.
+- [snap] The first-use notice "First time: your messages … go to Claude Code" shows once above the steps, with a close button (`dismissDataNotice`).
+- [self] Sending while a reply is written is refused inline and the words stay.
+
+### S-122 Draft card: change a row, Undo, Start Over, Create
+Model: `DraftCardModel` (per-row `DraftRowEdit` from `AgentOrderEditor`, `LimitsEditor`, `ScheduleKind`).
+Acceptance:
+- [unit] Each editable row has its own button ("Change agents", "Change limits"…); a change is said to the chat and the card updates; the changed row shows "Updated" and Undo; Undo says the old value and the mark goes.
+- [unit] Create Optimization and Create and Run Once · ≈$38 (typical run cost, else "up to $50") are disabled while the draft is not ready or the chat is writing; Create and Run Once adds no schedule.
+- [unit] A failed environment check disables both and offers Use Smaller Setup and Try Again.
+- [unit] Start Over ends the chat and returns the first prompt for Home; Stop keeps the steps.
+- [snap] Rows Measures, Agents, Each run, Schedule, Output, Config as in 8-new-optimization.png; the failed state as in 18-new-optimization-error.png.
+
+### S-123 Steering notes with read receipts
+Model: `SteeringModel` (a chat bound to the optimization).
+Acceptance:
+- [unit] A note shows "Queued · read at the next candidate" with Undo, then "Read by Claude Code at 02:11" without it; Undo works only while queued; a taken-back note reads "Withdrawn".
+- [snap] The composer is multi-line, hint "Return adds a line · ⌘↩ sends" (`ComposerKey`).
+
+### S-124 Agents page
+Model: `AgentsPageModel` (`HarnessPreferences` keeps the chat default and the order).
+Acceptance:
+- [unit] Rows for logins (On this Mac) and API keys; each status that is not OK has one button: Sign In, Add Key…, Re-detect; Sign In re-checks, then hands the app `claude auth login` / `codex login` / `grok login`.
+- [unit] "default" is on the harness chats start on; only a ready harness can be it; "Order" reads "Claude Code → Codex → Grok · on this Mac" and is edited with the same popover as the card.
+- [snap] 7-agents.png: Order row, On this Mac, API keys.
+
+### S-125 Optimization settings rows and the Overview footnote
+Model: `OptimizationSettingsModel`, `ValueModelEditor`.
+Acceptance:
+- [unit] Agents, Value and Schedule save through the daemon and show "Saved"; a list in `ratchet.yaml` shows "Set in ratchet.yaml: change it in the repo." and no Edit.
+- [unit] Archive confirms ("Archive “Checkout p95”?", "Stops the schedule and keeps its history and wins.") and clears the schedule.
+- [snap] The Overview footnote "Estimated from each optimization's Value row." links "Edit value" to the Value row.
+
+### S-126 One value story, from the daemon
+Model: `ValueStoryModel`.
+Acceptance:
+- [unit] Home and the Overview carry the same `story` ("$12.5k delivered + $2.9k pending · 68×"); pending never enters the return; agents on a plan show "included in your plan".
+- [snap] No data shows "No wins yet" with one New Optimization button; the chart draws pending as the dashed step.
+
+### S-127 Run log: harness events, and the menu bar
+Acceptance:
+- [unit] The run log marks waits, switches, pauses and resumes (`AgentLog.harnessEntries`: "Waiting for Claude Code", "Switched to Codex", "Paused", "Resumed with Claude Code"); a pause shows its reason.
+- [unit] The menu bar shows "Keeping your Mac awake" only while the daemon holds the assertion (`AppStore.power`).

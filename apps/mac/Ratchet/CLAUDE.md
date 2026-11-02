@@ -9,8 +9,15 @@ No SwiftData. Data comes from `ratchetd` through the client protocols (`Sources/
 resources plus one event stream, split by domain into `OptimizationsClient` (overview, optimizations, agents, benchmarks,
 templates, logs and result details), `ConnectorsClient`, `SetupClient` (repos, preflight, drafts, overrides), `SandboxClient`
 and `EventsClient`. `RatchetClient` is their composition (a typealias), and a screen or a double can depend on one domain.
-`ChatClient` (`Chat/`) is separate: a conversation has its own stream; it has a protocol, models and `MockChatClient`, and no
-daemon implementation or UI yet (P5). Two `RatchetClient` implementations: `DaemonRatchetClient` (the real daemon,
+`ChatClient` (`Chat/`) is separate: a conversation has its own stream. `DaemonChatClient` (`/v1/chats`, one `SSEConnection` per
+followed chat that resumes with `Last-Event-ID`) and `MockChatClient` (scripted drafts, create, notes, rate limit, auth expired, crash,
+slow) pass one contract (`ChatClientContractTests`, the daemon side over `ChatDaemonFake`). The P6/P7 settings and the value story are
+`HarnessClient` (`OptimizationSettingsClient` + `ValueStoryClient`: agents list, value model, schedule, `/v1/home`, the Overview
+story), `DaemonHarnessClient` and `MockHarnessClient`; their JSON is hand-written in `Daemon/HarnessWire.swift` and `ChatWire.swift`
+until the generated client holds it. View models (no views): `ChatStore`/`ChatSession` (one observable per chat; frames are batched, a
+delta touches only `LiveReply`), `ComposerModel`, `ConversationModel`, `DraftCardModel`, `SteeringModel`, `AgentsPageModel`,
+`OptimizationSettingsModel`, `ValueStoryModel`; the editors in `Agents/Editors.swift` are shared by the composer chips, the card rows and
+the settings rows. `docs/STORIES.md` (P5b) says what each screen draws from them. Two `RatchetClient` implementations: `DaemonRatchetClient` (the real daemon,
 `Sources/RatchetKit/Daemon/`) and `MockRatchetClient` (sample data, fake live events). The mock is only for test and snapshot
 mode (`APP_STORE`) and `APP_DEMO=1`; every group (overview, connectors and the GitHub device flow, environment drafts,
 optimizations) is real, with no sample fallback. `Tests/RatchetKitTests/ClientContractTests.swift` runs one contract against

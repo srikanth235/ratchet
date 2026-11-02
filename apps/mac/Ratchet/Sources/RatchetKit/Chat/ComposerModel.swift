@@ -131,7 +131,8 @@ public final class ComposerModel {
         let lower = message.lowercased()
         if let limits, !lower.contains("$") { extras.append("Each run may use up to \(Money.short(Double(limits.budgetUSD))) and \(Elapsed.hm(limits.hours * 3600)).") }
         if let schedule, !Self.mentionsSchedule(lower) { extras.append(schedule.instruction) }
-        if agents.order.count > 1 { extras.append(agents.instruction) } else if agents.placement == .cloud { extras.append("Run it in the cloud.") }
+        // The agents chip says something only when the person changed it from what a new optimization starts with.
+        if agents.order != options.startingOrder || agents.placement != .local { extras.append(agents.instruction) }
         if let cloudAccount { extras.append("Use the \(cloudAccount) AWS account.") }
         if !extras.isEmpty { message += (message.hasSuffix(".") || message.hasSuffix("?") || message.hasSuffix("!") ? " " : ". ") + extras.joined(separator: " ") }
         return message

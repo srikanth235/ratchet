@@ -26,6 +26,7 @@ public actor MockChatClient: ChatClient, ChatScenario {
         var cardID: String
         var agents: [Harness]
         var budget = 50
+        var hours = 2
         var schedule: String? = "every night at 02:00"
         var smaller = false
         var created = false
@@ -247,12 +248,19 @@ public actor MockChatClient: ChatClient, ChatScenario {
         draft.cardID = "draft-\(turn)"
         draft.created = false
         if let budget = Self.dollars(in: lower) { draft.budget = budget }
-        if lower.contains("every night") || lower.contains("nightly") { draft.schedule = "every night at 02:00" }
-        if lower.contains("weekdays") { draft.schedule = "weekdays at 02:00" }
-        if lower.contains("once") && !lower.contains("every") { draft.schedule = nil }
-        for other in Harness.allCases where lower.contains("use " + other.title.lowercased()) && ready.contains(other) {
-            if !draft.agents.contains(other) { draft.agents.append(other) }
+        if let hours = Self.hours(in: lower) { draft.hours = hours }
+        if lower.contains("once a week") || lower.contains("weekly") {
+            draft.schedule = "weekly at 02:00"
+        } else if lower.contains("on every push") {
+            draft.schedule = "on every push"
+        } else if lower.contains("every night") || lower.contains("nightly") {
+            draft.schedule = "every night at 02:00"
+        } else if lower.contains("weekdays") {
+            draft.schedule = "weekdays at 02:00"
+        } else if lower.contains("run it once") || lower.contains("do not add a schedule") {
+            draft.schedule = nil
         }
+        Self.applyAgents(lower, to: &draft.agents, ready: ready)
         if lower.contains("smaller") { draft.smaller = true }
         chats[id]?.draft = draft
         var card = Self.card(draft, chat: chat, ready: ready)
@@ -289,6 +297,25 @@ public actor MockChatClient: ChatClient, ChatScenario {
         finish(id, chat: chat, answer: "Noted. An agent reads it at its next candidate.", turn: turn)
     }
 
+    /// "and 2 h": the whole number before " h".
+    static func hours(in text: String) -> Int? {
+        let words = text.split(whereSeparator: { $0 == " " || $0 == "." || $0 == "," })
+        guard let at = words.firstIndex(of: "h"), at > 0 else { return nil }
+        return Int(words[at - 1])
+    }
+
+    /// "use Grok too" adds an agent; "Use Claude Code, then Codex" sets the order they are named in.
+    static func applyAgents(_ lower: String, to agents: inout [Harness], ready: [Harness]) {
+        let named = Harness.allCases
+            .compactMap { harness in lower.range(of: harness.title.lowercased()).map { (harness, $0.lowerBound) } }
+            .filter { ready.contains($0.0) }
+        if lower.contains(" too") {
+            for (harness, _) in named where !agents.contains(harness) { agents.append(harness) }
+        } else if lower.hasPrefix("use "), !named.isEmpty {
+            agents = named.sorted { $0.1 < $1.1 }.map(\.0)
+        }
+    }
+
     /// The first whole number after a "$" in the text.
     static func dollars(in text: String) -> Int? {
         guard let dollar = text.firstIndex(of: "$") else { return nil }
@@ -309,7 +336,7 @@ public actor MockChatClient: ChatClient, ChatScenario {
                 key: "agents", label: "Agents", value: agentTitles + " · on this Mac", editable: true, options: options,
                 raw: .array(draft.agents.map { .string($0.rawValue) })),
             ChatCardRow(
-                key: "limits", label: "Each run", value: "up to $\(draft.budget) and 2 h", editable: true,
+                key: "limits", label: "Each run", value: "up to $\(draft.budget) and \(draft.hours) h", editable: true,
                 raw: .object(["budgetUsd": .number(Double(draft.budget))])),
             ChatCardRow(
                 key: "schedule", label: "Schedule", value: schedule, editable: true,

@@ -160,27 +160,29 @@ final class FrameBatcher {
     private let interval: Duration
     private let clock = ContinuousClock()
     private var buffer: [ChatFrame] = []
-    private var lastFlush: ContinuousClock.Instant
+    /// nil until the first flush: the first text goes at once.
+    private var lastFlush: ContinuousClock.Instant?
     private var trailing: Task<Void, Never>?
 
     init(session: ChatSession, interval: Duration) {
         self.session = session
         self.interval = interval
-        self.lastFlush = clock.now.advanced(by: .seconds(-10))
     }
 
     func push(_ frame: ChatFrame) {
         buffer.append(frame)
         switch frame.event {
         case .delta, .thinking:
-            if clock.now - lastFlush >= interval {
-                flush()
-            } else if trailing == nil {
-                let wait = interval
-                trailing = Task { [weak self] in
-                    try? await Task.sleep(for: wait)
-                    self?.flush()
+            if let last = lastFlush, clock.now - last < interval {
+                if trailing == nil {
+                    let wait = interval
+                    trailing = Task { [weak self] in
+                        try? await Task.sleep(for: wait)
+                        self?.flush()
+                    }
                 }
+            } else {
+                flush()
             }
         default:
             flush()
