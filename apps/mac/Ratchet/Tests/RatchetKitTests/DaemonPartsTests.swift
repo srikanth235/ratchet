@@ -53,13 +53,10 @@ struct DaemonPartsTests {
             + FollowTask.tasks(for: .ratchet(optimizationID: "o1", from: 1, to: 2))
             + FollowTask.tasks(for: .connector(connectorID: "c"))
         let ordered = FollowTask.ordered(burst)
+        // The agent update is part of the whole optimization's, so it is left out.
         #expect(ordered == [
-            .moves("o1"), .logAppended("o1", "a1"), .agent("o1", "a1"), .optimization("o1"), .optimization("o2"), .connectors, .needsYou,
-        ].filter { task in
-            // The agent update is part of the whole optimization's, so it is left out.
-            if case .agent("o1", _) = task { return false }
-            return true
-        })
+            .moves("o1"), .logAppended("o1", "a1"), .optimization("o2"), .optimization("o1"), .connectors, .needsYou,
+        ])
     }
 
     @Test func eventsThatSayNothingNeedNoFetch() {
@@ -187,7 +184,7 @@ struct DaemonPartsTests {
             if case .streamStateChanged(let state) = event { states.append(state) }
             if event == .resync { break }
         }
-        #expect(states.first == .connecting)
+        #expect(states.first == StreamState.connecting)
         #expect(states.contains(.live))
     }
 
@@ -201,7 +198,7 @@ struct DaemonPartsTests {
                 if case .reconnecting = state { break }
             }
         }
-        #expect(states.first == .connecting)
+        #expect(states.first == StreamState.connecting)
         guard case .reconnecting(let attempt, _)? = states.last else {
             Issue.record("never reported reconnecting")
             return
