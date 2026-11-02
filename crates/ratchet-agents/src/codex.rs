@@ -1,17 +1,23 @@
 //! Codex adapter: spawns `codex exec --json` and maps its JSONL to `AgentEvent`s.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Map, Value, json};
 
+use crate::classify::{FailureKind, FailureOnce, classify_text};
 use crate::claude_code::PromptVia;
 use crate::cli_agent::{CliAgent, CliAgentOptions, as_record, num, str_of, truncate};
+use crate::codex_app_server::CodexLiveSession;
+use crate::harness::{Scratch, TurnRunner, open_with_fallback};
 use crate::process::LineSplitter;
 use ratchet_core::enums::AgentKind;
 use ratchet_core::ports::{
-    AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
-    CancellationToken, EventSink, PortError, PortResult, Preflight,
+    Access, AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
+    CancellationToken, Capabilities, EventSink, Harness, LiveSession, McpServer, PortError,
+    PortResult, Preflight, SessionSpec, SharedEventSink,
 };
 
 /// USD per million tokens, for estimating cost: `codex exec --json` reports tokens but no dollars.
@@ -40,6 +46,9 @@ pub struct CodexStreamParser {
     splitter: LineSplitter,
     started: HashSet<String>,
     last_error: Option<String>,
+    failure: FailureOnce,
+    /// Report reasoning items as `Thinking` events (off for optimization runs, where they are noise).
+    pub emit_thinking: bool,
     now: Box<dyn Fn() -> i64 + Send + Sync>,
     pricing: Option<CodexPricing>,
 }
@@ -57,9 +66,23 @@ impl CodexStreamParser {
             splitter: LineSplitter::new(),
             started: HashSet::new(),
             last_error: None,
+            failure: FailureOnce::default(),
+            emit_thinking: false,
             now: Box::new(now),
             pricing,
         }
+    }
+
+    /// How the turn failed, when it was a rate limit or an expired login.
+    pub fn failure(&self) -> Option<FailureKind> {
+        self.failure.kind()
+    }
+
+    /// The classified event for an error message (once per turn). The reset time of a Codex `exec` limit is only in the prose,
+    /// whose format varies; it is not guessed.
+    fn classified(&mut self, at: i64, message: &str) -> Option<AgentEvent> {
+        let kind = classify_text(message, at / 1000)?;
+        self.failure.emit(at, kind, message)
     }
 
     pub fn push(&mut self, chunk: &str) -> Vec<AgentEvent> {
@@ -124,21 +147,25 @@ impl CodexStreamParser {
                     error: Some(message.clone()),
                     usage: None,
                 };
-                vec![
+                let mut events = vec![
                     AgentEvent::new(at, AgentEventType::Error)
-                        .with_text(message)
+                        .with_text(message.clone())
                         .with_data(json!({"fatal": true})),
-                ]
+                ];
+                events.extend(self.classified(at, &message));
+                events
             }
             "error" => {
                 // Often a transient stream error (reconnecting); `turn.failed` follows when it is fatal.
                 let message = str_of(obj, "message").unwrap_or("codex error").to_string();
                 self.last_error = Some(message.clone());
-                vec![
+                let mut events = vec![
                     AgentEvent::new(at, AgentEventType::Error)
-                        .with_text(message)
+                        .with_text(message.clone())
                         .with_data(json!({"fatal": false})),
-                ]
+                ];
+                events.extend(self.classified(at, &message));
+                events
             }
             other => {
                 self.unknown_types.insert(other.to_string());
@@ -238,7 +265,13 @@ impl CodexStreamParser {
                 ],
                 None => Vec::new(),
             },
-            Some("reasoning" | "todo_list") => Vec::new(),
+            Some("reasoning") => match str_of(item, "text") {
+                Some(text) if self.emit_thinking && !text.trim().is_empty() => {
+                    vec![AgentEvent::new(at, AgentEventType::Thinking).with_text(text)]
+                }
+                _ => Vec::new(),
+            },
+            Some("todo_list") => Vec::new(),
             Some(other) => {
                 self.unknown_types.insert(format!("item:{other}"));
                 Vec::new()
@@ -312,11 +345,86 @@ pub struct CodexOptions {
     pub api_key: Option<String>,
     /// Skip the API-key preflight check: the CLI is signed in with a ChatGPT account (`codex login`) on this machine.
     pub allow_subscription_auth: bool,
+    /// Hand MCP servers and the system-prompt add-on over in a temp `CODEX_HOME` (generated `config.toml` and `AGENTS.md`,
+    /// the login linked in) instead of `-c` flags. The fallback for when the `-c mcp_servers...` form is not accepted by a
+    /// CLI version, and the way to keep server environment values out of the process list.
+    pub config_overlay: bool,
+    /// Where the user's Codex home is, for the login the overlay links in. Default: `CODEX_HOME`, else `~/.codex`.
+    pub codex_home: Option<String>,
 }
 
+/// A TOML basic string.
+fn toml_str(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string())
+}
+
+/// A TOML key: bare when it can be, else quoted.
+fn toml_key(k: &str) -> String {
+    if !k.is_empty()
+        && k.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        k.to_string()
+    } else {
+        toml_str(k)
+    }
+}
+
+fn toml_array(items: &[String]) -> String {
+    format!(
+        "[{}]",
+        items
+            .iter()
+            .map(|i| toml_str(i))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+/// `-c` values (`key=value`, TOML) that declare `servers`.
+pub fn codex_mcp_overrides(servers: &[McpServer]) -> Vec<String> {
+    let mut out = Vec::new();
+    for s in servers {
+        let name = toml_key(&s.name);
+        out.push(format!(
+            "mcp_servers.{name}.command={}",
+            toml_str(&s.command)
+        ));
+        out.push(format!("mcp_servers.{name}.args={}", toml_array(&s.args)));
+        for (k, v) in &s.env {
+            out.push(format!(
+                "mcp_servers.{name}.env.{}={}",
+                toml_key(k),
+                toml_str(v)
+            ));
+        }
+    }
+    out
+}
+
+/// The `[mcp_servers.<name>]` tables of an overlay `config.toml`.
+pub fn codex_mcp_toml(servers: &[McpServer]) -> String {
+    let mut out = String::new();
+    for s in servers {
+        let name = toml_key(&s.name);
+        out.push_str(&format!("[mcp_servers.{name}]\n"));
+        out.push_str(&format!("command = {}\n", toml_str(&s.command)));
+        out.push_str(&format!("args = {}\n", toml_array(&s.args)));
+        if !s.env.is_empty() {
+            out.push_str(&format!("[mcp_servers.{name}.env]\n"));
+            for (k, v) in &s.env {
+                out.push_str(&format!("{} = {}\n", toml_key(k), toml_str(v)));
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+#[derive(Clone)]
 pub struct CodexAdapter {
-    cli: CliAgent,
-    options: CodexOptions,
+    pub(crate) cli: CliAgent,
+    pub(crate) options: CodexOptions,
 }
 
 impl CodexAdapter {
@@ -331,7 +439,39 @@ impl CodexAdapter {
 
     /// Argument list for one invocation, excluding the prompt (exported for tests and docs).
     pub fn build_args(&self, spec: &AgentSpec, resume_id: Option<&str>) -> Vec<String> {
+        self.build_session_args(&SessionSpec::from(spec), resume_id)
+    }
+
+    /// The `-c` values for `spec`: sandbox, the user's own overrides, and (unless `config_overlay`) MCP servers and the system
+    /// prompt add-on (`developer_instructions`).
+    pub fn config_values(&self, spec: &SessionSpec) -> Vec<String> {
         let o = &self.options;
+        let sandbox = if spec.access == Access::ReadOnly {
+            CodexSandbox::ReadOnly
+        } else {
+            o.sandbox.unwrap_or(CodexSandbox::WorkspaceWrite)
+        };
+        let mut out = vec![format!("sandbox_mode=\"{}\"", sandbox.as_str())];
+        let network = match spec.access {
+            Access::Edit { network } => network && o.network_access.unwrap_or(true),
+            Access::ReadOnly => false,
+        };
+        if sandbox == CodexSandbox::WorkspaceWrite && network {
+            out.push("sandbox_workspace_write.network_access=true".to_string());
+        }
+        out.extend(o.config_overrides.iter().cloned());
+        if !o.config_overlay {
+            out.extend(codex_mcp_overrides(&spec.mcp));
+            if let Some(text) = spec.system_append.as_ref().filter(|t| !t.is_empty()) {
+                out.push(format!("developer_instructions={}", toml_str(text)));
+            }
+        }
+        out
+    }
+
+    /// Argument list of a one-shot turn for `spec` (prompt excluded): [`CodexAdapter::build_args`] plus access, MCP servers and
+    /// the system prompt add-on.
+    pub fn build_session_args(&self, spec: &SessionSpec, resume_id: Option<&str>) -> Vec<String> {
         let mut args = vec!["exec".to_string()];
         if let Some(id) = resume_id.filter(|id| !id.is_empty()) {
             args.extend(["resume".to_string(), id.to_string()]);
@@ -341,44 +481,71 @@ impl CodexAdapter {
             args.extend(["--model".to_string(), model.clone()]);
         }
         // Config overrides rather than --sandbox/--cd: they are accepted by `exec` and `exec resume` alike.
-        let sandbox = o.sandbox.unwrap_or(CodexSandbox::WorkspaceWrite);
-        args.extend([
-            "-c".to_string(),
-            format!("sandbox_mode=\"{}\"", sandbox.as_str()),
-        ]);
-        if sandbox == CodexSandbox::WorkspaceWrite && o.network_access.unwrap_or(true) {
-            args.extend([
-                "-c".to_string(),
-                "sandbox_workspace_write.network_access=true".to_string(),
-            ]);
-        }
-        for over in &o.config_overrides {
-            args.extend(["-c".to_string(), over.clone()]);
+        for value in self.config_values(spec) {
+            args.extend(["-c".to_string(), value]);
         }
         args.extend(self.cli.extra_args.iter().cloned());
         args
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn turn(
-        &self,
-        session: &mut AgentSession,
-        args: Vec<String>,
-        spec: &AgentSpec,
-        prompt: &str,
-        on_event: &EventSink<'_>,
-        cancel: &CancellationToken,
-        is_start: bool,
-    ) -> PortResult<()> {
-        let clock = self.cli.clock.clone();
-        let mut parser = CodexStreamParser::new(move || clock.now(), self.options.pricing);
-        let via_arg = self.options.prompt_via == PromptVia::Arg;
-        let mut final_args = args;
-        if via_arg {
-            final_args.extend(["--".to_string(), prompt.to_string()]);
-        } else {
-            final_args.push("-".to_string());
+    /// Argument list of `codex app-server` for `spec`. The `-c` values go before the subcommand: they are the CLI's own.
+    pub fn build_app_server_args(&self, spec: &SessionSpec) -> Vec<String> {
+        let mut args = Vec::new();
+        for value in self.config_values(spec) {
+            args.extend(["-c".to_string(), value]);
         }
+        args.push("app-server".to_string());
+        args
+    }
+
+    fn source_home(&self) -> Option<PathBuf> {
+        self.options
+            .codex_home
+            .clone()
+            .or_else(|| self.cli.base_env.get("CODEX_HOME").cloned())
+            .filter(|h| !h.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| {
+                self.cli
+                    .base_env
+                    .get("HOME")
+                    .filter(|h| !h.is_empty())
+                    .map(|h| Path::new(h).join(".codex"))
+            })
+    }
+
+    /// With `config_overlay`: a temp `CODEX_HOME` holding the generated `config.toml` (MCP servers only; the user's own are not
+    /// loaded), `AGENTS.md` (the system prompt add-on) and the user's login linked in. Returns its path.
+    pub fn write_overlay(
+        &self,
+        spec: &SessionSpec,
+        scratch: &Scratch,
+    ) -> PortResult<Option<PathBuf>> {
+        if !self.options.config_overlay {
+            return Ok(None);
+        }
+        scratch.write("codex-home/config.toml", &codex_mcp_toml(&spec.mcp))?;
+        if let Some(text) = spec.system_append.as_ref().filter(|t| !t.is_empty()) {
+            scratch.write("codex-home/AGENTS.md", text)?;
+        }
+        let home = scratch.path().join("codex-home");
+        #[cfg(unix)]
+        if let Some(auth) = self
+            .source_home()
+            .map(|h| h.join("auth.json"))
+            .filter(|p| p.exists())
+        {
+            let _ = std::os::unix::fs::symlink(auth, home.join("auth.json"));
+        }
+        Ok(Some(home))
+    }
+
+    /// The environment additions of a run: the API key under both names and the overlay home.
+    pub(crate) fn run_env(
+        &self,
+        spec: &SessionSpec,
+        overlay: Option<&Path>,
+    ) -> BTreeMap<String, String> {
         let mut env = spec.env.clone().unwrap_or_default();
         if let Some(key) = self
             .cli
@@ -393,10 +560,81 @@ impl CodexAdapter {
         {
             env.insert("CODEX_API_KEY".to_string(), key.clone());
         }
-        let run_spec = AgentSpec {
-            env: Some(env),
-            ..spec.clone()
+        if let Some(home) = overlay {
+            env.insert(
+                "CODEX_HOME".to_string(),
+                home.to_string_lossy().into_owned(),
+            );
+        }
+        env
+    }
+
+    /// Run the first turn of a new session (or, with `spec.resume`, the next turn of an earlier one) with everything `spec`
+    /// asks for. `AgentAdapter::start` is this with the defaults of [`SessionSpec::from`].
+    pub async fn start_session(
+        &self,
+        spec: &SessionSpec,
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<AgentSession> {
+        let cancel = cancel.cloned().unwrap_or_default();
+        let resume = spec.resume.clone().filter(|r| !r.is_empty());
+        let mut session = AgentSession {
+            id: resume.clone().unwrap_or_default(),
+            kind: AgentKind::Codex,
         };
+        self.turn(
+            &mut session,
+            spec,
+            resume.as_deref(),
+            &spec.prompt,
+            on_event,
+            &cancel,
+            resume.is_none(),
+        )
+        .await?;
+        Ok(session)
+    }
+
+    /// `AgentAdapter::resume` with a [`SessionSpec`].
+    pub async fn resume_session(
+        &self,
+        session: &mut AgentSession,
+        spec: &SessionSpec,
+        message: &str,
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<()> {
+        let cancel = cancel.cloned().unwrap_or_default();
+        let id = session.id.clone();
+        self.turn(session, spec, Some(&id), message, on_event, &cancel, false)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn turn(
+        &self,
+        session: &mut AgentSession,
+        spec: &SessionSpec,
+        resume_id: Option<&str>,
+        prompt: &str,
+        on_event: &EventSink<'_>,
+        cancel: &CancellationToken,
+        is_start: bool,
+    ) -> PortResult<()> {
+        let scratch = Scratch::new("codex")?;
+        let overlay = self.write_overlay(spec, &scratch)?;
+        let args = self.build_session_args(spec, resume_id);
+        let clock = self.cli.clock.clone();
+        let mut parser = CodexStreamParser::new(move || clock.now(), self.options.pricing);
+        let via_arg = self.options.prompt_via == PromptVia::Arg;
+        let mut final_args = args;
+        if via_arg {
+            final_args.extend(["--".to_string(), prompt.to_string()]);
+        } else {
+            final_args.push("-".to_string());
+        }
+        let env = self.run_env(spec, overlay.as_deref());
         let res = {
             let mut on_line = |line: &str| {
                 for e in parser.parse_line(line) {
@@ -404,19 +642,20 @@ impl CodexAdapter {
                 }
             };
             self.cli
-                .run(
+                .run_in(
                     &final_args,
-                    &run_spec,
+                    &spec.workdir,
+                    Some(&env),
                     (!via_arg).then(|| prompt.to_string()),
                     &mut on_line,
                     cancel,
                 )
                 .await
         };
+        drop(scratch);
         if let Some(id) = parser.thread_id.as_ref().filter(|id| !id.is_empty()) {
             session.id = id.clone();
         }
-
         let fail = |message: String| -> PortError {
             on_event(
                 AgentEvent::new(self.cli.clock.now(), AgentEventType::Error)
@@ -478,6 +717,34 @@ impl CodexAdapter {
 }
 
 #[async_trait]
+impl TurnRunner for CodexAdapter {
+    fn kind(&self) -> AgentKind {
+        AgentKind::Codex
+    }
+
+    async fn run_turn(
+        &self,
+        session: &mut AgentSession,
+        spec: &SessionSpec,
+        resume: Option<&str>,
+        prompt: &str,
+        events: &EventSink<'_>,
+        cancel: &CancellationToken,
+    ) -> PortResult<()> {
+        self.turn(
+            session,
+            spec,
+            resume,
+            prompt,
+            events,
+            cancel,
+            resume.is_none(),
+        )
+        .await
+    }
+}
+
+#[async_trait]
 impl AgentAdapter for CodexAdapter {
     fn kind(&self) -> AgentKind {
         AgentKind::Codex
@@ -505,22 +772,8 @@ impl AgentAdapter for CodexAdapter {
         on_event: &EventSink<'_>,
         cancel: Option<&CancellationToken>,
     ) -> PortResult<AgentSession> {
-        let cancel = cancel.cloned().unwrap_or_default();
-        let mut session = AgentSession {
-            id: String::new(),
-            kind: AgentKind::Codex,
-        };
-        self.turn(
-            &mut session,
-            self.build_args(spec, None),
-            spec,
-            &spec.prompt,
-            on_event,
-            &cancel,
-            true,
-        )
-        .await?;
-        Ok(session)
+        self.start_session(&SessionSpec::from(spec), on_event, cancel)
+            .await
     }
 
     async fn resume(
@@ -531,9 +784,40 @@ impl AgentAdapter for CodexAdapter {
         on_event: &EventSink<'_>,
         cancel: Option<&CancellationToken>,
     ) -> PortResult<()> {
-        let cancel = cancel.cloned().unwrap_or_default();
-        let args = self.build_args(spec, Some(&session.id));
-        self.turn(session, args, spec, message, on_event, &cancel, false)
+        self.resume_session(session, &SessionSpec::from(spec), message, on_event, cancel)
             .await
+    }
+}
+
+#[async_trait]
+impl Harness for CodexAdapter {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            // deltas only come from the app-server; `exec --json` sends whole messages
+            streaming: !self.cli.disable_live_session,
+            live_session: !self.cli.disable_live_session,
+            mcp: true,
+            cost_in_usd: false,
+            read_only: true,
+        }
+    }
+
+    async fn open(
+        &self,
+        spec: &SessionSpec,
+        events: SharedEventSink,
+    ) -> PortResult<Box<dyn LiveSession>> {
+        let runner: Arc<dyn TurnRunner> = Arc::new(self.clone());
+        let clock = self.cli.clock.clone();
+        open_with_fallback(
+            self.capabilities().live_session,
+            move || clock.now(),
+            "codex",
+            runner,
+            spec,
+            events.clone(),
+            || async { CodexLiveSession::open(self, spec, events).await },
+        )
+        .await
     }
 }

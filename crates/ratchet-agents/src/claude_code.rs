@@ -1,16 +1,25 @@
 //! Claude Code adapter: spawns `claude -p --output-format stream-json --verbose` and maps its stream to `AgentEvent`s.
 
 use std::collections::BTreeSet;
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{Map, Value, json};
+use tokio::sync::mpsc;
 
-use crate::cli_agent::{CliAgent, CliAgentOptions, as_record, num, str_of, truncate};
-use crate::process::LineSplitter;
+use crate::classify::{FailureKind, FailureOnce, classify_status, classify_text};
+use crate::cli_agent::{CliAgent, CliAgentOptions, as_record, build_env, num, str_of, truncate};
+use crate::harness::{CLOSE_GRACE, Scratch, TurnRunner, open_with_fallback};
+use crate::live::LiveProcess;
+use crate::process::{LineSplitter, ProcessExit, SpawnOptions};
 use ratchet_core::enums::AgentKind;
 use ratchet_core::ports::{
-    AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
-    CancellationToken, EventSink, PortError, PortResult, Preflight,
+    Access, AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
+    CancellationToken, Capabilities, EventSink, Harness, LiveSession, McpServer, PortError,
+    PortResult, Preflight, SessionSpec, SharedEventSink,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -70,7 +79,12 @@ pub struct ClaudeStreamParser {
     pub result: Option<ClaudeResult>,
     pub malformed_lines: usize,
     pub unknown_types: BTreeSet<String>,
+    /// How the last finished turn failed, when it was a rate limit or an expired login (cleared when the next turn's first line
+    /// arrives, so a live session reads it between turns).
+    pub failure: Option<FailureKind>,
     splitter: LineSplitter,
+    turn_failure: FailureOnce,
+    turn_over: bool,
     now: Box<dyn Fn() -> i64 + Send + Sync>,
 }
 
@@ -82,7 +96,10 @@ impl ClaudeStreamParser {
             result: None,
             malformed_lines: 0,
             unknown_types: BTreeSet::new(),
+            failure: None,
             splitter: LineSplitter::new(),
+            turn_failure: FailureOnce::default(),
+            turn_over: false,
             now: Box::new(now),
         }
     }
@@ -119,16 +136,71 @@ impl ClaudeStreamParser {
             self.session_id = Some(id.to_string());
         }
         let at = (self.now)();
+        if self.turn_over {
+            // the previous turn of a live session is over; this line starts the next
+            self.turn_over = false;
+            self.failure = None;
+            self.turn_failure.reset();
+        }
         match kind {
             "system" => self.system(obj, at),
             "assistant" => self.assistant(obj, at),
             "user" => self.user(obj, at),
             "result" => self.result_line(obj, at),
+            "stream_event" => self.stream_event(obj, at),
+            "rate_limit_event" => self.rate_limit_event(obj, at),
             other => {
                 self.unknown_types.insert(other.to_string());
                 Vec::new()
             }
         }
+    }
+
+    /// `--include-partial-messages`: Anthropic stream events; text and thinking deltas are reported, the rest is bookkeeping.
+    fn stream_event(&mut self, raw: &Map<String, Value>, at: i64) -> Vec<AgentEvent> {
+        let Some(delta) = raw
+            .get("event")
+            .and_then(as_record)
+            .filter(|e| str_of(e, "type") == Some("content_block_delta"))
+            .and_then(|e| e.get("delta"))
+            .and_then(as_record)
+        else {
+            return Vec::new();
+        };
+        match str_of(delta, "type") {
+            Some("text_delta") => str_of(delta, "text")
+                .filter(|t| !t.is_empty())
+                .map(|t| vec![AgentEvent::new(at, AgentEventType::Delta).with_text(t)])
+                .unwrap_or_default(),
+            Some("thinking_delta") => str_of(delta, "thinking")
+                .filter(|t| !t.is_empty())
+                .map(|t| vec![AgentEvent::new(at, AgentEventType::Thinking).with_text(t)])
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// `status: "rejected"` is the quota being out (with the structured reset time); `allowed` / `allowed_warning` are only
+    /// information.
+    fn rate_limit_event(&mut self, raw: &Map<String, Value>, at: i64) -> Vec<AgentEvent> {
+        let Some(info) = raw.get("rate_limit_info").and_then(as_record) else {
+            return Vec::new();
+        };
+        if str_of(info, "status") != Some("rejected") {
+            return Vec::new();
+        }
+        let resets_at = info.get("resetsAt").and_then(Value::as_i64);
+        let kind = str_of(info, "rateLimitType").unwrap_or("quota");
+        self.signal(
+            at,
+            FailureKind::RateLimited { resets_at },
+            &format!("claude-code {kind} limit reached"),
+        )
+    }
+
+    fn signal(&mut self, at: i64, kind: FailureKind, text: &str) -> Vec<AgentEvent> {
+        self.failure = Some(kind);
+        self.turn_failure.emit(at, kind, text).into_iter().collect()
     }
 
     fn system(&mut self, raw: &Map<String, Value>, at: i64) -> Vec<AgentEvent> {
@@ -180,10 +252,22 @@ impl ClaudeStreamParser {
             .and_then(as_record)
             .and_then(|m| m.get("content"))
             .and_then(Value::as_array);
-        let Some(content) = content else {
-            return Vec::new();
-        };
         let mut events = Vec::new();
+        // `error: "rate_limit" | "authentication_failed"` marks an assistant line that carries the CLI's failure text.
+        let by_error = match str_of(raw, "error") {
+            Some("rate_limit") => Some(FailureKind::RateLimited { resets_at: None }),
+            Some("authentication_failed") => Some(FailureKind::AuthExpired),
+            _ => None,
+        };
+        if let Some(kind) = by_error {
+            let text = content
+                .map(|c| block_text(Some(&Value::Array(c.clone()))))
+                .unwrap_or_default();
+            events.extend(self.signal(at, kind, &text));
+        }
+        let Some(content) = content else {
+            return events;
+        };
         for block in content {
             let Some(block) = block.as_object() else {
                 continue;
@@ -276,11 +360,20 @@ impl ClaudeStreamParser {
             };
             events.push(
                 AgentEvent::new(at, AgentEventType::Error)
-                    .with_text(text)
+                    .with_text(text.clone())
                     .with_data(json!({"subtype": subtype})),
             );
+            let kind = raw
+                .get("api_error_status")
+                .and_then(Value::as_i64)
+                .and_then(classify_status)
+                .or_else(|| classify_text(&text, at / 1000));
+            if let Some(kind) = kind {
+                events.extend(self.signal(at, kind, &text));
+            }
         }
         self.result = Some(result);
+        self.turn_over = true;
         events
     }
 }
@@ -339,10 +432,31 @@ pub struct ClaudeCodeOptions {
     pub api_key: Option<String>,
     /// Skip the API-key preflight check (subscription login on the box; see docs/real-env/agents.md on terms).
     pub allow_subscription_auth: bool,
+    /// `--fallback-model`: the CLI's own retry on another model when the first is overloaded.
+    pub fallback_model: Option<String>,
 }
 
 pub const DEFAULT_CLAUDE_TOOLS: [&str; 6] = ["Bash", "Read", "Edit", "Write", "Glob", "Grep"];
 
+/// The tools a read-only session keeps (plus its MCP servers, as `mcp__<server>`).
+pub const READ_ONLY_CLAUDE_TOOLS: [&str; 3] = ["Read", "Glob", "Grep"];
+
+/// Tools a read-only session must not have, so a user setting that allows them cannot widen the session.
+const WRITE_CLAUDE_TOOLS: [&str; 5] = ["Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"];
+
+/// The `--mcp-config` file: `{"mcpServers": {name: {type, command, args, env}}}`.
+pub fn claude_mcp_config(servers: &[McpServer]) -> Value {
+    let mut map = Map::new();
+    for s in servers {
+        map.insert(
+            s.name.clone(),
+            json!({"type": "stdio", "command": s.command, "args": s.args, "env": s.env}),
+        );
+    }
+    json!({ "mcpServers": map })
+}
+
+#[derive(Clone)]
 pub struct ClaudeCodeAdapter {
     cli: CliAgent,
     options: ClaudeCodeOptions,
@@ -360,29 +474,54 @@ impl ClaudeCodeAdapter {
 
     /// Argument list for one invocation (exported for tests and docs).
     pub fn build_args(&self, spec: &AgentSpec, resume_id: Option<&str>) -> Vec<String> {
+        self.build_session_args(&SessionSpec::from(spec), resume_id, None)
+    }
+
+    /// Flags shared by one-shot and live runs. `mcp_config` is the path of the written [`claude_mcp_config`] file.
+    fn session_flags(
+        &self,
+        spec: &SessionSpec,
+        resume_id: Option<&str>,
+        mcp_config: Option<&Path>,
+    ) -> Vec<String> {
         let o = &self.options;
-        let mut args: Vec<String> = ["-p", "--output-format", "stream-json", "--verbose"]
-            .map(String::from)
-            .to_vec();
+        let read_only = spec.access == Access::ReadOnly;
+        let mut args = Vec::new();
         args.extend([
             "--permission-mode".to_string(),
-            o.permission_mode
-                .as_ref()
-                .map_or("acceptEdits", ClaudePermissionMode::as_str)
-                .to_string(),
+            if read_only {
+                // anything that would need approval is denied, never asked (nobody is there to answer)
+                "dontAsk".to_string()
+            } else {
+                o.permission_mode
+                    .as_ref()
+                    .map_or("acceptEdits", ClaudePermissionMode::as_str)
+                    .to_string()
+            },
         ]);
-        let allowed: Vec<String> = o
-            .allowed_tools
-            .clone()
-            .unwrap_or_else(|| DEFAULT_CLAUDE_TOOLS.map(String::from).to_vec());
+        let mut allowed: Vec<String> = if read_only {
+            READ_ONLY_CLAUDE_TOOLS.map(String::from).to_vec()
+        } else {
+            o.allowed_tools
+                .clone()
+                .unwrap_or_else(|| DEFAULT_CLAUDE_TOOLS.map(String::from).to_vec())
+        };
+        if read_only {
+            allowed.retain(|t| !WRITE_CLAUDE_TOOLS.contains(&t.as_str()));
+        }
+        allowed.extend(spec.mcp.iter().map(|m| format!("mcp__{}", m.name)));
         if !allowed.is_empty() {
             args.extend(["--allowedTools".to_string(), allowed.join(",")]);
         }
-        if !o.disallowed_tools.is_empty() {
-            args.extend([
-                "--disallowedTools".to_string(),
-                o.disallowed_tools.join(","),
-            ]);
+        let mut disallowed = o.disallowed_tools.clone();
+        if read_only {
+            disallowed.extend(WRITE_CLAUDE_TOOLS.map(String::from));
+        }
+        if matches!(spec.access, Access::Edit { network: false }) {
+            disallowed.extend(["WebFetch".to_string(), "WebSearch".to_string()]);
+        }
+        if !disallowed.is_empty() {
+            args.extend(["--disallowedTools".to_string(), disallowed.join(",")]);
         }
         if let Some(model) = spec.model.as_ref().filter(|m| !m.is_empty()) {
             args.extend(["--model".to_string(), model.clone()]);
@@ -390,8 +529,27 @@ impl ClaudeCodeAdapter {
         if let Some(turns) = spec.max_turns.filter(|t| *t > 0) {
             args.extend(["--max-turns".to_string(), turns.to_string()]);
         }
-        if let Some(prompt) = o.append_system_prompt.as_ref().filter(|p| !p.is_empty()) {
-            args.extend(["--append-system-prompt".to_string(), prompt.clone()]);
+        if let Some(model) = o.fallback_model.as_ref().filter(|m| !m.is_empty()) {
+            args.extend(["--fallback-model".to_string(), model.clone()]);
+        }
+        if let Some(path) = mcp_config {
+            // strict: the user's own global MCP servers are not loaded into a Ratchet session
+            args.extend([
+                "--mcp-config".to_string(),
+                path.to_string_lossy().into_owned(),
+                "--strict-mcp-config".to_string(),
+            ]);
+        }
+        let append: Vec<&str> = [
+            o.append_system_prompt.as_deref(),
+            spec.system_append.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|p| !p.is_empty())
+        .collect();
+        if !append.is_empty() {
+            args.extend(["--append-system-prompt".to_string(), append.join("\n\n")]);
         }
         if let Some(id) = resume_id.filter(|id| !id.is_empty()) {
             args.extend(["--resume".to_string(), id.to_string()]);
@@ -400,17 +558,113 @@ impl ClaudeCodeAdapter {
         args
     }
 
+    /// Argument list of a one-shot turn for `spec`: [`ClaudeCodeAdapter::build_args`] plus access, MCP servers and the system
+    /// prompt add-on.
+    pub fn build_session_args(
+        &self,
+        spec: &SessionSpec,
+        resume_id: Option<&str>,
+        mcp_config: Option<&Path>,
+    ) -> Vec<String> {
+        let mut args: Vec<String> = ["-p", "--output-format", "stream-json", "--verbose"]
+            .map(String::from)
+            .to_vec();
+        args.extend(self.session_flags(spec, resume_id, mcp_config));
+        args
+    }
+
+    /// Argument list of a live session: messages arrive on stdin as stream-json, text as partial-message deltas.
+    pub fn build_live_args(
+        &self,
+        spec: &SessionSpec,
+        resume_id: Option<&str>,
+        mcp_config: Option<&Path>,
+    ) -> Vec<String> {
+        let mut args: Vec<String> = [
+            "-p",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--replay-user-messages",
+        ]
+        .map(String::from)
+        .to_vec();
+        args.extend(self.session_flags(spec, resume_id, mcp_config));
+        args
+    }
+
+    /// The `--mcp-config` file for `spec`, when it has MCP servers. Keep the scratch alive while the CLI runs.
+    fn write_mcp_config(
+        spec: &SessionSpec,
+        scratch: &Scratch,
+    ) -> PortResult<Option<std::path::PathBuf>> {
+        if spec.mcp.is_empty() {
+            return Ok(None);
+        }
+        scratch
+            .write("mcp.json", &claude_mcp_config(&spec.mcp).to_string())
+            .map(Some)
+    }
+
+    /// Run the first turn of a new session (or, with `spec.resume`, the next turn of an earlier one) with everything `spec`
+    /// asks for. `AgentAdapter::start` is this with the defaults of [`SessionSpec::from`].
+    pub async fn start_session(
+        &self,
+        spec: &SessionSpec,
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<AgentSession> {
+        let cancel = cancel.cloned().unwrap_or_default();
+        let resume = spec.resume.clone().filter(|r| !r.is_empty());
+        let mut session = AgentSession {
+            id: resume.clone().unwrap_or_default(),
+            kind: AgentKind::ClaudeCode,
+        };
+        self.turn(
+            &mut session,
+            spec,
+            resume.as_deref(),
+            &spec.prompt,
+            on_event,
+            &cancel,
+            resume.is_none(),
+        )
+        .await?;
+        Ok(session)
+    }
+
+    /// `AgentAdapter::resume` with a [`SessionSpec`].
+    pub async fn resume_session(
+        &self,
+        session: &mut AgentSession,
+        spec: &SessionSpec,
+        message: &str,
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<()> {
+        let cancel = cancel.cloned().unwrap_or_default();
+        let id = session.id.clone();
+        self.turn(session, spec, Some(&id), message, on_event, &cancel, false)
+            .await
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn turn(
         &self,
         session: &mut AgentSession,
-        args: Vec<String>,
-        spec: &AgentSpec,
+        spec: &SessionSpec,
+        resume_id: Option<&str>,
         prompt: &str,
         on_event: &EventSink<'_>,
         cancel: &CancellationToken,
         is_start: bool,
     ) -> PortResult<()> {
+        let scratch = Scratch::new("claude")?;
+        let mcp = Self::write_mcp_config(spec, &scratch)?;
+        let args = self.build_session_args(spec, resume_id, mcp.as_deref());
         let clock = self.cli.clock.clone();
         let mut parser = ClaudeStreamParser::new(move || clock.now());
         let via_arg = self.options.prompt_via == PromptVia::Arg;
@@ -425,20 +679,21 @@ impl ClaudeCodeAdapter {
                 }
             };
             self.cli
-                .run(
+                .run_in(
                     &final_args,
-                    spec,
+                    &spec.workdir,
+                    spec.env.as_ref(),
                     (!via_arg).then(|| prompt.to_string()),
                     &mut on_line,
                     cancel,
                 )
                 .await
         };
+        drop(scratch);
         // A resumed session may come back under a new id; keep the handle current.
         if let Some(id) = parser.session_id.as_ref().filter(|id| !id.is_empty()) {
             session.id = id.clone();
         }
-
         let fail = |message: String| -> PortError {
             on_event(
                 AgentEvent::new(self.cli.clock.now(), AgentEventType::Error)
@@ -503,6 +758,34 @@ impl ClaudeCodeAdapter {
 }
 
 #[async_trait]
+impl TurnRunner for ClaudeCodeAdapter {
+    fn kind(&self) -> AgentKind {
+        AgentKind::ClaudeCode
+    }
+
+    async fn run_turn(
+        &self,
+        session: &mut AgentSession,
+        spec: &SessionSpec,
+        resume: Option<&str>,
+        prompt: &str,
+        events: &EventSink<'_>,
+        cancel: &CancellationToken,
+    ) -> PortResult<()> {
+        self.turn(
+            session,
+            spec,
+            resume,
+            prompt,
+            events,
+            cancel,
+            resume.is_none(),
+        )
+        .await
+    }
+}
+
+#[async_trait]
 impl AgentAdapter for ClaudeCodeAdapter {
     fn kind(&self) -> AgentKind {
         AgentKind::ClaudeCode
@@ -534,22 +817,8 @@ impl AgentAdapter for ClaudeCodeAdapter {
         on_event: &EventSink<'_>,
         cancel: Option<&CancellationToken>,
     ) -> PortResult<AgentSession> {
-        let cancel = cancel.cloned().unwrap_or_default();
-        let mut session = AgentSession {
-            id: String::new(),
-            kind: AgentKind::ClaudeCode,
-        };
-        self.turn(
-            &mut session,
-            self.build_args(spec, None),
-            spec,
-            &spec.prompt,
-            on_event,
-            &cancel,
-            true,
-        )
-        .await?;
-        Ok(session)
+        self.start_session(&SessionSpec::from(spec), on_event, cancel)
+            .await
     }
 
     async fn resume(
@@ -560,9 +829,233 @@ impl AgentAdapter for ClaudeCodeAdapter {
         on_event: &EventSink<'_>,
         cancel: Option<&CancellationToken>,
     ) -> PortResult<()> {
-        let cancel = cancel.cloned().unwrap_or_default();
-        let args = self.build_args(spec, Some(&session.id));
-        self.turn(session, args, spec, message, on_event, &cancel, false)
+        self.resume_session(session, &SessionSpec::from(spec), message, on_event, cancel)
             .await
+    }
+}
+
+#[async_trait]
+impl Harness for ClaudeCodeAdapter {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            streaming: true,
+            live_session: !self.cli.disable_live_session,
+            mcp: true,
+            cost_in_usd: true,
+            read_only: true,
+        }
+    }
+
+    async fn open(
+        &self,
+        spec: &SessionSpec,
+        events: SharedEventSink,
+    ) -> PortResult<Box<dyn LiveSession>> {
+        let runner: Arc<dyn TurnRunner> = Arc::new(self.clone());
+        let clock = self.cli.clock.clone();
+        open_with_fallback(
+            self.capabilities().live_session,
+            move || clock.now(),
+            "claude-code",
+            runner,
+            spec,
+            events.clone(),
+            || async { ClaudeLiveSession::open(self, spec, events).await },
+        )
+        .await
+    }
+}
+
+// ---------------------------------------------------------------- live session
+
+/// What the reader task tells `send` about the turn.
+enum Turn {
+    /// A `result` line arrived.
+    Done { is_error: bool, message: String },
+    /// The process is gone.
+    Exited(String),
+}
+
+/// `claude -p --input-format stream-json --output-format stream-json --include-partial-messages --replay-user-messages`: one
+/// process for the whole chat. Each user message is one stdin line; a turn ends at its `result` line.
+pub struct ClaudeLiveSession {
+    process: LiveProcess,
+    turns: tokio::sync::Mutex<mpsc::UnboundedReceiver<Turn>>,
+    session_id: Arc<std::sync::Mutex<Option<String>>>,
+    interrupted: AtomicBool,
+    interrupt_note: tokio::sync::Notify,
+    busy: AtomicBool,
+    events: SharedEventSink,
+    clock: Arc<dyn ratchet_core::ports::Clock>,
+    _scratch: Scratch,
+}
+
+/// After an interrupt the CLI should end the turn with a `result`; if it does not, the turn is over after this long anyway.
+const INTERRUPT_WAIT: Duration = Duration::from_secs(5);
+
+impl ClaudeLiveSession {
+    async fn open(
+        adapter: &ClaudeCodeAdapter,
+        spec: &SessionSpec,
+        events: SharedEventSink,
+    ) -> PortResult<Box<dyn LiveSession>> {
+        let scratch = Scratch::new("claude-live")?;
+        let mcp = ClaudeCodeAdapter::write_mcp_config(spec, &scratch)?;
+        let resume = spec.resume.clone().filter(|r| !r.is_empty());
+        let args = adapter.build_live_args(spec, resume.as_deref(), mcp.as_deref());
+        let (tx, rx) = mpsc::unbounded_channel();
+        let session_id = Arc::new(std::sync::Mutex::new(resume));
+        let clock = adapter.cli.clock.clone();
+        let mut parser = ClaudeStreamParser::new({
+            let clock = clock.clone();
+            move || clock.now()
+        });
+        let line_tx = tx.clone();
+        let line_id = session_id.clone();
+        let line_events = events.clone();
+        let process = LiveProcess::spawn(
+            adapter.cli.spawner.as_ref(),
+            &adapter.cli.binary,
+            &args,
+            &SpawnOptions {
+                cwd: spec.workdir.clone().into(),
+                env: build_env(&adapter.cli.base_env, spec.env.as_ref()),
+            },
+            move |_, line| {
+                for e in parser.parse_line(line) {
+                    line_events(e);
+                }
+                if let Some(id) = parser.session_id.clone() {
+                    *line_id.lock().unwrap() = Some(id);
+                }
+                if let Some(result) = parser.result.take() {
+                    let _ = line_tx.send(Turn::Done {
+                        is_error: result.is_error && result.subtype != "error_max_turns",
+                        message: if result.text.is_empty() {
+                            format!("claude-code ended with {}", result.subtype)
+                        } else {
+                            result.text
+                        },
+                    });
+                }
+            },
+            {
+                let tx = tx.clone();
+                move |exit| {
+                    let _ = tx.send(Turn::Exited(
+                        exit.spawn_error
+                            .clone()
+                            .unwrap_or_else(|| format!("exited with {}", exit_text(exit))),
+                    ));
+                }
+            },
+        );
+        // A binary that cannot start shows up at once; let the caller fall back to per-turn mode.
+        process.wait_exit(Duration::from_millis(100)).await;
+        if let Some(exit) = process.exit() {
+            return Err(PortError::AgentFailed {
+                message: format!(
+                    "claude live session did not start: {}",
+                    exit.spawn_error.clone().unwrap_or_else(|| exit_text(&exit))
+                ),
+                exit_code: exit.code,
+                stderr: Some(process.stderr_tail()),
+            });
+        }
+        Ok(Box::new(Self {
+            process,
+            turns: tokio::sync::Mutex::new(rx),
+            session_id,
+            interrupted: AtomicBool::new(false),
+            interrupt_note: tokio::sync::Notify::new(),
+            busy: AtomicBool::new(false),
+            events,
+            clock,
+            _scratch: scratch,
+        }))
+    }
+}
+
+fn exit_text(exit: &ProcessExit) -> String {
+    exit.signal.clone().unwrap_or_else(|| {
+        format!(
+            "code {}",
+            exit.code.map_or("null".into(), |c| c.to_string())
+        )
+    })
+}
+
+#[async_trait]
+impl LiveSession for ClaudeLiveSession {
+    async fn send(&self, text: &str) -> PortResult<()> {
+        let mut turns = self.turns.lock().await;
+        while turns.try_recv().is_ok() {}
+        self.interrupted.store(false, Ordering::SeqCst);
+        self.busy.store(true, Ordering::SeqCst);
+        self.process.write_json(&json!({
+            "type": "user",
+            "message": {"role": "user", "content": text},
+        }));
+        let after_interrupt = async {
+            self.interrupt_note.notified().await;
+            tokio::time::sleep(INTERRUPT_WAIT).await;
+        };
+        let outcome = tokio::select! {
+            o = turns.recv() => o,
+            () = after_interrupt => None,
+        };
+        self.busy.store(false, Ordering::SeqCst);
+        let interrupted = self.interrupted.load(Ordering::SeqCst);
+        let failed = |message: String| {
+            (self.events)(
+                AgentEvent::new(self.clock.now(), AgentEventType::Error)
+                    .with_text(message.clone())
+                    .with_data(json!({"stderr": self.process.stderr_tail()})),
+            );
+            Err(PortError::AgentFailed {
+                message,
+                exit_code: self.process.exit().and_then(|e| e.code),
+                stderr: Some(self.process.stderr_tail()),
+            })
+        };
+        match outcome {
+            Some(Turn::Done { is_error, message }) => {
+                if is_error && !interrupted {
+                    // the parser already reported the error (and its classification)
+                    Err(PortError::AgentFailed {
+                        message,
+                        exit_code: None,
+                        stderr: Some(self.process.stderr_tail()),
+                    })
+                } else {
+                    Ok(())
+                }
+            }
+            _ if interrupted => Ok(()),
+            Some(Turn::Exited(how)) => failed(format!("claude {how}")),
+            None => failed("claude live session ended".to_string()),
+        }
+    }
+
+    async fn interrupt(&self) -> PortResult<()> {
+        if !self.busy.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        self.interrupted.store(true, Ordering::SeqCst);
+        self.process.write_json(&json!({
+            "type": "control_request",
+            "request_id": "ratchet-interrupt",
+            "request": {"subtype": "interrupt"},
+        }));
+        self.interrupt_note.notify_one();
+        Ok(())
+    }
+
+    fn session_id(&self) -> Option<String> {
+        self.session_id.lock().unwrap().clone()
+    }
+
+    async fn close(self: Box<Self>) {
+        self.process.close(CLOSE_GRACE).await;
     }
 }

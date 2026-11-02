@@ -1,0 +1,7 @@
+{"id":"$ID","result":{"userAgent":"codex-cli/0.166.0"}}
+{"id":"$ID","result":{"thread":{"id":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","cliVersion":"0.166.0"},"model":"gpt-5","cwd":"/work/chat-1","approvalPolicy":"never","sandbox":{"type":"read-only","networkAccess":false}}}
+{"method":"thread/started","params":{"thread":{"id":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e"}}}
+{"id":"$ID","result":{"turn":{"id":"turn_1","status":"inProgress","items":[]}}}
+{"method":"turn/started","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turn":{"id":"turn_1","status":"inProgress","items":[]}}}
+{"method":"error","params":{"error":{"message":"unexpected status 401 Unauthorized: Your access token could not be refreshed. Please log out and sign in again.","codexErrorInfo":"Unauthorized","additionalDetails":null},"willRetry":false,"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_1"}}
+{"method":"turn/completed","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turn":{"id":"turn_1","status":"failed","items":[],"error":{"message":"unexpected status 401 Unauthorized: Your access token could not be refreshed. Please log out and sign in again.","codexErrorInfo":"Unauthorized"}}}}

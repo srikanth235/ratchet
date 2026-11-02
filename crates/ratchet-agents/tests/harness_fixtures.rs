@@ -122,26 +122,30 @@ fn texts(events: &[&AgentEvent]) -> Vec<String> {
 const CLAUDE_SID: &str = "9c1e5d7a-0b2f-4c63-8a41-5d2f7e6b3c10";
 
 #[test]
-fn claude_real_recording_with_partial_messages_counts_stream_and_rate_limit_events_as_unknown() {
+fn claude_real_recording_with_partial_messages_reports_deltas_and_ignores_an_allowed_rate_limit() {
     let (p, r) = claude("claude-2.1.316-real-deltas.jsonl");
     assert_eq!(p.session_id.as_deref(), Some(CLAUDE_SID));
     assert_eq!(r.malformed, 0);
-    // Deltas are not reported yet (P1): they are counted, never fatal. The whole message still arrives.
-    // `system/status` (a real subtype) is also unknown today.
-    assert_eq!(
-        r.unknown,
-        ["rate_limit_event", "stream_event", "system:status"]
-    );
+    // P1: `stream_event` text deltas are `Delta` events and an `allowed` `rate_limit_event` is information only. `system/status`
+    // (a real subtype) is still unknown.
+    assert_eq!(r.unknown, ["system:status"]);
     let messages = of_type(&r.events, AgentEventType::Message);
     assert_eq!(texts(&messages), ["Hi! What would you like to work on?"]);
+    let deltas = texts(&of_type(&r.events, AgentEventType::Delta));
+    assert_eq!(deltas.concat(), "Hi! What would you like to work on?");
+    assert!(of_type(&r.events, AgentEventType::RateLimited).is_empty());
     assert!(p.result.as_ref().is_some_and(|x| !x.is_error));
 }
 
 #[test]
 fn claude_mock_deltas_and_session_parse_like_the_real_shape() {
     let (p, r) = claude("claude-2.1.316-mock-deltas.jsonl");
-    assert_eq!(r.unknown, ["stream_event"]);
+    assert!(r.unknown.is_empty());
     assert_eq!(r.malformed, 0);
+    assert_eq!(
+        texts(&of_type(&r.events, AgentEventType::Delta)),
+        ["Three ", "optimizations ", "are running."]
+    );
     assert_eq!(
         texts(&of_type(&r.events, AgentEventType::Message)),
         ["Three optimizations are running."]
@@ -153,13 +157,13 @@ fn claude_mock_deltas_and_session_parse_like_the_real_shape() {
     assert_eq!(of_type(&r.events, AgentEventType::Usage).len(), 2);
     assert_eq!(texts(&of_type(&r.events, AgentEventType::Message)).len(), 2);
     assert_eq!(p.result.as_ref().map(|x| x.num_turns), Some(2));
-    assert_eq!(r.unknown, ["stream_event"]);
+    assert!(r.unknown.is_empty());
 }
 
 #[test]
 fn claude_mock_mcp_tool_call_is_a_tool_call_and_a_tool_result() {
     let (p, r) = claude("claude-2.1.316-mock-mcp-tool.jsonl");
-    assert!(r.unknown == ["stream_event"] && r.malformed == 0);
+    assert!(r.unknown.is_empty() && r.malformed == 0);
     let tools = of_type(&r.events, AgentEventType::Tool);
     assert_eq!(tools.len(), 2);
     let call = tools[0].data.as_ref().unwrap();
@@ -187,10 +191,15 @@ fn claude_mock_read_only_refusal_is_an_errored_tool_result_not_a_failed_turn() {
 }
 
 #[test]
-fn claude_mock_rate_limit_and_auth_expired_end_as_error_results_today() {
+fn claude_mock_rate_limit_and_auth_expired_end_as_error_results_and_are_classified() {
     let (p, r) = claude("claude-2.1.316-mock-rate-limit.jsonl");
-    // `rate_limit_event` is unknown today; `system/api_retry` is a Status event; the failure is an Error with the CLI's text.
-    assert_eq!(r.unknown, ["rate_limit_event"]);
+    // P1: the rejected `rate_limit_event` is a `RateLimited` event with the structured reset time (once per turn, though the
+    // assistant line and the result say it again); `system/api_retry` stays a Status event; the failure is an Error with the
+    // CLI's text.
+    assert!(r.unknown.is_empty());
+    let limited = of_type(&r.events, AgentEventType::RateLimited);
+    assert_eq!(limited.len(), 1);
+    assert_eq!(limited[0].data.as_ref().unwrap()["resetsAt"], 1793614200);
     assert!(p.result.as_ref().is_some_and(|x| x.is_error));
     let errors = of_type(&r.events, AgentEventType::Error);
     assert_eq!(errors.len(), 1);
@@ -210,6 +219,8 @@ fn claude_mock_rate_limit_and_auth_expired_end_as_error_results_today() {
     let (p, r) = claude("claude-2.1.316-mock-auth-expired.jsonl");
     assert!(r.unknown.is_empty());
     assert!(p.result.as_ref().is_some_and(|x| x.is_error));
+    assert_eq!(of_type(&r.events, AgentEventType::AuthExpired).len(), 1);
+    assert!(of_type(&r.events, AgentEventType::RateLimited).is_empty());
     let errors = of_type(&r.events, AgentEventType::Error);
     assert!(errors[0].text.as_deref().unwrap().contains("/login"));
 }

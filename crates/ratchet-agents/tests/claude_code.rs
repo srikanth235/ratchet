@@ -145,8 +145,6 @@ fn parser_skips_unknown_event_and_block_types_and_garbage_lines() {
         vec![
             "block:server_tool_use",
             "future_event_kind",
-            "rate_limit_event",
-            "stream_event",
             "system:hook_started"
         ]
     );
@@ -157,7 +155,8 @@ fn parser_skips_unknown_event_and_block_types_and_garbage_lines() {
 fn parser_reports_error_results_as_error_events_and_keeps_the_usage() {
     use AgentEventType::*;
     let (parser, events) = parse("claude-error-execution.jsonl", None);
-    assert_eq!(kinds(&events), vec![Status, Usage, Error]);
+    // the result's text is a 401, which is also an expired login
+    assert_eq!(kinds(&events), vec![Status, Usage, Error, AuthExpired]);
     assert!(
         events[2]
             .text

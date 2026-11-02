@@ -745,6 +745,17 @@ pub enum AgentEventType {
     Usage,
     Error,
     Verdict,
+    /// Partial assistant text (chat typing effect). The whole text still arrives later as a `Message`.
+    Delta,
+    /// A reasoning summary (optional, collapsed in a UI).
+    Thinking,
+    /// The provider refused for lack of quota. `data.resetsAt` (epoch seconds) is the reset time when the CLI gives one
+    /// (the `RateLimited { resets_at }` of the plan).
+    #[serde(rename = "rate_limited")]
+    RateLimited,
+    /// The login or key was rejected.
+    #[serde(rename = "auth_expired")]
+    AuthExpired,
 }
 
 /// Conventions: `usage` is incremental. `status` events carry `data.state` in `running | paused | done | failed`.
@@ -823,6 +834,140 @@ pub struct AgentSpec {
 pub struct AgentSession {
     pub id: String,
     pub kind: AgentKind,
+}
+
+/// What a session may do to the machine. Fixed when the session starts; nothing ever asks a human mid-run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum Access {
+    /// No file edits, no shell: reading and the session's MCP tools only.
+    ReadOnly,
+    /// Edit files and run commands in the working directory; `network` says whether commands may reach the network.
+    Edit { network: bool },
+}
+
+impl Default for Access {
+    /// What every caller got before `Access` existed: edits allowed, network on (an adapter's own options still apply).
+    fn default() -> Self {
+        Access::Edit { network: true }
+    }
+}
+
+/// An MCP server (stdio) handed to the CLI for one session.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct McpServer {
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+}
+
+/// Input of a harness session: [`AgentSpec`] plus access, MCP servers, a system-prompt add-on and the CLI session to resume.
+/// `AgentSpec` maps into it (`SessionSpec::from(&spec)`), with the defaults of "what the adapter's options say".
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSpec {
+    pub workdir: String,
+    pub prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_turns: Option<u32>,
+    #[serde(default)]
+    pub access: Access,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp: Vec<McpServer>,
+    /// Appended to the CLI's own system prompt (Ratchet's role prompt).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_append: Option<String>,
+    /// CLI session id to continue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume: Option<String>,
+}
+
+impl From<&AgentSpec> for SessionSpec {
+    fn from(spec: &AgentSpec) -> Self {
+        Self {
+            workdir: spec.workdir.clone(),
+            prompt: spec.prompt.clone(),
+            model: spec.model.clone(),
+            env: spec.env.clone(),
+            max_turns: spec.max_turns,
+            ..Self::default()
+        }
+    }
+}
+
+impl From<AgentSpec> for SessionSpec {
+    fn from(spec: AgentSpec) -> Self {
+        Self::from(&spec)
+    }
+}
+
+impl SessionSpec {
+    /// The plain spec of one turn (what [`AgentAdapter`] takes).
+    pub fn agent_spec(&self) -> AgentSpec {
+        AgentSpec {
+            workdir: self.workdir.clone(),
+            prompt: self.prompt.clone(),
+            model: self.model.clone(),
+            env: self.env.clone(),
+            max_turns: self.max_turns,
+        }
+    }
+}
+
+/// What a harness can do, so callers pick a path (live session or spawn-per-turn) without knowing the CLI.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "camelCase")]
+pub struct Capabilities {
+    /// Partial text arrives as `Delta` events in one-shot runs.
+    pub streaming: bool,
+    /// `open` holds one CLI process across turns. When false, `open` returns a spawn-per-turn session.
+    pub live_session: bool,
+    /// The CLI can be handed MCP servers per session.
+    pub mcp: bool,
+    /// The CLI reports dollars (otherwise tokens only).
+    pub cost_in_usd: bool,
+    /// Can limit a session to read-only.
+    pub read_only: bool,
+}
+
+/// One CLI conversation held open for chat. All methods take `&self` so that `interrupt` can run while `send` waits for the
+/// turn to end.
+#[async_trait]
+pub trait LiveSession: Send + Sync {
+    /// Send a user message; returns when the turn ends. Events go to the sink given to `Harness::open`. A turn cut short by
+    /// `interrupt` returns `Ok`; a failed turn returns `Err(PortError::AgentFailed)` after its `Error` (and `RateLimited` /
+    /// `AuthExpired`) events.
+    async fn send(&self, text: &str) -> PortResult<()>;
+    /// Stop the turn in progress (no-op when idle). The session stays usable.
+    async fn interrupt(&self) -> PortResult<()>;
+    /// The CLI's session id, once known (for `SessionSpec::resume`).
+    fn session_id(&self) -> Option<String>;
+    /// End the process.
+    async fn close(self: Box<Self>);
+}
+
+/// An [`AgentAdapter`] that can also hold a conversation open.
+#[async_trait]
+pub trait Harness: AgentAdapter {
+    fn capabilities(&self) -> Capabilities;
+    /// Open a live session. The first user message is `spec.prompt` when non-empty (sent before `open` returns); `spec.resume`
+    /// continues an earlier CLI session. Falls back to spawn-per-turn when `capabilities().live_session` is false.
+    async fn open(
+        &self,
+        spec: &SessionSpec,
+        events: SharedEventSink,
+    ) -> PortResult<Box<dyn LiveSession>>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
