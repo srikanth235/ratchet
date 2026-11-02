@@ -587,6 +587,7 @@ impl Engine {
             period: v.period,
             basis: v.basis,
             unit: v.unit.clone(),
+            note: v.note.clone(),
         });
         create.sandbox_id = sandbox_id.as_deref().map(Into::into);
         let (plateau, where_str) = (input.plateau_evals.to_string(), where_.to_string());

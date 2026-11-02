@@ -4,7 +4,7 @@
 //! no data). Everything comes from the ledger: ratchet moves, baselines, spend events and the optimizations'
 //! `objective.value` columns. The value card appears only when some optimization has a value model.
 
-use ratchet_core::enums::ValueBasis;
+use ratchet_core::enums::{Billing, SpendCategory, ValueBasis};
 use ratchet_core::numfmt::to_fixed;
 use ratchet_core::rows::{Optimization, OptimizationSummary, RatchetHistoryEntry};
 
@@ -31,7 +31,12 @@ pub struct Move {
 pub struct SpendAt {
     pub opt: String,
     pub at: i64,
+    /// Real dollars: 0 for tokens on the user's own plan.
     pub usd: f64,
+    pub category: SpendCategory,
+    pub billing: Billing,
+    /// Input plus output tokens the row accounts for.
+    pub tokens: i64,
 }
 
 /// One optimization with everything the KPIs read.

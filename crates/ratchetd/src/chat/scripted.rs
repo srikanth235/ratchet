@@ -296,6 +296,7 @@ impl ScriptedSession {
                 input_tokens: 120 + text.len() as u64,
                 output_tokens: (text.split_whitespace().count() as u64) * 2,
                 cost_usd: Some(0.0004),
+                ..AgentUsage::default()
             }),
         );
         true

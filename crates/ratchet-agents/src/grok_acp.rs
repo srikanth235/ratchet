@@ -214,6 +214,7 @@ impl GrokAcpParser {
                     .or_else(|| u.get("total_cost_usd"))
                     .and_then(Value::as_f64)
                     .filter(|c| c.is_finite() && *c >= 0.0),
+                ..AgentUsage::default()
             };
             events.push(AgentEvent::new(at, AgentEventType::Usage).with_usage(usage));
         }

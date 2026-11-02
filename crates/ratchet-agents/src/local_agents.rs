@@ -19,7 +19,7 @@ use crate::grok::{GrokAdapter, GrokOptions};
 use crate::process::SharedSpawner;
 use crate::runner_loop::LoopTuning;
 use async_trait::async_trait;
-use ratchet_core::enums::AgentKind;
+use ratchet_core::enums::{AgentKind, Billing};
 use ratchet_core::ports::{
     AgentAdapter, AgentSession, AgentSpec, CancellationToken, Clock, EventSink, PortError,
     PortResult, Preflight, RunnerConfig,
@@ -78,6 +78,11 @@ fn merge_cli(common: CliAgentOptions, over: &CliAgentOptions) -> CliAgentOptions
         },
         kill_grace: over.kill_grace.or(common.kill_grace),
         disable_live_session: over.disable_live_session || common.disable_live_session,
+        billing: if over.billing.is_api() {
+            common.billing
+        } else {
+            over.billing
+        },
     }
 }
 
@@ -147,6 +152,12 @@ fn build_local_adapter(
         env: Some(env),
         spawner: opts.spawner.clone(),
         clock: opts.clock.clone(),
+        // The user's own login is already paid for (a subscription); a key is billed per token.
+        billing: if info.auth == HarnessAuth::SignedIn {
+            Billing::Subscription
+        } else {
+            Billing::Api
+        },
         ..CliAgentOptions::default()
     };
     Ok(match kind {
@@ -198,6 +209,8 @@ pub struct RedetectingAdapter {
     kind: AgentKind,
     opts: LocalAdapterOptions,
     inner: tokio::sync::Mutex<Option<Arc<dyn AgentAdapter>>>,
+    /// The billing of `inner`, readable without waiting (the runner asks per event).
+    billing: std::sync::Mutex<Billing>,
 }
 
 impl RedetectingAdapter {
@@ -206,11 +219,19 @@ impl RedetectingAdapter {
             kind,
             opts,
             inner: tokio::sync::Mutex::new(None),
+            billing: std::sync::Mutex::new(Billing::Api),
         }
     }
 
     fn build(&self, opts: &LocalAdapterOptions) -> Result<Arc<dyn AgentAdapter>, String> {
         local_adapter_for(opts, self.kind)
+    }
+
+    fn remember_billing(&self, billing: Billing) {
+        *self
+            .billing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = billing;
     }
 
     async fn current(&self) -> PortResult<Arc<dyn AgentAdapter>> {
@@ -219,6 +240,7 @@ impl RedetectingAdapter {
             return Ok(a.clone());
         }
         let a = self.build(&self.opts).map_err(PortError::Failed)?;
+        self.remember_billing(a.billing());
         *inner = Some(a.clone());
         Ok(a)
     }
@@ -230,6 +252,13 @@ impl AgentAdapter for RedetectingAdapter {
         self.kind
     }
 
+    fn billing(&self) -> Billing {
+        *self
+            .billing
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     async fn preflight(&self) -> PortResult<Preflight> {
         let mut opts = self.opts.clone();
         opts.harnesses = detect_harnesses(&DetectOptions {
@@ -239,6 +268,7 @@ impl AgentAdapter for RedetectingAdapter {
         .await;
         match self.build(&opts) {
             Ok(a) => {
+                self.remember_billing(a.billing());
                 *self.inner.lock().await = Some(a.clone());
                 a.preflight().await
             }

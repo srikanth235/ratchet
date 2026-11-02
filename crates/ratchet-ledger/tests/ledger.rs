@@ -6,8 +6,9 @@ use common::*;
 use ratchet_core::LedgerErrorCode;
 use ratchet_core::config::GuardrailResult;
 use ratchet_core::enums::{
-    AgentKind, AgentStatus, BenchPhase, CandidateVerdict, Direction, EvaluatorKind,
-    OptimizationStatus, SandboxProviderKind, SandboxStatus, SpendCategory, ValueBasis, ValuePeriod,
+    AgentKind, AgentStatus, BenchPhase, Billing, CandidateVerdict, Direction, EvaluatorKind,
+    OptimizationStatus, SandboxProviderKind, SandboxStatus, ScheduleKind, SpendCategory,
+    ValueBasis, ValuePeriod,
 };
 use ratchet_core::ids::{AgentId, CandidateId, OptimizationId, SandboxId};
 use ratchet_core::ledger::{Patch, RecordSandboxInput, SandboxStatusPatch};
@@ -1335,6 +1336,7 @@ async fn stores_pack_evaluator_kind_and_the_value_model() {
         period: ValuePeriod::Month,
         basis: ValueBasis::Measured,
         unit: Some("pt".into()),
+        note: None,
     });
     let o = l.create_optimization(input).await.unwrap();
     assert_eq!(
@@ -1381,6 +1383,7 @@ async fn rejects_non_positive_values_and_bad_columns_at_the_db_level() {
         period: ValuePeriod::Year,
         basis: ValueBasis::Estimated,
         unit: None,
+        note: None,
     });
     assert!(msg(l.create_optimization(input).await).contains("CHECK"));
     let e = raw_error(&l, "insert into optimizations (id, repo, base_ref, metric, direction, min_gain, budget_usd, time_limit_s, status, created_at, config_yaml, evaluator_kind) values ('o','r','m','m','minimize',0.1,1,1,'draft',1,'x','vibes')").await;
@@ -1571,4 +1574,127 @@ async fn candidate_ids_and_money_survive_a_json_round_trip() {
     let back: ratchet_core::rows::Candidate = serde_json::from_value(json).unwrap();
     assert_eq!(back, c);
     let _ = CandidateId::new("x");
+}
+
+// ---------------------------------------------------------------- cost split (P7)
+
+#[tokio::test]
+async fn subscription_usage_is_counted_in_tokens_and_never_in_dollars() {
+    let l = ledger().await;
+    let s = setup(&l).await;
+    // a key: real dollars and tokens
+    let mut api = RecordSpendInput::new(s.opt.id.clone(), SpendCategory::Tokens, 2.0, "tokens:a");
+    api.agent_id = Some(s.claude.id.clone());
+    api.input_tokens = 100;
+    api.output_tokens = 20;
+    let e = l.record_spend(api).await.unwrap();
+    assert_eq!((e.billing, e.usd, e.input_tokens), (Billing::Api, 2.0, 100));
+    // the user's own plan: the dollars the caller passed are dropped, the tokens stay
+    let mut plan = RecordSpendInput::new(s.opt.id.clone(), SpendCategory::Tokens, 9.0, "tokens:b");
+    plan.agent_id = Some(s.claude.id.clone());
+    plan.billing = Some(Billing::Subscription);
+    plan.input_tokens = 4_000;
+    plan.output_tokens = 500;
+    let e = l.record_spend(plan).await.unwrap();
+    assert_eq!(
+        (e.billing, e.usd, e.input_tokens, e.output_tokens),
+        (Billing::Subscription, 0.0, 4_000, 500)
+    );
+    // what the budget guard reads is real dollars only
+    assert_eq!(l.total_spend(&s.opt.id).await.unwrap(), 2.0);
+    let b = l.spend_breakdown(&s.opt.id).await.unwrap();
+    assert_eq!(
+        (b.total, b.by_category.tokens, b.included_tokens),
+        (2.0, 2.0, 4_500)
+    );
+    let summary = l
+        .list_optimizations(None)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|o| o.id == s.opt.id)
+        .unwrap();
+    assert_eq!(summary.spend_usd, 2.0);
+}
+
+#[tokio::test]
+async fn rows_written_before_the_billing_columns_read_as_api_with_no_tokens() {
+    let l = ledger().await;
+    let s = setup(&l).await;
+    // the shape of an insert from before migration 0003: no billing, no token columns
+    sqlx::query(
+        "INSERT INTO spend_events (optimization_id, category, usd, estimated, source, at) VALUES (?1, 'tokens', 1.5, 1, 'old', 5)",
+    )
+    .bind(s.opt.id.as_str())
+    .execute(l.pool())
+    .await
+    .unwrap();
+    let b = l.spend_breakdown(&s.opt.id).await.unwrap();
+    assert_eq!((b.total, b.included_tokens), (1.5, 0));
+    let row = sqlx::query(
+        "SELECT billing, input_tokens, output_tokens FROM spend_events WHERE source = 'old'",
+    )
+    .fetch_one(l.pool())
+    .await
+    .unwrap();
+    assert_eq!(row.get::<String, _>("billing"), "api");
+    assert_eq!(row.get::<i64, _>("input_tokens"), 0);
+    // and the column refuses anything else
+    assert!(
+        raw_error(
+            &l,
+            "INSERT INTO spend_events (optimization_id, category, usd, source, at, billing) VALUES ('x', 'tokens', 0, 's', 1, 'free')"
+        )
+        .await
+        .contains("CHECK")
+    );
+}
+
+#[tokio::test]
+async fn the_value_model_and_the_schedule_can_be_set_and_cleared() {
+    let l = ledger().await;
+    let o = mk_opt(&l).await;
+    assert_eq!(
+        (o.value_usd_per_unit, o.value_note.clone(), o.schedule),
+        (None, None, None)
+    );
+    let v = ValueInput {
+        usd_per_unit: 1200.0,
+        period: ValuePeriod::Year,
+        basis: ValueBasis::Estimated,
+        unit: Some("ms".into()),
+        note: Some("ms saved x checkout volume".into()),
+    };
+    let o = l.set_value_model(&o.id, Some(&v)).await.unwrap();
+    assert_eq!(
+        (
+            o.value_usd_per_unit,
+            o.value_unit.as_deref(),
+            o.value_note.as_deref()
+        ),
+        (Some(1200.0), Some("ms"), Some("ms saved x checkout volume"))
+    );
+    let o = l
+        .set_schedule(&o.id, Some(ScheduleKind::Nightly))
+        .await
+        .unwrap();
+    assert_eq!(o.schedule, Some(ScheduleKind::Nightly));
+    let bad = ValueInput {
+        usd_per_unit: 0.0,
+        ..v
+    };
+    assert!(msg(l.set_value_model(&o.id, Some(&bad)).await).contains("> 0"));
+    let o = l.set_value_model(&o.id, None).await.unwrap();
+    assert_eq!(
+        (
+            o.value_usd_per_unit,
+            o.value_period,
+            o.value_basis,
+            o.value_note
+        ),
+        (None, None, None, None)
+    );
+    let o = l.set_schedule(&o.id, None).await.unwrap();
+    assert_eq!(o.schedule, None);
+    assert!(msg(l.set_schedule(&OptimizationId::new("nope"), None).await).contains("not found"));
 }

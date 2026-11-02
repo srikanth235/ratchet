@@ -60,13 +60,36 @@ async fn the_migration_creates_the_same_schema_as_the_drizzle_one() {
         assert_eq!(a.0, b.0, "type");
         assert_eq!(a.1, b.1, "name");
         assert_eq!(a.2, b.2, "table of {}", a.1);
-        // SQLite keeps the statement text as written
+        // SQLite keeps the statement text as written. Migration 0003 (P7) adds columns to these two tables, so their text
+        // differs from drizzle's by those columns only: checked below.
+        if a.0 == "table" && ["spend_events", "optimizations"].contains(&a.1.as_str()) {
+            continue;
+        }
         assert_eq!(
             a.3.as_deref().map(str::trim),
             b.3.as_deref().map(str::trim),
             "DDL of {}",
             a.1
         );
+    }
+    // every drizzle column is still there, in the same order, with the same type, before the columns 0003 added
+    for table in ["spend_events", "optimizations"] {
+        let cols = |p: &SqlitePool, t: &str| {
+            let q = format!("select name, type from pragma_table_info('{t}') order by cid");
+            let p = p.clone();
+            async move {
+                sqlx::query(sqlx::AssertSqlSafe(q))
+                    .fetch_all(&p)
+                    .await
+                    .unwrap()
+                    .iter()
+                    .map(|r| (r.get::<String, _>("name"), r.get::<String, _>("type")))
+                    .collect::<Vec<_>>()
+            }
+        };
+        let (mine, theirs) = (cols(l.pool(), table).await, cols(&pool, table).await);
+        assert_eq!(&mine[..theirs.len()], &theirs[..], "columns of {table}");
+        assert!(mine.len() > theirs.len(), "0003 added columns to {table}");
     }
     // 10 tables, 10 indexes (the primary-key autoindexes included), 4 triggers
     let count = |t: &str| ours.iter().filter(|r| r.0 == t).count();
@@ -89,8 +112,8 @@ async fn opening_twice_applies_each_migration_once() {
             .await
             .unwrap()
             .get("n");
-        // 0001 (the drizzle schema) and 0002 (chats)
-        assert_eq!(n, 2);
+        // 0001 (the drizzle schema), 0002 (chats) and 0003 (billing, value)
+        assert_eq!(n, 3);
         l.close().await;
     }
 }

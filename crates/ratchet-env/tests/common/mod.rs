@@ -67,6 +67,7 @@ impl ScriptedAgent {
             input_tokens: 1000,
             output_tokens: 1000,
             cost_usd: Some(self.usd),
+            ..AgentUsage::default()
         });
         events(usage);
         Ok(())

@@ -3,7 +3,7 @@
 
 use ratchet_core::config::GuardrailResult;
 use ratchet_core::enums::{
-    AgentKind, AgentStatus, BenchPhase, CandidateVerdict, Direction, OptimizationStatus,
+    AgentKind, AgentStatus, BenchPhase, Billing, CandidateVerdict, Direction, OptimizationStatus,
     SpendCategory,
 };
 use ratchet_core::ids::{AgentId, OptimizationId};
@@ -328,14 +328,20 @@ pub async fn is_ledger_empty(ledger: &Ledger) -> ServiceResult<bool> {
 }
 
 /// Seed a realistic set of optimizations. Call only when the ledger is empty.
-pub async fn seed_demo(ledger: &Ledger, now: i64) -> ServiceResult<()> {
+///
+/// `story`: also count tokens, and bill the Codex optimization to a subscription (its tokens are counted, not charged), the rest to a
+/// key, the way a Mac with one login and one key would.
+pub async fn seed_demo(ledger: &Ledger, now: i64, story: bool) -> ServiceResult<()> {
     for spec in specs() {
-        seed_one(ledger, &spec, now).await?;
+        seed_one(ledger, &spec, now, story).await?;
     }
     Ok(())
 }
 
-async fn seed_one(ledger: &Ledger, spec: &Spec, now: i64) -> ServiceResult<()> {
+/// Blended model price used to turn a seeded token spend into token counts: $9 per million tokens, 80% of them input.
+const SEED_USD_PER_TOKEN: f64 = 9.0e-6;
+
+async fn seed_one(ledger: &Ledger, spec: &Spec, now: i64, story: bool) -> ServiceResult<()> {
     let started = now - spec.started_ago * MIN_MS;
     let yaml = demo_config_yaml(spec.name, spec.metric, spec.direction.as_str(), spec.value);
     let cfg = parse_config(&yaml).map_err(|e| {
@@ -528,9 +534,18 @@ async fn seed_one(ledger: &Ledger, spec: &Spec, now: i64) -> ServiceResult<()> {
             ))
             .await?;
         for (cat, w) in parts {
-            let mut s = RecordSpendInput::new(id.clone(), cat, round_to(w * scale, 4), "seed");
+            let usd = round_to(w * scale, 4);
+            let mut s = RecordSpendInput::new(id.clone(), cat, usd, "seed");
             s.agent_id = Some(agent_id.clone());
             s.at = Some(at + 5 * MIN_MS);
+            if story && cat == SpendCategory::Tokens {
+                let tokens = (usd / SEED_USD_PER_TOKEN).round() as u64;
+                s.input_tokens = tokens * 4 / 5;
+                s.output_tokens = tokens - s.input_tokens;
+                if spec.agents == [AgentKind::Codex] {
+                    s.billing = Some(Billing::Subscription);
+                }
+            }
             ledger.record_spend(s).await?;
         }
     }
@@ -550,4 +565,75 @@ async fn seed_one(ledger: &Ledger, spec: &Spec, now: i64) -> ServiceResult<()> {
             .await?;
     }
     Ok(())
+}
+
+impl super::Inner {
+    /// What the app's mock data shows beyond the ledger rows: schedules, the plain-words half of each value model, a merged pull
+    /// request (the old edge-worker win: delivered) and an open one (ingest: pending). The running search optimization is neither,
+    /// so Home reads "delivered + pending" and the table has a "ready" row's worth of every state.
+    pub(crate) async fn seed_value_story(&self) -> ServiceResult<()> {
+        use ratchet_core::enums::ScheduleKind;
+        use ratchet_ledger::ValueInput;
+        use std::sync::PoisonError;
+
+        let plan: [(&str, ScheduleKind, &str); 3] = [
+            (
+                DEMO_RUNNING_ID,
+                ScheduleKind::Nightly,
+                "ms saved x search volume",
+            ),
+            (
+                "opt_demo_ingest",
+                ScheduleKind::Nightly,
+                "events per second x pipeline value",
+            ),
+            (
+                "opt_demo_edge",
+                ScheduleKind::Weekly,
+                "seconds saved x cold starts",
+            ),
+        ];
+        for (id, schedule, note) in plan {
+            let oid = OptimizationId::new(id);
+            self.ledger.set_schedule(&oid, Some(schedule)).await?;
+            let row = self
+                .ledger
+                .get_optimization(&oid)
+                .await?
+                .ok_or_else(|| ServiceError::not_found("optimization", id))?;
+            if let Some(usd) = row.value_usd_per_unit {
+                self.ledger
+                    .set_value_model(
+                        &oid,
+                        Some(&ValueInput {
+                            usd_per_unit: usd,
+                            period: row
+                                .value_period
+                                .unwrap_or(ratchet_core::enums::ValuePeriod::Year),
+                            basis: row
+                                .value_basis
+                                .unwrap_or(ratchet_core::enums::ValueBasis::Estimated),
+                            unit: row.value_unit.clone(),
+                            note: Some(note.to_owned()),
+                        }),
+                    )
+                    .await?;
+            }
+        }
+        let mut urls = self.pr_urls.lock().unwrap_or_else(PoisonError::into_inner);
+        urls.insert(
+            "opt_demo_ingest".into(),
+            "https://github.com/acme/ingest-service/pull/311".into(),
+        );
+        urls.insert(
+            "opt_demo_edge".into(),
+            "https://github.com/acme/edge-worker/pull/298".into(),
+        );
+        drop(urls);
+        self.merged_prs
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert("opt_demo_edge".into());
+        Ok(())
+    }
 }

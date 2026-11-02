@@ -631,6 +631,147 @@ async fn every_route_round_trips_its_types() {
         .rt("GET", "/v1/overview", "/v1/overview?range=all", None, 200)
         .await;
 
+    // ---- the value story, the value model, the schedule, a merge -----------------------------------------------
+    let home: HomeVm = c.rt("GET", "/v1/home", "/v1/home", None, 200).await;
+    assert_eq!(
+        home.story, ov.story,
+        "Home and Overview tell one value story"
+    );
+    assert_eq!(home.optimizations, ov.spent.optimizations);
+    assert_eq!(ov.phase, OverviewPhase::Wins);
+    assert!(ov.empty_state.is_none());
+    // the seeded ledger has key-billed spend only: no tokens on a plan
+    assert_eq!(ov.spent.included_tokens, 0);
+    assert!((ov.spent.usd - ov.spent.aws_usd - ov.spent.agents_api_usd).abs() < 1e-9);
+
+    let value: ValueModelVm = c
+        .rt(
+            "GET",
+            "/v1/optimizations/{id}/value",
+            "/v1/optimizations/opt_demo_edge/value",
+            None,
+            200,
+        )
+        .await;
+    assert!(value.set && value.unit.as_deref() == Some("s"));
+    let edited: ValueModelVm = c
+        .rt(
+            "PUT",
+            "/v1/optimizations/{id}/value",
+            "/v1/optimizations/opt_demo_edge/value",
+            Some(json!({"usdPerUnit": 1500, "unit": "s", "note": "seconds saved x cold starts"})),
+            200,
+        )
+        .await;
+    assert_eq!(edited.usd_per_unit, Some(1500.0));
+    assert_eq!(
+        edited.summary,
+        "$1,500 per s a year \u{b7} estimated \u{b7} seconds saved x cold starts"
+    );
+    c.fails(
+        "PUT",
+        "/v1/optimizations/opt_demo_edge/value",
+        Some(json!({"usdPerUnit": 0})),
+        400,
+        ErrorCode::InvalidRequest,
+    )
+    .await;
+    let cleared: ValueModelVm = c
+        .rt(
+            "DELETE",
+            "/v1/optimizations/{id}/value",
+            "/v1/optimizations/opt_demo_edge/value",
+            None,
+            200,
+        )
+        .await;
+    assert!(!cleared.set && cleared.summary == "Not set");
+    let _: ValueModelVm = c
+        .rt(
+            "PUT",
+            "/v1/optimizations/{id}/value",
+            "/v1/optimizations/opt_demo_edge/value",
+            Some(
+                serde_json::to_value(&SetValueModelInput {
+                    usd_per_unit: value.usd_per_unit.unwrap(),
+                    period: value.period,
+                    basis: value.basis,
+                    unit: value.unit.clone(),
+                    note: value.note.clone(),
+                })
+                .unwrap(),
+            ),
+            200,
+        )
+        .await;
+
+    let sched: ScheduleVm = c
+        .rt(
+            "GET",
+            "/v1/optimizations/{id}/schedule",
+            "/v1/optimizations/opt_demo_edge/schedule",
+            None,
+            200,
+        )
+        .await;
+    assert_eq!((sched.schedule, sched.runs_next_30_days), (None, None));
+    let sched: ScheduleVm = c
+        .rt(
+            "PUT",
+            "/v1/optimizations/{id}/schedule",
+            "/v1/optimizations/opt_demo_edge/schedule",
+            Some(json!({"schedule": "weekly"})),
+            200,
+        )
+        .await;
+    assert_eq!(
+        (sched.summary.as_str(), sched.runs_next_30_days),
+        ("Once a week", Some(4))
+    );
+    let sched: ScheduleVm = c
+        .rt(
+            "PUT",
+            "/v1/optimizations/{id}/schedule",
+            "/v1/optimizations/opt_demo_edge/schedule",
+            Some(json!({"schedule": null})),
+            200,
+        )
+        .await;
+    assert_eq!(sched.schedule, None);
+    c.fails(
+        "GET",
+        "/v1/optimizations/nope/value",
+        None,
+        404,
+        ErrorCode::NotFound,
+    )
+    .await;
+
+    c.fails(
+        "POST",
+        "/v1/optimizations/opt_demo_web/pull-request/merged",
+        None,
+        409,
+        ErrorCode::Conflict,
+    )
+    .await;
+    let merged: PullRequestVm = c
+        .rt(
+            "POST",
+            "/v1/optimizations/{id}/pull-request/merged",
+            &format!("/v1/optimizations/{demo}/pull-request/merged"),
+            None,
+            200,
+        )
+        .await;
+    assert!(
+        merged
+            .url
+            .starts_with("https://github.com/acme/search-api/pull/")
+    );
+    let home = c.d.http.get_json("/v1/home").await;
+    assert_eq!(home["pullRequests"]["merged"], 1);
+
     let list: ConnectorsVm = c
         .rt("GET", "/v1/connectors", "/v1/connectors", None, 200)
         .await;

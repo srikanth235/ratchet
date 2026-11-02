@@ -264,6 +264,38 @@ pub trait AppService: Send + Sync + 'static {
     // ---- overview ----------------------------------------------------------------------------------------
     /// Spent, value locked in, return, the staircase, what needs the user and the table, over `range`.
     async fn overview(&self, range: OverviewRange) -> ServiceResult<OverviewVm>;
+    /// The line above the composer: the Overview's value story, computed by the same call, plus a few counts.
+    async fn home(&self, range: OverviewRange) -> ServiceResult<HomeVm> {
+        Ok(crate::views::overview::home_of(self.overview(range).await?))
+    }
+
+    // ---- value model, schedule, pull request state -------------------------------------------------------
+    /// The Value row of an optimization's settings.
+    async fn get_value_model(&self, _id: &str) -> ServiceResult<ValueModelVm> {
+        unsupported("a value model")
+    }
+    /// Replace the value model; the wins already in the ledger are valued with it from now on.
+    async fn set_value_model(
+        &self,
+        _id: &str,
+        _input: SetValueModelInput,
+    ) -> ServiceResult<ValueModelVm> {
+        unsupported("a value model")
+    }
+    /// Remove the value model.
+    async fn clear_value_model(&self, _id: &str) -> ServiceResult<ValueModelVm> {
+        unsupported("a value model")
+    }
+    async fn get_schedule(&self, _id: &str) -> ServiceResult<ScheduleVm> {
+        unsupported("a schedule")
+    }
+    async fn set_schedule(&self, _id: &str, _input: SetScheduleInput) -> ServiceResult<ScheduleVm> {
+        unsupported("a schedule")
+    }
+    /// Record that the optimization's pull request was merged: its wins count as delivered from then on. 409 without a pull request.
+    async fn mark_pull_request_merged(&self, _id: &str) -> ServiceResult<PullRequestVm> {
+        unsupported("recording a merge")
+    }
 
     // ---- connectors --------------------------------------------------------------------------------------
     /// Every saved connector (detected CLI logins included), the device flow in progress and the keychain state.

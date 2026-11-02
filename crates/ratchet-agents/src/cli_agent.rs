@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use ratchet_core::enums::Billing;
 use ratchet_core::ports::mock::SystemClock;
 use ratchet_core::ports::{AgentSpec, CancellationToken, Clock};
 use serde_json::{Map, Value};
@@ -27,6 +28,9 @@ pub struct CliAgentOptions {
     pub kill_grace: Option<Duration>,
     /// Never hold a CLI process open for chat: `Harness::open` returns a spawn-per-turn session (start, then resume).
     pub disable_live_session: bool,
+    /// How the CLI's tokens are paid for: `Subscription` when it runs on the user's own login (detection said `signed-in`), else
+    /// `Api` (a key).
+    pub billing: Billing,
 }
 
 /// `text` cut to `max` characters with a note of how much was dropped.
@@ -96,6 +100,7 @@ pub struct CliAgent {
     pub extra_args: Vec<String>,
     pub kill_grace: Option<Duration>,
     pub disable_live_session: bool,
+    pub billing: Billing,
 }
 
 impl CliAgent {
@@ -108,6 +113,7 @@ impl CliAgent {
             extra_args: options.extra_args,
             kill_grace: options.kill_grace,
             disable_live_session: options.disable_live_session,
+            billing: options.billing,
         }
     }
 

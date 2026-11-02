@@ -294,3 +294,53 @@ runner loop's turns. On the daemon:
 cloud-only run no longer holds the Mac. The daemon's hook takes an `IOPMAssertion` (`PreventUserIdleSystemSleep`, FFI in
 `ratchetd/src/power.rs`; `caffeinate -i -w <pid>` only if the OS refuses) exactly while `active`. The held state is published as
 `keepingAwake` on `run-active` events and `engine.keepingAwake` on every snapshot, settings and health answer.
+
+## P7 notes (cost split, value story, Overview)
+
+Code: `ratchet-core/src/enums.rs` (`Billing`, `ScheduleKind`), `ratchet-ledger/migrations/0003_billing_value.sql`, `ratchet-agents/src/{local_agents,runner_loop}.rs`
+(stamping), `ratchet-engine/src/tick.rs` (recording), `ratchetd/src/views/{overview,value}.rs` and `api/{overview,value}.rs` (the numbers and
+their shapes). Tests: `ratchetd/tests/api/value_story.rs`, `ratchet-ledger/tests/ledger.rs`, `ratchet-engine/tests/engine/core_loop.rs`,
+`ratchet-agents/tests/runner_loop.rs`, `ratchet-cli/tests/cli/daemon.rs`.
+
+### Billing
+
+- `AgentUsage.billing` (`api` default, left off the wire; `subscription`). `AgentAdapter::billing()`: the local adapters answer
+  `subscription` when detection says `signed-in`, `api` for a key; the runner loop stamps it on every `Usage` it forwards (a fallback to
+  another harness changes the stamp with the slot). Cloud runners use keys: `api`.
+- Ledger: `spend_events.billing` (`api`|`subscription`, default `api`), `input_tokens`, `output_tokens`. A `subscription` row is stored
+  with `usd = 0` whatever the caller passed. `total_spend`, the summaries and `spend_breakdown` sum `billing = 'api'` only;
+  `SpendBreakdown.includedTokens` counts the plan's tokens. The tick loop writes one row per billing per poll; the runner loop's own
+  budget ignores subscription usage. Both budget guards therefore count real dollars only.
+
+### API
+
+`GET /v1/overview` (`OverviewVm`) gained:
+
+| Field | Meaning |
+|---|---|
+| `story` | `ValueStory`: `delivered {usdPerYear, wins}` (merged pull requests), `pending {usdPerYear, wins, pullRequests}` (open ones), `readyToShip` (no pull request yet), `spentUsd`, `return` (delivered ÷ spentUsd, null until both), `paybackDays`, `basis`, `line` ("$12.5k delivered + $2.9k pending · 68×") |
+| `spent` | `usd` = `awsUsd` + `agentsApiUsd`; `includedTokens`; `detail` ("AWS $121 · agents included in your plan (2.4M tokens)") |
+| `forecast` | next 30 days: `scheduledRuns`, `unforecast` (on-push), `expectedUsd` = `expectedAwsUsd` + `expectedAgentsApiUsd`, `expectedIncludedTokens`, `hardCapUsd` (= `spent.budgetUsd`), `line` |
+| `chart` | points `{at, spentUsd, deliveredUsdPerYear, pendingUsdPerYear, readyUsdPerYear}` from `from` to `to` (≤120 spend buckets plus one per win) |
+| `phase`, `emptyState` | `empty` / `no-wins` / `wins`; `{title, body}` when not `wins` |
+| `rows[]` | `pullRequest {url, merged}`, `valueState` (`delivered`/`pending`/`ready`/`none`), `pending`, `return`, `valueModel`, `spentUsd` in real dollars |
+| `wins[]` | `state` per win |
+
+`value` and `returnOnSpend` stay as "every verified win, merged or not"; the screens show `story`. `GET /v1/home?range=` (`HomeVm`) is
+`story` from the same call plus `optimizations`, `pullRequests {open, merged}`, `failed`: identical numbers by construction (`home_of`).
+
+Value model (the Value row): `GET|PUT|DELETE /v1/optimizations/{id}/value`, `ValueModelVm {set, metric, direction, usdPerUnit, period, unit,
+basis, note, summary}`; PUT replaces the model (`usdPerUnit > 0`, `note` ≤ 200, `unit` ≤ 24). A win's value is computed from the model, so
+changing it re-values every win. Schedule: `GET|PUT /v1/optimizations/{id}/schedule` (`once|nightly|weekdays|weekly|on-push`, `null`
+clears). Merge: `POST /v1/optimizations/{id}/pull-request/merged` (409 without a pull request). Nothing polls GitHub for merges yet, so a
+real daemon shows `delivered = 0` until this is called (the engine/P8 can call it later).
+
+CLI: `ratchet home`, `value show|set|clear` (`clear` needs `--yes`; `set` keeps the flags you leave out), `schedule show|set --every|clear`,
+`pr-merged <id>`; `overview` prints the story and the forecast. Each is also an MCP tool. Simulation: `SimOptions.seed_value_story` (on in
+the daemon binary, off for the older tests).
+
+### What the app must change (P5b / F2)
+
+Read `story`, `spent.detail` and `forecast` instead of computing from `value`; draw `chart` (dashed `pendingUsdPerYear`); show
+`emptyState` for `phase != wins`; per row show `pending` dimmed with "pending"; link the footnote "Edit value" to the Value row
+(`/value`), and a Schedule row (`/schedule`); Home header from `GET /v1/home`. `ValueModelVm`/`ScheduleVm` need client mapping.

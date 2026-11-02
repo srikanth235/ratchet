@@ -5,7 +5,9 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use ratchet_core::enums::{CandidateVerdict, Direction, OptimizationStatus, SpendCategory};
+use ratchet_core::enums::{
+    Billing, CandidateVerdict, Direction, OptimizationStatus, SpendCategory,
+};
 use ratchet_core::ids::{AgentId, OptimizationId};
 use ratchet_core::numfmt::to_fixed;
 use ratchet_core::ports::{Clock, FileDiff};
@@ -25,12 +27,17 @@ use crate::service::{ServiceError, ServiceResult};
 /// The pull request URL of an optimization (state the ledger does not hold).
 pub type PrUrlLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
+/// Has the optimization's pull request been merged? Asked only for optimizations that have one. Without a lookup nothing is merged
+/// (every pull request counts as open), so the numbers never claim value that was not delivered.
+pub type PrMergedLookup = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
 /// Read-only view builders over a [`Ledger`].
 #[derive(Clone)]
 pub struct LedgerViews {
     pub ledger: Ledger,
     pub clock: Arc<dyn Clock>,
     pub pr_url: PrUrlLookup,
+    pub pr_merged: PrMergedLookup,
 }
 
 fn opt_id(id: &str) -> OptimizationId {
@@ -138,14 +145,21 @@ impl LedgerViews {
             ledger,
             clock,
             pr_url,
+            pr_merged: Arc::new(|_| false),
         }
+    }
+
+    /// Tell the views which pull requests are merged (see [`PrMergedLookup`]).
+    pub fn with_pr_merged(mut self, pr_merged: PrMergedLookup) -> Self {
+        self.pr_merged = pr_merged;
+        self
     }
 
     pub fn now(&self) -> i64 {
         self.clock.now()
     }
 
-    async fn require(&self, id: &str) -> ServiceResult<Optimization> {
+    pub(crate) async fn require(&self, id: &str) -> ServiceResult<Optimization> {
         self.ledger
             .get_optimization(&opt_id(id))
             .await?
@@ -213,16 +227,28 @@ impl LedgerViews {
 
     /// Every spend event as `(optimization, at, usd)`.
     pub async fn all_spend(&self) -> ServiceResult<Vec<SpendAt>> {
-        let rows = sqlx::query("SELECT optimization_id, at, usd FROM spend_events ORDER BY at, id")
-            .fetch_all(self.ledger.pool())
-            .await
-            .map_err(db)?;
+        let rows = sqlx::query(
+            "SELECT optimization_id, at, usd, category, billing, input_tokens + output_tokens AS tokens FROM spend_events \
+             ORDER BY at, id",
+        )
+        .fetch_all(self.ledger.pool())
+        .await
+        .map_err(db)?;
         Ok(rows
             .iter()
             .map(|r| SpendAt {
                 opt: r.get::<String, _>("optimization_id"),
                 at: r.get::<i64, _>("at"),
                 usd: r.get::<f64, _>("usd"),
+                category: r
+                    .get::<String, _>("category")
+                    .parse()
+                    .unwrap_or(SpendCategory::Experiment),
+                billing: r
+                    .get::<String, _>("billing")
+                    .parse()
+                    .unwrap_or(Billing::Api),
+                tokens: r.get::<i64, _>("tokens"),
             })
             .collect())
     }

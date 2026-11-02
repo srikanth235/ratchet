@@ -39,6 +39,8 @@ struct Persisted {
     /// Live-mode settings other than the profile (that lives in `aws_profile`).
     live: PersistedLive,
     pull_requests: BTreeMap<String, String>,
+    /// Optimizations whose pull request was recorded as merged (their wins count as delivered).
+    merged_pull_requests: std::collections::BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -260,6 +262,15 @@ impl SettingsStore {
         self.data()
             .pull_requests
             .insert(id.to_owned(), url.to_owned());
+        self.save();
+    }
+
+    pub fn pr_merged(&self, id: &str) -> bool {
+        self.data().merged_pull_requests.contains(id)
+    }
+
+    pub fn set_pr_merged(&self, id: &str) {
+        self.data().merged_pull_requests.insert(id.to_owned());
         self.save();
     }
 

@@ -21,7 +21,7 @@ pub use tokio_util::sync::CancellationToken;
 use crate::bench::calibrate::Calibration;
 use crate::config::{GuardrailResult, RatchetConfig};
 use crate::enums::{
-    AgentKind, AgentsWhere, CandidateVerdict, InstanceRole, Mode, SandboxProviderKind,
+    AgentKind, AgentsWhere, Billing, CandidateVerdict, InstanceRole, Mode, SandboxProviderKind,
     SandboxStatus, SpendCategory,
 };
 use crate::ids::{AgentId, CandidateId, OptimizationId};
@@ -732,6 +732,10 @@ pub struct AgentUsage {
     pub output_tokens: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    /// Who pays for the tokens: a key (`api`, the default and left off the wire) or the user's own plan (`subscription`:
+    /// counted, never charged). Stamped by the runner from detection (a login is `subscription`, a key is `api`).
+    #[serde(default, skip_serializing_if = "Billing::is_api")]
+    pub billing: Billing,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -986,6 +990,11 @@ pub struct Preflight {
 #[async_trait]
 pub trait AgentAdapter: Send + Sync {
     fn kind(&self) -> AgentKind;
+    /// How this adapter's tokens are paid for right now: `Subscription` for the user's own signed-in plan, `Api` for a key (the
+    /// default). The runner stamps it on every `Usage` event it forwards.
+    fn billing(&self) -> Billing {
+        Billing::Api
+    }
     async fn preflight(&self) -> PortResult<Preflight>;
     /// Run one agent turn to completion, streaming events to `events`.
     async fn start(

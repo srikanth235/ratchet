@@ -403,7 +403,12 @@ impl RealService {
             let s = settings.clone();
             Arc::new(move |id| s.pr_url(id))
         };
-        let views = LedgerViews::new(ledger.clone(), Arc::clone(&clock), pr_urls);
+        let pr_merged: crate::views::PrMergedLookup = {
+            let s = settings.clone();
+            Arc::new(move |id| s.pr_merged(id))
+        };
+        let views =
+            LedgerViews::new(ledger.clone(), Arc::clone(&clock), pr_urls).with_pr_merged(pr_merged);
         let (tx, _) = broadcast::channel(1024);
         let configs: Arc<Mutex<HashMap<String, serde_json::Value>>> = Arc::default();
 
@@ -1565,6 +1570,39 @@ impl AppService for RealService {
             .map_err(service_error)?;
         self.0.settings.set_pr_url(id, &pr.url);
         Ok(PullRequestVm { url: pr.url })
+    }
+
+    async fn mark_pull_request_merged(&self, id: &str) -> ServiceResult<PullRequestVm> {
+        self.0.views.value_model(id).await?; // 404 for an unknown optimization
+        let url = self.0.settings.pr_url(id).ok_or_else(|| {
+            ServiceError::Conflict("this optimization has no pull request yet".into())
+        })?;
+        self.0.settings.set_pr_merged(id);
+        Ok(PullRequestVm { url })
+    }
+
+    async fn get_value_model(&self, id: &str) -> ServiceResult<ValueModelVm> {
+        self.0.views.value_model(id).await
+    }
+
+    async fn set_value_model(
+        &self,
+        id: &str,
+        input: SetValueModelInput,
+    ) -> ServiceResult<ValueModelVm> {
+        self.0.views.set_value_model(id, input).await
+    }
+
+    async fn clear_value_model(&self, id: &str) -> ServiceResult<ValueModelVm> {
+        self.0.views.clear_value_model(id).await
+    }
+
+    async fn get_schedule(&self, id: &str) -> ServiceResult<ScheduleVm> {
+        self.0.views.schedule(id).await
+    }
+
+    async fn set_schedule(&self, id: &str, input: SetScheduleInput) -> ServiceResult<ScheduleVm> {
+        self.0.views.set_schedule(id, input).await
     }
 
     async fn report(&self, id: &str) -> ServiceResult<ReportVm> {

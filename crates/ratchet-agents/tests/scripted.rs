@@ -275,7 +275,8 @@ async fn usage_events_carry_the_scripted_tokens_and_a_believable_cost() {
         AgentUsage {
             input_tokens: 80_000,
             output_tokens: 4_000,
-            cost_usd: Some(price_usage(80_000, 4_000))
+            cost_usd: Some(price_usage(80_000, 4_000)),
+            ..AgentUsage::default()
         }
     );
     assert!((price_usage(80_000, 4_000) - 0.3).abs() < 0.01);

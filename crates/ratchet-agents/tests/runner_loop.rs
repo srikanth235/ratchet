@@ -1,6 +1,6 @@
 mod common;
 
-use ratchet_core::enums::{AgentKind, CandidateVerdict};
+use ratchet_core::enums::{AgentKind, Billing, CandidateVerdict};
 use ratchet_core::ports::mock::SystemClock;
 use ratchet_core::ports::{
     AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
@@ -394,6 +394,7 @@ impl AgentAdapter for TokensOnly {
                     input_tokens: u.input_tokens,
                     output_tokens: u.output_tokens,
                     cost_usd: None,
+                    ..AgentUsage::default()
                 };
             }
             on_event(e)
@@ -415,6 +416,48 @@ impl AgentAdapter for TokensOnly {
 }
 
 impl Received for TokensOnly {
+    fn received(&self) -> Vec<String> {
+        self.0.received()
+    }
+}
+
+/// A harness that runs on the user's own login: whatever it reports is covered by the plan.
+struct OnPlan(Arc<ScriptedAgent>);
+
+#[async_trait]
+impl AgentAdapter for OnPlan {
+    fn kind(&self) -> AgentKind {
+        self.0.kind()
+    }
+    fn billing(&self) -> Billing {
+        Billing::Subscription
+    }
+    async fn preflight(&self) -> PortResult<Preflight> {
+        self.0.preflight().await
+    }
+    async fn start(
+        &self,
+        spec: &AgentSpec,
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<AgentSession> {
+        self.0.start(spec, on_event, cancel).await
+    }
+    async fn resume(
+        &self,
+        session: &mut AgentSession,
+        spec: &AgentSpec,
+        message: &str,
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<()> {
+        self.0
+            .resume(session, spec, message, on_event, cancel)
+            .await
+    }
+}
+
+impl Received for OnPlan {
     fn received(&self) -> Vec<String> {
         self.0.received()
     }
@@ -805,6 +848,52 @@ async fn budget_can_be_estimated_from_tokens_when_the_adapter_reports_no_cost() 
     let res = run.result().await;
     assert_eq!(res.reason, RunnerStopReason::Budget);
     assert!((res.spend_usd - 3.0).abs() < 1e-9);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn usage_on_a_subscription_is_stamped_and_never_counts_against_the_budget() {
+    // the same $0.60 turn that stops a key-billed loop at a $0.50 budget (see the budget test above)
+    let inner = Arc::new(ScriptedAgent::new(script(vec![
+        vec![write("a.txt", "1\n"), usage(90_000, 5_000, Some(0.6))],
+        vec![write("b.txt", "2\n")],
+    ])));
+    let adapter = Arc::new(OnPlan(inner));
+    let mut run = Launch::default()
+        .agent(adapter.clone(), adapter)
+        .config(|c| c["budgetUsd"] = 0.5.into())
+        .go(script(vec![]))
+        .await;
+    let res = run.result().await;
+    assert_ne!(res.reason, RunnerStopReason::Budget);
+    assert_eq!(res.spend_usd, 0.0, "tokens on a plan are not dollars");
+    assert_eq!(
+        res.candidates, 2,
+        "the loop kept going past the dollar budget"
+    );
+    let stamped: Vec<Billing> = run
+        .events()
+        .iter()
+        .filter_map(|e| e.usage.as_ref().map(|u| u.billing))
+        .collect();
+    assert!(!stamped.is_empty() && stamped.iter().all(|b| *b == Billing::Subscription));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn usage_on_a_key_stays_api_billed() {
+    let mut run = Launch::default()
+        .go(script(vec![vec![
+            write("a.txt", "1\n"),
+            usage(1_000, 100, Some(0.01)),
+        ]]))
+        .await;
+    let res = run.result().await;
+    assert!((res.spend_usd - 0.01).abs() < 1e-9);
+    assert!(
+        run.events()
+            .iter()
+            .filter_map(|e| e.usage.as_ref())
+            .all(|u| u.billing == Billing::Api)
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

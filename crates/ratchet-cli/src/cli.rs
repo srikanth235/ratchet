@@ -145,11 +145,29 @@ pub enum Command {
         /// owner/name, or a local folder.
         target: String,
     },
-    /// Overview: spent, value locked in, return, what needs you (provisional).
+    /// Overview: what was spent (AWS, agents), what is delivered and pending, the return, the next 30 days, what needs you
+    /// (provisional).
     Overview {
         #[arg(long, value_enum, default_value_t = OverviewRangeArg::Days90)]
         range: OverviewRangeArg,
     },
+    /// Home: the line above the composer, the same value story as `overview` (provisional).
+    Home {
+        #[arg(long, value_enum, default_value_t = OverviewRangeArg::Days90)]
+        range: OverviewRangeArg,
+    },
+    /// What an improvement is worth: the Value row of an optimization. Wins are valued with it; change it and every win is re-valued.
+    Value {
+        #[command(subcommand)]
+        action: ValueCmd,
+    },
+    /// How often an optimization runs by itself (what the Overview's "Next 30 days" counts).
+    Schedule {
+        #[command(subcommand)]
+        action: ScheduleCmd,
+    },
+    /// Record that an optimization's pull request was merged: its wins count as delivered from then on.
+    PrMerged { id: String },
     /// Saved GitHub / AWS / agent connectors (provisional).
     Connectors,
     /// Serve every command above as an MCP tool on stdio, for clients with no shell.
@@ -346,6 +364,72 @@ pub struct EventsArgs {
     /// Stop after this long.
     #[arg(long, value_parser = parse_duration, value_name = "DURATION")]
     pub timeout: Option<u64>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ValueCmd {
+    /// The value model: dollars per unit of improvement, the unit, the period, the basis and the words behind it.
+    Show { optimization: String },
+    /// Set the value model. Flags you leave out keep their current value, so `--note "..."` alone changes only the words.
+    ///
+    /// Example: ratchet value set opt_ab12 --usd-per-unit 1200 --unit ms --note "ms saved x checkout volume"
+    Set {
+        optimization: String,
+        /// Dollars per one unit of improvement, per period (greater than 0). Required the first time.
+        #[arg(long, value_parser = finite_number, allow_hyphen_values = true, value_name = "USD")]
+        usd_per_unit: Option<f64>,
+        /// What the dollars are quoted for (default year).
+        #[arg(long, value_enum)]
+        period: Option<PeriodArg>,
+        /// What one unit is called ("ms").
+        #[arg(long)]
+        unit: Option<String>,
+        /// `estimated` until measured in production (default estimated).
+        #[arg(long, value_enum)]
+        basis: Option<BasisArg>,
+        /// The model in plain words ("ms saved x checkout volume"). An empty string removes it.
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// Remove the value model: the wins lose their dollar value. Needs --yes.
+    Clear { optimization: String },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ScheduleCmd {
+    /// How often the optimization runs by itself, and how many runs that is in the next 30 days.
+    Show { optimization: String },
+    /// Set the schedule.
+    Set {
+        optimization: String,
+        /// once | nightly | weekdays | weekly | on-push
+        #[arg(long, value_enum, required = true)]
+        every: ScheduleArg,
+    },
+    /// Remove the schedule: runs start only by hand.
+    Clear { optimization: String },
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeriodArg {
+    Month,
+    Year,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BasisArg {
+    Estimated,
+    Measured,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScheduleArg {
+    Once,
+    Nightly,
+    Weekdays,
+    Weekly,
+    #[value(name = "on-push")]
+    OnPush,
 }
 
 #[derive(Subcommand, Debug)]
