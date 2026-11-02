@@ -70,6 +70,7 @@ fn merge_cli(common: CliAgentOptions, over: &CliAgentOptions) -> CliAgentOptions
             over.extra_args.clone()
         },
         kill_grace: over.kill_grace.or(common.kill_grace),
+        disable_live_session: over.disable_live_session || common.disable_live_session,
     }
 }
 

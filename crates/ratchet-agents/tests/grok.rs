@@ -177,11 +177,26 @@ fn adapter_for(plan: FakeProcessSpec, env: &[(&str, &str)]) -> (FakeSpawner, Gro
 const KEYED: [(&str, &str); 2] = [("XAI_API_KEY", "xai-key"), ("PATH", "/bin")];
 
 #[tokio::test]
-async fn start_runs_grok_headless_with_the_prompt_on_stdin_and_returns_the_session_id() {
-    let (fake, adapter) = adapter_for(
-        FakeProcessSpec::stdout(fixture("grok-success.jsonl")).with_chunk_size(40),
-        &KEYED,
-    );
+async fn start_runs_grok_headless_with_the_prompt_in_a_file_and_returns_the_session_id() {
+    // `grok -p -` does not read stdin; the prompt goes in a temp `--prompt-file`, read here while the fake "runs"
+    let prompts = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let seen = prompts.clone();
+    let fake = FakeSpawner::with_plan(move |call, _| {
+        let at = call.args.iter().position(|a| a == "--prompt-file").unwrap();
+        seen.lock()
+            .unwrap()
+            .push(std::fs::read_to_string(&call.args[at + 1]).unwrap());
+        FakeProcessSpec::stdout(fixture("grok-success.jsonl")).with_chunk_size(40)
+    });
+    let adapter = GrokAdapter::new(GrokOptions {
+        cli: CliAgentOptions {
+            spawner: Some(Arc::new(fake.clone())),
+            env: Some(env_of(&KEYED)),
+            kill_grace: Some(Duration::from_millis(20)),
+            ..CliAgentOptions::default()
+        },
+        ..GrokOptions::default()
+    });
     let (events, on_event) = collect();
     let mut s = spec();
     s.model = Some("grok-4.7".into());
@@ -198,11 +213,10 @@ async fn start_runs_grok_headless_with_the_prompt_on_stdin_and_returns_the_sessi
     );
     let call = fake.call(0);
     assert_eq!(call.command, "grok");
+    assert_eq!(call.args[0], "--prompt-file");
     assert_eq!(
-        call.args,
+        call.args[2..],
         [
-            "-p",
-            "-",
             "--output-format",
             "streaming-json",
             "--permission-mode",
@@ -211,9 +225,12 @@ async fn start_runs_grok_headless_with_the_prompt_on_stdin_and_returns_the_sessi
             "grok-4.7"
         ]
     );
-    assert_eq!(call.stdin, "make it faster");
+    assert_eq!(*prompts.lock().unwrap(), ["make it faster"]);
+    assert_eq!(call.stdin, "");
     assert_eq!(call.options.cwd.to_str(), Some("/work/agent-2"));
     assert_eq!(call.options.env["XAI_API_KEY"], "xai-key");
+    // both names the CLI may read
+    assert_eq!(call.options.env["GROK_CODE_XAI_API_KEY"], "xai-key");
     assert_eq!(
         events.lock().unwrap().last().unwrap().event_type,
         AgentEventType::Usage
@@ -222,10 +239,24 @@ async fn start_runs_grok_headless_with_the_prompt_on_stdin_and_returns_the_sessi
 
 #[tokio::test]
 async fn resume_passes_the_session_id_to_resume() {
-    let (fake, adapter) = adapter_for(
-        FakeProcessSpec::stdout(fixture("grok-resume.jsonl")),
-        &KEYED,
-    );
+    let prompts = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let seen = prompts.clone();
+    let fake = FakeSpawner::with_plan(move |call, _| {
+        let at = call.args.iter().position(|a| a == "--prompt-file").unwrap();
+        seen.lock()
+            .unwrap()
+            .push(std::fs::read_to_string(&call.args[at + 1]).unwrap());
+        FakeProcessSpec::stdout(fixture("grok-resume.jsonl"))
+    });
+    let adapter = GrokAdapter::new(GrokOptions {
+        cli: CliAgentOptions {
+            spawner: Some(Arc::new(fake.clone())),
+            env: Some(env_of(&KEYED)),
+            kill_grace: Some(Duration::from_millis(20)),
+            ..CliAgentOptions::default()
+        },
+        ..GrokOptions::default()
+    });
     let mut session = AgentSession {
         id: SID.into(),
         kind: AgentKind::Grok,
@@ -242,10 +273,10 @@ async fn resume_passes_the_session_id_to_resume() {
         .await
         .unwrap();
     let call = fake.call(0);
-    assert_eq!(call.args[..2], ["-p", "-"]);
+    assert_eq!(call.args[0], "--prompt-file");
     let at = call.args.iter().position(|a| a == "--resume").unwrap();
     assert_eq!(call.args[at + 1], SID);
-    assert_eq!(call.stdin, "verdict: verified");
+    assert_eq!(*prompts.lock().unwrap(), ["verdict: verified"]);
     let events = events.lock().unwrap();
     assert!(
         events
@@ -282,11 +313,10 @@ async fn permission_mode_sandbox_and_turn_limit_are_configurable() {
         .unwrap();
     let call = fake.call(0);
     assert_eq!(call.command, "/usr/local/bin/grok");
+    assert_eq!(call.args[0], "--prompt-file");
     assert_eq!(
-        call.args,
+        call.args[2..],
         [
-            "-p",
-            "-",
             "--output-format",
             "streaming-json",
             "--permission-mode",

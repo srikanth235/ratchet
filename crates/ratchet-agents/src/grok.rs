@@ -1,16 +1,22 @@
 //! Grok adapter: spawns `grok -p - --output-format streaming-json` and maps its JSONL to `AgentEvent`s.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
 
+use crate::classify::{FailureKind, FailureOnce, classify_text};
 use crate::cli_agent::{CliAgent, CliAgentOptions, as_record, num, str_of, truncate};
+use crate::grok_acp::GrokLiveSession;
+use crate::harness::{Scratch, TurnRunner, open_with_fallback};
 use crate::process::LineSplitter;
 use ratchet_core::enums::AgentKind;
 use ratchet_core::ports::{
-    AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
-    CancellationToken, EventSink, PortError, PortResult, Preflight,
+    Access, AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
+    CancellationToken, Capabilities, EventSink, Harness, LiveSession, McpServer, PortError,
+    PortResult, Preflight, SessionSpec, SharedEventSink,
 };
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -35,6 +41,10 @@ pub struct GrokStreamParser {
     text: String,
     started: HashSet<String>,
     finished: HashSet<String>,
+    failure: FailureOnce,
+    /// Report each `text` / `thought` line as a `Delta` / `Thinking` event too (chat); optimization runs only want the joined
+    /// `Message`. Default off.
+    pub emit_deltas: bool,
     now: Box<dyn Fn() -> i64 + Send + Sync>,
 }
 
@@ -49,8 +59,15 @@ impl GrokStreamParser {
             text: String::new(),
             started: HashSet::new(),
             finished: HashSet::new(),
+            failure: FailureOnce::default(),
+            emit_deltas: false,
             now: Box::new(now),
         }
+    }
+
+    /// How the turn failed, when it was a rate limit or an expired login.
+    pub fn failure(&self) -> Option<FailureKind> {
+        self.failure.kind()
     }
 
     pub fn push(&mut self, chunk: &str) -> Vec<AgentEvent> {
@@ -92,16 +109,27 @@ impl GrokStreamParser {
         };
         let at = (self.now)();
         if kind == "text" {
+            let mut events = Vec::new();
             if let Some(delta) = str_of(obj, "data") {
                 self.text.push_str(delta);
+                if self.emit_deltas && !delta.is_empty() {
+                    events.push(AgentEvent::new(at, AgentEventType::Delta).with_text(delta));
+                }
             }
-            return Vec::new();
+            return events;
         }
         // Everything else ends the paragraph being streamed.
         let mut events = self.flush_text();
         match kind {
-            // Reasoning, the slash-command list and the per-step usage carry nothing Ratchet reports.
-            "thought" | "available_commands" | "usage" => {}
+            "thought" => {
+                if self.emit_deltas
+                    && let Some(t) = str_of(obj, "data").filter(|t| !t.is_empty())
+                {
+                    events.push(AgentEvent::new(at, AgentEventType::Thinking).with_text(t));
+                }
+            }
+            // The slash-command list and the per-step usage carry nothing Ratchet reports.
+            "available_commands" | "usage" => {}
             "tool_call" => {
                 let id = str_of(obj, "toolCallId").unwrap_or("");
                 if id.is_empty() || self.started.insert(id.to_string()) {
@@ -157,9 +185,13 @@ impl GrokStreamParser {
                 };
                 events.push(
                     AgentEvent::new(at, AgentEventType::Error)
-                        .with_text(message)
+                        .with_text(message.clone())
                         .with_data(json!({"fatal": true})),
                 );
+                // Grok documents no rate-limit shape: the message text is all there is, and no reset time.
+                if let Some(kind) = classify_text(&message, at / 1000) {
+                    events.extend(self.failure.emit(at, kind, &message));
+                }
             }
             other => {
                 self.unknown_types.insert(other.to_string());
@@ -265,15 +297,83 @@ pub struct GrokOptions {
     pub sandbox: Option<String>,
     /// `--max-turns`. Default: the CLI's own.
     pub max_turns: Option<u32>,
-    /// Set as `XAI_API_KEY` for the child (it takes precedence over a grok.com login).
+    /// Set as `XAI_API_KEY` (and `GROK_CODE_XAI_API_KEY`) for the child (it takes precedence over a grok.com login).
     pub api_key: Option<String>,
     /// Skip the API-key preflight check: the CLI is signed in with a grok.com account (`grok login`) on this machine.
     pub allow_subscription_auth: bool,
+    /// The tools a read-only session keeps (`--tools`). Default [`GROK_READ_ONLY_TOOLS`].
+    pub read_only_tools: Option<Vec<String>>,
+    /// The tools a read-only session must not have (`--disallowed-tools`; the denylist wins over the allowlist). Default
+    /// [`GROK_WRITE_TOOLS`].
+    pub write_tools: Option<Vec<String>>,
+    /// Where the user's Grok home is, for the login the overlay links in. Default: `GROK_HOME`, else `~/.grok`.
+    pub grok_home: Option<String>,
 }
 
+/// Tool names a read-only Grok session keeps. `read_file` is the name `available_commands` shows in the S0 fixtures; the rest
+/// are best guesses until real-world testing (a wrong name only removes a tool).
+pub const GROK_READ_ONLY_TOOLS: [&str; 4] = ["read_file", "list_dir", "grep", "glob"];
+
+/// Tool names a read-only Grok session loses. `run_terminal_command` is in the fixtures; the rest are best guesses, and the
+/// allowlist already excludes them.
+pub const GROK_WRITE_TOOLS: [&str; 6] = [
+    "run_terminal_command",
+    "edit_file",
+    "write_file",
+    "apply_patch",
+    "delete_file",
+    "search_replace",
+];
+
+fn toml_str(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_else(|_| "\"\"".to_string())
+}
+
+fn toml_key(k: &str) -> String {
+    if !k.is_empty()
+        && k.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        k.to_string()
+    } else {
+        toml_str(k)
+    }
+}
+
+/// The overlay `config.toml`: the session's MCP servers only, and the user's own Claude / Cursor MCP sources switched off.
+pub fn grok_config_toml(servers: &[McpServer]) -> String {
+    let mut out = String::from(
+        "# generated by Ratchet for one session\n[compat.claude]\nmcps = false\n\n[compat.cursor]\nmcps = false\n\n",
+    );
+    for s in servers {
+        let name = toml_key(&s.name);
+        out.push_str(&format!(
+            "[mcp_servers.{name}]\ncommand = {}\n",
+            toml_str(&s.command)
+        ));
+        out.push_str(&format!(
+            "args = [{}]\n",
+            s.args
+                .iter()
+                .map(|a| toml_str(a))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        if !s.env.is_empty() {
+            out.push_str(&format!("[mcp_servers.{name}.env]\n"));
+            for (k, v) in &s.env {
+                out.push_str(&format!("{} = {}\n", toml_key(k), toml_str(v)));
+            }
+        }
+        out.push('\n');
+    }
+    out
+}
+
+#[derive(Clone)]
 pub struct GrokAdapter {
-    cli: CliAgent,
-    options: GrokOptions,
+    pub(crate) cli: CliAgent,
+    pub(crate) options: GrokOptions,
 }
 
 impl GrokAdapter {
@@ -285,47 +385,209 @@ impl GrokAdapter {
         Self { cli, options }
     }
 
-    /// Argument list for one invocation, the prompt excluded (it goes on stdin through `-p -`). Exported for tests and docs.
-    pub fn build_args(&self, spec: &AgentSpec, resume_id: Option<&str>) -> Vec<String> {
+    /// Argument list for one invocation, the prompt excluded (it is read from `prompt_file`, the `--prompt-file` of the headless
+    /// mode; `-p -` does not read stdin). Exported for tests and docs.
+    pub fn build_args(
+        &self,
+        spec: &AgentSpec,
+        resume_id: Option<&str>,
+        prompt_file: &Path,
+    ) -> Vec<String> {
+        self.build_session_args(&SessionSpec::from(spec), resume_id, prompt_file)
+    }
+
+    /// `--tools` / `--disallowed-tools` of a read-only session.
+    pub(crate) fn read_only_tool_args(&self) -> Vec<String> {
         let o = &self.options;
-        let mut args: Vec<String> = ["-p", "-", "--output-format", "streaming-json"]
-            .map(String::from)
-            .to_vec();
-        args.extend([
-            "--permission-mode".to_string(),
-            o.permission_mode
-                .clone()
-                .unwrap_or_else(|| "acceptEdits".to_string()),
-        ]);
+        let keep = o
+            .read_only_tools
+            .clone()
+            .unwrap_or_else(|| GROK_READ_ONLY_TOOLS.map(String::from).to_vec());
+        let drop = o
+            .write_tools
+            .clone()
+            .unwrap_or_else(|| GROK_WRITE_TOOLS.map(String::from).to_vec());
+        vec![
+            "--tools".to_string(),
+            keep.join(","),
+            "--disallowed-tools".to_string(),
+            drop.join(","),
+        ]
+    }
+
+    /// Argument list of a one-shot turn for `spec`: [`GrokAdapter::build_args`] plus access and the system prompt add-on.
+    pub fn build_session_args(
+        &self,
+        spec: &SessionSpec,
+        resume_id: Option<&str>,
+        prompt_file: &Path,
+    ) -> Vec<String> {
+        let o = &self.options;
+        let mut args: Vec<String> = vec![
+            "--prompt-file".to_string(),
+            prompt_file.to_string_lossy().into_owned(),
+            "--output-format".to_string(),
+            "streaming-json".to_string(),
+        ];
+        let read_only = spec.access == Access::ReadOnly;
+        if !read_only {
+            args.extend([
+                "--permission-mode".to_string(),
+                o.permission_mode
+                    .clone()
+                    .unwrap_or_else(|| "acceptEdits".to_string()),
+            ]);
+        }
         if let Some(id) = resume_id.filter(|id| !id.is_empty()) {
             args.extend(["--resume".to_string(), id.to_string()]);
         }
         if let Some(model) = spec.model.as_ref().filter(|m| !m.is_empty()) {
             args.extend(["--model".to_string(), model.clone()]);
         }
-        if let Some(sandbox) = o.sandbox.as_ref().filter(|s| !s.is_empty()) {
+        if read_only {
+            args.extend(["--sandbox".to_string(), "read-only".to_string()]);
+            args.extend(self.read_only_tool_args());
+        } else if let Some(sandbox) = o.sandbox.as_ref().filter(|s| !s.is_empty()) {
             args.extend(["--sandbox".to_string(), sandbox.clone()]);
         }
-        if let Some(turns) = o.max_turns {
+        if let Some(turns) = spec.max_turns.filter(|t| *t > 0).or(o.max_turns) {
             args.extend(["--max-turns".to_string(), turns.to_string()]);
+        }
+        if let Some(text) = spec.system_append.as_ref().filter(|t| !t.is_empty()) {
+            args.extend(["--rules".to_string(), text.clone()]);
         }
         args.extend(self.cli.extra_args.iter().cloned());
         args
+    }
+
+    fn source_home(&self) -> Option<PathBuf> {
+        self.options
+            .grok_home
+            .clone()
+            .or_else(|| self.cli.base_env.get("GROK_HOME").cloned())
+            .filter(|h| !h.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| {
+                self.cli
+                    .base_env
+                    .get("HOME")
+                    .filter(|h| !h.is_empty())
+                    .map(|h| Path::new(h).join(".grok"))
+            })
+    }
+
+    /// With MCP servers: a temp `GROK_HOME` holding the generated `config.toml` (the session's servers, the user's Claude and
+    /// Cursor ones off) and the user's login linked in. One-shot `grok -p` has no MCP flag; the live (ACP) path passes the
+    /// servers in `session/new` instead. Returns the home's path.
+    pub fn write_overlay(
+        &self,
+        spec: &SessionSpec,
+        scratch: &Scratch,
+    ) -> PortResult<Option<PathBuf>> {
+        if spec.mcp.is_empty() {
+            return Ok(None);
+        }
+        scratch.write("grok-home/config.toml", &grok_config_toml(&spec.mcp))?;
+        let home = scratch.path().join("grok-home");
+        #[cfg(unix)]
+        if let Some(auth) = self
+            .source_home()
+            .map(|h| h.join("auth.json"))
+            .filter(|p| p.exists())
+        {
+            let _ = std::os::unix::fs::symlink(auth, home.join("auth.json"));
+        }
+        Ok(Some(home))
+    }
+
+    /// The environment additions of a run: the API key under both names the CLI may read, and the overlay home.
+    pub(crate) fn run_env(
+        &self,
+        spec: &SessionSpec,
+        overlay: Option<&Path>,
+    ) -> BTreeMap<String, String> {
+        let mut env = spec.env.clone().unwrap_or_default();
+        let key = ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY"]
+            .iter()
+            .find_map(|k| {
+                env.get(*k)
+                    .or_else(|| self.cli.base_env.get(*k))
+                    .filter(|v| !v.is_empty())
+                    .cloned()
+            });
+        if let Some(key) = key {
+            env.entry("XAI_API_KEY".to_string())
+                .or_insert_with(|| key.clone());
+            env.entry("GROK_CODE_XAI_API_KEY".to_string())
+                .or_insert(key);
+        }
+        if let Some(home) = overlay {
+            env.insert("GROK_HOME".to_string(), home.to_string_lossy().into_owned());
+        }
+        env
+    }
+
+    /// Run the first turn of a new session (or, with `spec.resume`, the next turn of an earlier one) with everything `spec`
+    /// asks for. `AgentAdapter::start` is this with the defaults of [`SessionSpec::from`].
+    pub async fn start_session(
+        &self,
+        spec: &SessionSpec,
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<AgentSession> {
+        let cancel = cancel.cloned().unwrap_or_default();
+        let resume = spec.resume.clone().filter(|r| !r.is_empty());
+        let mut session = AgentSession {
+            id: resume.clone().unwrap_or_default(),
+            kind: AgentKind::Grok,
+        };
+        self.turn(
+            &mut session,
+            spec,
+            resume.as_deref(),
+            &spec.prompt,
+            on_event,
+            &cancel,
+            resume.is_none(),
+        )
+        .await?;
+        Ok(session)
+    }
+
+    /// `AgentAdapter::resume` with a [`SessionSpec`].
+    pub async fn resume_session(
+        &self,
+        session: &mut AgentSession,
+        spec: &SessionSpec,
+        message: &str,
+        on_event: &EventSink<'_>,
+        cancel: Option<&CancellationToken>,
+    ) -> PortResult<()> {
+        let cancel = cancel.cloned().unwrap_or_default();
+        let id = session.id.clone();
+        self.turn(session, spec, Some(&id), message, on_event, &cancel, false)
+            .await
     }
 
     #[allow(clippy::too_many_arguments)]
     async fn turn(
         &self,
         session: &mut AgentSession,
-        args: Vec<String>,
-        spec: &AgentSpec,
+        spec: &SessionSpec,
+        resume_id: Option<&str>,
         prompt: &str,
         on_event: &EventSink<'_>,
         cancel: &CancellationToken,
         is_start: bool,
     ) -> PortResult<()> {
+        let scratch = Scratch::new("grok")?;
+        let prompt_file = scratch.write("prompt.txt", prompt)?;
+        let overlay = self.write_overlay(spec, &scratch)?;
+        let args = self.build_session_args(spec, resume_id, &prompt_file);
+        let env = self.run_env(spec, overlay.as_deref());
         let clock = self.cli.clock.clone();
         let mut parser = GrokStreamParser::new(move || clock.now());
+        parser.emit_deltas = false;
         let res = {
             let mut on_line = |line: &str| {
                 for e in parser.parse_line(line) {
@@ -333,9 +595,10 @@ impl GrokAdapter {
                 }
             };
             self.cli
-                .run(&args, spec, Some(prompt.to_string()), &mut on_line, cancel)
+                .run_in(&args, &spec.workdir, Some(&env), None, &mut on_line, cancel)
                 .await
         };
+        drop(scratch);
         for e in parser.end() {
             on_event(e);
         }
@@ -404,6 +667,34 @@ impl GrokAdapter {
 }
 
 #[async_trait]
+impl TurnRunner for GrokAdapter {
+    fn kind(&self) -> AgentKind {
+        AgentKind::Grok
+    }
+
+    async fn run_turn(
+        &self,
+        session: &mut AgentSession,
+        spec: &SessionSpec,
+        resume: Option<&str>,
+        prompt: &str,
+        events: &EventSink<'_>,
+        cancel: &CancellationToken,
+    ) -> PortResult<()> {
+        self.turn(
+            session,
+            spec,
+            resume,
+            prompt,
+            events,
+            cancel,
+            resume.is_none(),
+        )
+        .await
+    }
+}
+
+#[async_trait]
 impl AgentAdapter for GrokAdapter {
     fn kind(&self) -> AgentKind {
         AgentKind::Grok
@@ -415,7 +706,10 @@ impl AgentAdapter for GrokAdapter {
             problems.push(p);
         }
         let has = |k: &str| self.cli.base_env.get(k).is_some_and(|v| !v.is_empty());
-        if !self.options.allow_subscription_auth && !has("XAI_API_KEY") {
+        if !self.options.allow_subscription_auth
+            && !has("XAI_API_KEY")
+            && !has("GROK_CODE_XAI_API_KEY")
+        {
             problems.push("XAI_API_KEY is not set".to_string());
         }
         Ok(Preflight {
@@ -430,22 +724,8 @@ impl AgentAdapter for GrokAdapter {
         on_event: &EventSink<'_>,
         cancel: Option<&CancellationToken>,
     ) -> PortResult<AgentSession> {
-        let cancel = cancel.cloned().unwrap_or_default();
-        let mut session = AgentSession {
-            id: String::new(),
-            kind: AgentKind::Grok,
-        };
-        self.turn(
-            &mut session,
-            self.build_args(spec, None),
-            spec,
-            &spec.prompt,
-            on_event,
-            &cancel,
-            true,
-        )
-        .await?;
-        Ok(session)
+        self.start_session(&SessionSpec::from(spec), on_event, cancel)
+            .await
     }
 
     async fn resume(
@@ -456,9 +736,39 @@ impl AgentAdapter for GrokAdapter {
         on_event: &EventSink<'_>,
         cancel: Option<&CancellationToken>,
     ) -> PortResult<()> {
-        let cancel = cancel.cloned().unwrap_or_default();
-        let args = self.build_args(spec, Some(&session.id));
-        self.turn(session, args, spec, message, on_event, &cancel, false)
+        self.resume_session(session, &SessionSpec::from(spec), message, on_event, cancel)
             .await
+    }
+}
+
+#[async_trait]
+impl Harness for GrokAdapter {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            streaming: true,
+            live_session: !self.cli.disable_live_session,
+            mcp: true,
+            cost_in_usd: true,
+            read_only: true,
+        }
+    }
+
+    async fn open(
+        &self,
+        spec: &SessionSpec,
+        events: SharedEventSink,
+    ) -> PortResult<Box<dyn LiveSession>> {
+        let runner: Arc<dyn TurnRunner> = Arc::new(self.clone());
+        let clock = self.cli.clock.clone();
+        open_with_fallback(
+            self.capabilities().live_session,
+            move || clock.now(),
+            "grok",
+            runner,
+            spec,
+            events.clone(),
+            || async { GrokLiveSession::open(self, spec, events).await },
+        )
+        .await
     }
 }

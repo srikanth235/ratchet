@@ -153,3 +153,40 @@ fixtures are untouched.
 The fake CLI is `crates/ratchet-agents/tests/fake_cli/main.rs`, built as the `ratchet-fake-cli` binary (`replay`,
 `claude-stream-json`, `codex-app-server`, `grok-acp`; usage in its header comment). Tests are in
 `crates/ratchet-agents/tests/harness_fixtures.rs`.
+
+## 6. P1 result: what the harness layer does with each cell
+
+Code: `ratchet-core/src/ports.rs` (`SessionSpec`, `Access`, `McpServer`, `Capabilities`, `Harness`, `LiveSession`), `ratchet-agents`
+(`harness.rs`, `live.rs`, `classify.rs`, `codex_app_server.rs`, `grok_acp.rs`, and the three adapters). Tests:
+`tests/harness.rs` (mapping and parsers), `tests/live_sessions.rs` (live sessions against `tests/fake_cli`).
+
+Deviations from the sketch in 4.1, on purpose:
+
+- `LiveSession::send` and `interrupt` take `&self` (not `&mut self`): an interrupt has to run while `send` waits for the turn.
+- `Harness::open` takes a `SharedEventSink` (an `Arc`) because the session keeps emitting after `open` returns. The first
+  message is `spec.prompt` when it is not empty.
+- `RateLimited` and `AuthExpired` are plain event types (`rate_limited`, `auth_expired`); the reset time is `data.resetsAt`
+  (epoch seconds) instead of a payload on the enum, so `AgentEventType` stays `Copy` and the wire stays `{"type": "..."}`.
+- `Access` defaults to `Edit { network: true }`, which is what `AgentSpec` callers always got; the adapter's own options still
+  apply on top of it. `ReadOnly` overrules them.
+
+| Cell | Claude Code | Codex | Grok |
+|---|---|---|---|
+| One-shot / resume | unchanged (`start_session`/`resume_session` take a `SessionSpec`; `start`/`resume` map into them) | same | same; prompt now in `--prompt-file` (a temp file) instead of `-p -`, resume unchanged |
+| Deltas | live: `stream_event` `text_delta` → `Delta`, `thinking_delta` → `Thinking` | live (app-server): `item/agentMessage/delta` → `Delta`, reasoning deltas → `Thinking`. `exec`: whole messages (reasoning items → `Thinking` only if `emit_thinking`) | live (ACP): `agent_message_chunk` → `Delta`. `-p`: `text` lines → `Delta` only if `emit_deltas` (off for optimizations) |
+| Live session | `-p --input-format stream-json --output-format stream-json --include-partial-messages --replay-user-messages`; interrupt = `control_request` | `codex app-server`: `initialize` → `initialized` → `thread/start`\|`thread/resume` → `turn/start`; `turn/interrupt` | `grok agent stdio`: `initialize` → `authenticate` → `session/new`\|`session/load`; `session/prompt`; `session/cancel` |
+| MCP | `--mcp-config <temp json> --strict-mcp-config`, tools allowed as `mcp__<name>` | `-c mcp_servers.<name>.command/args/env.*`; **fallback** `CodexOptions::config_overlay`: temp `CODEX_HOME` with generated `config.toml`, `AGENTS.md`, `auth.json` linked | live: `session/new {mcpServers}`; one-shot: temp `GROK_HOME` with generated `config.toml` (`[compat.*] mcps=false`) and `auth.json` linked |
+| Read-only | `--permission-mode dontAsk`, `--allowedTools Read,Glob,Grep,mcp__*`, `--disallowedTools Bash,Edit,Write,...` | `sandbox_mode="read-only"` (app-server: `sandbox:"read-only"`, `approvalPolicy:"never"`) | one-shot: `--sandbox read-only --tools ... --disallowed-tools ...`; live: tools only (the sandbox is refused in agent mode); permission requests are answered by the client |
+| System prompt | `--append-system-prompt` | `-c developer_instructions=...` (overlay: `AGENTS.md`) | one-shot `--rules`; live `session/new _meta.rules` |
+| Rate limit | rejected `rate_limit_event` (reset time), assistant `error`, `api_error_status` | `exec`: text; app-server: `codexErrorInfo` + `account/rateLimits/updated` (reset time) | text (reset time only from "retry after Ns") |
+| Auth expired | assistant `error: authentication_failed`, 401 | `exec`: text; app-server: `Unauthorized` | text |
+| Model fallback | `ClaudeCodeOptions::fallback_model` → `--fallback-model` | ✗ | ✗ |
+
+Fallbacks in force: `Capabilities::live_session` is false when `CliAgentOptions::disable_live_session` is set, and `open` returns a
+`SpawnPerTurnSession` (first message = start, later ones = resume) when the live process cannot start or its handshake fails; a
+`Status` event says so. Codex over the app-server does not pass an API key through `account/login`; with only `OPENAI_API_KEY`
+the app-server may answer `Unauthorized`, which classifies as `AuthExpired` (confirm in real-world testing, then the fix is
+`CodexOptions::config_overlay` or per-turn mode).
+
+Tool names for Grok's read-only lists (`GROK_READ_ONLY_TOOLS`, `GROK_WRITE_TOOLS`) are fixtures plus guesses; they are options
+(`GrokOptions::read_only_tools`, `write_tools`) so real-world testing can correct them without a code change.

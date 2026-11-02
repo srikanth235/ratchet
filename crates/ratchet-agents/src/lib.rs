@@ -12,17 +12,22 @@
 //! are `ratchet-core`'s; the filesystem artifact store is `ratchet-sandbox`'s.
 
 pub mod artifacts;
+pub mod classify;
 pub mod claude_code;
 pub mod cli_agent;
 pub mod clock;
 pub mod codex;
+pub mod codex_app_server;
 pub mod context;
 pub mod control;
 pub mod demo_scripts;
 pub mod detect;
 pub mod git;
 pub mod grok;
+pub mod grok_acp;
+pub mod harness;
 pub mod inbox;
+pub mod live;
 pub mod local_agents;
 pub mod process;
 pub mod runner_loop;
@@ -36,14 +41,15 @@ pub use artifacts::{
     event_key, inbox_key, last_seq, read_events, runner_prefix, seq_of,
 };
 pub use claude_code::{
-    ClaudeCodeAdapter, ClaudeCodeOptions, ClaudePermissionMode, ClaudeResult, ClaudeStreamParser,
-    DEFAULT_CLAUDE_TOOLS, PromptVia,
+    ClaudeCodeAdapter, ClaudeCodeOptions, ClaudeLiveSession, ClaudePermissionMode, ClaudeResult,
+    ClaudeStreamParser, DEFAULT_CLAUDE_TOOLS, PromptVia,
 };
 pub use cli_agent::{CliAgent, CliAgentOptions};
 pub use clock::{AcceleratedClock, ManualClock};
 pub use codex::{
     CodexAdapter, CodexOptions, CodexPricing, CodexSandbox, CodexStreamParser, CodexTurnResult,
 };
+pub use codex_app_server::{CodexAppServerParser, CodexLiveSession, TurnSignal};
 pub use context::{
     ContextInput, HistoryEntry, ResumeInput, build_context, build_initial_prompt,
     build_resume_message, format_duration, improvement_pct,
@@ -66,7 +72,10 @@ pub use git::{
     has_candidate_trailer, with_candidate_trailer,
 };
 pub use grok::{GrokAdapter, GrokOptions, GrokStreamParser, GrokTurnResult};
+pub use grok_acp::{GrokAcpParser, GrokLiveSession};
+pub use harness::{Scratch, SpawnPerTurnSession, TurnRunner};
 pub use inbox::MemoryInbox;
+pub use live::{LiveProcess, RpcClient, RpcError, RpcMessage};
 pub use local_agents::{
     LocalAdapterOptions, LocalAgentControlOptions, create_local_agent_control,
     local_adapter_factory, local_adapter_for, local_agent_problem,

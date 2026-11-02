@@ -20,6 +20,10 @@
 //!   `session/update` chunks first and its response last, as ACP does.
 //!
 //! `"$ID"` in a fixture is replaced by the raw JSON id of the request being answered. Stdin EOF ends the process with exit 0.
+//!
+//! A fixture line `{"$hold":true}` cuts a batch short: the lines before it are printed, the turn stays open, and the lines after
+//! it wait for the client to interrupt (`control_request` for Claude, `turn/interrupt` for Codex, `session/cancel` for Grok).
+//! The interrupt releases the next batch as usual; for ACP, `$ID` then stands for the id of the held `session/prompt`.
 //! Everything read from stdin is appended to the file named by `RATCHET_FAKE_CLI_LOG`, when set, for assertions.
 
 use std::io::{BufRead, Write};
@@ -78,6 +82,10 @@ fn replay(lines: &[&str], args: &[String]) {
     std::process::exit(code);
 }
 
+fn is_hold(line: &str) -> bool {
+    line.contains("\"$hold\"")
+}
+
 fn is_response(line: &str) -> bool {
     line.contains("\"$ID\"")
 }
@@ -98,6 +106,8 @@ fn serve(mode: &str, lines: &[&str]) {
             .ok()
     });
     let mut cursor = 0usize;
+    // raw id of the request whose batch was cut at a hold
+    let mut held: Option<String> = None;
     let mut out = std::io::stdout().lock();
     for input in std::io::stdin().lock().lines() {
         let Ok(input) = input else { break };
@@ -110,45 +120,52 @@ fn serve(mode: &str, lines: &[&str]) {
         let Ok(msg) = serde_json::from_str::<serde_json::Value>(&input) else {
             continue;
         };
-        let batch: &[&str] = match mode {
+        let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
+        let mut id = msg
+            .get("id")
+            .map_or_else(|| "null".to_string(), |v| v.to_string());
+        let end = match mode {
             "claude-stream-json" => {
-                if msg.get("type").and_then(|t| t.as_str()) != Some("user") {
+                let kind = msg.get("type").and_then(|t| t.as_str());
+                let interrupt = kind == Some("control_request") && held.is_some();
+                if kind != Some("user") && !interrupt {
                     continue;
                 }
-                let end = lines[cursor..]
+                lines[cursor..]
                     .iter()
                     .position(|l| is_result(l))
-                    .map_or(lines.len(), |i| cursor + i + 1);
-                let batch = &lines[cursor..end];
-                cursor = end;
-                batch
+                    .map_or(lines.len(), |i| cursor + i + 1)
             }
             _ => {
-                // JSON-RPC: only requests (id + method) are answered.
-                let (Some(id), Some(_)) = (msg.get("id"), msg.get("method")) else {
+                // JSON-RPC: requests (id + method) are answered; ACP's `session/cancel` is a notification that releases the
+                // held prompt's response.
+                let cancel = mode == "grok-acp" && method == "session/cancel" && held.is_some();
+                if cancel {
+                    id = held.clone().unwrap_or_default();
+                } else if msg.get("id").is_none() || method.is_empty() {
                     continue;
-                };
-                let _ = id;
+                }
                 let Some(first) = lines[cursor..].iter().position(|l| is_response(l)) else {
                     continue;
                 };
                 let first = cursor + first;
-                let end = if mode == "codex-app-server" {
+                if mode == "codex-app-server" {
                     lines[first + 1..]
                         .iter()
                         .position(|l| is_response(l))
                         .map_or(lines.len(), |i| first + 1 + i)
                 } else {
                     first + 1
-                };
-                let batch = &lines[cursor..end];
-                cursor = end;
-                batch
+                }
             }
         };
-        let id = msg
-            .get("id")
-            .map_or_else(|| "null".to_string(), |v| v.to_string());
+        let hold = lines[cursor..end].iter().position(|l| is_hold(l));
+        let (batch, next) = match hold {
+            Some(h) => (&lines[cursor..cursor + h], cursor + h + 1),
+            None => (&lines[cursor..end], end),
+        };
+        held = hold.map(|_| id.clone());
+        cursor = next;
         for line in batch {
             let _ = writeln!(out, "{}", line.replace("\"$ID\"", &id));
         }

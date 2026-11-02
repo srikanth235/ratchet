@@ -25,6 +25,8 @@ pub struct CliAgentOptions {
     pub extra_args: Vec<String>,
     /// Grace between SIGTERM and SIGKILL on abort.
     pub kill_grace: Option<Duration>,
+    /// Never hold a CLI process open for chat: `Harness::open` returns a spawn-per-turn session (start, then resume).
+    pub disable_live_session: bool,
 }
 
 /// `text` cut to `max` characters with a note of how much was dropped.
@@ -50,6 +52,20 @@ pub fn num(v: Option<&Value>) -> u64 {
     }
 }
 
+/// `map` followed along a JSON pointer such as `/result/content/0/text`.
+pub fn pointer<'a>(map: &'a Map<String, Value>, path: &str) -> Option<&'a Value> {
+    let rest = path.strip_prefix('/')?;
+    let (first, tail) = match rest.split_once('/') {
+        Some((f, t)) => (f, Some(format!("/{t}"))),
+        None => (rest, None),
+    };
+    let head = map.get(first)?;
+    match tail {
+        Some(t) => head.pointer(&t),
+        None => Some(head),
+    }
+}
+
 pub fn str_of<'a>(v: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
     v.get(key).and_then(Value::as_str)
 }
@@ -71,6 +87,7 @@ pub fn process_env() -> HashMap<String, String> {
 }
 
 /// The part of a CLI adapter that does not depend on the CLI: binary, environment, spawner, clock.
+#[derive(Clone)]
 pub struct CliAgent {
     pub binary: String,
     pub base_env: HashMap<String, String>,
@@ -78,6 +95,7 @@ pub struct CliAgent {
     pub clock: Arc<dyn Clock>,
     pub extra_args: Vec<String>,
     pub kill_grace: Option<Duration>,
+    pub disable_live_session: bool,
 }
 
 impl CliAgent {
@@ -89,6 +107,7 @@ impl CliAgent {
             clock: options.clock.unwrap_or_else(|| Arc::new(SystemClock)),
             extra_args: options.extra_args,
             kill_grace: options.kill_grace,
+            disable_live_session: options.disable_live_session,
         }
     }
 
@@ -100,10 +119,29 @@ impl CliAgent {
         on_line: &mut (dyn FnMut(&str) + Send),
         cancel: &CancellationToken,
     ) -> RunProcessResult {
-        let mut options = RunProcessOptions::new(
-            PathBuf::from(&spec.workdir),
-            build_env(&self.base_env, spec.env.as_ref()),
-        );
+        self.run_in(
+            args,
+            &spec.workdir,
+            spec.env.as_ref(),
+            stdin,
+            on_line,
+            cancel,
+        )
+        .await
+    }
+
+    /// [`CliAgent::run`] with the working directory and environment given directly.
+    pub async fn run_in(
+        &self,
+        args: &[String],
+        workdir: &str,
+        env: Option<&BTreeMap<String, String>>,
+        stdin: Option<String>,
+        on_line: &mut (dyn FnMut(&str) + Send),
+        cancel: &CancellationToken,
+    ) -> RunProcessResult {
+        let mut options =
+            RunProcessOptions::new(PathBuf::from(workdir), build_env(&self.base_env, env));
         options.stdin = stdin;
         options.cancel = Some(cancel);
         if let Some(grace) = self.kill_grace {
