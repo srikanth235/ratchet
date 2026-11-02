@@ -1,13 +1,19 @@
-// Renders each screen of design/v03.html to design/v03/<n>-<name>.png. Usage: node design/tools/render.js
-const path = require('path'); const { chromium } = require('playwright');
+// Renders each screen of design/v03.html to design/v03/<n>-<name>.png. Usage: node design/tools/render.js [sN ...]
+const path = require('path'); const fs = require('fs'); const { chromium } = require('playwright');
 const D = path.join(__dirname, '..');
-const files = {s1:'1-home',s2:'2-run',s3:'3-optimization',s4:'4-customize',s5:'5-connectors',s6:'6-settings',s7:'7-agents',s8:'8-new-conversation',s9:'9-overview',s10:'10-connectors-discover'};
+const slug = s => s.toLowerCase().replace(/[·]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 (async () => {
   const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1500, height: 1000 } });
   const errs = []; p.on('pageerror', e => errs.push(e.message));
   await p.goto('file://' + path.join(D, 'v03.html')); await p.waitForTimeout(800);
-  for (const id of await p.$$eval('section[id^=s], [id^=s].screen, div[id^=s]', els => els.map(e => e.id).filter(i => /^s\d+$/.test(i)))) {
-    const name = files[id] || id; await (await p.$('#' + id)).screenshot({ path: path.join(D, 'v03', name + '.png') });
+  const want = process.argv.slice(2);
+  const secs = await p.$$eval('section.screen', els => els.map(e => [e.id, e.dataset.name]));
+  fs.mkdirSync(path.join(D, 'v03'), { recursive: true });
+  for (const f of fs.readdirSync(path.join(D, 'v03'))) if (f.endsWith('.png') && !want.length) fs.unlinkSync(path.join(D, 'v03', f));
+  for (const [id, name] of secs) {
+    if (want.length && !want.includes(id)) continue;
+    const file = id.slice(1) + '-' + slug(name) + '.png';
+    await (await p.$('#' + id)).screenshot({ path: path.join(D, 'v03', file) });
   }
-  console.log(errs.length ? errs : 'ok'); await b.close();
+  console.log(errs.length ? errs : 'ok', secs.length + ' screens'); await b.close();
 })();
