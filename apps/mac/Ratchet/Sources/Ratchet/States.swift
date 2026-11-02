@@ -105,6 +105,8 @@ struct PagePlaceholder: View {
 
 /// "No wins yet. Start your first optimization." and a way to try the demo first.
 struct EmptyOverview: View {
+    /// What the daemon says for this phase ("No wins yet" / "Start your first optimization."); the same words when it says none.
+    var text: EmptyStateText?
     @Environment(AppRouter.self) private var router
     @Environment(AppStore.self) private var store
     @Environment(DaemonController.self) private var daemon
@@ -114,9 +116,9 @@ struct EmptyOverview: View {
     var body: some View {
         VStack(spacing: Space.lg) {
             RatchetMarkView(height: 44)
-            Text("No wins yet").kitType(.pageTitle).foregroundStyle(Ink.text)
-            Text("Start your first optimization.").kitType(.body).foregroundStyle(Ink.textMuted)
-            Button("New Optimization") { router.startWizard(client: store.client) }
+            Text(text?.title ?? "No wins yet").kitType(.pageTitle).foregroundStyle(Ink.text)
+            Text(text?.body ?? "Start your first optimization.").kitType(.body).foregroundStyle(Ink.textMuted)
+            Button("New Optimization") { router.newOptimization() }
                 .buttonStyle(.kit(.primary))
                 .disabled(!actionsEnabled)
             if daemon.management == .managed && !store.isDemoData {

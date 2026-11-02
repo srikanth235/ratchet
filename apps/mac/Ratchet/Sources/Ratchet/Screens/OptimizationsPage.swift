@@ -74,7 +74,7 @@ struct EmptyOptimizations: View {
             RatchetMarkView(height: 36)
             Text("No optimizations yet").kitType(.pageTitle).foregroundStyle(Ink.text)
             Text("Start your first optimization.").kitType(.body).foregroundStyle(Ink.textMuted)
-            Button("New Optimization") { router.startWizard(client: store.client) }
+            Button("New Optimization") { router.newOptimization() }
                 .buttonStyle(.kit(.primary))
                 .disabled(!actionsEnabled)
         }

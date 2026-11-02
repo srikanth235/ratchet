@@ -2,34 +2,35 @@ import Observation
 import RatchetKit
 import SwiftUI
 
-/// Where the window is: the page, the open optimization, the open wizard. Menus, the menu bar item and the
+/// Where the window is: the page, the open optimization, the open creation conversation. Menus, the menu bar item and the
 /// snapshot mode all drive it.
 @Observable
 final class AppRouter {
     var page: Page = .overview
     var optimizationID: String?
-    var wizard: NewOptimizationFlow?
+    /// The chat that is drafting a new optimization with the person (the creation conversation). It takes over Home's place;
+    /// nil when Home shows the composer. The old four-step wizard is gone (ADR 0001): its logic stays in RatchetKit.
+    var creationChatID: String?
     /// Settings > General > Advanced (development) is open. Collapsed every time the app starts.
     var advancedExpanded = false
     /// Stop… from the header, the table, the context menu or the menu bar: the optimization the one confirmation asks about.
     var pendingStop: String?
-    /// "Use template": the template whose pull request is being set up.
-    var templateProposal: TemplateProposalFlow?
+    /// Archive… from the optimization page's menu: the optimization the one confirmation asks about.
+    var pendingArchive: String?
     /// Settings reopens on the last tab. Test and snapshot runs leave it alone.
     var settingsTab: SettingsTab = SettingsTab(rawValue: UserDefaults.standard.string(forKey: "settings.tab") ?? "") ?? .general {
         didSet { if !Store.isOverridden { UserDefaults.standard.set(settingsTab.rawValue, forKey: "settings.tab") } }
     }
-
-    /// The wizard's loading work. It ends with the wizard: closing it or going elsewhere cancels what it was still doing.
-    @ObservationIgnored private var wizardTask: Task<Void, Never>?
+    /// The optimization page's tab: the run, or its settings. Opening an optimization starts on the run.
+    var detailTab: DetailTab = .run
 
     /// Where the window is, as plain values, for `RouteRules` (RatchetKit, tested).
     private var route: RouteState {
-        get { RouteState(page: page.rawValue, optimizationID: optimizationID, wizardOpen: wizard != nil) }
+        get { RouteState(page: page.rawValue, optimizationID: optimizationID, wizardOpen: creationChatID != nil) }
         set {
             page = Page(rawValue: newValue.page) ?? page
             optimizationID = newValue.optimizationID
-            if !newValue.wizardOpen { closeWizard() }
+            if !newValue.wizardOpen { creationChatID = nil }
         }
     }
 
@@ -39,41 +40,30 @@ final class AppRouter {
     }
 
     func open(optimization id: String) {
+        if optimizationID != id { detailTab = .run }
         route = RouteRules.open(optimization: id, from: route)
     }
 
-    func startWizard(client: any RatchetClient, templateID: String? = nil) {
-        closeWizard()
-        let flow = NewOptimizationFlow(client: client)
-        wizard = flow
-        route = RouteRules.startWizard(from: route)
-        wizardTask = Task {
-            await flow.load()
-            if Task.isCancelled { return }
-            if let templateID { flow.useTemplate(templateID) }
-        }
+    /// "New Optimization": Home with the composer ready. Whatever conversation was open is left (it is still in the chat store).
+    func newOptimization() {
+        route = RouteRules.show(Page.home.rawValue, from: RouteState(page: "", optimizationID: nil, wizardOpen: false))
     }
 
-    /// "Review" on an optimization that waits for its environment: the wizard, on the Environment step.
-    func reviewEnvironment(of optimization: Optimization, client: any RatchetClient) {
-        closeWizard()
-        let flow = NewOptimizationFlow(client: client)
-        wizard = flow
-        page = .optimizations
-        optimizationID = nil
-        wizardTask = Task {
-            await flow.load()
-            if Task.isCancelled { return }
-            await flow.selectRepo(optimization.repo)
-            if Task.isCancelled { return }
-            flow.goal = optimization.goal
-            await flow.go(to: .environment)
-        }
+    /// A chat that drafts an optimization is on screen.
+    func openConversation(_ chatID: String) {
+        route = RouteRules.startConversation(from: route)
+        creationChatID = chatID
     }
 
-    func closeWizard() {
-        wizardTask?.cancel()
-        wizardTask = nil
-        wizard = nil
+    func closeConversation() {
+        creationChatID = nil
     }
+}
+
+/// The optimization page has two tabs: the run (header, log, steering) and the settings rows.
+enum DetailTab: String, CaseIterable, Identifiable {
+    case run, settings
+
+    var id: String { rawValue }
+    var title: String { self == .run ? "Run" : "Settings" }
 }

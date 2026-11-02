@@ -34,7 +34,13 @@ public enum RouteRules {
         RouteState(page: optimizationsPage, optimizationID: id, wizardOpen: false)
     }
 
-    /// The New optimization flow (also "Review" on an optimization that waits).
+    /// The creation conversation (a chat that drafts an optimization): it takes over Home's place, so Home stays selected in
+    /// the sidebar. `wizardOpen` means "a creation flow is open"; the old wizard screens are gone (ADR 0001).
+    public static func startConversation(from state: RouteState) -> RouteState {
+        RouteState(page: "home", optimizationID: nil, wizardOpen: true)
+    }
+
+    /// The old New optimization wizard (its screens are gone; kept for its tests).
     public static func startWizard(from state: RouteState) -> RouteState {
         RouteState(page: optimizationsPage, optimizationID: nil, wizardOpen: true)
     }

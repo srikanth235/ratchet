@@ -20,18 +20,20 @@ final class DebugBridge {
     private static var running: DebugBridge?
 
     static func start(
-        store: AppStore, router: AppRouter, connectors: ConnectorsPageState, daemon: DaemonController, notifier: AppNotifier,
-        openSettings: OpenSettingsAction
+        store: AppStore, router: AppRouter, hub: ChatHub, connectors: ConnectorsPageState, daemon: DaemonController,
+        notifier: AppNotifier, openSettings: OpenSettingsAction
     ) {
         guard running == nil else { return }
         let bridge = DebugBridge(
-            store: store, router: router, connectors: connectors, daemon: daemon, notifier: notifier, openSettings: openSettings)
+            store: store, router: router, hub: hub, connectors: connectors, daemon: daemon, notifier: notifier,
+            openSettings: openSettings)
         running = bridge
         bridge.begin()
     }
 
     private let store: AppStore
     private let router: AppRouter
+    private let hub: ChatHub
     private let connectors: ConnectorsPageState
     private let daemon: DaemonController
     private let notifier: AppNotifier
@@ -40,11 +42,12 @@ final class DebugBridge {
     private var ranSelfTest = false
 
     private init(
-        store: AppStore, router: AppRouter, connectors: ConnectorsPageState, daemon: DaemonController, notifier: AppNotifier,
-        openSettings: OpenSettingsAction
+        store: AppStore, router: AppRouter, hub: ChatHub, connectors: ConnectorsPageState, daemon: DaemonController,
+        notifier: AppNotifier, openSettings: OpenSettingsAction
     ) {
         self.store = store
         self.router = router
+        self.hub = hub
         self.connectors = connectors
         self.daemon = daemon
         self.notifier = notifier
@@ -135,7 +138,7 @@ final class DebugBridge {
             let known = SnapScene.allCases.map(\.rawValue).joined(separator: ", ")
             return BridgeReply(ok: false, command: command.line, message: "No scene named \(name). Scenes: \(known)")
         }
-        await scene.apply(store: store, router: router, connectors: connectors, daemon: daemon, notifier: notifier)
+        await scene.apply(store: store, router: router, hub: hub, connectors: connectors, daemon: daemon, notifier: notifier)
         try? await Task.sleep(for: .seconds(1))
         let path = channel.snapshots.appending(path: "\(scene.rawValue)-\(appearanceName).png").path
         try? FileManager.default.removeItem(atPath: path)
@@ -154,7 +157,7 @@ final class DebugBridge {
             return BridgeReply(ok: false, command: command.line, message: "The self-test already ran in this launch and left the sample data changed. Quit and open the app again.")
         }
         ranSelfTest = true
-        let result = await SelfTest.runNow(store: store, router: router, notifier: notifier)
+        let result = await SelfTest.runNow(store: store, router: router, hub: hub, notifier: notifier)
         return BridgeReply(
             ok: result.failures == 0, command: command.line,
             message: result.failures == 0 ? "SELFTEST PASS \(result.checks) checks" : "SELFTEST FAIL \(result.failures) of \(result.checks) checks",
@@ -169,7 +172,7 @@ final class DebugBridge {
 
     private func status() -> BridgeStatus {
         BridgeStatus(
-            page: router.page.rawValue, selectedOptimization: router.optimizationID, wizardOpen: router.wizard != nil,
+            page: router.page.rawValue, selectedOptimization: router.optimizationID, wizardOpen: router.creationChatID != nil,
             daemonPhase: daemon.phase.bridgeName, daemonDetail: daemon.phase.failureDetail ?? daemon.versionNote,
             notificationAuth: notifier.authorization.bridgeName, appearance: appearanceName,
             optimizations: store.optimizationStore.optimizations.count, running: store.optimizationStore.runningOptimizations.count, needsYou: store.needsYouCount,
@@ -197,8 +200,8 @@ extension AppNotifier.Authorization {
 /// Release builds have no debug bridge.
 enum DebugBridge {
     static func start(
-        store: AppStore, router: AppRouter, connectors: ConnectorsPageState, daemon: DaemonController, notifier: AppNotifier,
-        openSettings: OpenSettingsAction
+        store: AppStore, router: AppRouter, hub: ChatHub, connectors: ConnectorsPageState, daemon: DaemonController,
+        notifier: AppNotifier, openSettings: OpenSettingsAction
     ) {}
 }
 #endif

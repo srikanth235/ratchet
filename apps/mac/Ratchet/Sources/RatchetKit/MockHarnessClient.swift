@@ -18,7 +18,7 @@ public actor MockHarnessClient: HarnessClient {
     private var policies: [String: AgentsPolicy] = [:]
     private var values: [String: ValueModel] = [:]
     private var schedules: [String: ScheduleSetting] = [:]
-    private let scenario: ValueScenario
+    private var scenario: ValueScenario
     private let configLocked: Set<String>
     private let now: Date
 
@@ -26,6 +26,11 @@ public actor MockHarnessClient: HarnessClient {
         self.scenario = scenario
         self.configLocked = configLocked
         self.now = now
+    }
+
+    /// Switches what the sample value story says (snapshots and the self-test: wins, a subscription, no wins, nothing at all).
+    public func use(_ new: ValueScenario) {
+        scenario = new
     }
 
     // MARK: Agents

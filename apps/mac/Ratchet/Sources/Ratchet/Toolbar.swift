@@ -28,7 +28,7 @@ struct NewOptimizationToolbarButton: View {
 
     var body: some View {
         Button {
-            router.startWizard(client: store.client)
+            router.newOptimization()
         } label: {
             Label("New Optimization", systemImage: "plus")
                 .labelStyle(.titleAndIcon)

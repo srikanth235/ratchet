@@ -112,7 +112,7 @@ extension OptimizationDetailView {
                     }
                     if let number = optimization.prNumber {
                         HairlineRow {
-                            TitleStack(title: "Pull request #\(number)", subtitle: optimization.status == .merged ? "Merged" : "Open, waiting for you")
+                            TitleStack(title: "Pull request #\(number)", subtitle: optimization.status == .merged ? "Merged" : "Open · counts once it merges")
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Button("Open") { openPullRequest(optimization, number) }
                                 .buttonStyle(.kit(.quiet, small: true))

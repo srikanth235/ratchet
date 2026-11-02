@@ -17,7 +17,8 @@ public enum OptimizationStatus: String, CaseIterable, Codable, Sendable {
     public var title: String {
         switch self {
         case .running: "Running"
-        case .waiting: "Waiting on you"
+        // Created and not started yet. Nothing waits on a person: Run Now starts it, or its schedule does.
+        case .waiting: "Not started"
         case .merged: "Merged"
         case .done: "Done"
         case .noWin: "No win"

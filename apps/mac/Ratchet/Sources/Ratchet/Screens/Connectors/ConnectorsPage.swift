@@ -11,6 +11,8 @@ struct ConnectorsPage: View {
     @State private var sheet: ConnectorSheetRequest?
     @State private var refreshing = false
     @State private var query = ""
+    @State private var tab: ConnectorsTab = .yours
+    @State private var focus = SnapshotFocus.shared
     @FocusState private var searching: Bool
 
     private let areaName = "connectors"
@@ -24,6 +26,48 @@ struct ConnectorsPage: View {
         KitPage {
             PageHeader("Connectors", subtitle: "Accounts each optimization can use. Secrets stay in your keychain.")
                 .gridProbe("header", area: areaName)
+            // Yours | Discover sits on its own row, under the title. (The Agents page has no such switch.)
+            KitSegmented(items: ConnectorsTab.allCases, selection: $tab, title: { $0.title },
+                         help: { $0 == .yours ? "Accounts you have connected" : "Accounts and agents you can add" })
+                .fixedSize()
+                .dimsWhenInactive()
+                .gridProbe("tabs", area: areaName)
+            if tab == .discover {
+                DiscoverConnectors { request in sheet = request }
+                    .gridProbe("discover", area: areaName)
+            } else {
+                yours
+            }
+        }
+        .gridArea(areaName, inset: Space.pageX)
+        .task(id: focus.connectorsTab) { tab = (Store.isOverridden && focus.connectorsTab == "discover") ? .discover : .yours }
+        .sheet(item: $sheet) { AddConnectorSheet(request: $0) }
+        .onChange(of: connectorsState.sheet) { _, request in takeRequest(request) }
+        .onAppear { takeRequest(connectorsState.sheet) }
+        .toolbar {
+            ToolbarItemGroup {
+                Button(refreshing ? "Checking…" : "Refresh All", systemImage: "arrow.clockwise") {
+                    Task {
+                        refreshing = true
+                        await store.connectorStore.refreshConnectors()
+                        refreshing = false
+                    }
+                }
+                .disabled(refreshing || !actionsEnabled)
+                .help("Check every connector with its provider")
+                Button("Add…", systemImage: "plus") { sheet = ConnectorSheetRequest(kind: .github) }
+                    .disabled(!actionsEnabled)
+                    .help("Add a GitHub account, an AWS profile or an agent (Shift-Command-N)")
+            }
+        }
+        .searchable(text: $query, placement: .toolbar, prompt: "Search connectors")
+        .searchFocused($searching)
+        .focusedSceneValue(\.findAction, FindAction { searching = true })
+    }
+
+    /// The connectors that were added, by kind.
+    @ViewBuilder
+    private var yours: some View {
             if !store.connectorStore.connectorSetup.encryptionAvailable {
                 NoteLine(
                     tone: .wait,
@@ -53,30 +97,6 @@ struct ConnectorsPage: View {
                 }
                 .gridProbe(kind.rawValue, area: areaName)
             }
-        }
-        .gridArea(areaName, inset: Space.pageX)
-        .sheet(item: $sheet) { AddConnectorSheet(request: $0) }
-        .onChange(of: connectorsState.sheet) { _, request in takeRequest(request) }
-        .onAppear { takeRequest(connectorsState.sheet) }
-        .toolbar {
-            ToolbarItemGroup {
-                Button(refreshing ? "Checking…" : "Refresh All", systemImage: "arrow.clockwise") {
-                    Task {
-                        refreshing = true
-                        await store.connectorStore.refreshConnectors()
-                        refreshing = false
-                    }
-                }
-                .disabled(refreshing || !actionsEnabled)
-                .help("Check every connector with its provider")
-                Button("Add…", systemImage: "plus") { sheet = ConnectorSheetRequest(kind: .github) }
-                    .disabled(!actionsEnabled)
-                    .help("Add a GitHub account, an AWS profile or an agent (Shift-Command-N)")
-            }
-        }
-        .searchable(text: $query, placement: .toolbar, prompt: "Search connectors")
-        .searchFocused($searching)
-        .focusedSceneValue(\.findAction, FindAction { searching = true })
     }
 
     /// "Add Connector…" from the menu bar, or a snapshot scene, asks for the sheet through `ConnectorsPageState`.

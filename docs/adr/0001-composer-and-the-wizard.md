@@ -1,6 +1,6 @@
 # 1. Does the Home composer replace the New optimization wizard?
 
-Status: proposed (F2, for the owner to accept before P5 starts). Context: srikanth235/ratchet#10 §1, `docs/AGENT_HARNESS_PLAN.md` §4.8.
+Status: implemented in P5b (the screens are gone; the logic stays). Context: srikanth235/ratchet#10 §1, `docs/AGENT_HARNESS_PLAN.md` §4.8.
 
 ## Context
 

@@ -19,15 +19,15 @@ enum SelfTest {
 
     /// Runs the whole self-test on the sample client inside an app that is already running (the debug bridge's
     /// `selftest`) and returns the counts and lines. Test mode only; it changes the sample data.
-    static func runNow(store: AppStore, router: AppRouter, notifier: AppNotifier) async -> (checks: Int, failures: Int, lines: [String]) {
+    static func runNow(store: AppStore, router: AppRouter, hub: ChatHub, notifier: AppNotifier) async -> (checks: Int, failures: Int, lines: [String]) {
         failures = 0
         count = 0
         output = []
-        await run(store: store, router: router, notifier: notifier)
+        await run(store: store, router: router, hub: hub, notifier: notifier)
         return (count, failures, output)
     }
 
-    static func runIfRequested(store: AppStore, router: AppRouter, daemon: DaemonController, notifier: AppNotifier) {
+    static func runIfRequested(store: AppStore, router: AppRouter, hub: ChatHub, daemon: DaemonController, notifier: AppNotifier) {
         guard requested else { return }
         // Print each line at once, so a crash keeps the lines before it.
         setvbuf(stdout, nil, _IOLBF, 0)
@@ -45,13 +45,13 @@ enum SelfTest {
             return
         }
         Task {
-            await run(store: store, router: router, notifier: notifier)
+            await run(store: store, router: router, hub: hub, notifier: notifier)
             print(failures == 0 ? "SELFTEST PASS \(count) checks" : "SELFTEST FAIL \(failures) of \(count) checks")
             finish(code: failures == 0 ? 0 : 1)
         }
     }
 
-    private static func run(store: AppStore, router: AppRouter, notifier: AppNotifier) async {
+    private static func run(store: AppStore, router: AppRouter, hub: ChatHub, notifier: AppNotifier) async {
         // Store: the first load.
         check("the store loaded", store.isLoaded)
         check("test mode runs on demo data", store.isDemoData)
@@ -234,6 +234,7 @@ enum SelfTest {
         auditIcons()
         await auditNotifications(store: store, router: router, notifier: notifier)
         await auditEventStream(store: store)
+        await auditChat(store: store, router: router, hub: hub)
     }
 
     /// The real client path end to end: the generated client, the unix socket, the bearer token, the mapping, the event

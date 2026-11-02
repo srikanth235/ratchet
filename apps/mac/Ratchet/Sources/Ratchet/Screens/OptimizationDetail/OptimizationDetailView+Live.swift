@@ -21,13 +21,6 @@ extension OptimizationDetailView {
                 label: "Time left", value: optimization.secondsLeft.map(Elapsed.hm) ?? "—",
                 note: "of " + String(format: "%g", optimization.timeLimitHours) + " h limit")
         }
-        if optimization.status == .waiting {
-            HStack(spacing: Space.sm) {
-                StatusDot(tone: .wait)
-                Text("Waiting on you: approve the environment and the agents carry on.")
-                    .kitType(.body).foregroundStyle(Ink.textMuted)
-            }
-        }
         // The agents sit beside the chart when there is room, and under it when there is not.
         ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: Space.pageX) {
@@ -43,7 +36,7 @@ extension OptimizationDetailView {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        AgentLogSection(agents: detail?.agents ?? [])
+        RunLogSection(optimizationID: id, agents: detail?.agents ?? [])
         KitSection("Candidates") { CandidateTable(optimization: optimization, candidates: detail?.candidates ?? []) }
     }
 

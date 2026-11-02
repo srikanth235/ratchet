@@ -55,6 +55,16 @@ public final class ChatSession: Identifiable {
     /// The conversation as a value (for tests and for code that wants everything at once).
     public var conversation: ChatConversation { core }
 
+    /// Reads every structural part. A view that draws `conversation` (a pure value the observation cannot see into) calls this
+    /// first, so it is redrawn when a message, a step, a card or the turn state changes, and not for a delta.
+    public func observeStructure() {
+        _ = messages
+        _ = steps
+        _ = cards
+        _ = error
+        _ = isReplying
+    }
+
     public func dismissDataNotice() {
         dataNotice = nil
         core.chat.dataNotice = nil

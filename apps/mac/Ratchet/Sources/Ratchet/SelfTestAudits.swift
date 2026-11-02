@@ -107,8 +107,7 @@ extension SelfTest {
             "a click on a win opens the optimization",
             await settles { router.page == .optimizations && router.optimizationID == "opt-checkout" })
         notifier.open(.newOptimization)
-        check("a click on an environment draft opens the flow", await settles { router.wizard != nil })
-        router.closeWizard()
+        check("a click on New Optimization opens Home with the composer", await settles { router.page == .home && router.creationChatID == nil })
         router.show(.overview)
 
         // Links: the same destinations, and every page by name.

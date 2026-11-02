@@ -21,6 +21,8 @@ struct ConnectorSheetRequest: Identifiable, Equatable {
     var showsToken = false
     /// AWS: the profile already picked.
     var pick: String?
+    /// Agents: the harness whose key is being added (the Agents page's "Add Key…").
+    var harness: Harness?
 }
 
 /// What the Connectors page is doing besides showing the store's connectors: which rows are being renamed, edited or explained,
