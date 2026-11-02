@@ -380,35 +380,35 @@ struct ConnectorFormTests {
 
     @Test func aPastedTokenIsKeptButNeverShownAgain() async throws {
         let (store, _) = await make()
-        let before = store.connectors.count
-        try await store.addGithubToken(githubToken, name: "octocat-bot")
-        #expect(store.connectors.count == before + 1)
-        let added = try #require(store.connectors.first { $0.name == "octocat-bot" })
+        let before = store.connectorStore.connectors.count
+        try await store.connectorStore.addGithubToken(githubToken, name: "octocat-bot")
+        #expect(store.connectorStore.connectors.count == before + 1)
+        let added = try #require(store.connectorStore.connectors.first { $0.name == "octocat-bot" })
         #expect(added.kind == .github && added.origin == .token && added.state == .connected)
-        let encoded = try JSONEncoder().encode(store.connectors)
+        let encoded = try JSONEncoder().encode(store.connectorStore.connectors)
         #expect(!String(decoding: encoded, as: UTF8.self).contains(githubToken))
     }
 
     @Test func aTokenGitHubRejectsOrOfTheWrongShapeAddsNothing() async throws {
         let (store, _) = await make()
-        let before = store.connectors.count
-        await #expect(throws: RatchetClientError.self) { try await store.addGithubToken("nope") }
+        let before = store.connectorStore.connectors.count
+        await #expect(throws: RatchetClientError.self) { try await store.connectorStore.addGithubToken("nope") }
         do {
-            try await store.addGithubToken("ghp_" + String(repeating: "a", count: 32) + "0000")
+            try await store.connectorStore.addGithubToken("ghp_" + String(repeating: "a", count: 32) + "0000")
             Issue.record("a rejected token must not be added")
         } catch let error as RatchetClientError {
             #expect(error.localizedDescription.contains("rejected"))
         }
-        #expect(store.connectors.count == before)
+        #expect(store.connectorStore.connectors.count == before)
     }
 
     @Test func withoutAKeychainTheFormsSayWhy() async throws {
         let (store, client) = await make()
-        #expect(store.connectorSetup.encryptionAvailable)
+        #expect(store.connectorStore.connectorSetup.encryptionAvailable)
         await client.simulate(keychainAvailable: false)
         await store.refresh()
-        #expect(!store.connectorSetup.encryptionAvailable)
-        await #expect(throws: RatchetClientError.self) { try await store.addGithubToken(githubToken) }
+        #expect(!store.connectorStore.connectorSetup.encryptionAvailable)
+        await #expect(throws: RatchetClientError.self) { try await store.connectorStore.addGithubToken(githubToken) }
     }
 
     @Test func awsProfilesFromTheMachineExcludeTheOnesAlreadyConnected() async throws {
@@ -417,15 +417,15 @@ struct ConnectorFormTests {
         #expect(profiles.profiles.map(\.name) == ["acme-prod", "personal-dev", "acme-staging", "sandbox-eu"])
         #expect(profiles.profiles.first?.hint == "SSO · session acme")
         #expect(profiles.profiles.first { $0.name == "personal-dev" }?.hint == "access keys")
-        let available = profiles.available(excluding: store.connectors)
+        let available = profiles.available(excluding: store.connectorStore.connectors)
         #expect(available.map(\.name) == ["sandbox-eu"])
-        #expect(profiles.emptyNote(excluding: store.connectors) == nil)
+        #expect(profiles.emptyNote(excluding: store.connectorStore.connectors) == nil)
 
-        try await store.addConnectorChecked(NewConnector(kind: .aws, name: "sandbox-eu", region: "eu-west-2", monthlyCapUSD: 500))
-        let added = try #require(store.connectors.first { $0.profile == "sandbox-eu" })
+        try await store.connectorStore.addConnectorChecked(NewConnector(kind: .aws, name: "sandbox-eu", region: "eu-west-2", monthlyCapUSD: 500))
+        let added = try #require(store.connectorStore.connectors.first { $0.profile == "sandbox-eu" })
         #expect(added.region == "eu-west-2" && added.monthlyCapUSD == 500 && !added.isDefault)
-        #expect(profiles.available(excluding: store.connectors).isEmpty)
-        #expect(profiles.emptyNote(excluding: store.connectors) == "Every profile in ~/.aws is already connected.")
+        #expect(profiles.available(excluding: store.connectorStore.connectors).isEmpty)
+        #expect(profiles.emptyNote(excluding: store.connectorStore.connectors) == "Every profile in ~/.aws is already connected.")
     }
 
     @Test func theNotesForAMachineWithoutProfiles() {
@@ -436,27 +436,27 @@ struct ConnectorFormTests {
 
     @Test func anAwsConnectorIsEditedInPlace() async throws {
         let (store, _) = await make()
-        try await store.updateConnector("aws-personal-dev", ConnectorUpdate(region: "eu-west-1", cap: .remove))
-        var edited = try #require(store.connectors.first { $0.id == "aws-personal-dev" })
+        try await store.connectorStore.updateConnector("aws-personal-dev", ConnectorUpdate(region: "eu-west-1", cap: .remove))
+        var edited = try #require(store.connectorStore.connectors.first { $0.id == "aws-personal-dev" })
         #expect(edited.region == "eu-west-1" && edited.monthlyCapUSD == nil)
         #expect(edited.detail.contains("eu-west-1") && !edited.detail.contains("cap"))
-        try await store.updateConnector("aws-personal-dev", ConnectorUpdate(cap: .set(250)))
-        edited = try #require(store.connectors.first { $0.id == "aws-personal-dev" })
+        try await store.connectorStore.updateConnector("aws-personal-dev", ConnectorUpdate(cap: .set(250)))
+        edited = try #require(store.connectorStore.connectors.first { $0.id == "aws-personal-dev" })
         #expect(edited.monthlyCapUSD == 250 && edited.region == "eu-west-1")
-        try await store.updateConnector("aws-personal-dev", ConnectorUpdate(region: "us-west-2", cap: .keep))
-        #expect(store.connectors.first { $0.id == "aws-personal-dev" }?.monthlyCapUSD == 250)
+        try await store.connectorStore.updateConnector("aws-personal-dev", ConnectorUpdate(region: "us-west-2", cap: .keep))
+        #expect(store.connectorStore.connectors.first { $0.id == "aws-personal-dev" }?.monthlyCapUSD == 250)
         await #expect(throws: RatchetClientError.self) {
-            try await store.updateConnector("aws-personal-dev", ConnectorUpdate(region: "mars"))
+            try await store.connectorStore.updateConnector("aws-personal-dev", ConnectorUpdate(region: "mars"))
         }
     }
 
     @Test func renamingKeepsTheRestAndNeedsAName() async throws {
         let (store, _) = await make()
-        try await store.updateConnector("gh-acme-org", ConnectorUpdate(name: "  Acme organisation "))
-        let renamed = try #require(store.connectors.first { $0.id == "gh-acme-org" })
+        try await store.connectorStore.updateConnector("gh-acme-org", ConnectorUpdate(name: "  Acme organisation "))
+        let renamed = try #require(store.connectorStore.connectors.first { $0.id == "gh-acme-org" })
         #expect(renamed.name == "Acme organisation" && renamed.state == .connected)
-        await #expect(throws: RatchetClientError.self) { try await store.updateConnector("gh-acme-org", ConnectorUpdate(name: "  ")) }
-        await #expect(throws: RatchetClientError.self) { try await store.updateConnector("nope", ConnectorUpdate(name: "x")) }
+        await #expect(throws: RatchetClientError.self) { try await store.connectorStore.updateConnector("gh-acme-org", ConnectorUpdate(name: "  ")) }
+        await #expect(throws: RatchetClientError.self) { try await store.connectorStore.updateConnector("nope", ConnectorUpdate(name: "x")) }
     }
 
     @Test func anAccountFromTheEnvironmentCannotBeRenamedOrRemoved() {
@@ -468,25 +468,25 @@ struct ConnectorFormTests {
 
     @Test func checkConnectionAnswersInOneLine() async throws {
         let (store, _) = await make()
-        let ok = try await store.checkConnector("gh-srikanth235")
+        let ok = try await store.connectorStore.checkConnector("gh-srikanth235")
         #expect(ok.ok && ok.detail.contains("srikanth235"))
-        let expired = try await store.checkConnector("aws-acme-staging")
+        let expired = try await store.connectorStore.checkConnector("aws-acme-staging")
         #expect(!expired.ok && expired.detail.contains("signing in"))
-        await #expect(throws: RatchetClientError.self) { try await store.checkConnector("nope") }
+        await #expect(throws: RatchetClientError.self) { try await store.connectorStore.checkConnector("nope") }
     }
 
     @Test func refreshAllKeepsTheList() async {
         let (store, _) = await make()
-        let before = store.connectors
-        await store.refreshConnectors()
-        #expect(store.connectors == before)
+        let before = store.connectorStore.connectors
+        await store.connectorStore.refreshConnectors()
+        #expect(store.connectorStore.connectors == before)
         #expect(store.lastError == nil)
     }
 
     @Test func reDetectPicksUpANewlyInstalledCLI() async throws {
         let (store, client) = await make()
         try await store.client.removeConnector(id: "agent-codex-login")
-        await store.refreshConnectors()
+        await store.connectorStore.refreshConnectors()
         let seen = try await client.detectedHarnesses(redetect: false)
         let connected = try await client.connectors()
         #expect(DetectedHarness.addable(seen, connected: connected).isEmpty)
@@ -497,10 +497,10 @@ struct ConnectorFormTests {
         #expect(addable.map(\.harness) == [.codex])
         #expect(addable.first?.title == "Codex · v0.166")
 
-        try await store.addConnectorChecked(NewConnector(kind: .agent, name: Harness.codex.title))
-        let login = try #require(store.connectors.first { $0.harness == .codex })
+        try await store.connectorStore.addConnectorChecked(NewConnector(kind: .agent, name: Harness.codex.title))
+        let login = try #require(store.connectorStore.connectors.first { $0.harness == .codex })
         #expect(login.origin == .login && !login.canRunInCloud)
-        #expect(DetectedHarness.addable(after, connected: store.connectors).isEmpty)
+        #expect(DetectedHarness.addable(after, connected: store.connectorStore.connectors).isEmpty)
     }
 
     @Test func noCLIAtAllHasItsOwnNote() {
@@ -510,10 +510,10 @@ struct ConnectorFormTests {
 
     @Test func anAgentKeyIsListedAsACloudCapableKey() async throws {
         let (store, _) = await make()
-        try await store.addConnectorChecked(NewConnector(kind: .agent, name: "Claude Code", secret: "sk-ant-api03-abcdefgh"))
-        let key = try #require(store.connectors.last { $0.kind == .agent })
+        try await store.connectorStore.addConnectorChecked(NewConnector(kind: .agent, name: "Claude Code", secret: "sk-ant-api03-abcdefgh"))
+        let key = try #require(store.connectorStore.connectors.last { $0.kind == .agent })
         #expect(key.origin == .apiKey && key.canRunInCloud && key.harness == .claudeCode)
-        let encoded = try JSONEncoder().encode(store.connectors)
+        let encoded = try JSONEncoder().encode(store.connectorStore.connectors)
         #expect(!String(decoding: encoded, as: UTF8.self).contains("sk-ant-api03"))
     }
 }

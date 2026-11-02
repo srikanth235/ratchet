@@ -60,6 +60,12 @@ struct ContentView: View {
                 store: store, router: router, openSettings: openSettings, daemon: daemon, notifier: notifier,
                 loginItem: loginItem)
         }
+        // The live events follow the same rule, as a task of their own: they stop when the daemon goes away or the data source
+        // changes (demo mode), and start again with them. Nothing else holds on to the stream.
+        .task(id: "\(daemon.phase.isRunning)|\(store.isDemoData)") {
+            guard daemon.phase.isRunning else { return }
+            await store.followEvents()
+        }
         .sheet(item: Binding(get: { router.templateProposal }, set: { router.templateProposal = $0 })) { flow in
             UseTemplateSheet(flow: flow)
         }

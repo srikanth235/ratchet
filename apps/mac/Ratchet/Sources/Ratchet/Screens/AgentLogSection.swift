@@ -36,7 +36,7 @@ struct AgentLogView: View {
     let state: AgentState
     @Environment(AppStore.self) private var store
 
-    private var log: AgentLog { store.insight.logs[agentID] ?? AgentLog() }
+    private var log: AgentLog { store.insight.logModel(agentID).log }
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Dim.radiusRow, style: .continuous)
@@ -63,7 +63,7 @@ struct AgentLogView: View {
                 if let newest { proxy.scrollTo(newest, anchor: .bottom) }
             }
             .task(id: agentID) {
-                await store.loadAgentLog(agentID)
+                await store.insight.loadAgentLog(agentID)
                 if let newest = log.lines.last?.id { proxy.scrollTo(newest, anchor: .bottom) }
             }
         }

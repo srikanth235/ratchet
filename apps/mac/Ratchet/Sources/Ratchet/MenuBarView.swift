@@ -35,10 +35,10 @@ struct MenuBarView: View {
                 }
             }
             Hairline()
-            if store.runningOptimizations.isEmpty {
+            if store.optimizationStore.runningOptimizations.isEmpty {
                 Text("No optimizations running").kitType(.meta).foregroundStyle(Ink.textFaint)
             } else {
-                ForEach(store.runningOptimizations) { optimization in
+                ForEach(store.optimizationStore.runningOptimizations) { optimization in
                     Button { show { router.open(optimization: optimization.id) } } label: { runRow(optimization) }
                         .buttonStyle(.plain)
                 }
@@ -58,7 +58,7 @@ struct MenuBarView: View {
             }
             Hairline()
             HStack(alignment: .top, spacing: Space.xs) {
-                StatusDot(tone: store.sandbox.isOn ? .ok : .off)
+                StatusDot(tone: store.sandboxStore.sandbox.isOn ? .ok : .off)
                 Text(sandboxLine).kitType(.caption).foregroundStyle(Ink.textMuted)
             }
             HStack(spacing: Space.sm) {
@@ -75,9 +75,9 @@ struct MenuBarView: View {
     }
 
     private var sandboxLine: String {
-        guard store.sandbox.isOn else { return "Sandbox off" }
-        var line = "Sandbox on · " + (store.sandbox.account ?? "AWS") + " · " + Money.exact(store.sandbox.costSoFarUSD) + " so far"
-        if let offAt = store.sandbox.offAt { line += " · off at " + Elapsed.timeOfDay(offAt) }
+        guard store.sandboxStore.sandbox.isOn else { return "Sandbox off" }
+        var line = "Sandbox on · " + (store.sandboxStore.sandbox.account ?? "AWS") + " · " + Money.exact(store.sandboxStore.sandbox.costSoFarUSD) + " so far"
+        if let offAt = store.sandboxStore.sandbox.offAt { line += " · off at " + Elapsed.timeOfDay(offAt) }
         return line
     }
 

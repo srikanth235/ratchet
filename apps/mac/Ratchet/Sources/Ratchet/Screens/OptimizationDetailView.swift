@@ -11,8 +11,8 @@ struct OptimizationDetailView: View {
     @Environment(\.openURL) private var openURL
     @State private var confirmingStop = false
 
-    private var detail: OptimizationDetail? { store.details[id] }
-    private var optimization: Optimization? { store.optimization(id: id) ?? detail?.optimization }
+    private var detail: OptimizationDetail? { store.optimizationStore.details[id] }
+    private var optimization: Optimization? { store.optimizationStore.optimization(id: id) ?? detail?.optimization }
 
     var body: some View {
         Group {
@@ -37,8 +37,8 @@ struct OptimizationDetailView: View {
             }
         }
         .task(id: id) {
-            await store.loadDetail(id: id)
-            if store.details[id]?.optimization.status.isFinished == true { await store.loadInsights(id) }
+            await store.optimizationStore.loadDetail(id: id)
+            if store.optimizationStore.details[id]?.optimization.status.isFinished == true { await store.insight.loadInsights(id) }
         }
     }
 
@@ -55,7 +55,7 @@ struct OptimizationDetailView: View {
                 Button("Open pull request #\(number)") { openPullRequest(optimization, number) }
                     .buttonStyle(.kit(.primary))
             } else if optimization.status.isFinished && optimization.winsCount > 0 {
-                Button("Create pull request") { Task { if let url = await store.openPullRequest(id) { openURL(url) } } }
+                Button("Create pull request") { Task { if let url = await store.optimizationStore.openPullRequest(id) { openURL(url) } } }
                     .buttonStyle(.kit(.primary))
             }
             if optimization.status.isFinished {
@@ -67,7 +67,7 @@ struct OptimizationDetailView: View {
                     .confirmationDialog(
                         "Stop this optimization?", isPresented: $confirmingStop, titleVisibility: .visible
                     ) {
-                        Button("Stop and revoke keys", role: .destructive) { Task { await store.stopOptimization(id) } }
+                        Button("Stop and revoke keys", role: .destructive) { Task { await store.optimizationStore.stopOptimization(id) } }
                         Button("Keep running", role: .cancel) {}
                     } message: {
                         Text("The agents stop, their keys are revoked and the sandbox is removed once nothing else uses it. Wins found so far are kept.")
@@ -85,7 +85,7 @@ struct OptimizationDetailView: View {
     /// The markdown report, through the system save dialog.
     @MainActor
     private func exportReport() async {
-        guard let report = await store.report(id) else { return }
+        guard let report = await store.optimizationStore.report(id) else { return }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = report.fileName
         panel.canCreateDirectories = true
@@ -189,7 +189,7 @@ struct OptimizationDetailView: View {
             KitSection("What changed") { changeBlock(optimization) }
                 .frame(width: 320, alignment: .leading)
         }
-        if let insights = store.insight.insights[id] {
+        if let insights = store.insight.model(for: id).insights {
             resultInsights(insights, optimization)
         }
         KitSection("Candidates") { candidateTable(optimization) }
@@ -354,7 +354,7 @@ private struct AgentActions: View {
                 .popover(isPresented: $composing) { composer }
             Button(agent.state == .paused ? "Resume" : "Pause") {
                 Task {
-                    if agent.state == .paused { await store.resumeAgent(agent.id) } else { await store.pauseAgent(agent.id) }
+                    if agent.state == .paused { await store.optimizationStore.resumeAgent(agent.id) } else { await store.optimizationStore.pauseAgent(agent.id) }
                 }
             }
             .buttonStyle(.kit(.quiet, small: true))
@@ -385,6 +385,6 @@ private struct AgentActions: View {
         guard !note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         text = ""
         composing = false
-        Task { await store.messageAgent(agent.id, text: note) }
+        Task { await store.optimizationStore.messageAgent(agent.id, text: note) }
     }
 }

@@ -19,7 +19,7 @@ struct BenchmarkRunSection: View {
     }
 
     /// The optimizations that have a baseline to show.
-    private var runs: [Optimization] { store.optimizations.filter { $0.baseline != 0 } }
+    private var runs: [Optimization] { store.optimizationStore.optimizations.filter { $0.baseline != 0 } }
 
     private var runID: String? {
         if let chosen, runs.contains(where: { $0.id == chosen }) { return chosen }
@@ -34,7 +34,7 @@ struct BenchmarkRunSection: View {
                     content(id)
                 }
                 .task(id: "\(id)|\(metric ?? "")") {
-                    await store.loadBenchmark(id, metric: metric)
+                    await store.insight.loadBenchmark(id, metric: metric)
                 }
             } else {
                 Text("Start an optimization and its benchmark appears here.").kitType(.body).foregroundStyle(Ink.textMuted)
@@ -52,7 +52,7 @@ struct BenchmarkRunSection: View {
             .labelsHidden()
             .fixedSize()
             Spacer(minLength: Space.sm)
-            if let series = store.insight.series[id], series.hasMetricSwitch {
+            if let series = store.insight.model(for: id).series, series.hasMetricSwitch {
                 KitSwitch(items: series.options, selection: series.selected ?? series.options[0], title: { $0.label }) { choice in
                     metric = choice.isObjective ? nil : choice.key
                 }
@@ -63,8 +63,8 @@ struct BenchmarkRunSection: View {
 
     @ViewBuilder
     private func content(_ id: String) -> some View {
-        if let series = store.insight.series[id] {
-            let results = store.insight.results[id] ?? []
+        if let series = store.insight.model(for: id).series {
+            let results = store.insight.model(for: id).results ?? []
             header(series)
             if series.steps.isEmpty {
                 Text("The chart appears once the baseline run finishes.").kitType(.body).foregroundStyle(Ink.textMuted)
@@ -109,7 +109,7 @@ struct BenchmarkRunSection: View {
 
     @ViewBuilder
     private func histogram(_ id: String, series: BenchmarkSeries, results: [CandidateResult]) -> some View {
-        let baseline = store.insight.insights[id]?.baselineSamples ?? []
+        let baseline = store.insight.model(for: id).insights?.baselineSamples ?? []
         let best = results.filter { $0.movedRatchet && !$0.samples.isEmpty }.max { $0.at < $1.at }
         if !baseline.isEmpty, let best {
             SamplesHistogram(
@@ -122,7 +122,7 @@ struct BenchmarkRunSection: View {
 
     @ViewBuilder
     private func baselineVsBest(_ id: String) -> some View {
-        let insights = store.insight.insights[id]
+        let insights = store.insight.model(for: id).insights
         if let lines = insights?.compare, !lines.isEmpty {
             HairlineList {
                 ForEach(lines) { line in

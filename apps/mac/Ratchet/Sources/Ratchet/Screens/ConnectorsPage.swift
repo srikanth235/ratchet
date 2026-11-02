@@ -20,7 +20,7 @@ struct ConnectorsPage: View {
                     Button(refreshing ? "Checking…" : "Refresh all") {
                         Task {
                             refreshing = true
-                            await store.refreshConnectors()
+                            await store.connectorStore.refreshConnectors()
                             refreshing = false
                         }
                     }
@@ -32,20 +32,20 @@ struct ConnectorsPage: View {
                 }
             }
             .gridProbe(probePrefix + "header", area: areaName)
-            if !store.connectorSetup.encryptionAvailable {
+            if !store.connectorStore.connectorSetup.encryptionAvailable {
                 NoteLine(
                     tone: .wait,
                     text: "The keychain is unavailable, so tokens and API keys cannot be stored. `GITHUB_TOKEN`, `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` from the environment are still honoured.")
                     .setupPanel()
                     .gridProbe(probePrefix + "keychain", area: areaName)
             }
-            if let flow = store.githubFlow {
+            if let flow = store.connectorStore.githubFlow {
                 GithubFlowCard(flow: flow)
                     .gridProbe(probePrefix + "github-flow", area: areaName)
             }
             ForEach(ConnectorKind.allCases) { kind in
                 KitSection(kind.title) {
-                    let list = store.connectors(of: kind)
+                    let list = store.connectorStore.connectors(of: kind)
                     if list.isEmpty {
                         Text(Self.emptyText(kind)).kitType(.meta).foregroundStyle(Ink.textFaint)
                     } else {
@@ -98,7 +98,7 @@ private struct ConnectorRow: View {
                 if connector.isDefault {
                     Text("Default").kitType(.meta).foregroundStyle(Ink.textFaint)
                 } else if hovering && connector.state.isUsable {
-                    Button("Make default") { Task { await store.setDefaultConnector(connector.id) } }
+                    Button("Make default") { Task { await store.connectorStore.setDefaultConnector(connector.id) } }
                         .buttonStyle(.kit(.link))
                 }
                 signInButton
@@ -115,7 +115,7 @@ private struct ConnectorRow: View {
         .onHover { hovering = $0 }
         .contextMenu { menuItems }
         .confirmationDialog("Remove \(connector.name)?", isPresented: $confirmingRemove) {
-            Button("Remove", role: .destructive) { Task { await store.removeConnector(connector.id) } }
+            Button("Remove", role: .destructive) { Task { await store.connectorStore.removeConnector(connector.id) } }
         } message: {
             Text(removeNote)
         }
@@ -162,7 +162,7 @@ private struct ConnectorRow: View {
         guard !name.isEmpty else { return }
         Task {
             do {
-                try await store.updateConnector(connector.id, ConnectorUpdate(name: name))
+                try await store.connectorStore.updateConnector(connector.id, ConnectorUpdate(name: name))
                 setMode(nil)
             } catch {
                 router.rowNotes[connector.id] = ConnectorNote(ok: false, text: error.localizedDescription)
@@ -179,7 +179,7 @@ private struct ConnectorRow: View {
                 .buttonStyle(.kit(.quiet, small: true))
         } else if connector.state == .expired || (connector.kind == .github && connector.state == .signedOut) {
             if !connector.isFromEnvironment {
-                Button("Sign in") { Task { await store.signInConnector(connector.id) } }
+                Button("Sign in") { Task { await store.connectorStore.signInConnector(connector.id) } }
                     .buttonStyle(.kit(.quiet, small: true))
             }
         }
@@ -200,12 +200,12 @@ private struct ConnectorRow: View {
     @ViewBuilder
     private var menuItems: some View {
         if connector.state.isUsable && !connector.isDefault {
-            Button("Make Default") { Task { await store.setDefaultConnector(connector.id) } }
+            Button("Make Default") { Task { await store.connectorStore.setDefaultConnector(connector.id) } }
         }
         Button("Check Connection") { check() }
         if connector.state == .expired || connector.state == .signedOut {
             if connector.kind != .github || !connector.isFromEnvironment {
-                Button("Sign In") { Task { await store.signInConnector(connector.id) } }
+                Button("Sign In") { Task { await store.connectorStore.signInConnector(connector.id) } }
             }
         }
         if connector.kind == .aws {
@@ -221,7 +221,7 @@ private struct ConnectorRow: View {
     private func check() {
         Task {
             do {
-                let result = try await store.checkConnector(connector.id)
+                let result = try await store.connectorStore.checkConnector(connector.id)
                 router.rowNotes[connector.id] = ConnectorNote(ok: result.ok, text: result.detail)
             } catch {
                 router.rowNotes[connector.id] = ConnectorNote(ok: false, text: error.localizedDescription)
@@ -316,7 +316,7 @@ private struct AwsEditForm: View {
         let update = ConnectorUpdate(region: region, cap: capCheck.value.map { .set($0) } ?? .remove)
         Task {
             do {
-                try await store.updateConnector(connector.id, update)
+                try await store.connectorStore.updateConnector(connector.id, update)
                 router.rowModes[connector.id] = nil
             } catch {
                 failure = error.localizedDescription
@@ -352,14 +352,14 @@ private struct GithubFlowCard: View {
                             NSPasteboard.general.setString(flow.userCode, forType: .string)
                         }
                         .buttonStyle(.kit(.quiet, small: true))
-                        Button("Cancel") { Task { await store.cancelGithubSignIn() } }
+                        Button("Cancel") { Task { await store.connectorStore.cancelGithubSignIn() } }
                             .buttonStyle(.kit(.link, small: true))
                     }
                 }
             } else {
-                Button("Try again") { Task { await store.startGithubSignIn() } }
+                Button("Try again") { Task { await store.connectorStore.startGithubSignIn() } }
                     .buttonStyle(.kit(.primary, small: true))
-                Button("Dismiss") { Task { await store.cancelGithubSignIn() } }
+                Button("Dismiss") { Task { await store.connectorStore.cancelGithubSignIn() } }
                     .buttonStyle(.kit(.link, small: true))
             }
         }
@@ -414,7 +414,7 @@ struct AddConnectorSheet: View {
         _pick = State(initialValue: request.pick)
     }
 
-    private var canStore: Bool { store.connectorSetup.encryptionAvailable }
+    private var canStore: Bool { store.connectorStore.connectorSetup.encryptionAvailable }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.lg) {
@@ -479,22 +479,22 @@ struct AddConnectorSheet: View {
                 switch kind {
                 case .github:
                     if showsToken {
-                        try await store.addGithubToken(token)
+                        try await store.connectorStore.addGithubToken(token)
                         token = ""
                     } else {
-                        await store.startGithubSignIn()
+                        await store.connectorStore.startGithubSignIn()
                     }
                 case .aws:
                     guard let pick else { return }
-                    try await store.addConnectorChecked(NewConnector(
+                    try await store.connectorStore.addConnectorChecked(NewConnector(
                         kind: .aws, name: pick, region: region.trimmingCharacters(in: .whitespaces),
                         monthlyCapUSD: SettingsCheck.cap(cap).value))
-                    Task { await store.refreshConnectors() }
+                    Task { await store.connectorStore.refreshConnectors() }
                 case .agent:
-                    try await store.addConnectorChecked(NewConnector(
+                    try await store.connectorStore.addConnectorChecked(NewConnector(
                         kind: .agent, name: keyName.isEmpty ? cli.title : keyName, secret: apiKey))
                     apiKey = ""
-                    Task { await store.refreshConnectors() }
+                    Task { await store.connectorStore.refreshConnectors() }
                 }
                 dismiss()
             } catch {
@@ -510,7 +510,7 @@ struct AddConnectorSheet: View {
             Text("Sign in with GitHub").kitType(.section).foregroundStyle(Ink.textMuted)
             Text("GitHub shows a short code. Type it at github.com/login/device and Ratchet adds the account. No password or token passes through the app.")
                 .kitType(.meta).foregroundStyle(Ink.textMuted).fixedSize(horizontal: false, vertical: true)
-            if !store.connectorSetup.clientIdConfigured {
+            if !store.connectorStore.connectorSetup.clientIdConfigured {
                 CommandText(text: "This build uses the built-in placeholder OAuth client id: set `RATCHET_GITHUB_CLIENT_ID` to your OAuth app.", type: .caption)
             }
             DisclosureGroup(isExpanded: $showsToken) {
@@ -542,8 +542,8 @@ struct AddConnectorSheet: View {
         VStack(alignment: .leading, spacing: Space.md) {
             Text("AWS profile").kitType(.section).foregroundStyle(Ink.textMuted)
             if let profiles {
-                let available = profiles.available(excluding: store.connectors)
-                if let note = profiles.emptyNote(excluding: store.connectors) {
+                let available = profiles.available(excluding: store.connectorStore.connectors)
+                if let note = profiles.emptyNote(excluding: store.connectorStore.connectors) {
                     CommandText(text: note + " Run `aws configure sso` in a terminal, then rescan.", type: .meta, color: Ink.textMuted)
                 } else {
                     ScrollView {
@@ -592,7 +592,7 @@ struct AddConnectorSheet: View {
             VStack(alignment: .leading, spacing: Space.sm) {
                 Text("Found on this Mac").kitType(.section).foregroundStyle(Ink.textMuted)
                 if let found {
-                    let addable = DetectedHarness.addable(found, connected: store.connectors)
+                    let addable = DetectedHarness.addable(found, connected: store.connectorStore.connectors)
                     if addable.isEmpty {
                         Text(DetectedHarness.emptyNote(found)).kitType(.meta).foregroundStyle(Ink.textFaint)
                     } else {
@@ -638,7 +638,7 @@ struct AddConnectorSheet: View {
         Task {
             defer { busy = false }
             do {
-                try await store.addConnectorChecked(NewConnector(kind: .agent, name: agent.harness.title))
+                try await store.connectorStore.addConnectorChecked(NewConnector(kind: .agent, name: agent.harness.title))
                 dismiss()
             } catch {
                 failure = error.localizedDescription
@@ -650,7 +650,7 @@ struct AddConnectorSheet: View {
         Task {
             do {
                 found = try await store.client.detectedHarnesses(redetect: true)
-                await store.refreshConnectors()
+                await store.connectorStore.refreshConnectors()
                 failure = nil
             } catch {
                 failure = error.localizedDescription

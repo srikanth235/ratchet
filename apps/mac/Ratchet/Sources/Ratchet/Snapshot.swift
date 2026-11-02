@@ -50,7 +50,7 @@ enum SnapScene: String, CaseIterable {
         daemon.preview(nil)
         notifier.preview(.allowed, prompt: false)
         store.dismissError()
-        await store.cancelGithubSignIn()
+        await store.connectorStore.cancelGithubSignIn()
         router.show(.overview)
         router.rowModes = [:]
         router.rowNotes = [:]
@@ -68,10 +68,10 @@ enum SnapScene: String, CaseIterable {
         case .notificationPrompt: notifier.preview(.notDetermined, prompt: true)
         case .errorBanner:
             router.open(optimization: "opt-checkout")
-            await store.stopOptimization("opt-bundle")
+            await store.optimizationStore.stopOptimization("opt-bundle")
         case .connectorSignIn:
             router.show(.connectors)
-            await store.startGithubSignIn()
+            await store.connectorStore.startGithubSignIn()
         case .optimizations: router.show(.optimizations)
         case .benchmarks: router.show(.benchmarks)
         case .connectors: router.show(.connectors)
@@ -80,22 +80,22 @@ enum SnapScene: String, CaseIterable {
         case .detailNoWin: router.open(optimization: "opt-bundle")
         case .detailLiveLog:
             router.open(optimization: "opt-checkout")
-            await store.loadDetail(id: "opt-checkout")
-            await store.loadAgentLog("agent-claude-login")
+            await store.optimizationStore.loadDetail(id: "opt-checkout")
+            await store.insight.loadAgentLog("agent-claude-login")
             SnapshotFocus.shared.target = "log"
         case .detailResultTime:
             router.open(optimization: "opt-cli")
-            await store.loadDetail(id: "opt-cli")
-            await store.loadInsights("opt-cli")
+            await store.optimizationStore.loadDetail(id: "opt-cli")
+            await store.insight.loadInsights("opt-cli")
             SnapshotFocus.shared.target = "time"
         case .detailResultSpend:
             router.open(optimization: "opt-forecast")
-            await store.loadDetail(id: "opt-forecast")
-            await store.loadInsights("opt-forecast")
+            await store.optimizationStore.loadDetail(id: "opt-forecast")
+            await store.insight.loadInsights("opt-forecast")
             SnapshotFocus.shared.target = "spend"
         case .benchmarksRun, .benchmarksRunP99:
             router.show(.benchmarks)
-            await store.loadBenchmark("opt-checkout", metric: nil)
+            await store.insight.loadBenchmark("opt-checkout", metric: nil)
             if self == .benchmarksRunP99 { SnapshotFocus.shared.metric = "p99" }
             SnapshotFocus.shared.target = "run"
         case .newRepoFound, .newRepoInvalid, .newRepoTemplate, .newLocalFolder, .newLocalNoRemote, .newMissing:

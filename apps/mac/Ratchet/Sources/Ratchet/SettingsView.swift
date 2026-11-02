@@ -136,7 +136,7 @@ struct GeneralSettings: View {
         }
         Section("Data") {
             LabeledContent("Source", value: sourceText)
-            LabeledContent("Optimizations", value: "\(store.optimizations.count)")
+            LabeledContent("Optimizations", value: "\(store.optimizationStore.optimizations.count)")
         }
         AdvancedSettingsSection()
         Section("Shortcuts") {
