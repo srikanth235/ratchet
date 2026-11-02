@@ -153,23 +153,12 @@ public final class InsightsStore {
         }
     }
 
-    /// The stream lost its place: read again what somebody has open, a few at a time.
+    /// The stream lost its place: read again what somebody has open.
     func reloadOpen() async {
         let agents = Array(logs.keys)
         let optimizationIDs = Array(optimizations.compactMap { $0.value.insights == nil ? nil : $0.key })
-        await withTaskGroup(of: Void.self) { group in
-            var running = 0
-            for agentID in agents {
-                if running == 4 { await group.next(); running -= 1 }
-                group.addTask { @MainActor in await self.loadAgentLog(agentID) }
-                running += 1
-            }
-            for id in optimizationIDs {
-                if running == 4 { await group.next(); running -= 1 }
-                group.addTask { @MainActor in await self.loadInsights(id) }
-                running += 1
-            }
-        }
+        for agentID in agents { await loadAgentLog(agentID) }
+        for id in optimizationIDs { await loadInsights(id) }
     }
 }
 
