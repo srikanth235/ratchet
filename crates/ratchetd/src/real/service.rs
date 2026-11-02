@@ -313,6 +313,11 @@ fn demo_name(id: &str) -> String {
 }
 
 impl RealService {
+    /// True while any run is active (what the `run-active` event last said, read directly).
+    pub fn run_active(&self) -> bool {
+        self.0.product.run_active()
+    }
+
     pub async fn new(opts: RealServiceOptions) -> ServiceResult<Self> {
         let clock: Arc<dyn Clock> = opts.clock.clone().unwrap_or_else(|| Arc::new(SystemClock));
         let ledger_opts = LedgerOptions {

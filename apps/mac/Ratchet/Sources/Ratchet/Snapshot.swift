@@ -24,6 +24,8 @@ enum SnapScene: String, CaseIterable {
     case daemonApproval = "daemon-approval"
     case notificationPrompt = "notification-prompt"
     case connectorSignIn = "connector-signin"
+    // A failed action: the dismissible banner above the page (Stop on an optimization that already ended).
+    case errorBanner = "error-banner"
     // Setup: finding the repo, "What's missing", the Connectors forms, "Use template".
     case newRepoFound = "new-repo-found"
     case newRepoInvalid = "new-repo-invalid"
@@ -47,6 +49,7 @@ enum SnapScene: String, CaseIterable {
         SnapshotFocus.shared.metric = nil
         daemon.preview(nil)
         notifier.preview(.allowed, prompt: false)
+        store.dismissError()
         await store.cancelGithubSignIn()
         router.show(.overview)
         router.rowModes = [:]
@@ -63,6 +66,9 @@ enum SnapScene: String, CaseIterable {
         case .daemonStarting: daemon.preview(.starting)
         case .daemonApproval: daemon.preview(.needsApproval)
         case .notificationPrompt: notifier.preview(.notDetermined, prompt: true)
+        case .errorBanner:
+            router.open(optimization: "opt-checkout")
+            await store.stopOptimization("opt-bundle")
         case .connectorSignIn:
             router.show(.connectors)
             await store.startGithubSignIn()
@@ -178,7 +184,8 @@ enum SnapScene: String, CaseIterable {
 /// APP_SNAPSHOT_PAGES=overview,new-budget limits the scenes. "all" means every scene; add "settings" for Settings.
 enum Snapshot {
     static func runIfRequested(
-        store: AppStore, router: AppRouter, openSettings: OpenSettingsAction, daemon: DaemonController, notifier: AppNotifier
+        store: AppStore, router: AppRouter, openSettings: OpenSettingsAction, daemon: DaemonController, notifier: AppNotifier,
+        loginItem: LoginItem
     ) {
         let env = ProcessInfo.processInfo.environment
         guard let dir = env["APP_SNAPSHOT"], !dir.isEmpty else { return }
@@ -211,6 +218,7 @@ enum Snapshot {
             if everything || only?.contains("settings") == true {
                 await SnapScene.overview.apply(store: store, router: router, daemon: daemon, notifier: notifier)
                 let main = NSApp.windows.first { $0.canBecomeMain && !$0.isSheet }
+                loginItem.preview(.off)
                 openSettings()
                 try? await Task.sleep(for: .seconds(1))
                 for mode in ["light", "dark"] {
@@ -232,6 +240,14 @@ enum Snapshot {
                     }
                     capture(to: "\(dir)/settings-advanced-\(mode).png", window: advanced)
                     router.advancedExpanded = false
+                    // Launch at login, waiting for the OK in System Settings.
+                    loginItem.preview(.needsApproval)
+                    try? await Task.sleep(for: .seconds(0.8))
+                    let pending = NSApp.windows.first {
+                        $0.isVisible && $0 !== main && !$0.isSheet && $0.styleMask.contains(.titled)
+                    }
+                    capture(to: "\(dir)/settings-login-approval-\(mode).png", window: pending)
+                    loginItem.preview(.off)
                 }
             }
             print("SNAPSHOT done \(dir)")

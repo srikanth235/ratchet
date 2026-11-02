@@ -58,6 +58,7 @@ struct GeneralSettings: View {
     @Environment(AppStore.self) private var store
     @Environment(DaemonController.self) private var daemon
     @Environment(AppNotifier.self) private var notifier
+    @Environment(LoginItem.self) private var loginItem
     @State private var installNote: String?
 
     var body: some View {
@@ -66,6 +67,22 @@ struct GeneralSettings: View {
             Text("Running optimizations, what needs you and the sandbox, one click away. Closing the window keeps Ratchet running while this is on.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+        Section("Startup") {
+            Toggle("Launch at login", isOn: Binding(
+                get: { loginItem.state.isRequested },
+                set: { on in
+                    // Launching at login starts with only the menu bar item, so it needs the item to be on.
+                    if on { showMenuBarItem = true }
+                    if let problem = loginItem.set(on) { store.reportProblem(problem) }
+                }))
+                .disabled(loginItem.state == .unavailable)
+            Text(loginItemNote)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if loginItem.state == .needsApproval {
+                Button("Open Login Items") { loginItem.openSystemSettings() }
+            }
         }
         Section("Background service") {
             LabeledContent("Status", value: statusText)
@@ -126,6 +143,15 @@ struct GeneralSettings: View {
             LabeledContent("New optimization", value: "Command-N")
             LabeledContent("Overview, Optimizations, Benchmarks, Connectors", value: "Command-1 to 4")
             LabeledContent("Refresh", value: "Command-R")
+        }
+    }
+
+    private var loginItemNote: String {
+        switch loginItem.state {
+        case .off: "Start Ratchet when you log in, with only the menu bar item, so notifications keep arriving after a restart. It is off now."
+        case .on: "On. Ratchet starts with only the menu bar item when you log in. Turn it off here or in System Settings > General > Login Items."
+        case .needsApproval: "Waiting for your OK: allow Ratchet in System Settings > General > Login Items."
+        case .unavailable: "Not available in this build: Launch at login needs Ratchet to run from an installed app."
         }
     }
 

@@ -51,7 +51,11 @@ public final class AppStore {
     public private(set) var sandbox: SandboxStatus = .off
     public private(set) var receipt: TeardownReceipt?
     public private(set) var isLoaded = false
+    /// The last thing that failed, shown in the window's banner until it is dismissed or the next action starts.
     public private(set) var lastError: String?
+    /// True while `lastError` came from loading data (cleared by the next good load). A failed action stays until the
+    /// person dismisses it or starts the next action, so a background refresh cannot wipe it.
+    @ObservationIgnored private var errorCameFromLoading = false
     /// The GitHub sign-in in progress: its code is shown until the account appears or the flow ends.
     public private(set) var githubFlow: GithubSignInFlow?
     /// Agent logs, result details and benchmark series of what was opened (see RatchetClient+Insights.swift).
@@ -119,10 +123,10 @@ public final class AppStore {
             sandbox = try await client.sandboxStatus()
             receipt = try await client.sandboxReceipt()
             isLoaded = true
-            lastError = nil
+            if errorCameFromLoading { clearError() }
             persist()
         } catch {
-            lastError = error.localizedDescription
+            failLoading(error)
         }
     }
 
@@ -148,7 +152,7 @@ public final class AppStore {
         do {
             overview = try await client.overview(range: newRange)
         } catch {
-            lastError = error.localizedDescription
+            failLoading(error)
         }
     }
 
@@ -156,7 +160,7 @@ public final class AppStore {
         do {
             details[id] = try await client.optimization(id: id)
         } catch {
-            lastError = error.localizedDescription
+            failLoading(error)
         }
     }
 
@@ -301,37 +305,65 @@ public final class AppStore {
 
     /// The kill switch. Reloads the optimization so the screen shows how it ended.
     public func stopOptimization(_ id: String) async {
+        beginAction()
         do {
             try await client.stopOptimization(id: id)
             await refreshOptimization(id)
         } catch {
-            lastError = error.localizedDescription
+            fail(error, "Couldn't stop the optimization")
         }
     }
 
     /// Opens the pull request for the verified wins. Returns where it is, or nil (and `lastError`) when it could not.
     public func openPullRequest(_ id: String) async -> URL? {
+        beginAction()
         do {
             let url = try await client.openPullRequest(optimizationID: id)
             await refreshOptimization(id)
             return url
         } catch {
-            lastError = error.localizedDescription
+            fail(error, "Couldn't open the pull request")
             return nil
         }
     }
 
     public func report(_ id: String) async -> OptimizationReport? {
+        beginAction()
         do {
             return try await client.report(optimizationID: id)
         } catch {
-            lastError = error.localizedDescription
+            fail(error)
             return nil
         }
     }
 
     /// Something the views did (saving a file) failed: shown like any other error.
-    public func reportProblem(_ text: String) { lastError = text }
+    public func reportProblem(_ text: String) {
+        lastError = text
+        errorCameFromLoading = false
+    }
+
+    /// The banner's close button.
+    public func dismissError() { clearError() }
+
+    /// Every action starts here, so the banner never shows the answer to something the person did before.
+    private func beginAction() { clearError() }
+
+    private func clearError() {
+        lastError = nil
+        errorCameFromLoading = false
+    }
+
+    private func fail(_ error: Error, _ headline: String? = nil) {
+        let reason = error.localizedDescription
+        lastError = headline.map { "\($0). \(reason)" } ?? reason
+        errorCameFromLoading = false
+    }
+
+    private func failLoading(_ error: Error) {
+        lastError = error.localizedDescription
+        errorCameFromLoading = true
+    }
 
     private func refreshOptimization(_ id: String) async {
         await loadDetail(id: id)
@@ -339,77 +371,85 @@ public final class AppStore {
     }
 
     public func pauseAgent(_ id: String) async {
+        beginAction()
         do {
             let agent = try await client.pauseAgent(id: id)
             if let optimizationID = optimizationID(ofAgent: id) { apply(.agentUpdated(optimizationID: optimizationID, agent: agent)) }
         } catch {
-            lastError = error.localizedDescription
+            fail(error)
         }
     }
 
     public func resumeAgent(_ id: String) async {
+        beginAction()
         do {
             let agent = try await client.resumeAgent(id: id)
             if let optimizationID = optimizationID(ofAgent: id) { apply(.agentUpdated(optimizationID: optimizationID, agent: agent)) }
         } catch {
-            lastError = error.localizedDescription
+            fail(error)
         }
     }
 
     public func messageAgent(_ id: String, text: String) async {
+        beginAction()
         do {
             try await client.messageAgent(id: id, text: text)
         } catch {
-            lastError = error.localizedDescription
+            fail(error)
         }
     }
 
     public func addConnector(_ new: NewConnector) async {
+        beginAction()
         do {
             _ = try await client.addConnector(new)
             connectors = try await client.connectors()
         } catch {
-            lastError = error.localizedDescription
+            fail(error)
         }
     }
 
     /// Starts the GitHub device flow (a new account, or `connectorID` again). The code to type appears in `githubFlow`.
     public func startGithubSignIn(connectorID: String? = nil) async {
+        beginAction()
         do {
             githubFlow = try await client.startGithubSignIn(connectorID: connectorID)
-            lastError = nil
         } catch {
-            lastError = error.localizedDescription
+            fail(error)
         }
     }
 
     public func cancelGithubSignIn() async {
+        beginAction()
         do {
             try await client.cancelGithubSignIn()
             githubFlow = nil
         } catch {
-            lastError = error.localizedDescription
+            fail(error)
         }
     }
 
     public func removeConnector(_ id: String) async {
+        beginAction()
         do {
             try await client.removeConnector(id: id)
             connectors = try await client.connectors()
         } catch {
-            lastError = error.localizedDescription
+            fail(error)
         }
     }
 
     public func setDefaultConnector(_ id: String) async {
+        beginAction()
         do {
             connectors = try await client.setDefaultConnector(id: id)
         } catch {
-            lastError = error.localizedDescription
+            fail(error)
         }
     }
 
     public func signInConnector(_ id: String) async {
+        beginAction()
         // A GitHub sign-in is the device flow again; AWS and agents are checked (their login lives on the Mac).
         if let connector = connectors.first(where: { $0.id == id }), connector.kind == .github {
             await startGithubSignIn(connectorID: id)
@@ -419,7 +459,7 @@ public final class AppStore {
             _ = try await client.signInConnector(id: id)
             connectors = try await client.connectors()
         } catch {
-            lastError = error.localizedDescription
+            fail(error)
         }
     }
 
@@ -451,20 +491,21 @@ public final class AppStore {
 
     /// "Refresh all": every connector is checked with its provider.
     public func refreshConnectors() async {
+        beginAction()
         do {
             connectors = try await client.refreshConnectors()
-            lastError = nil
         } catch {
-            lastError = error.localizedDescription
+            fail(error)
         }
     }
 
     public func endSandbox() async {
+        beginAction()
         do {
             receipt = try await client.endSandbox()
             sandbox = try await client.sandboxStatus()
         } catch {
-            lastError = error.localizedDescription
+            fail(error, "Couldn't end the sandbox")
         }
     }
 

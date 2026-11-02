@@ -18,7 +18,6 @@ use ratchet_engine::desktop::{
 };
 use ratchet_engine::runtime::{ConnectionTesterDeps, create_connection_tester};
 use ratchet_github::{GithubApiOptions, HttpGithubApi};
-use ratchetd::api::ApiEvent;
 use ratchetd::launchagent::{self, LaunchAgentSpec, Launchctl, NoLaunchctl, SystemLaunchctl};
 use ratchetd::real::{RealService, RealServiceOptions, SettingsStore};
 use ratchetd::server::{Daemon, DaemonConfig, shutdown_signal};
@@ -321,14 +320,10 @@ async fn real_service(args: &ServeArgs, ledger_path: Option<PathBuf>) -> Result<
     } else {
         ratchetd::host::CommandPowerBlocker::disabled()
     });
-    let mut events = service.subscribe();
+    let events = service.subscribe();
+    let probe = service.clone();
     tokio::spawn(async move {
-        while let Ok(e) = events.recv().await {
-            if let ApiEvent::RunActive { active, .. } = e {
-                hook.on_run_active(active);
-            }
-        }
-        hook.release();
+        ratchetd::host::keep_awake(&hook, events, move || probe.run_active()).await;
     });
     Ok(service)
 }

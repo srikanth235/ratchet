@@ -9,6 +9,7 @@ struct ContentView: View {
     @Environment(AppRouter.self) private var router
     @Environment(DaemonController.self) private var daemon
     @Environment(AppNotifier.self) private var notifier
+    @Environment(LoginItem.self) private var loginItem
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
     @State private var ran = false
@@ -18,11 +19,23 @@ struct ContentView: View {
             SidebarView()
                 .navigationSplitViewColumnWidth(Dim.sidebarWidth)
         } detail: {
-            if daemon.showsStatusScreen(storeLoaded: store.isLoaded) {
-                DaemonStatusView()
-            } else {
-                DetailRoot()
+            let showsStatus = daemon.showsStatusScreen(storeLoaded: store.isLoaded)
+            VStack(spacing: 0) {
+                // What went wrong stays on every page until it is dismissed or the next action starts.
+                if let message = store.lastError, !showsStatus {
+                    ErrorBanner(message: message) { store.dismissError() }
+                        .padding(.horizontal, Space.pageX)
+                        .padding(.top, Space.sm)
+                        .padding(.bottom, Space.sm)
+                        .transition(.opacity)
+                }
+                if showsStatus {
+                    DaemonStatusView()
+                } else {
+                    DetailRoot()
+                }
             }
+            .animation(Motion.step, value: store.lastError)
         }
         .toolbar(removing: .title)
         // The page starts at the top edge, as in the design; the traffic lights sit over the sidebar.
@@ -31,6 +44,9 @@ struct ContentView: View {
         .task {
             wire()
             daemon.start()
+            // Started by the login item: only the menu bar item shows. The window stays alive, hidden, so the data keeps
+            // loading and notifications keep coming.
+            if LaunchContext.startsInMenuBar { LaunchContext.hideWindow() }
         }
         // Loads the data once the daemon answers (at once with sample data), and again when it comes back.
         .task(id: daemon.phase.isRunning) {
@@ -41,13 +57,15 @@ struct ContentView: View {
             ran = true
             SelfTest.runIfRequested(store: store, router: router, daemon: daemon)
             Snapshot.runIfRequested(
-                store: store, router: router, openSettings: openSettings, daemon: daemon, notifier: notifier)
+                store: store, router: router, openSettings: openSettings, daemon: daemon, notifier: notifier,
+                loginItem: loginItem)
         }
         .sheet(item: Binding(get: { router.templateProposal }, set: { router.templateProposal = $0 })) { flow in
             UseTemplateSheet(flow: flow)
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             daemon.recheck()
+            loginItem.refresh()
             Task { await notifier.refreshAuthorization() }
         }
     }
@@ -59,7 +77,9 @@ extension ContentView {
         store.enabledNotifications = { NotificationPreferences.enabled }
         store.onNotification = { [notifier] request in notifier.post(request) }
         notifier.onOpen = { [store, router] destination in
-            if !NSApp.windows.contains(where: { $0.canBecomeMain && $0.isVisible }) { openWindow(id: "main") }
+            if !NSApp.windows.contains(where: { $0.canBecomeMain && $0.isVisible }) {
+                LaunchContext.revealWindow { openWindow(id: "main") }
+            }
             switch destination {
             case .optimization(let id): router.open(optimization: id)
             case .connectors: router.show(.connectors)

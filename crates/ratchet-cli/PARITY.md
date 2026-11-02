@@ -18,6 +18,10 @@ in-process `ratchetd` on a temp socket), `binary.rs` (the real executable). Unit
 | `baseline --repeats 0` is rejected by the command | clap rejects it first (exit 2); the library entry point still has the check and the original message | `positive_int` is a parser |
 | `--pack` / `--list-packs` | unchanged, still aliases | `docs/SIMPLIFIED_MODEL.md` |
 
+`run`, `stop`, `env end` and `pr` need `--yes` (`-y`): without it they print what they would do (repo, agents, budget, where) on stderr,
+change nothing and exit **2** (`confirmation_required` in `--json`, on stdout). The preview is built from the command line alone, so it works
+with the daemon down. Tests: `destructive_commands_preview_and_exit_2_without_yes`, `the_preview_needs_no_daemon`.
+
 New: `--json` on every command (errors go to stderr as `{"error": {code, message, fields}}`), `--socket` /
 `--token-file` / `--token` (and `RATCHET_SOCKET` / `RATCHET_TOKEN_FILE` / `RATCHET_TOKEN` / `RATCHET_HOME`),
 `templates`, and the daemon commands: `status`, `list`, `show`, `run [--demo|repo] [--wait]`, `stop`, `report [--out]`,
