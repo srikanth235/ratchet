@@ -139,11 +139,11 @@ struct ReplyFooter: View {
                         Text("Retry")
                     }
                 }
-                .buttonStyle(.kit(.link, small: true))
+                .buttonStyle(.kit(.ghost, small: true))
                 .help("Ask again")
             }
             Button("Copy", action: copy)
-                .buttonStyle(.kit(.link, small: true))
+                .buttonStyle(.kit(.ghost, small: true))
                 .help("Copy this reply")
         }
     }

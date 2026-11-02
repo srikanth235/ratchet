@@ -333,7 +333,13 @@ struct DraftFlowTests {
         task.cancel()
         let rows = Dictionary(uniqueKeysWithValues: model.rows.map { ($0.row.key, $0.row.value) })
         #expect(rows["limits"] == "up to $20 and 1 h" && rows["schedule"] == "weekdays at 02:00")
-        #expect(model.rows.map(\.changeTitle) == ["Change goal", "Change measure", "Change agents", "Change limits", "Change schedule", "Change output", "Change config"])
+        #expect(model.rows.map(\.changeTitle) == [
+            "Change repository", "Change goal", "Change measure", "Change agents", "Change cloud", "Change limits", "Change schedule",
+            "Change output", "Change config",
+        ])
+        // Repository and Cloud are on every card: the repo is read, not changed here; the cloud row follows the Home chip.
+        #expect(rows["repo"] == "acme/shop" && rows["cloud"] == "None · agents run on this Mac")
+        #expect(model.rows.first { $0.row.key == "repo" }?.isEditable == false)
         #expect(model.rows.filter(\.isUpdated).isEmpty)
         #expect(model.canCreate && model.createTitle == "Create Optimization")
     }

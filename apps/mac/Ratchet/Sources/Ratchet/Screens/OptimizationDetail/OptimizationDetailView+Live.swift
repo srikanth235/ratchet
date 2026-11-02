@@ -52,7 +52,7 @@ extension OptimizationDetailView {
         HairlineList {
             ForEach(detail?.agents ?? []) { agent in
                 HairlineRow {
-                    StatusDot(tone: agent.state.tone)
+                    StatusShape(tone: agent.state.tone).frame(height: Dim.textLine)
                     VStack(alignment: .leading, spacing: 0) {
                         Text(agent.name).kitType(.bodyStrong).foregroundStyle(Ink.text).lineLimit(1)
                         Text(agent.state.title + " · " + agent.activity).kitType(.meta).foregroundStyle(Ink.textMuted).lineLimit(2)

@@ -141,7 +141,7 @@ struct AddConnectorSheet: View {
                             }
                         }
                     }
-                    .frame(maxHeight: 200)
+                    .frame(maxHeight: Layout.listMaxHeight)
                 }
                 if !profiles.ssoSessions.isEmpty {
                     CommandText(text: "SSO sessions found: `" + profiles.ssoSessions.joined(separator: ", ") + "`. Pick a profile that uses one.", type: .caption)

@@ -36,4 +36,10 @@ struct MenuBarRulesTests {
         let timed = MenuBarRules.sandboxLine(SandboxStatus(isOn: true, account: "a", offAt: Date(timeIntervalSince1970: 0)))
         #expect(timed.contains(" · off at "))
     }
+
+    @Test func theNeedsYouCountAgreesWithItsNumber() {
+        #expect(MenuBarRules.needsYouText(1) == "1 needs you")
+        #expect(MenuBarRules.needsYouText(2) == "2 need you")
+        #expect(MenuBarRules.needsYouText(0) == "0 need you")
+    }
 }

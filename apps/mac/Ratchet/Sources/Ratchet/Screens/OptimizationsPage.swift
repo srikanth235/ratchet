@@ -71,7 +71,7 @@ struct EmptyOptimizations: View {
 
     var body: some View {
         VStack(spacing: Space.lg) {
-            RatchetMarkView(height: 36)
+            RatchetMarkView(height: Dim.markLarge)
             Text("No optimizations yet").kitType(.pageTitle).foregroundStyle(Ink.text)
             Text("Start your first optimization.").kitType(.body).foregroundStyle(Ink.textMuted)
             Button("New Optimization") { router.newOptimization() }

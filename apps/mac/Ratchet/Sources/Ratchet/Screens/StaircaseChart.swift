@@ -102,7 +102,7 @@ struct StaircaseChart: View {
         }
         .padding(.top, compact ? Space.lg : Space.xxl)
         .frame(height: compact ? Dim.chartHeight : Dim.chartHeightDetail)
-        .accessibilityLabel("Chart")
+        .accessibilityLabel("Best result over time")
         .accessibilityValue(summary(wins: wins.count))
     }
 

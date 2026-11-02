@@ -65,13 +65,14 @@ Naming: a *harness* is an agent CLI (Claude Code, Codex, Grok): `Harness`, `Harn
 
 The window is the native shell; the brand lives in the content. `ContentView` is a `NavigationSplitView`: the **system sidebar**
 (`Sidebar.swift`: the pages from `Page.sidebar`, then "Recent runs"; two levels, no action rows, no background or edge of its own;
-a selected run wears a brass wash) and the detail column under a native toolbar. Pages: Home, Overview, Optimizations, Agents,
+one selection style, the system's, for pages and runs) and the detail column under a native toolbar. Pages: Home, Overview, Optimizations, Agents,
 Benchmarks, Connectors. Command-1 to 6 follow `Page.sidebar`.
 
 - **Toolbar** (`Toolbar.swift`): `ShellToolbar` (declared on the detail column, never on the split view) holds the connection badge
   ("Demo data", "Reconnecting…"), the sandbox status item (shape and word, popover with End Now) and New Optimization. Each page
-  adds its own items (the range on Overview, the filter on Optimizations, Refresh All and Add… on Connectors, the actions on
-  the open optimization) and a page-scoped `.searchable`. `SidebarCommands()` and `ToolbarCommands()` are on the scene.
+  adds its own items (the filter on Optimizations, Refresh All and Add… on Connectors, the actions on the open optimization;
+  a `ToolbarSpacer` after New Optimization keeps them in their own capsule) and a page-scoped `.searchable`. The Overview's range
+  (`RangeSwitch`) is on the page, in its header, not in the toolbar. `SidebarCommands()` and `ToolbarCommands()` are on the scene.
 - **Title and restore**: `.navigationTitle` is the page ("New Optimization" in the flow), the subtitle a count, the range or the
   open optimization's name. The window title is no longer "Ratchet", so the main window registers itself (`MainWindow`,
   `UI/WindowBehavior.swift`); never look it up by title. `@SceneStorage` restores the page and the open optimization (ids only;
@@ -94,8 +95,9 @@ Benchmarks, Connectors. Command-1 to 6 follow `Page.sidebar`.
   disables New Optimization, Stop, Run Now, Open Pull Request, Add Connector… and End Now. Without data the full-window
   `DaemonStatusView` stays. Empty, loading and failed-connector states are in `States.swift` and `ConnectorRow`; a broken
   status always has its fix beside it (Sign in, Add key, Re-detect).
-- **Layout**: one content width (`Layout.contentWidth`) in `KitPage`; the page margin is `Space.pageX`, passed to `.gridArea(_,
-  inset:)`; side columns use `ViewThatFits`; nested radii use `ConcentricRectangle`; the ⋯ of a row is `KitMoreMenu` (28 pt hit area).
+- **Layout**: one content width (`Layout.contentWidth`) in `KitPage`; the page margin is one step, `Space.page` (40; `pageX`, `pageTop`
+  and `pageBottom` are that step), passed to `.gridArea(_, inset:)`; a page with a floating bar gives it to `KitPage(bottomBar:)`, a
+  docked under the scroll view (not floating over it), so the content stops above it; side columns use `ViewThatFits`; nested radii use `ConcentricRectangle`; the ⋯ of a row is `KitMoreMenu` (28 pt hit area).
 
 ## The chat screens (P5b)
 
@@ -113,8 +115,17 @@ test, snapshot and `APP_DEMO` mode, the daemon's otherwise. Screens (`Screens/Ho
   tags, Edit popovers, Saved; Archive…). Pause Schedule clears the schedule and remembers it for Resume (this session only).
 - **Agents** (`AgentsPage`), **Overview** (`OverviewPage`, `ValueChart` with the dashed pending step and a text equivalent), the Connectors
   **Yours | Discover** row (not on Agents), the menu bar's "Keeping your Mac awake" line (`AppStore.power`).
+- **The run's log** (`Run/RunLogSection.swift`): Overview is one timeline (`RunTimeline`, RatchetKit: each event once however many agents
+  reported it, prose in the reading face, a sealed verdict and a blocked candidate as cards, the person's notes at the end); By Agent is
+  one lane each; Everything is every line of every agent.
+- **Ask about a run**: "Ask…" in the run header (and in ⋯) calls `ChatHub.askAboutRun`: a chat bound to the optimization
+  (`NewChat(optimization:)`, which the daemon already gives the run's context) on the default agent, in `AskRunSheet`; it is the creation
+  conversation's `ConversationBody` without a draft card. One chat per optimization while the app runs. Done or Escape closes it.
+- **The draft card** lists Repository, Measures, Agents, Cloud, Each run, Schedule, Output, Config (`DraftCardModel.allRows` adds the first
+  and the Cloud row when the daemon did not send them); each editable row has a quiet "Change" (read out as "Change agents") opening the
+  same editors as the Home chips. The drafting state shows the three steps (read, picked, drafting), not a bare "Working".
 - Popovers (`Chat/Popovers.swift`) are shared by the chips, the card rows and the settings rows. Snapshot scenes: `home*`, `conversation-*`,
-  `run-*`, `optimization-settings*`, `agents-signin`, `overview-nowins`, `connectors-discover`, `menubar-awake`; the self-test drives a simulated
+  `run-*`, `optimization-settings*`, `agents-signin`, `overview-nowins`, `connectors-discover`, `menubar-awake`, `run-bottom`, `run-ask`, `connector-sso`, `overview-footnote`, `value-row`; the self-test drives a simulated
   chat to a created optimization (`SelfTestChat.swift`).
 
 ## The bundled daemon
@@ -157,7 +168,7 @@ stop the agent first: Settings, Stop). CI runs the same thing with `tools/smoke-
 
 `AppNotifier` (UNUserNotificationCenter). Permission is never asked at launch: the Overview shows a calm card once an optimization exists
 (`NotificationPrompt`), and Settings has a button. Posted only while the app is in the background. Categories (`NotificationCategory`, one
-switch each in Settings): win ready to merge, environment drafted, budget limit, run finished or failed, connector expired. A click opens the
+switch each in Settings): win ready to merge, budget limit, run finished or failed, connector expired. A click opens the
 screen (`NotificationDestination`: the optimization, Connectors, or Home with the composer). `NotificationRouting` (RatchetKit) is the pure
 decision function over two store states; the store calls it after each event and never on the first load.
 
@@ -217,6 +228,10 @@ Test and snapshot mode never register anything. Snapshot: `settings-login-approv
 - Snapshots: `tools/snap.sh` writes `/tmp/Ratchet-shots/<scene>-light.png` and `-dark.png` for the pages (Home and Agents too), the optimization detail (live, finished, no win), the four New optimization steps, and `settings-<tab>-*.png` (general, notifications, this-mac, advanced, plus `settings-advanced-open` and `settings-login-approval`), the parts gallery (`gallery-actions`, `-choices`, `-rows`, `-inputs`, `-status`, `-identity`, `-type`, `-tokens`), and the states `daemon-starting`, `daemon-approval`, `notification-prompt`, `connector-signin`, and the setup states `new-repo-found`, `new-repo-invalid`, `new-repo-template`, `new-local-folder`, `new-local-noremote`, `new-missing`, `connectors-add-github`, `connectors-add-aws`, `connectors-add-agent`, `connectors-edit`, `connectors-rename`, `connectors-check`, `connectors-keychain`, `template-pr`, `settings-advanced`, and the scenes `daemon-failed`, `daemon-stopped`, `daemon-unbundled`, `daemon-down` (the banner over a page with data), `loading-overview`, `failed-connector`, `empty-overview`, `empty-optimizations`,
   `empty-benchmarks` (the sample world emptied with `MockRatchetClient.simulate(empty:)`), `menubar`, `menubar-empty` (the menu bar panel's view hosted in a window,
   `MenuBarCapture`) and `notifications-denied` (Settings). `APP_SNAPSHOT_PAGES=overview,new-budget tools/snap.sh` limits the scenes.
+- Contrast on real pixels: snapshot mode brings the window to the front (key and active, so the inactive dim does not apply), writes
+  `<scene>-<mode>-text.json` (the frame of every `Text` set through `kitType`, `UI/TextProbes.swift`) next to each window picture, and
+  `swift tools/check-contrast.swift /tmp/Ratchet-shots/*-text.json` measures text against its ground inside those frames (4.5:1, 3:1 from
+  24 pt; disabled text exempt; an inactive picture is skipped, and all skipped fails). CI runs it ("Contrast on pixels").
 - Grid and kit lint: `tools/grid-lint.sh` (bash or zsh; every Swift file incl. `Tokens.swift`; also flags raw colors and SF Symbols outside the kit), then `swift tools/check-layout.swift /tmp/Ratchet-shots/*-layout.json`.
 - API client: `tools/generate-api.sh` after `api/openapi.yaml` changes (needs network once for the generator). Live check against a real daemon: `RATCHET_LIVE_HOME=<dir of a running ratchetd> swift test --filter LiveDaemon`.
 - Test mode: `APP_STORE=<file in /tmp>` means a fixed clock, no live ticks and no saved snapshot.

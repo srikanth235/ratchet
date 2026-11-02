@@ -27,7 +27,7 @@ struct MockClientTests {
         #expect(overview.series.first?.win == nil)
         #expect(overview.series.last?.win == nil)
         #expect(overview.series.last?.valuePerYearUSD == 15_400)
-        #expect(overview.needsYou.map(\.kind) == [.approveEnvironment, .mergeWins])
+        #expect(overview.needsYou.map(\.kind) == [.mergeWins])
     }
 
     @Test func rangesNarrowTheOverview() async throws {

@@ -185,7 +185,7 @@ struct KitGallery: View {
                     TextField("Repository", text: $fieldText).kitField()
                 }
             }
-            caption("Steering field (glass in a container, anchored with a safe-area inset): rest, hover, focused, disabled")
+            caption("Steering field (glass in a container, docked under the scroll view): rest, hover, focused, disabled")
             Grid(alignment: .topLeading, horizontalSpacing: Space.xl, verticalSpacing: Space.xl) {
                 GridRow {
                     steering(.rest)

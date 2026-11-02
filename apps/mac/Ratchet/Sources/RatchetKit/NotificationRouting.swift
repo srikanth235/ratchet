@@ -2,14 +2,13 @@ import Foundation
 
 /// The kinds of notification the app can post. Each has its own switch in Settings.
 public enum NotificationCategory: String, CaseIterable, Codable, Sendable, Identifiable {
-    case winReady, environmentDrafted, budgetLimit, runFinished, connectorExpired
+    case winReady, budgetLimit, runFinished, connectorExpired
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
         case .winReady: "Wins ready to merge"
-        case .environmentDrafted: "Environment waiting for approval"
         case .budgetLimit: "Budget limit reached"
         case .runFinished: "Run finished or failed"
         case .connectorExpired: "Connector expired"
@@ -19,7 +18,6 @@ public enum NotificationCategory: String, CaseIterable, Codable, Sendable, Ident
     public var explanation: String {
         switch self {
         case .winReady: "A verified win is ready to become a pull request."
-        case .environmentDrafted: "An agent drafted a test environment and waits for your approval."
         case .budgetLimit: "An optimization stopped because it spent its budget."
         case .runFinished: "An optimization finished, or a run failed."
         case .connectorExpired: "A GitHub, AWS or agent sign-in needs renewing."
@@ -34,7 +32,7 @@ public enum NotificationCategory: String, CaseIterable, Codable, Sendable, Ident
 public enum NotificationDestination: Equatable, Sendable {
     case optimization(String)
     case connectors
-    /// The New optimization flow: an environment draft waits there.
+    /// The New Optimization screen (Home with the composer).
     case newOptimization
     case overview
 
@@ -107,7 +105,6 @@ public enum NotificationRouting {
             let destination: NotificationDestination
             switch item.kind {
             case .mergeWins: category = .winReady; destination = .optimization(item.optimizationID)
-            case .approveEnvironment: category = .environmentDrafted; destination = .newOptimization
             case .budgetLimit: category = .budgetLimit; destination = .optimization(item.optimizationID)
             case .runFailed: category = .runFinished; destination = .optimization(item.optimizationID)
             case .signIn: category = .connectorExpired; destination = .connectors
@@ -145,15 +142,5 @@ public enum NotificationRouting {
                 body: "Its sign-in expired. Optimizations that use it cannot start.", destination: .connectors))
         }
         return found.filter { enabled.contains($0.category) }
-    }
-
-    /// An agent finished drafting an environment.
-    public static func environmentDrafted(
-        draftID: String, repoID: String, enabled: Set<NotificationCategory> = Set(NotificationCategory.allCases)
-    ) -> NotificationRequest? {
-        guard enabled.contains(.environmentDrafted) else { return nil }
-        return NotificationRequest(
-            id: "draft-" + draftID, category: .environmentDrafted, title: "Environment drafted for " + repoID,
-            body: "Review it and approve to continue.", destination: .newOptimization)
     }
 }

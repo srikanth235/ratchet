@@ -86,7 +86,7 @@ extension SelfTest {
         let requests = [
             NotificationRequest(id: "selftest-win", category: .winReady, title: "Win", body: "Ready", destination: .optimization("opt-checkout")),
             NotificationRequest(id: "selftest-conn", category: .connectorExpired, title: "Expired", body: "Sign in", destination: .connectors),
-            NotificationRequest(id: "selftest-draft", category: .environmentDrafted, title: "Drafted", body: "Approve", destination: .newOptimization),
+            NotificationRequest(id: "selftest-budget", category: .budgetLimit, title: "Budget", body: "Stopped", destination: .newOptimization),
             NotificationRequest(id: "selftest-done", category: .runFinished, title: "Done", body: "Finished", destination: .overview),
         ]
         for request in requests {

@@ -3,7 +3,7 @@ import Testing
 @testable import RatchetKit
 
 @MainActor
-@Suite("New optimization")
+@Suite("New Optimization")
 struct NewOptimizationFlowTests {
     private func flow() async -> NewOptimizationFlow {
         let flow = NewOptimizationFlow(client: MockRatchetClient(now: testNow))
@@ -17,7 +17,7 @@ struct NewOptimizationFlowTests {
         #expect(flow.repoID == "acme-org/shop-api")
         #expect(flow.detection?.found == true)
         #expect(flow.detection?.suggestedTemplateID == "http-latency")
-        #expect(flow.title == "New optimization")
+        #expect(flow.title == "New Optimization")
         #expect(!flow.canContinue)
         #expect(flow.budgetUSD == 50)
         #expect(flow.timeLimitHours == 2)

@@ -67,7 +67,7 @@ struct OptimizationSettingsView: View {
     }
 
     private var notifyText: String {
-        let on = NotificationCategory.allCases.filter { $0 != .environmentDrafted && NotificationPreferences.isOn($0) }
+        let on = NotificationCategory.allCases.filter { NotificationPreferences.isOn($0) }
         return on.isEmpty ? "nothing" : on.map { $0.title.lowercased() }.joined(separator: " · ")
     }
 

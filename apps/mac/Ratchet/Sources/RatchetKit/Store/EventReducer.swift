@@ -145,10 +145,7 @@ public enum EventReducer {
     private static func notifications(
         for event: RatchetEvent, from old: LiveState, to new: LiveState, enabled: Set<NotificationCategory>
     ) -> [NotificationRequest] {
-        if case .environmentDraftReady(let draftID, let repoID) = event {
-            return NotificationRouting.environmentDrafted(draftID: draftID, repoID: repoID, enabled: enabled).map { [$0] } ?? []
-        }
-        return NotificationRouting.changes(from: old.observed, to: new.observed, enabled: enabled)
+        NotificationRouting.changes(from: old.observed, to: new.observed, enabled: enabled)
     }
 
     // MARK: An optimization changed

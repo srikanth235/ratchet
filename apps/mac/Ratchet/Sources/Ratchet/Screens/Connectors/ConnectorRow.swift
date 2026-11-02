@@ -28,7 +28,7 @@ struct ConnectorRow: View {
                 // A broken status always has its fix beside it.
                 fixButton
                 StatusLabel(tone: connector.state.tone, text: connector.state.title)
-                    .frame(width: 120, alignment: .leading)
+                    .frame(width: Layout.statusColumn, alignment: .leading)
                 actions
             }
             extras
@@ -61,7 +61,7 @@ struct ConnectorRow: View {
             HStack(spacing: Space.sm) {
                 TextField("Name", text: $draftName)
                     .kitField()
-                    .frame(maxWidth: 280)
+                    .frame(maxWidth: Layout.fieldWide)
                     .onSubmit { saveName() }
                     .accessibilityLabel("Name of \(connector.name)")
                     .onAppear { draftName = connector.name }
@@ -217,6 +217,14 @@ struct ConnectorRow: View {
         }
     }
 
+    private var ssoCommand: String { "aws sso login --profile \(connector.profile ?? connector.name)" }
+
+    private func copySSOCommand() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(ssoCommand, forType: .string)
+        connectorsState.rowNotes[connector.id] = ConnectorNote(ok: true, text: "Copied. Paste it in a terminal and finish in the browser, then check again.")
+    }
+
     private func check() {
         Task {
             do {
@@ -233,8 +241,13 @@ struct ConnectorRow: View {
     @ViewBuilder
     private var extras: some View {
         if mode == .ssoHint {
+            // The sign-in is the AWS CLI's: it opens the browser for the SSO page. The row hands over the exact command and checks
+            // the session again afterwards.
             HStack(spacing: Space.md) {
-                CommandText(text: "Run `aws sso login --profile \(connector.profile ?? connector.name)` in a terminal, then check again.", type: .meta, color: Ink.textMuted)
+                CommandText(text: "Run `\(ssoCommand)` in a terminal, then check again.", type: .meta, color: Ink.textMuted)
+                Button("Copy Command") { copySSOCommand() }
+                    .buttonStyle(.kit(.quiet, small: true))
+                    .help("Copy the sign-in command to paste in a terminal")
                 Button("Check again") { check() }
                     .buttonStyle(.kit(.quiet, small: true))
             }

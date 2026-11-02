@@ -46,6 +46,10 @@ public final class DraftCardModel {
     /// What one run typically costs, for "Create and Run Once · ≈$38" (from the Overview forecast); nil falls back to the
     /// run's budget cap ("up to $50").
     public var typicalRunCostUSD: Double?
+    /// The AWS account the draft runs its sandbox in, as the Home chip chose it; nil when none was (the agents run on this Mac).
+    public var cloudAccount: String?
+    /// The accounts the Cloud row offers; the row is not editable while there are none.
+    public var cloudAccounts: [String] = []
     /// Rows the person changed, with the row as it was: Undo puts it back.
     public private(set) var changes: [String: ChatCardRow] = [:]
 
@@ -73,8 +77,26 @@ public final class DraftCardModel {
     /// The setup agent is writing a new draft: the composer shows Stop.
     public var isDrafting: Bool { session?.isReplying ?? false }
 
+    /// What the card lists: the daemon's rows, with Repository first and Cloud after Agents whenever the daemon did not send them,
+    /// so every draft says where it reads from and where it runs (the same two rows as the Home chips).
+    public var allRows: [ChatCardRow] {
+        var list = card?.rows ?? []
+        if !list.contains(where: { $0.key == "repo" }) {
+            let repo = card?.repo ?? session?.core.chat.repo
+            list.insert(ChatCardRow(key: "repo", label: "Repository", value: repo ?? "Not chosen"), at: 0)
+        }
+        if !list.contains(where: { $0.key == "cloud" }) {
+            let row = ChatCardRow(
+                key: "cloud", label: "Cloud", value: cloudAccount.map { $0 + " · AWS" } ?? "None · agents run on this Mac",
+                editable: !cloudAccounts.isEmpty, options: cloudAccounts.map { ChatCardOption(label: $0, value: $0) })
+            let after = list.firstIndex { $0.key == "agents" }.map { $0 + 1 } ?? list.count
+            list.insert(row, at: after)
+        }
+        return list
+    }
+
     public var rows: [DraftRowState] {
-        (card?.rows ?? []).map { row in
+        allRows.map { row in
             let before = changes[row.key]
             return DraftRowState(
                 row: row, changeTitle: "Change " + Self.noun(of: row), isUpdated: before != nil && before?.value != row.value)
@@ -121,7 +143,7 @@ public final class DraftCardModel {
 
     /// The editor a row's popover starts from; nil for a row that is not editable.
     public func editor(for key: String) -> DraftRowEdit? {
-        guard let row = card?.rows.first(where: { $0.key == key }), row.editable else { return nil }
+        guard let row = allRows.first(where: { $0.key == key }), row.editable else { return nil }
         switch key {
         case "agents": return .agents(AgentOrderEditor(row: row))
         case "limits": return .limits(LimitsEditor(row: row))
@@ -134,7 +156,7 @@ public final class DraftCardModel {
 
     /// Says the change to the chat and remembers the row as it was, so "Updated" and Undo can show.
     public func edit(_ key: String, _ edit: DraftRowEdit) async {
-        guard canCreate || card?.status == .failed, let row = card?.rows.first(where: { $0.key == key }) else { return }
+        guard canCreate || card?.status == .failed, let row = allRows.first(where: { $0.key == key }) else { return }
         changes[key] = row
         await store.send(chatID, text: edit.instruction)
     }

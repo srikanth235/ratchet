@@ -29,9 +29,22 @@ extension View {
         glassEffect(.regular, in: .rect(cornerRadius: radius))
     }
 
+    /// Escape closes a popover or sheet from wherever the focus is inside it; the system gives the focus back to what opened it.
+    func closesOnEscape() -> some View {
+        modifier(ClosesOnEscape())
+    }
+
     /// Custom chrome (page titles, status items, segments) dims when the window is not in front, like the system's own.
     func dimsWhenInactive() -> some View {
         modifier(DimsWhenInactive())
+    }
+}
+
+private struct ClosesOnEscape: ViewModifier {
+    @Environment(\.dismiss) private var dismiss
+
+    func body(content: Content) -> some View {
+        content.onExitCommand { dismiss() }
     }
 }
 

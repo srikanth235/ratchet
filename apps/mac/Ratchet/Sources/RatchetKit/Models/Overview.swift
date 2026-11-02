@@ -18,7 +18,7 @@ public struct ValuePoint: Identifiable, Codable, Hashable, Sendable {
 }
 
 public enum NeedsYouKind: String, Codable, Sendable {
-    case approveEnvironment, mergeWins
+    case mergeWins
     /// A connector that needs signing in again; opens the Connectors page.
     case signIn
     /// A budget that ran out; opens the optimization.

@@ -30,6 +30,10 @@ final class ChatHub {
     var signInHelp: SignInHelp?
     /// Home's first-use line ("Your messages … go to Claude Code") was closed.
     var homeNoticeClosed: Bool
+    /// "Ask about a run": the chat of each optimization asked about (one per optimization, kept while the app runs), and the
+    /// optimization whose sheet is open.
+    private(set) var askChats: [String: String] = [:]
+    var asking: String?
 
     @ObservationIgnored private var conversations: [String: ConversationModel] = [:]
     @ObservationIgnored private var drafts: [String: DraftCardModel] = [:]
@@ -85,10 +89,12 @@ final class ChatHub {
 
     /// What the Home chips offer, from the repos, the AWS accounts and the harnesses on this Mac.
     func updateComposerOptions(store: AppStore) {
-        composer.update(options: ComposerOptions(
+        let options = ComposerOptions(
             repos: store.repos.map(\.id), cloudAccounts: store.connectorStore.connectors(of: .aws).map(\.name),
-            catalog: agents.catalog, chatDefault: agents.chatDefault, preferredOrder: agents.optimizationOrder))
+            catalog: agents.catalog, chatDefault: agents.chatDefault, preferredOrder: agents.optimizationOrder)
+        composer.update(options: options)
         for model in conversations.values { model.catalog = agents.catalog }
+        for model in drafts.values { model.cloudAccounts = options.cloudAccounts }
         for model in settings.values { model.defaultOrder = agents.optimizationOrder }
     }
 
@@ -106,6 +112,7 @@ final class ChatHub {
     func draftCard(_ chatID: String) -> DraftCardModel {
         if let model = drafts[chatID] { return model }
         let model = DraftCardModel(store: chats, chatID: chatID, typicalRunCostUSD: story.typicalRunCostUSD)
+        model.cloudAccounts = composer.options.cloudAccounts
         drafts[chatID] = model
         return model
     }
@@ -136,7 +143,10 @@ final class ChatHub {
     @discardableResult
     func sendFromHome(store: AppStore, router: AppRouter) async -> String? {
         updateComposerOptions(store: store)
+        // The cloud chip is not part of the first message; the card's Cloud row remembers it.
+        let cloud = composer.cloudAccount
         guard let id = await composer.send() else { return nil }
+        draftCard(id).cloudAccount = cloud
         router.openConversation(id)
         return id
     }
@@ -159,6 +169,34 @@ final class ChatHub {
         }
         router.openConversation(id)
         return id
+    }
+
+    // MARK: Ask about a run
+
+    /// "Ask…" on a run: a chat bound to that optimization on the default agent (the daemon gives it the run's context), shown in a
+    /// sheet. One chat per optimization while the app runs. When no agent is signed in the error banner says so.
+    func askAboutRun(_ optimizationID: String, store: AppStore) async {
+        updateComposerOptions(store: store)
+        if askChats[optimizationID] == nil {
+            let catalog = agents.catalog
+            let harness = agents.chatDefault ?? catalog.ready.first
+            guard let id = await chats.start(NewChat(
+                optimization: optimizationID, harness: harness, model: harness.flatMap { catalog.choice(for: $0).model?.id }))
+            else {
+                store.errors.report("Couldn't start the conversation. " + (chats.startError ?? "No agent is signed in."))
+                return
+            }
+            askChats[optimizationID] = id
+        }
+        asking = optimizationID
+    }
+
+    /// The conversation of an optimization's ask sheet; "Use Codex" after a failed turn moves the sheet to the new chat.
+    func askConversation(_ optimizationID: String, router: AppRouter) -> ConversationModel? {
+        guard let chatID = askChats[optimizationID] else { return nil }
+        let model = conversation(chatID, router: router)
+        model.onSwitched = { [weak self] fresh in self?.askChats[optimizationID] = fresh }
+        return model
     }
 
     /// Start Over: the conversation ends and Home comes back with the first words restored.

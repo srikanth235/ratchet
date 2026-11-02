@@ -15,7 +15,7 @@ struct AppStoreTests {
     @Test func refreshFillsEveryList() async {
         let (store, _) = await loadedStore()
         #expect(store.isLoaded)
-        #expect(store.optimizationStore.optimizations.count == 5)
+        #expect(store.optimizationStore.optimizations.count == 6)
         #expect(store.connectorStore.connectors.count == 8)
         #expect(store.templates.count == 10)
         #expect(store.benchmarks.count == 5)
@@ -23,15 +23,15 @@ struct AppStoreTests {
         #expect(store.sandboxStore.sandbox.isOn)
         #expect(store.sandboxStore.receipt != nil)
         #expect(store.overview?.spentUSD == 184)
-        #expect(store.needsYouCount == 2)
+        #expect(store.needsYouCount == 1)
         #expect(store.optimizationStore.runningOptimizations.map(\.id) == ["opt-checkout"])
     }
 
     @Test func filtersSplitRunningAndDone() async {
         let (store, _) = await loadedStore()
-        #expect(store.optimizationStore.visibleOptimizations(.all).count == 5)
-        #expect(store.optimizationStore.visibleOptimizations(.running).map(\.id) == ["opt-checkout", "opt-search"])
-        #expect(store.optimizationStore.visibleOptimizations(.done).count == 3)
+        #expect(store.optimizationStore.visibleOptimizations(.all).count == 6)
+        #expect(store.optimizationStore.visibleOptimizations(.running).map(\.id) == ["opt-checkout", "opt-nightly"])
+        #expect(store.optimizationStore.visibleOptimizations(.done).count == 4)
     }
 
     @Test func changingTheRangeReloadsTheOverview() async {
@@ -215,7 +215,7 @@ struct AppStoreTests {
         #expect(second.optimizationStore.optimizations.isEmpty)
         await second.restoreCache()
         #expect(!second.isLoaded)
-        #expect(second.optimizationStore.optimizations.count == 5)
+        #expect(second.optimizationStore.optimizations.count == 6)
         #expect(second.overview?.spentUSD == 184)
         #expect(second.connectorStore.connectors.count == 8)
     }
@@ -228,7 +228,7 @@ struct AppStoreTests {
         await store.flushCache()
         let data = try Data(contentsOf: url)
         let cached = try JSONDecoder().decode(CachedState.self, from: data)
-        #expect(cached.optimizations.count == 5)
+        #expect(cached.optimizations.count == 6)
     }
 
     @Test func aResyncEventReloadsWhatIsShown() async {

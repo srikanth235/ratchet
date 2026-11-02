@@ -171,12 +171,10 @@ struct EventReducerTests {
         #expect(switchedOff.notifications.isEmpty)
     }
 
-    @Test func aDraftReadyEventIsAnnouncedWhenItsCategoryIsOn() {
-        let event = RatchetEvent.environmentDraftReady(draftID: "d1", repoID: "acme/shop")
-        let on = EventReducer.reduce(state(), event)
-        #expect(on.notifications.map(\.id) == ["draft-d1"])
-        #expect(on.touched.isEmpty)
-        let off = EventReducer.reduce(state(), event, enabled: [.winReady])
-        #expect(off.notifications.isEmpty)
+    @Test func aDraftReadyEventIsNotAnnounced() {
+        // Nothing waits for an environment approval, so a drafted environment is not news.
+        let result = EventReducer.reduce(state(), RatchetEvent.environmentDraftReady(draftID: "d1", repoID: "acme/shop"))
+        #expect(result.notifications.isEmpty)
+        #expect(result.touched.isEmpty)
     }
 }

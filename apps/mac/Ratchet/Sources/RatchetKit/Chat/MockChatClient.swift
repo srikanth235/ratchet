@@ -2,7 +2,7 @@ import Foundation
 
 /// A `ChatClient` with no model behind it, for tests, snapshots and demo mode. It follows the daemon's scripted harness
 /// (`docs/ratchet-chat.md`, "Simulation"): events carry ids and are replayed from `lastEventID`; a message with
-/// `[simulate:rate-limit]`, `[simulate:auth-expired]`, `[simulate:crash]` or `[simulate:slow]` produces that failure; a message
+/// `[simulate:rate-limit]`, `[simulate:auth-expired]`, `[simulate:crash]`, `[simulate:slow]` or `[simulate:drafting]` (the draft's three steps, the last still running) produces that failure; a message
 /// that mentions a "draft" (or any message of a chat on a repo) produces a draft card, "create it" creates it, a message in a
 /// chat on an optimization is a steering note, and `[simulate:env-fail]` fails the draft's environment check.
 public actor MockChatClient: ChatClient, ChatScenario {
@@ -199,6 +199,9 @@ public actor MockChatClient: ChatClient, ChatScenario {
             record(id, .failed(ChatError(
                 code: .failed, harness: harness, title: harness.title + " stopped unexpectedly", message: "", fixes: [.retry])))
             record(id, .done(turn: turn, outcome: .failed, usage: ChatUsage()))
+        } else if lower.contains("[simulate:drafting]") {
+            // Drafting, still going: the first two steps are done, the setup agent is on the third (screen 22).
+            draftSteps(id, chat: chat, turn: turn, finished: false)
         } else if lower.contains("[simulate:slow]") {
             record(id, .delta("Working on it"))
         } else if let optimization = chat.optimization {
@@ -222,6 +225,24 @@ public actor MockChatClient: ChatClient, ChatScenario {
         record(id, .tool(ChatToolStep(id: "t\(turn)", name: "list_templates", state: .done, summary: "Looked at the templates")))
     }
 
+    /// The three steps of a draft (screens 8 and 22): the repo read, the template picked, the environment drafted. While the
+    /// setup agent is still drafting, the last one is running.
+    private func draftSteps(_ id: String, chat: Chat, turn: Int, finished: Bool) {
+        let repo = chat.repo ?? "the repo"
+        record(id, .tool(ChatToolStep(id: "t\(turn)-read", name: "Read", state: .done, summary: "Read \(repo) · main · no ratchet.yaml yet")))
+        record(id, .tool(ChatToolStep(
+            id: "t\(turn)-pick", name: "pick_template", state: .done,
+            summary: "Picked the HTTP latency template: k6 load test, hidden query mix as the holdout, error-rate guardrail")))
+        if finished {
+            record(id, .tool(ChatToolStep(
+                id: "t\(turn)-draft", name: "draft_environment", state: .done,
+                summary: "Setup agent drafted a full-stack environment · passes every check · $0.59/h")))
+        } else {
+            record(id, .tool(ChatToolStep(
+                id: "t\(turn)-draft", name: "draft_environment", state: .running, summary: "Setup agent is drafting the environment…")))
+        }
+    }
+
     /// A reply with text, word by word, and the end of the turn.
     private func say(_ id: String, chat: Chat, text answer: String, turn: Int) {
         steps(id, turn: turn)
@@ -242,7 +263,7 @@ public actor MockChatClient: ChatClient, ChatScenario {
     // MARK: Drafts
 
     private func makeDraft(_ id: String, chat: Chat, text: String, lower: String, turn: Int) {
-        steps(id, turn: turn)
+        draftSteps(id, chat: chat, turn: turn, finished: true)
         var draft = chats[id]?.draft ?? DraftState(cardID: "", agents: [chat.harness])
         let previous = draft.cardID.isEmpty ? nil : draft.cardID
         draft.cardID = "draft-\(turn)"
@@ -290,6 +311,11 @@ public actor MockChatClient: ChatClient, ChatScenario {
     }
 
     private func steer(_ id: String, chat: Chat, optimization: String, text: String, turn: Int) {
+        // A question about the run ("ask about a run") is answered; only an instruction becomes a note for the agents.
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("?") {
+            say(id, chat: chat, text: "Here is where this run stands: the agents are trying candidates and the evaluator is checking each one.", turn: turn)
+            return
+        }
         let seq = takeSeq(id)
         let note = ChatCard(
             id: "note-\(seq)", kind: .note, status: .queued, title: text, optimization: optimization)

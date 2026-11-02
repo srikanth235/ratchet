@@ -28,11 +28,11 @@ struct AwsEditForm: View {
         VStack(alignment: .leading, spacing: Space.md) {
             HStack(alignment: .top, spacing: Space.lg) {
                 FieldBlock("Region", problem: regionProblem) {
-                    TextField("us-east-1", text: $region).kitField().frame(width: 200)
+                    TextField("us-east-1", text: $region).kitField().frame(width: Layout.fieldMedium)
                         .accessibilityLabel("Region")
                 }
                 FieldBlock("Monthly cap (USD)", hint: "Empty: no cap", problem: capCheck.problem) {
-                    TextField("none", text: $cap).kitField().frame(width: 160)
+                    TextField("none", text: $cap).kitField().frame(width: Layout.labelColumn)
                         .accessibilityLabel("Monthly cap in dollars")
                 }
                 VStack {

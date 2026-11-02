@@ -64,6 +64,11 @@ public final class ValueStoryModel {
     public static let footnote = "Estimated from each optimization's Value row."
     public static let footnoteLink = "Edit value"
 
+    /// The optimization whose Value row "Edit value" opens: the one with a pull request (the numbers lean on it most), else the first.
+    public static func valueRowTarget(in optimizations: [Optimization]) -> Optimization? {
+        optimizations.first { $0.prNumber != nil } ?? optimizations.first
+    }
+
     /// The spend line: "AWS $121 · agents included in your plan (2.4M tokens)".
     public var spendDetail: String? { overview?.spent.detail }
 }

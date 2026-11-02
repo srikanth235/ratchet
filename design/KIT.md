@@ -53,16 +53,16 @@ columns 360 and 320, content 1000, composer 720, window 1280 x 820 (minimum 1080
 
 | Role | Face | Size | Used for |
 | --- | --- | --- | --- |
-| `pageTitle`, `brand`, `quote`, `heroUnit` | Instrument Serif | 32, 23, 26, 22 | titles |
-| `hero` | Instrument Serif | 56 | the big numbers |
-| `body`, `bodyStrong` | Instrument Sans | 13.5 | rows, fields |
-| `meta`, `caption`, `captionStrong` | Instrument Sans | 12.5, 12, 12 | notes, labels |
-| `section`, `button`, `buttonPrimary`, `buttonSmall` | Instrument Sans | 13, 13, 13, 12 | headings, buttons |
+| `pageTitle`, `brand`, `quote`, `heroUnit` | Instrument Serif | 32, 22, 28, 22 | titles |
+| `hero` | Instrument Serif | 52 | the big numbers |
+| `body`, `bodyStrong`, `section` | Instrument Sans | 14 | rows, fields, headings |
+| `meta`, `caption`, `captionStrong` | Instrument Sans | 12.5 | notes, labels |
+| `button`, `buttonPrimary`, `buttonSmall` | Instrument Sans | 12.5 | buttons |
 | `micro`, `microStrong` | Instrument Sans | 11 | badges, counters, group headings |
 | `mono`, `monoStrong`, `microMono` | SF Mono (system) | 12.5, 12.5, 11 | numbers, commands. Decision: SF Mono; the mockup's JetBrains Mono is not bundled |
 | `axis`, `axisMono` | Instrument Sans, SF Mono | 10 | chart axes. Nothing is smaller than 10 pt |
 
-The mockup scale is 11 / 12.5 / 14. The app keeps 12 (`caption`) and 13.5 (`body`) until F4 merges them into 12.5 and 14 with the screens.
+The scale is the mockup's: 11 / 12.5 / 14 (plus 10 for chart axes only), four text sizes where there were seven. Nothing else is set by hand.
 
 ## Icons
 
@@ -88,15 +88,15 @@ States for every part: rest, hover, pressed, selected, focused, disabled. `force
 | Sidebar row (`Rows`) | 32 high, icon 16, `body`, `radiusRow` | for settings areas inside a page; the window's own sidebar is the system one (`Sidebar.swift`) |
 | Table row | full width, hairline under, `hover` fill | focus ring inside |
 | Hairline list and row | 12 vertical padding | |
-| Status label | dot (8) or shape (16) + word + caption | the word carries the meaning |
+| Status label | shape (16) + word + caption | the word carries the meaning; tables and lists use the shape, never a bare dot |
 | Status shape (`Controls`) | circle with tick (done), turning arc (running), diamond (waiting), triangle (failed), dashed circle (off) | colour-independent, 1.4.1 |
 | Field (`Page`) | 36 high, `radiusField`, `controlBorder`, focus: brass edge + ring | single line |
 | Composer (`Controls`) | `radiusLarge` glass card in a `KitGlassContainer`, multi-line field (2 to 6 lines), chips row, 32 send button | Command-Return sends; sending shows a stop button. The control edge and the focus ring are the kit's, the surface is Liquid Glass |
-| Steering field (`Glass`) | `KitSteeringField`: glass container, control edge, concentric inner area; the screen fills it and passes `isFocused` | states: rest, hover, focused, disabled. Anchor with `.safeAreaInset(edge: .bottom)` |
+| Steering field (`Glass`) | `KitSteeringField`: glass container, control edge, concentric inner area; the screen fills it and passes `isFocused` | states: rest, hover, focused, disabled. Dock it with `KitPage(bottomBar:)` (under the scroll view, not over it) so the content stops above it |
 | Glass container (`Glass`) | `KitGlassContainer`, `.kitGlass()` | one per floating group; no glass on glass; tint only to carry meaning |
 | More menu (`Buttons`) | `KitMoreMenu`: an `ellipsis` symbol in a 28 pt hit area, opens the row's actions | always labelled; every action is also in the context menu and the menu bar |
 | Popover chip | 28 high, title + chevron, `controlBorder` | open: brass edge; set (not a default): brass text and edge; the label is the popover's title; `PopoverChip` attaches the popover |
-| Segmented control | 32 high, bordered, segments split by `hairlineStrong` | selected: lifted + brass underline; Left/Right move |
+| Segmented control | 32 high, bordered, segments split by `hairlineStrong` | selected: lifted + brass underline; one tab stop for the whole control (`arrowGroup`), Left/Right move the selection, the control wears the focus ring |
 | Range switch (`KitSwitch`) | text-only segments | chart ranges |
 | Toggle (`KitToggleStyle`) | 40 x 24 track, knob 16 | on: brass track, dark knob; real `Toggle` |
 | Settings sidebar | heading (`microStrong`) + sidebar rows, 176 wide | Up/Down move |

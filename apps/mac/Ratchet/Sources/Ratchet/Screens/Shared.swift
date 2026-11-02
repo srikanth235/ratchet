@@ -10,6 +10,7 @@ extension OptimizationStatus {
         case .waiting: .off
         case .merged, .done: .ok
         case .noWin: .off
+        case .failed: .bad
         }
     }
 }
@@ -50,7 +51,10 @@ struct ResultCell: View {
     let optimization: Optimization
 
     var body: some View {
-        if let change = optimization.change, let text = optimization.resultText {
+        if optimization.status == .failed {
+            // A failed run says why, not what it had found before it failed.
+            Text(optimization.failureReason ?? "the run did not finish").kitType(.meta).foregroundStyle(Ink.bad).lineLimit(1)
+        } else if let change = optimization.change, let text = optimization.resultText {
             HStack(spacing: Space.sm) {
                 Text(Percent.signed(change))
                     .kitType(.mono)
@@ -77,15 +81,17 @@ struct ValueCell: View {
 
     var body: some View {
         let pending = Self.isPending(optimization)
+        // A failed run delivers nothing, whatever it had estimated.
+        let value = optimization.status == .failed ? nil : optimization.valuePerYearUSD
         HStack(spacing: Space.xs) {
             if pending { Text("pending").kitType(.micro).foregroundStyle(Ink.textFaint) }
-            Text(optimization.valuePerYearUSD.map(Money.short) ?? "—")
+            Text(value.map(Money.short) ?? "—")
                 .kitType(.mono)
-                .foregroundStyle(optimization.valuePerYearUSD == nil || pending ? Ink.textFaint : Ink.text)
+                .foregroundStyle(value == nil || pending ? Ink.textFaint : Ink.text)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(optimization.valuePerYearUSD.map { Money.short($0) + " a year" + (pending ? ", pending until its pull request merges" : "") } ?? "No value yet")
+        .accessibilityLabel(value.map { Money.short($0) + " a year" + (pending ? ", pending until its pull request merges" : "") } ?? "No value yet")
     }
 }
 
@@ -105,6 +111,8 @@ struct SpentCell: View {
 }
 
 enum TableColumns {
+    /// The optimization name column's floor: a title and its `owner/repo` line without a cut at the default window.
+    static let name: CGFloat = 224
     static let status: CGFloat = 128
     static let result: CGFloat = 176
     static let spent: CGFloat = 88
@@ -120,6 +128,7 @@ extension Optimization {
         case .merged: 2
         case .done: 3
         case .noWin: 4
+        case .failed: 5
         }
     }
 
@@ -146,17 +155,19 @@ struct OptimizationTable: View {
     var body: some View {
         let rows = sortOrder.isEmpty ? optimizations : optimizations.sorted(using: sortOrder)
         Table(of: Optimization.self, selection: $selection, sortOrder: $sortOrder) {
+            // The name column never gives way below its floor, so "Forecast accuracy" and its repo are read whole at the default width.
             TableColumn("Optimization", value: \.title) { optimization in
                 TitleStack(title: optimization.title, subtitle: optimization.repo)
             }
+            .width(min: TableColumns.name, ideal: TableColumns.name + Space.section * 2)
             TableColumn("Status", value: \.statusRank) { optimization in
-                StatusLabel(tone: optimization.status.tone, text: optimization.status.title, caption: Self.caption(optimization))
+                StatusLabel(tone: optimization.status.tone, text: optimization.statusText, caption: Self.caption(optimization))
             }
-            .width(min: 112, ideal: 128, max: 160)
+            .width(min: 112, ideal: 120, max: 160)
             TableColumn("Result", value: \.changeSort) { optimization in
                 ResultCell(optimization: optimization)
             }
-            .width(min: 144, ideal: 176)
+            .width(min: 136, ideal: 168)
             TableColumn("Spent", value: \.spentUSD) { optimization in
                 SpentCell(optimization: optimization).frame(maxWidth: .infinity, alignment: .trailing)
             }
@@ -171,7 +182,8 @@ struct OptimizationTable: View {
                     .draggable(OptimizationAction.link(for: optimization))
             }
         }
-        .tableStyle(.inset)
+        // No banded rows: bands past the last row read as empty skeleton rows.
+        .tableStyle(.inset(alternatesRowBackgrounds: false))
         .scrollContentBackground(.hidden)
         .contextMenu(forSelectionType: Optimization.ID.self) { ids in
             OptimizationMenuItems(ids: Array(ids))

@@ -4,39 +4,58 @@ import SwiftUI
 // Page-level parts: the scrolling page, its header, section headings, the hero number, the range switch.
 
 /// A scrolling page on the canvas, with the design's generous margins. Every page has one content width (`Layout.contentWidth`),
-/// kept to the leading edge so probes line up; a page that needs another says why with `maxWidth`.
-struct KitPage<Content: View>: View {
+/// kept to the leading edge so probes line up; a page that needs another says why with `maxWidth`. A page with a bar that floats
+/// at the bottom (the steering field) passes it as `bottomBar`: it is docked under the scroll view, not floating over it, so the
+/// content scrolls to a stop above it and the last rows are never under it.
+struct KitPage<Content: View, Bar: View>: View {
     var maxWidth: CGFloat?
     let content: Content
+    let bottomBar: Bar
 
-    init(maxWidth: CGFloat? = nil, @ViewBuilder content: () -> Content) {
+    init(maxWidth: CGFloat? = nil, @ViewBuilder content: () -> Content, @ViewBuilder bottomBar: () -> Bar) {
         self.maxWidth = maxWidth
         self.content = content()
+        self.bottomBar = bottomBar()
     }
 
     @State private var focus = SnapshotFocus.shared
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: Space.block) {
-                    content
+        // The scroll view and, docked under it, the bar: the content scrolls to a stop above the bar and never runs under it.
+        VStack(spacing: 0) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Space.block) {
+                        content
+                    }
+                    .frame(maxWidth: maxWidth ?? Layout.contentWidth, alignment: .leading)
+                    .padding(.horizontal, Space.pageX)
+                    .padding(.top, Space.pageTop)
+                    .padding(.bottom, Space.pageBottom)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .id("page-top")
                 }
-                .frame(maxWidth: maxWidth ?? Layout.contentWidth, alignment: .leading)
-                .padding(.horizontal, Space.pageX)
-                .padding(.top, Space.pageTop)
-                .padding(.bottom, Space.pageBottom)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .id("page-top")
+                .task(id: focus.target) {
+                    // Snapshot mode only: bring the section of the scene into view once its data is there.
+                    guard Store.isOverridden else { return }
+                    try? await Task.sleep(for: .milliseconds(300))
+                    // "page-end" is the bottom of the page: the last rows, where a bar must not cover them.
+                    if focus.target == "page-end" {
+                        proxy.scrollTo("page-top", anchor: .bottom)
+                    } else {
+                        proxy.scrollTo(focus.target ?? "page-top", anchor: .top)
+                    }
+                }
             }
-            .background(Ink.canvas)
-            .task(id: focus.target) {
-                // Snapshot mode only: bring the section of the scene into view once its data is there.
-                guard Store.isOverridden else { return }
-                try? await Task.sleep(for: .milliseconds(300))
-                proxy.scrollTo(focus.target ?? "page-top", anchor: .top)
-            }
+            bottomBar
         }
+        .background(Ink.canvas)
+    }
+}
+
+extension KitPage where Bar == EmptyView {
+    init(maxWidth: CGFloat? = nil, @ViewBuilder content: () -> Content) {
+        self.init(maxWidth: maxWidth, content: content, bottomBar: { EmptyView() })
     }
 }
 
@@ -174,12 +193,13 @@ struct KitSwitch<Item: Identifiable & Hashable>: View {
             ForEach(items) { item in
                 Button(title(item)) { onSelect(item) }
                     .buttonStyle(RangeSegmentStyle(isSelected: item == selection))
+                    .focusable(false)
                     .accessibilityAddTraits(item == selection ? .isSelected : [])
             }
         }
         .dimsWhenInactive()
-        // Left and Right move the selection, as in every segmented control.
-        .onMoveCommand { direction in
+        // One tab stop; Left and Right move the selection, as in every segmented control.
+        .arrowGroup(radius: Dim.radiusRow) { direction in
             guard let index = items.firstIndex(of: selection) else { return }
             switch direction {
             case .left: onSelect(items[max(index - 1, 0)])

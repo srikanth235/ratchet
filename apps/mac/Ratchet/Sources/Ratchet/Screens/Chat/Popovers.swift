@@ -55,6 +55,7 @@ struct PopoverFrame<Content: View>: View {
         }
         .padding(Space.lg)
         .frame(width: Layout.popoverWidth, alignment: .leading)
+        .closesOnEscape()
     }
 }
 

@@ -4,7 +4,7 @@ import OpenAPIRuntime
 import Testing
 @testable import RatchetKit
 
-// The assertions of the Electron renderer's tests for New optimization (repo search, ratchet.yaml review, the template
+// The assertions of the Electron renderer's tests for New Optimization (repo search, ratchet.yaml review, the template
 // pull request, "What's missing"), Connectors (tokens, AWS profiles, editing in place, Check connection, re-detect, the
 // keychain notice) and Advanced (development), ported to the model, the store and the daemon mapping.
 // Sources: fc503b1:packages/desktop/src/renderer/{screens,connectors}.test.tsx and shared/live-settings.ts.
@@ -96,7 +96,7 @@ struct SettingsCheckTests {
     }
 }
 
-// MARK: - New optimization, step 1 and "What's missing"
+// MARK: - New Optimization, step 1 and "What's missing"
 
 @MainActor
 @Suite("Setup: repo step")

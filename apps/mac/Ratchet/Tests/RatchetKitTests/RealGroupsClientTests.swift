@@ -137,18 +137,20 @@ struct StoreNotificationTests {
         let store = AppStore(client: MockRatchetClient(now: testNow))
         var posted: [NotificationRequest] = []
         store.onNotification = { posted.append($0) }
+        let first = NeedsYouItem(id: "ship-d1", kind: .mergeWins, title: "3 wins ready", detail: "d", actionTitle: "Open", optimizationID: "opt-checkout")
+        let second = NeedsYouItem(id: "ship-d2", kind: .mergeWins, title: "1 win ready", detail: "d", actionTitle: "Open", optimizationID: "opt-checkout")
         // Not loaded yet: nothing is news.
-        store.apply(.environmentDraftReady(draftID: "d0", repoID: "acme/shop"))
+        store.apply(.needsYouChanged([first]))
         #expect(posted.isEmpty)
         await store.refresh()
         store.apply(.githubFlowChanged(GithubSignInFlow(
             state: .pending, userCode: "ABCD-EFGH", verificationURL: "https://github.com/login/device", expiresAt: Date())))
         #expect(store.connectorStore.githubFlow?.userCode == "ABCD-EFGH")
-        store.apply(.environmentDraftReady(draftID: "d1", repoID: "acme/shop"))
-        #expect(posted.map(\.id) == ["draft-d1"])
+        store.apply(.needsYouChanged(store.needsYou + [first]))
+        #expect(posted.map(\.id) == ["needs-ship-d1"])
         // A switched-off category posts nothing.
         store.enabledNotifications = { [] }
-        store.apply(.environmentDraftReady(draftID: "d2", repoID: "acme/shop"))
+        store.apply(.needsYouChanged(store.needsYou + [second]))
         #expect(posted.count == 1)
     }
 

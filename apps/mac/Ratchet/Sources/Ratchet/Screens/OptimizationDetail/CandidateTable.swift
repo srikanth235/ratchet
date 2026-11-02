@@ -12,7 +12,7 @@ struct CandidateTable: View {
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Space.lg) {
-                columnTitle("Commit").frame(width: 76, alignment: .leading)
+                columnTitle("Commit").frame(width: Layout.numberColumn, alignment: .leading)
                 columnTitle("Candidate").frame(maxWidth: .infinity, alignment: .leading)
                 columnTitle("Verdict").frame(width: TableColumns.status, alignment: .leading)
                 columnTitle(optimization.metric.name).frame(width: TableColumns.spent + Space.xl, alignment: .trailing)
@@ -22,7 +22,7 @@ struct CandidateTable: View {
             ForEach(cap.shown(candidates)) { candidate in
                 HStack(spacing: Space.lg) {
                     Text(candidate.id).kitType(.mono).foregroundStyle(Ink.textFaint)
-                        .frame(width: 76, alignment: .leading)
+                        .frame(width: Layout.numberColumn, alignment: .leading)
                     TitleStack(title: candidate.title, subtitle: candidate.agent)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     StatusLabel(tone: candidate.verdict.tone, text: candidate.verdict.title)

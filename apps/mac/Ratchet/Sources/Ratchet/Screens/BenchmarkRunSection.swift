@@ -226,7 +226,7 @@ private struct CandidateResultRow: View {
             TitleStack(title: row.message, subtitle: row.note ?? row.agent)
                 .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: Space.xs) {
-                StatusDot(tone: row.result == .blocked ? .bad : .ok)
+                StatusShape(tone: row.result == .blocked ? .bad : .ok)
                 Text(row.guardrailText).kitType(.meta)
                     .foregroundStyle(row.result == .blocked ? Ink.bad : Ink.textMuted).lineLimit(1)
             }

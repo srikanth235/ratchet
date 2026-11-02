@@ -55,7 +55,7 @@ enum SelfTest {
         // Store: the first load.
         check("the store loaded", store.isLoaded)
         check("test mode runs on demo data", store.isDemoData)
-        check("five optimizations", store.optimizationStore.optimizations.count == 5)
+        check("six optimizations", store.optimizationStore.optimizations.count == 6)
         check("spent matches the design", store.overview?.spentUSD == 184, "\(String(describing: store.overview?.spentUSD))")
         check("value locked in matches the design", store.overview?.valueLockedPerYearUSD == 15_400)
         check("two things need you", store.needsYouCount == 2)

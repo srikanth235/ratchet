@@ -44,15 +44,16 @@ struct StatusDot: View {
     }
 }
 
-/// A status dot and a word, with an optional grey line under it. The word carries the meaning; the color backs it.
+/// A status shape and a word, with an optional grey line under it. The word carries the meaning; the shape (not just a colour)
+/// backs it (WCAG 1.4.1).
 struct StatusLabel: View {
     let tone: StatusTone
     let text: String
     var caption: String?
 
     var body: some View {
-        HStack(alignment: .top, spacing: Space.xs) {
-            StatusDot(tone: tone).frame(height: Dim.textLine)
+        HStack(alignment: .top, spacing: Space.sm) {
+            StatusShape(tone: tone).frame(height: Dim.textLine)
             VStack(alignment: .leading, spacing: 0) {
                 Text(text).kitType(.body).foregroundStyle(Ink.text)
                 if let caption {

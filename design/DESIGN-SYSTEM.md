@@ -15,7 +15,7 @@ checked for contrast in both modes. Revisit only if a user-facing accent picker 
 | --- | --- |
 | Title bar, toolbar, menus, alerts, sheets, popovers (chrome) | native macOS. No custom backgrounds behind them |
 | Settings window (`Form`, tabs) | native layout and controls; text through `.kitType`, colour through `Ink`; 520 wide |
-| Sidebar, toolbar, window title | native macOS (F4): the system sidebar (`List` with `.listStyle(.sidebar)`), a `.toolbar`, `.navigationTitle`. No background or edge of our own; brass only in the content. A selected recent run wears a `brassWash` |
+| Sidebar, toolbar, window title | native macOS (F4): the system sidebar (`List` with `.listStyle(.sidebar)`), a `.toolbar`, `.navigationTitle`. No background or edge of our own; brass only in the content. One selection style, the system's, for pages and runs |
 | Tables and lists of optimizations | native `Table` (selection, sorting, context menu, drag); cell text through `.kitType`, colour through `Ink` |
 | Pages: Overview, Optimizations, Benchmarks, Connectors, detail | brand: kit page, parts, serif titles |
 | Composer, steering field | brand parts on Liquid Glass: `.glassEffect()` inside one `KitGlassContainer`, control edge and focus ring stay the kit's. Never glass on glass |
@@ -27,8 +27,8 @@ checked for contrast in both modes. Revisit only if a user-facing accent picker 
 
 - Sheets, popovers, bars, the menu bar window: no `.background` (the system paints glass). Custom fills are for content only.
 - Custom chrome (page titles, status items, segments, the daemon banner) calls `.dimsWhenInactive()` (`appearsActive`, `Dim.inactiveOpacity`).
-- Radii nest through `ConcentricRectangle` inside a `.containerShape`; one `Layout.contentWidth` per page; the page margin is `Space.pageX`.
-- Inputs that stay at the bottom edge are `.safeAreaInset(edge: .bottom)`. Side columns use `ViewThatFits`.
+- Radii nest through `ConcentricRectangle` inside a `.containerShape`; one `Layout.contentWidth` per page; the page margin is one step, `Space.page` (40), at the sides, top and bottom.
+- Inputs that stay at the bottom edge are docked under the scroll view (`KitPage(bottomBar:)`), not floating over it: the content stops above them. Side columns use `ViewThatFits`.
 
 ## Colour (Ink)
 
@@ -41,7 +41,7 @@ checked for contrast in both modes. Revisit only if a user-facing accent picker 
 
 ## Type
 
-Only `.kitType(role)`; roles by purpose (title, body, meta, caption, micro, mono). 10 pt is the floor (axes); text is 11 or more. Serif for titles
+Only `.kitType(role)`; roles by purpose (title, body, meta, caption, micro, mono). Text sizes are 11, 12.5 and 14; 10 pt is the floor (chart axes only). Serif for titles
 and big numbers only. Numbers use the mono role or `.monospacedDigit()`. Mono is SF Mono.
 
 ## Sizes (Dim, Layout, Space)
