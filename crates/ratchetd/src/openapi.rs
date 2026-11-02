@@ -29,6 +29,7 @@ use crate::api::API_VERSION;
     (name = "environments", description = "Sandboxes: what is running, end now, receipts."),
     (name = "overview", description = "Overview: spent, value locked in, return, the value staircase, needs you, the table."),
     (name = "connectors", description = "Saved GitHub accounts, AWS profiles and agent credentials, and the choice remembered per repo."),
+    (name = "chats", description = "Chat: a conversation with the user's own agent CLI that acts on Ratchet only through Ratchet's tools. Each chat has its own server-sent-event stream."),
     (name = "environment drafts", description = "Dynamic environments: a setup agent drafts the environment a goal needs, the user asks for changes and approves, the files are committed and locked."),
 ))]
 struct ApiDoc;

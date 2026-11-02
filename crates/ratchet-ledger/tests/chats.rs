@@ -132,3 +132,24 @@ async fn a_message_needs_a_chat_and_a_known_role() {
     assert!(l.append_chat_message("c", msg("wizard", "x")).await.is_err());
     assert!(l.create_chat(chat("c")).await.is_err(), "ids are unique");
 }
+
+#[tokio::test]
+async fn the_first_chat_of_a_harness_is_the_oldest_one() {
+    let l = common::ledger().await;
+    l.create_chat(chat("a")).await.unwrap();
+    l.create_chat(chat("b")).await.unwrap();
+    let mut other = chat("c");
+    other.harness = "codex".into();
+    l.create_chat(other).await.unwrap();
+    assert_eq!(
+        l.first_chat_of_harness("claude-code").await.unwrap().as_deref(),
+        Some("a")
+    );
+    assert_eq!(l.first_chat_of_harness("codex").await.unwrap().as_deref(), Some("c"));
+    assert_eq!(l.first_chat_of_harness("grok").await.unwrap(), None);
+    l.delete_chat("a").await.unwrap();
+    assert_eq!(
+        l.first_chat_of_harness("claude-code").await.unwrap().as_deref(),
+        Some("b")
+    );
+}

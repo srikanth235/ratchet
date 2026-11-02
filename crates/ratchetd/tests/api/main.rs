@@ -2,6 +2,7 @@
 //! the OpenAPI document and the simulation. One test binary (they all link the whole server).
 
 mod auth;
+mod chat;
 mod common;
 mod contract;
 mod electron_api;

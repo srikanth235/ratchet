@@ -98,6 +98,10 @@ pub struct DaemonConfig {
     pub event_window: usize,
     /// MCP sessions and drafts; default an empty hub (drafts then need `McpHub::set_hosts`).
     pub mcp: Option<Arc<crate::mcp::McpHub>>,
+    /// The chat service; default one built from the service's ledger and chat engine (the scripted engine without one).
+    pub chats: Option<Arc<crate::chat::ChatService>>,
+    /// Options of the default chat service.
+    pub chat_options: Option<crate::chat::ChatOptions>,
 }
 
 impl DaemonConfig {
@@ -107,6 +111,8 @@ impl DaemonConfig {
             token_store: None,
             event_window: DEFAULT_WINDOW,
             mcp: None,
+            chats: None,
+            chat_options: None,
         }
     }
 }
@@ -119,6 +125,8 @@ pub struct Daemon {
     pub hub: EventHub,
     /// Issue and revoke MCP session tokens here.
     pub mcp: Arc<crate::mcp::McpHub>,
+    /// Chats; closed (sessions ended, tokens revoked) when the daemon stops.
+    pub chats: Arc<crate::chat::ChatService>,
     shutdown: watch::Sender<bool>,
     serve: JoinHandle<io::Result<()>>,
     bridge: JoinHandle<()>,
@@ -139,6 +147,27 @@ impl Daemon {
         let bridge = hub.bridge(service.subscribe());
         let (shutdown, down) = watch::channel(false);
         let mcp = cfg.mcp.unwrap_or_default();
+        let chats = match cfg.chats {
+            Some(c) => c,
+            None => {
+                let ledger = match service.ledger() {
+                    Some(l) => l,
+                    None => ratchet_ledger::Ledger::open_memory(Default::default())
+                        .await
+                        .map_err(io::Error::other)?,
+                };
+                let engine = service.chat_engine().unwrap_or_else(|| {
+                    crate::chat::ScriptedChatEngine::new(crate::chat::ScriptedOptions::default())
+                });
+                crate::chat::ChatService::new(
+                    ledger,
+                    engine,
+                    mcp.clone(),
+                    Some(service.clone()),
+                    cfg.chat_options.unwrap_or_default(),
+                )
+            }
+        };
         let state = AppState {
             service,
             hub: hub.clone(),
@@ -148,7 +177,9 @@ impl Daemon {
             socket_path: Some(cfg.socket_path.display().to_string()),
             shutdown: down.clone(),
             mcp: mcp.clone(),
+            chats: chats.clone(),
         };
+        chats.bind(state.clone());
         let app = build_router(state, TokenAuth::new(token.clone()));
         let mut stop = down;
         let serve = tokio::spawn(async move {
@@ -164,6 +195,7 @@ impl Daemon {
             token,
             hub,
             mcp,
+            chats,
             shutdown,
             serve,
             bridge,
@@ -179,6 +211,7 @@ impl Daemon {
     /// Wait until the server has stopped, then remove the socket and the token.
     pub async fn stopped(self) -> io::Result<()> {
         let r = self.serve.await.map_err(io::Error::other)?;
+        self.chats.shutdown().await;
         self.bridge.abort();
         let _ = std::fs::remove_file(&self.socket_path);
         let _ = self.token_store.clear();

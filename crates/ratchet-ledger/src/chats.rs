@@ -149,6 +149,16 @@ impl Ledger {
         rows.iter().map(chat_row).collect()
     }
 
+    /// The oldest chat on `harness`: the one the first-use notice belongs to.
+    pub async fn first_chat_of_harness(&self, harness: &str) -> Result<Option<String>> {
+        let r = sqlx::query("SELECT id FROM chats WHERE harness = ?1 ORDER BY created_at, rowid LIMIT 1")
+            .bind(harness)
+            .fetch_optional(&mut *self.conn().await?)
+            .await
+            .map_err(db)?;
+        r.map(|r| col(&r, "id")).transpose()
+    }
+
     /// The CLI session to resume next time. `None` clears it.
     pub async fn set_chat_cli_session(&self, id: &str, session: Option<&str>) -> Result<()> {
         sqlx::query("UPDATE chats SET cli_session_id = ?2, updated_at = ?3 WHERE id = ?1")

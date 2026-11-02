@@ -273,6 +273,8 @@ struct Inner {
     pump: Mutex<Option<JoinHandle<()>>>,
     /// Environment drafts: the setup agent (the user's own Claude Code / Codex, run on this machine) per repository.
     drafts: EnvDrafts,
+    /// Chat: the user's own agent CLIs, a read-only checkout per chat.
+    chat: Arc<super::chat::CliChatEngine>,
 }
 
 /// The setup agent of a repository comes from its live runtime.
@@ -412,6 +414,7 @@ impl RealService {
             })
         };
 
+        let chat_connectors = Arc::clone(&connectors);
         let inner = Arc::new(Inner {
             ledger: ledger.clone(),
             views,
@@ -438,6 +441,14 @@ impl RealService {
             probe: opts.connection_probe.clone(),
             idle_minutes: opts.idle_minutes,
             pump: Mutex::new(None),
+            chat: Arc::new(super::chat::CliChatEngine::new(super::chat::CliChatOptions {
+                harnesses: opts.harnesses.clone(),
+                models: ModelCatalog::load(opts.models_file.as_deref()).0,
+                root: opts.state_root.join("chats"),
+                clone_url: None,
+                github_token: Some(Arc::new(move || chat_connectors.github_token(None))),
+                spawner: None,
+            })),
             drafts: EnvDrafts::new(Arc::new(ProductDrafters(product.clone())), {
                 let tx = tx.clone();
                 Arc::new(move |e| {
@@ -1176,6 +1187,14 @@ impl crate::mcp::ConfigHosts for RealService {
 impl AppService for RealService {
     fn engine(&self) -> EngineInfo {
         self.0.engine()
+    }
+
+    fn ledger(&self) -> Option<ratchet_ledger::Ledger> {
+        Some(self.0.ledger.clone())
+    }
+
+    fn chat_engine(&self) -> Option<Arc<dyn crate::chat::ChatEngine>> {
+        Some(self.0.chat.clone())
     }
 
     fn ledger_path(&self) -> Option<String> {

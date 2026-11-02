@@ -278,6 +278,7 @@ async fn serve(args: ServeArgs) -> Result<()> {
                 ledger_path,
                 seed_demo: !args.no_seed,
                 tick_ms: args.tick_ms,
+                chat_chunk_delay: std::time::Duration::from_millis(15),
                 ..SimOptions::default()
             })
             .await

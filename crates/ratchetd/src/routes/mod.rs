@@ -3,6 +3,7 @@
 //! from the same source as the router (`crate::openapi`).
 
 mod agents;
+mod chats;
 mod connectors;
 mod drafts;
 pub mod extract;
@@ -31,6 +32,8 @@ pub struct AppState {
     pub shutdown: watch::Receiver<bool>,
     /// MCP session tokens and drafts (`/v1/mcp/*`).
     pub mcp: Arc<crate::mcp::McpHub>,
+    /// Chats: the live sessions and their streams.
+    pub chats: Arc<crate::chat::ChatService>,
 }
 
 /// All routes (without the auth layer and without `/v1/openapi.json`).
@@ -43,4 +46,5 @@ pub fn api_router() -> OpenApiRouter<AppState> {
         .merge(repos::router())
         .merge(connectors::router())
         .merge(drafts::router())
+        .merge(chats::router())
 }
