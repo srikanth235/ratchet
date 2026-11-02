@@ -53,6 +53,7 @@ pub const MARKS: &[(&str, Mark)] = &[
     ("inspect", Mark::ReadOnly),
     ("overview", Mark::ReadOnly),
     ("connectors", Mark::ReadOnly),
+    ("open", Mark::Write),
 ];
 
 /// Arguments the MCP tools leave out: they write files on the machine running the server (the tool returns the text instead).

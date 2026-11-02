@@ -79,25 +79,29 @@ final class AppRouter {
         didSet { if !Store.isOverridden { UserDefaults.standard.set(settingsTab.rawValue, forKey: "settings.tab") } }
     }
 
+    /// Where the window is, as plain values, for `RouteRules` (RatchetKit, tested).
+    private var route: RouteState {
+        get { RouteState(page: page.rawValue, optimizationID: optimizationID, wizardOpen: wizard != nil) }
+        set {
+            page = Page(rawValue: newValue.page) ?? page
+            optimizationID = newValue.optimizationID
+            if !newValue.wizardOpen { wizard = nil }
+        }
+    }
+
     /// A page from the sidebar. Choosing the page you are on goes back to its list.
     func show(_ target: Page) {
-        if target == page { optimizationID = nil }
-        page = target
-        wizard = nil
-        if target != .optimizations { optimizationID = nil }
+        route = RouteRules.show(target.rawValue, from: route)
     }
 
     func open(optimization id: String) {
-        page = .optimizations
-        optimizationID = id
-        wizard = nil
+        route = RouteRules.open(optimization: id, from: route)
     }
 
     func startWizard(client: any RatchetClient, templateID: String? = nil) {
         let flow = NewOptimizationFlow(client: client)
         wizard = flow
-        page = .optimizations
-        optimizationID = nil
+        route = RouteRules.startWizard(from: route)
         Task {
             await flow.load()
             if let templateID { flow.useTemplate(templateID) }

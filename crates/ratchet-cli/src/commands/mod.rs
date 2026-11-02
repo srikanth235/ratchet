@@ -2,9 +2,11 @@
 //! clients of the daemon's socket API (see [`api`]).
 
 pub mod api;
+pub mod autostart;
 pub mod baseline;
 pub mod confirm;
 pub mod init;
+pub mod open;
 pub mod validate;
 
 use serde::Serialize;
@@ -25,7 +27,13 @@ pub fn emit_json<T: Serialize + ?Sized>(io: &dyn Io, value: &T) {
 pub fn report_error(io: &dyn Io, json: bool, e: &ClientError) -> i32 {
     if json {
         let body = match e {
-            ClientError::Api { error, .. } => serde_json::json!({"error": error}),
+            ClientError::Api { error, .. } => {
+                let mut value = serde_json::to_value(error).unwrap_or_default();
+                if let (Some(hint), Some(object)) = (hint_for(e), value.as_object_mut()) {
+                    object.insert("hint".into(), serde_json::json!(hint));
+                }
+                serde_json::json!({"error": value})
+            }
             other => serde_json::json!({"error": {
                 "code": match other {
                     ClientError::Connect { .. } => "unreachable",
@@ -44,8 +52,21 @@ pub fn report_error(io: &dyn Io, json: bool, e: &ClientError) -> i32 {
                 io.err(&format!("  - {}: {}\n", f.path, f.message));
             }
         }
+        if let Some(hint) = hint_for(e) {
+            io.err(&format!("hint: {hint}\n"));
+        }
     }
     1
+}
+
+/// What to try after a failure, when the error says what is wrong but not how to fix it.
+fn hint_for(e: &ClientError) -> Option<&'static str> {
+    match e.code() {
+        Some(ratchetd::api::ErrorCode::NotFound) => Some(
+            "ids come from `ratchet list` (optimizations; `ratchet show <id>` lists their agents) and `ratchet env list` (environments)",
+        ),
+        _ => None,
+    }
 }
 
 /// A fixed-width text table.
@@ -97,6 +118,7 @@ pub async fn dispatch(cli: Cli, io: &dyn Io) -> i32 {
         Command::Baseline(args) => return baseline::run_baseline(args, json, io).await,
         Command::Templates => return init::list_all(json, io),
         Command::Mcp => return crate::mcp::serve(&cli).await,
+        Command::Open(args) => return open::run_open(args, json, io),
         _ => {}
     }
     let conn = Connection {
@@ -108,6 +130,13 @@ pub async fn dispatch(cli: Cli, io: &dyn Io) -> i32 {
         && let Some(preview) = confirm::preview(&cli.command)
     {
         return confirm::refuse(io, json, &preview);
+    }
+    // The daemon is down? Start it (on a Mac, at the standard location), or say how.
+    if autostart::wanted(&conn, &autostart::Environment::current()) {
+        let socket = ratchetd::paths::socket_path();
+        if let Some(code) = autostart::ensure_running(&socket, json, io).await {
+            return code;
+        }
     }
     let client = match Client::resolve(&conn) {
         Ok(c) => c,

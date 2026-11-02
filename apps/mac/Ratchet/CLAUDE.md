@@ -40,7 +40,19 @@ The plists come from `ratchetd launchagent print --bundle-program ... [--demo]`.
 to demo) are `DaemonLifecycle` in RatchetKit, a pure state machine with tests. While the socket is silent the window shows
 `DaemonStatusView` ("Starting Ratchet…", or the Login Items prompt, or a failure with Try again). Settings has Restart / Stop / Demo mode /
 Open log and notifications. A daemon you start yourself is used as is: set `RATCHET_HOME=<dir>` (or `RATCHET_SOCKET`) and the app only watches
-that socket and registers nothing. The `ratchet` CLI is linked into `/usr/local/bin` only when the user clicks "Install command line tool".
+that socket and registers nothing. A build with no `ratchetd` inside (`RATCHET_SKIP_DAEMON=1`, or the Rust build failed) and no `RATCHET_HOME`
+is `Management.unbundled`: `DaemonStatusView` says "This build has no background service" at once (not after 40 s of "Starting…"), and
+`build.sh` ends with a loud WARNING box. A new build can meet the previous build's daemon, because the LaunchAgent outlives the app: once per
+launch the app compares `GET /v1/status` `version` with `Contents/Helpers/ratchetd --version` (`DaemonVersionCheck`, RatchetKit) and restarts
+the agent on a mismatch. `build.sh --open` quits the app and runs `launchctl bootout gui/$UID/com.ratchet.ratchetd` (and `.demo`) before it
+replaces the bundle; the app registers the agent again, and if the agent is enabled yet nothing answers after 4 s it unregisters and registers
+once more. On `didBecomeActive` the app rechecks the daemon, the login item and the notification permission, and Settings polls every 2 s
+while one of them is missing (System Settings changes do not always notify the app).
+
+The `ratchet` CLI: Settings > Command line links it into `~/.local/bin` (the user's folder; no password) and says how to add that folder to
+`PATH` when a login shell does not have it. "Install for all users…" links `/usr/local/bin` through the system's administrator prompt, only on
+request. `CommandLineLinkState` (RatchetKit) names what is at a link: missing, linked, **broken** (target gone), another copy of the app, or a
+file that is not ours (never replaced). Settings shows each state and "Repair" for a broken link.
 
 Dev loop: `cargo run -p ratchetd -- serve --mode sim` in one terminal, `RATCHET_HOME=<its dir> ~/Applications/Ratchet.app/Contents/MacOS/Ratchet` in
 another (the dir is printed in the log; on macOS `~/Library/Application Support/Ratchet` is both the default and what the bundled agent uses, so
@@ -53,6 +65,31 @@ stop the agent first: Settings, Stop). CI runs the same thing with `tools/smoke-
 switch each in Settings): win ready to merge, environment drafted, budget limit, run finished or failed, connector expired. A click opens the
 screen (`NotificationDestination`: the optimization, Connectors, or the New optimization flow). `NotificationRouting` (RatchetKit) is the pure
 decision function over two store states; the store calls it after each event and never on the first load.
+
+## URL scheme and `ratchet open`
+
+`Info.plist.in` registers `ratchet://`. `ContentView` handles it with `.onOpenURL`, through `AppLink` (RatchetKit): `ratchet://open/<page or
+optimization id>`, `ratchet://optimization/<id>`, `ratchet://connectors|new|overview`, `ratchet://<page>`. Places a notification click can open
+go through `NotificationDestination(token:)`, the same parser, and through `AppNotifier.open`, so a link and a click cannot disagree. A click or
+link that arrives before the window has set `onOpen` (a cold launch) waits in `PendingDestination` and is delivered when the handler is set.
+`ratchet open <page|id>` (the CLI, no daemon needed) builds the link and hands it to `/usr/bin/open`; `--print` only prints it.
+
+## Debug bridge (debug builds only)
+
+`./build.sh --debug` compiles `DebugBridge.swift`; a release build has no channel. The running app polls `<home>/bridge/inbox/<id>.cmd`
+(`<home>` = `$RATCHET_HOME`, else `~/Library/Application Support/Ratchet`) and answers in `<home>/bridge/outbox/<id>.json` (`BridgeReply`,
+protocol and tests in RatchetKit). `tools/ratchetctl.sh <command>` is the client (prints the JSON; exit 0 ok, 1 refused, 2 no answer):
+
+| Command | Does |
+|---|---|
+| `status` | JSON `status`: `page`, `selectedOptimization`, `wizardOpen`, `daemonPhase`, `daemonDetail`, `notificationAuth`, `appearance`, counts, `lastError`, `testMode`, `pid`; also `bridge/status.json` |
+| `open:<page\|id>` | A page by name, or an optimization id (`AppLink` rules) |
+| `appearance:light\|dark` | Switches the app's appearance |
+| `snapshot:<scene>` | A window PNG in `bridge/snapshots/<scene>-<appearance>.png` (any `SnapScene`, e.g. `menubar`, `daemon-failed`; test mode) |
+| `selftest` | The self-test inside the running app (`checks`, `failures`, `lines`; test mode, once per launch, so run it first) |
+
+`tools/bridge-test.sh` starts a debug build in test mode (`APP_STORE=…`, a private `RATCHET_HOME`) and drives all of it; CI runs it
+("Debug bridge" step). Typical agent loop: `RATCHET_HOME=/tmp/r APP_STORE=/tmp/r.store …/Ratchet &`, then `RATCHET_HOME=/tmp/r tools/ratchetctl.sh open:connectors`.
 
 ## Errors and launch at login
 
@@ -69,17 +106,22 @@ Test and snapshot mode never register anything. Snapshot: `settings-login-approv
 ## Layout
 
 - `Sources/RatchetAPI/` generated OpenAPI types and client (see Data). `Sources/RatchetKit/` models, formatting, client protocol, mock, daemon client (`Daemon/`), `AppStore`, `NewOptimizationFlow`. No SwiftUI. Tests in `Tests/RatchetKitTests/`.
-- `Sources/Ratchet/` the app: `App.swift` (scenes, commands, `Store`), `ContentView.swift`, `Sidebar.swift`, `Router.swift`, `MenuBarView.swift`, `SettingsView.swift`, `Snapshot.swift`, `SelfTest.swift`, `DaemonController.swift`, `DaemonStatusView.swift`, `AppNotifier.swift`, `NotificationPrompt.swift`, `CommandLineTool.swift`.
+- `Sources/Ratchet/` the app: `App.swift` (scenes, commands, `Store`), `ContentView.swift`, `Sidebar.swift`, `Router.swift`, `MenuBarView.swift`, `SettingsView.swift`, `Snapshot.swift`, `SelfTest.swift`, `DaemonController.swift`, `DaemonStatusView.swift`, `AppNotifier.swift`, `NotificationPrompt.swift`, `CommandLineTool.swift`, `DebugBridge.swift`, `SelfTestAudits.swift`.
 - `Sources/Ratchet/Screens/` one file per screen: Overview, Optimizations, detail, New optimization steps, Benchmarks, Connectors.
 - `Sources/Ratchet/DesignKit/` the design kit: `Tokens.swift` (Palette, Ink, Dim, Motion), `Type.swift`, `Icons.swift`, `Buttons.swift`, `Rows.swift`, `Choice.swift`, `Page.swift`.
 - `Sources/Ratchet/UI/` `Grid.swift` (the 4 pt scale, layout probes), `WindowBehavior.swift`.
 
 ## Build and check
 
-- Build and install: `./build.sh` (`--open` restarts the app). Prints the compiler errors with context on failure.
+- Build and install: `./build.sh` (`--open` quits the app and stops its daemon first, then opens the new copy; `--debug` adds the debug bridge). Prints the compiler errors with context on failure.
 - Unit tests: `swift test --scratch-path ~/Library/Developer/Ratchet/test-build`.
-- Self-test: `tools/selftest.sh` (exit 0 when every check passes, on the sample client). Add a check for every story with logic. `tools/smoke-daemon.sh` starts the bundled `ratchetd serve --mode sim` on a temp socket and runs `Ratchet --selftest-live` against it (the real client path); CI runs both.
-- Snapshots: `tools/snap.sh` writes `/tmp/Ratchet-shots/<scene>-light.png` and `-dark.png` for the four pages, the optimization detail (live, finished, no win), the four New optimization steps, and `settings-<tab>-*.png`, and the states `daemon-starting`, `daemon-approval`, `notification-prompt`, `connector-signin`, and the setup states `new-repo-found`, `new-repo-invalid`, `new-repo-template`, `new-local-folder`, `new-local-noremote`, `new-missing`, `connectors-add-github`, `connectors-add-aws`, `connectors-add-agent`, `connectors-edit`, `connectors-rename`, `connectors-check`, `connectors-keychain`, `template-pr`, `settings-advanced`. `APP_SNAPSHOT_PAGES=overview,new-budget tools/snap.sh` limits the scenes.
+- Self-test: `tools/selftest.sh` (exit 0 when every check passes, on the sample client). Add a check for every story with logic. It also
+  audits the system's side (`SelfTestAudits.swift`): the Go and File menus against `Page.allCases` and the commands (titles, keys, enabled),
+  every `KitIcon` drawn at 16 and 32 pt (new icon cases go in `SelfTest.kitIcons`), a notification's content and destination round trip and a
+  click through the router, the `ratchet://` scheme in `Info.plist`, and a short event-stream smoke test. `tools/smoke-daemon.sh` starts the bundled `ratchetd serve --mode sim` on a temp socket and runs `Ratchet --selftest-live` against it (the real client path); CI runs both.
+- Snapshots: `tools/snap.sh` writes `/tmp/Ratchet-shots/<scene>-light.png` and `-dark.png` for the four pages, the optimization detail (live, finished, no win), the four New optimization steps, and `settings-<tab>-*.png`, and the states `daemon-starting`, `daemon-approval`, `notification-prompt`, `connector-signin`, and the setup states `new-repo-found`, `new-repo-invalid`, `new-repo-template`, `new-local-folder`, `new-local-noremote`, `new-missing`, `connectors-add-github`, `connectors-add-aws`, `connectors-add-agent`, `connectors-edit`, `connectors-rename`, `connectors-check`, `connectors-keychain`, `template-pr`, `settings-advanced`, and the scenes `daemon-failed`, `daemon-stopped`, `daemon-unbundled`, `empty-overview`, `empty-optimizations`,
+  `empty-benchmarks` (the sample world emptied with `MockRatchetClient.simulate(empty:)`), `menubar`, `menubar-empty` (the menu bar panel's view hosted in a window,
+  `MenuBarCapture`) and `notifications-denied` (Settings). `APP_SNAPSHOT_PAGES=overview,new-budget tools/snap.sh` limits the scenes.
 - Grid: `tools/grid-lint.sh`, then `swift tools/check-layout.swift /tmp/Ratchet-shots/*-layout.json`.
 - API client: `tools/generate-api.sh` after `api/openapi.yaml` changes (needs network once for the generator). Live check against a real daemon: `RATCHET_LIVE_HOME=<dir of a running ratchetd> swift test --filter LiveDaemon`.
 - Test mode: `APP_STORE=<file in /tmp>` means a fixed clock, no live ticks and no saved snapshot.
@@ -91,5 +133,6 @@ Test and snapshot mode never register anything. Snapshot: `settings-login-approv
 - Colors only through `Ink` (light and dark values), fonts only through `.kitType(...)`, icons through `KitIcon`.
 - Parts are real controls (`Button` with a `ButtonStyle`), never a shape with a tap gesture.
 - Window chrome (title bar, toolbar, menus, sheets, popovers) stays system. Every action has a menu item and a shortcut: Command-N new optimization, Command-1 to 4 pages.
+- Pure app logic (menu bar `timeFraction`/`runNote`/`sandboxLine`, the CLI link states, route rules, links, the debug bridge protocol) lives in RatchetKit with tests, not in views.
 - Money, percents and durations go through `Money`, `Percent`, `Elapsed` in the Kit, so the tests cover them.
 - Main-actor default isolation in the app target; the Kit target is nonisolated, its types are `Sendable` structs, `MockRatchetClient` is an actor and `DaemonRatchetClient` a `Sendable` class.

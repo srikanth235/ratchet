@@ -5,12 +5,14 @@
 #
 # Usage: ./build.sh            release build, install
 #        ./build.sh --debug    debug build, install
-#        ./build.sh --open     install, then quit the running copy and open the new one
+#        ./build.sh --open     quit the running copy and stop its daemon (launchctl bootout) before the bundle is replaced,
+#                              install, then open the new one. The app restarts the daemon when its version differs.
 #        ./build.sh --universal  also build ratchetd and ratchet for arm64 and x86_64 (CI; the default is this Mac's arch)
 #
 # The app bundles the Rust daemon: Contents/Helpers/ratchetd and ratchet, and the LaunchAgent plists the app registers
 # with SMAppService in Contents/Library/LaunchAgents/. RATCHET_SKIP_DAEMON=1 leaves them out (a quick UI-only build);
-# RATCHET_REQUIRE_DAEMON=1 makes a failed helper build fail the script (CI).
+# RATCHET_REQUIRE_DAEMON=1 makes a failed helper build fail the script (CI). A build without the daemon says so loudly at
+# the end, and the app it makes shows "This build has no background service" instead of waiting for one.
 set -euo pipefail
 here=${0:A:h}
 name="Ratchet"
@@ -48,6 +50,16 @@ fi
 
 app="$HOME/Applications/$name.app"
 mkdir -p "$HOME/Applications"
+# The running copy and its daemon belong to the bundle that is about to be replaced. Quit the app, and stop the
+# LaunchAgent: a daemon still running from the old bundle would answer the new app with the old code. The new app
+# registers the agent again when it starts (and restarts it when the daemon's version differs).
+if [[ " $* " == *" --open "* ]]; then
+  osascript -e "quit app \"$name\"" 2>/dev/null || true
+  for label in com.ratchet.ratchetd com.ratchet.ratchetd.demo; do
+    launchctl bootout "gui/$UID/$label" 2>/dev/null || true
+  done
+  sleep 0.5
+fi
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin" "$app/Contents/MacOS/$name"
@@ -68,7 +80,10 @@ if [[ -d "$here/Fonts" ]]; then
   cp -X "$here"/Fonts/* "$app/Contents/Resources/Fonts/"
 fi
 # The daemon and the command line tool, and the LaunchAgent plists that run the daemon (real, and demo on the simulation).
-if [[ -z "${RATCHET_SKIP_DAEMON:-}" ]]; then
+bundled_daemon=yes
+if [[ -n "${RATCHET_SKIP_DAEMON:-}" ]]; then
+  bundled_daemon="no (RATCHET_SKIP_DAEMON is set)"
+else
   helpers="$app/Contents/Helpers"
   agents="$app/Contents/Library/LaunchAgents"
   flags=()
@@ -98,7 +113,7 @@ if [[ -z "${RATCHET_SKIP_DAEMON:-}" ]]; then
     exit 1
   else
     rm -rf "$helpers"
-    echo "warning: ratchetd was not built, so this copy of the app has no bundled daemon (RATCHET_SKIP_DAEMON=1 hides this)"
+    bundled_daemon="no (the Rust helpers failed to build; is a Rust toolchain installed?)"
   fi
 fi
 # `xattr -cr` is not understood by every macOS: clear each file's attributes instead.
@@ -106,8 +121,18 @@ find "$app" -exec xattr -c {} + 2>/dev/null || true
 codesign --force --sign "$identity" "$app" 2>&1 | grep -v "replacing existing signature" || true
 echo "installed $app (signed: ${identity})"
 
+if [[ "$bundled_daemon" != yes ]]; then
+  # Loud on purpose: a copy without ratchetd cannot run optimizations, and a quiet warning scrolls away.
+  echo ""
+  echo "######################################################################"
+  echo "# WARNING: this build has NO bundled daemon: $bundled_daemon"
+  echo "# $app can open, but shows \"This build has no background service\""
+  echo "# and runs nothing. Fix the cause and run ./build.sh again, or start"
+  echo "# a daemon yourself and open the app with RATCHET_HOME=<its folder>."
+  echo "######################################################################"
+  echo ""
+fi
+
 if [[ " $* " == *" --open "* ]]; then
-  osascript -e "quit app \"$name\"" 2>/dev/null || true
-  sleep 0.5
   open "$app"
 fi

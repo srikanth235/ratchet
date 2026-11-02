@@ -104,6 +104,7 @@ pub async fn run(c: &Client, cmd: Command, json: bool, io: &dyn Io) -> R {
         | Command::Init(_)
         | Command::Baseline(_)
         | Command::Templates
+        | Command::Open(_)
         | Command::Mcp => {
             unreachable!("offline commands are dispatched before the client is built")
         }
