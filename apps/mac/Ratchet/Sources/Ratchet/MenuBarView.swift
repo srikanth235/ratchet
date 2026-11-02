@@ -70,8 +70,9 @@ struct MenuBarView: View {
             }
         }
         .padding(Space.lg)
-        .frame(width: 320)
+        .frame(width: Layout.popoverWidth)
         .background(Ink.canvas)
+        .tint(Ink.brass)
     }
 
     private var sandboxLine: String {

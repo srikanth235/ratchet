@@ -1,7 +1,9 @@
 # Ratchet (Mac app)
 
 The native macOS app of Ratchet, in SwiftUI. Plan: `docs/NATIVE_ARCHITECTURE.md` ("Mac app"). Look: Midnight Brass, calm
-version (`design/v02.html`, `design/v02/*.png`). It lives in the Ratchet repo; there is no separate git repo.
+version (`design/v02.html`, `design/v02/*.png`; v0.3.1 mockups `design/v03.html`). It lives in the Ratchet repo; there is no separate git repo.
+
+Design rules: `design/DESIGN-SYSTEM.md` (which token when). Parts and states: `design/KIT.md`. Use their tokens; never raw colors, radii, sizes or durations.
 
 ## Data
 
@@ -59,7 +61,7 @@ decision function over two store states; the store calls it after each event and
 - `Sources/RatchetAPI/` generated OpenAPI types and client (see Data). `Sources/RatchetKit/` models, formatting, client protocol, mock, daemon client (`Daemon/`), `AppStore`, `NewOptimizationFlow`. No SwiftUI. Tests in `Tests/RatchetKitTests/`.
 - `Sources/Ratchet/` the app: `App.swift` (scenes, commands, `Store`), `ContentView.swift`, `Sidebar.swift`, `Router.swift`, `MenuBarView.swift`, `SettingsView.swift`, `Snapshot.swift`, `SelfTest.swift`, `DaemonController.swift`, `DaemonStatusView.swift`, `AppNotifier.swift`, `NotificationPrompt.swift`, `CommandLineTool.swift`.
 - `Sources/Ratchet/Screens/` one file per screen: Overview, Optimizations, detail, New optimization steps, Benchmarks, Connectors.
-- `Sources/Ratchet/DesignKit/` the design kit: `Tokens.swift` (Palette, Ink, Dim, Motion), `Type.swift`, `Icons.swift`, `Buttons.swift`, `Rows.swift`, `Choice.swift`, `Page.swift`.
+- `Sources/Ratchet/DesignKit/` the design kit: `Tokens.swift` (Palette, Ink, Dim, Layout, Motion), `PartState.swift` (states, focus ring), `Type.swift`, `Icons.swift`, `Buttons.swift`, `Rows.swift`, `Choice.swift`, `Controls.swift` (chip, segmented, toggle, composer, settings sidebar, status shape), `Page.swift`, `KitGallery.swift` (`APP_KIT_GALLERY=1`; snapshot scenes `gallery-*`).
 - `Sources/Ratchet/UI/` `Grid.swift` (the 4 pt scale, layout probes), `WindowBehavior.swift`.
 
 ## Build and check
@@ -67,17 +69,18 @@ decision function over two store states; the store calls it after each event and
 - Build and install: `./build.sh` (`--open` restarts the app). Prints the compiler errors with context on failure.
 - Unit tests: `swift test --scratch-path ~/Library/Developer/Ratchet/test-build`.
 - Self-test: `tools/selftest.sh` (exit 0 when every check passes, on the sample client). Add a check for every story with logic. `tools/smoke-daemon.sh` starts the bundled `ratchetd serve --mode sim` on a temp socket and runs `Ratchet --selftest-live` against it (the real client path); CI runs both.
-- Snapshots: `tools/snap.sh` writes `/tmp/Ratchet-shots/<scene>-light.png` and `-dark.png` for the four pages, the optimization detail (live, finished, no win), the four New optimization steps, and `settings-<tab>-*.png`, and the states `daemon-starting`, `daemon-approval`, `notification-prompt`, `connector-signin`, and the setup states `new-repo-found`, `new-repo-invalid`, `new-repo-template`, `new-local-folder`, `new-local-noremote`, `new-missing`, `connectors-add-github`, `connectors-add-aws`, `connectors-add-agent`, `connectors-edit`, `connectors-rename`, `connectors-check`, `connectors-keychain`, `template-pr`, `settings-advanced`. `APP_SNAPSHOT_PAGES=overview,new-budget tools/snap.sh` limits the scenes.
-- Grid: `tools/grid-lint.sh`, then `swift tools/check-layout.swift /tmp/Ratchet-shots/*-layout.json`.
+- Snapshots: `tools/snap.sh` writes `/tmp/Ratchet-shots/<scene>-light.png` and `-dark.png` for the four pages, the optimization detail (live, finished, no win), the four New optimization steps, and `settings-<tab>-*.png`, the parts gallery (`gallery-actions`, `-choices`, `-rows`, `-inputs`, `-status`, `-identity`, `-type`, `-tokens`), and the states `daemon-starting`, `daemon-approval`, `notification-prompt`, `connector-signin`, and the setup states `new-repo-found`, `new-repo-invalid`, `new-repo-template`, `new-local-folder`, `new-local-noremote`, `new-missing`, `connectors-add-github`, `connectors-add-aws`, `connectors-add-agent`, `connectors-edit`, `connectors-rename`, `connectors-check`, `connectors-keychain`, `template-pr`, `settings-advanced`. `APP_SNAPSHOT_PAGES=overview,new-budget tools/snap.sh` limits the scenes.
+- Grid and kit lint: `tools/grid-lint.sh` (bash or zsh; every Swift file incl. `Tokens.swift`; also flags raw colors and SF Symbols outside the kit), then `swift tools/check-layout.swift /tmp/Ratchet-shots/*-layout.json`.
 - API client: `tools/generate-api.sh` after `api/openapi.yaml` changes (needs network once for the generator). Live check against a real daemon: `RATCHET_LIVE_HOME=<dir of a running ratchetd> swift test --filter LiveDaemon`.
 - Test mode: `APP_STORE=<file in /tmp>` means a fixed clock, no live ticks and no saved snapshot.
 - CI: `.github/workflows/native.yml`, job `mac-app` (macOS 26).
 
 ## Rules
 
-- Spacing comes from `Space` (`UI/Grid.swift`), on a 4 pt grid; the design's own odd sizes (3, 7, 15 pt) live in `DesignKit/Tokens.swift` as `Dim`.
+- Spacing comes from `Space` (`UI/Grid.swift`), on a 4 pt grid; control sizes and radii are `Dim`, shared widths `Layout` (`DesignKit/Tokens.swift`), all on the grid.
 - Colors only through `Ink` (light and dark values), fonts only through `.kitType(...)`, icons through `KitIcon`.
-- Parts are real controls (`Button` with a `ButtonStyle`), never a shape with a tap gesture.
+- Parts are real controls (`Button` with a `ButtonStyle`), never a shape with a tap gesture. Each takes `forcedPartState` and is shown in every state in `KitGallery`.
+- `.tint(Ink.brass)` is set at each scene root; motion only through `Motion` (nil under Reduce Motion).
 - Window chrome (title bar, toolbar, menus, sheets, popovers) stays system. Every action has a menu item and a shortcut: Command-N new optimization, Command-1 to 4 pages.
 - Money, percents and durations go through `Money`, `Percent`, `Elapsed` in the Kit, so the tests cover them.
 - Main-actor default isolation in the app target; the Kit target is nonisolated, its types are `Sendable` structs, `MockRatchetClient` is an actor and `DaemonRatchetClient` a `Sendable` class.

@@ -33,3 +33,7 @@ Tokens in `v03.css` are two layers named like `DesignKit/Tokens.swift`: Palette 
 - `glass` (popovers, tooltips, bubbles), `raisedSoft` (cards), `brassWash`, `brassLine`, `focus`, `scrim`, `okWash`/`badWash`/`waitWash`, the traffic-light colours and `mark*` are new names for values the mockup repeated.
 - Light `mint700` is `#187250` (was `#1F8A62`, 4.1:1 as text) and light `ink500` is `#5C6676` (was `#6B7587`, 4.4:1 on paper). Both failed AA as text.
 - Sizes: text 11, 12.5 and 14; button 32, small 28, field 36, sidebar row 32; radii 8, 12, 16; hover alpha .08.
+
+## Kit and icon
+
+`KIT.md` is the spec of the Swift design kit (tokens, type, icons, every part and its states); `DESIGN-SYSTEM.md` says which token to use when and where native macOS wins over the brand. The app icon has one source, `apps/mac/Ratchet/Icon/AppIcon.icon`; `python3 design/tools/build-icon.py` rewrites its layers and the flat `icon/ratchet-icon.svg`.

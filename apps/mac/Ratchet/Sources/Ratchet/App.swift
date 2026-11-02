@@ -9,7 +9,7 @@ import SwiftUI
 //                                    and every Settings tab in light and dark mode, then quit
 //   Ratchet --selftest               run the self-test on the sample client and quit with 0 or 1 (tools/selftest.sh)
 //   APP_GRID=1 Ratchet               draw the 8 pt grid and the layout probes over the window
-//   APP_KIT_GALLERY=1 Ratchet        (not built yet) parts gallery
+//   APP_KIT_GALLERY=1 Ratchet        the parts gallery (DesignKit/KitGallery.swift) instead of the app; snapshot mode shoots it too
 //
 // Data comes through the RatchetClient protocol (RatchetKit). The app talks to ratchetd through DaemonRatchetClient: it
 // registers the bundled daemon as a LaunchAgent (DaemonController), shows "Starting Ratchet…" until the socket answers,
@@ -26,6 +26,7 @@ struct RatchetApp: App {
     @State private var daemon = DaemonController.make()
     @State private var notifier = AppNotifier(enabled: !Store.isOverridden)
     @AppStorage("menuBarItem") private var showMenuBarItem = true
+    @State private var gallery = KitGalleryState.shared
 
     var body: some Scene {
         Window("Ratchet", id: "main") {
@@ -34,10 +35,13 @@ struct RatchetApp: App {
                 .environment(router)
                 .environment(daemon)
                 .environment(notifier)
+                .overlay { if gallery.isShown { KitGallery() } }
                 .overlay { if GridOverlay.enabled { GridOverlay() } }
-                .frame(minWidth: 1080, minHeight: 640)
+                .frame(minWidth: Layout.minWindowWidth, minHeight: Layout.minWindowHeight)
+                // The one accent: system controls (toggles, pickers, selection, focus) wear brass, not the Mac's accent.
+                .tint(Ink.brass)
         }
-        .defaultSize(width: 1280, height: 820)
+        .defaultSize(width: Layout.defaultWindowWidth, height: Layout.defaultWindowHeight)
         .windowToolbarStyle(.unified)
         .commands {
             SidebarCommands()
@@ -62,6 +66,7 @@ struct RatchetApp: App {
                 .environment(router)
                 .environment(daemon)
                 .environment(notifier)
+                .tint(Ink.brass)
         }
         .windowResizability(.contentSize)
 

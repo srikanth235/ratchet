@@ -24,7 +24,7 @@ struct SettingsView: View {
             Form { GeneralSettings() }
                 .formStyle(.grouped)
                 .fitsContent()
-                .frame(width: 560)
+                .frame(width: Layout.settingsWidth)
         case .connectors:
             ConnectorsPage(embedded: true)
                 .frame(width: 800, height: 600)
@@ -64,8 +64,8 @@ struct GeneralSettings: View {
         Section("Menu bar") {
             Toggle("Show Ratchet in the menu bar", isOn: $showMenuBarItem)
             Text("Running optimizations, what needs you and the sandbox, one click away. Closing the window keeps Ratchet running while this is on.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .kitType(.caption)
+                .foregroundStyle(Ink.textFaint)
         }
         Section("Background service") {
             LabeledContent("Status", value: statusText)
@@ -77,7 +77,7 @@ struct GeneralSettings: View {
                         Task { await store.useSource(isDemoData: on, cacheURL: Store.cacheURL(demo: on)) }
                     }))
                 Text("Demo mode runs ratchetd on made-up data, with no accounts. Your real optimizations are untouched and come back when you switch it off.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .kitType(.caption).foregroundStyle(Ink.textFaint)
                 HStack {
                     Button("Restart") { daemon.restart() }
                     if daemon.phase == .stopped {
@@ -88,7 +88,7 @@ struct GeneralSettings: View {
                     Button("Open log") { DaemonLog.reveal() }
                 }
                 Text("ratchetd keeps optimizations running after you quit Ratchet. Stopping it pauses them. Login Items in System Settings lists it as Ratchet.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .kitType(.caption).foregroundStyle(Ink.textFaint)
             }
         }
         Section("Notifications") {
@@ -98,11 +98,11 @@ struct GeneralSettings: View {
                     NotificationSwitch(category: category)
                 }
             case .denied:
-                Text("Notifications for Ratchet are off in System Settings.").font(.caption).foregroundStyle(.secondary)
+                Text("Notifications for Ratchet are off in System Settings.").kitType(.caption).foregroundStyle(Ink.textFaint)
                 Button("Open Notification Settings") { notifier.openSystemSettings() }
             case .notDetermined, .unknown:
                 Text("Ratchet can tell you when a win is ready to merge, an environment waits for approval, a budget is reached or a run finishes.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .kitType(.caption).foregroundStyle(Ink.textFaint)
                 Button("Turn on notifications") { Task { await notifier.requestPermission() } }
             }
         }
@@ -112,10 +112,10 @@ struct GeneralSettings: View {
                 Button(CommandLineTool.installed ? "Remove command line tool" : "Install command line tool…") {
                     installNote = CommandLineTool.installed ? CommandLineTool.uninstall() : CommandLineTool.install()
                 }
-                if let installNote { Text(installNote).font(.caption).foregroundStyle(.secondary) }
+                if let installNote { Text(installNote).kitType(.caption).foregroundStyle(Ink.textFaint) }
             }
             Text("Adds a ratchet command to your Terminal, for scripts and agents. Only with your OK; it is a link to the copy inside this app.")
-                .font(.caption).foregroundStyle(.secondary)
+                .kitType(.caption).foregroundStyle(Ink.textFaint)
         }
         Section("Data") {
             LabeledContent("Source", value: sourceText)
@@ -159,7 +159,7 @@ private struct NotificationSwitch: View {
         Toggle(isOn: $isOn) {
             VStack(alignment: .leading) {
                 Text(category.title)
-                Text(category.explanation).font(.caption).foregroundStyle(.secondary)
+                Text(category.explanation).kitType(.caption).foregroundStyle(Ink.textFaint)
             }
         }
     }

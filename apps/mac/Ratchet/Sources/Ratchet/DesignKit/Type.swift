@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// Type roles, from the reference CSS in design/v02.html: Instrument Sans for text (13.5 body, 12.5 notes, 12 captions),
+/// Type roles, from the reference CSS in design/v02.html and design/tools/v03.css (v0.3.1 text sizes 11, 12.5, 14): Instrument Sans for text (13.5 body, 12.5 notes, 12 captions),
 /// Instrument Serif for page titles and big numbers (32 title, 56 hero), SF Mono for numbers. The system fonts stand in
 /// when the bundled faces are missing (`KitFonts`). Views set fonts only through `.kitType(...)`.
-enum KitType {
+enum KitType: CaseIterable {
     case pageTitle, brand, hero, heroUnit, quote
     case body, bodyStrong, meta, caption, section, button, buttonSmall
-    case buttonPrimary, captionStrong, mono, monoStrong, axis, axisMono
+    case buttonPrimary, captionStrong, mono, monoStrong, axis, axisMono, micro, microStrong, microMono
 
     var font: Font {
         switch self {
@@ -26,9 +26,13 @@ enum KitType {
         case .buttonSmall: sans(KitFonts.sansMedium, 12, .medium)
         case .mono: .system(size: 12.5, design: .monospaced)
         case .monoStrong: .system(size: 12.5, weight: .medium, design: .monospaced)
-        // Chart axes: the reference scales its 11 px labels down with the chart, to about 8 pt.
-        case .axis: sans(KitFonts.sansRegular, 8, .regular)
-        case .axisMono: .system(size: 8, design: .monospaced)
+        // Chart axes: 10 pt, the smallest text anywhere (the reference scaled them to 8 pt, below the 10 pt floor).
+        case .axis: sans(KitFonts.sansRegular, 10, .regular)
+        case .axisMono: .system(size: 10, design: .monospaced)
+        // v0.3.1 `.xs` (11 px): badges, counters, group headings, the debug overlay.
+        case .micro: sans(KitFonts.sansRegular, 11, .regular)
+        case .microStrong: sans(KitFonts.sansSemibold, 11, .semibold)
+        case .microMono: .system(size: 11, design: .monospaced)
         }
     }
 

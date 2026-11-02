@@ -39,6 +39,30 @@ enum SnapScene: String, CaseIterable {
     case connectorsCheck = "connectors-check"
     case connectorsKeychain = "connectors-keychain"
     case templatePR = "template-pr"
+    // The parts gallery (DesignKit/KitGallery.swift): every part in every state, one section per scene.
+    case galleryActions = "gallery-actions"
+    case galleryChoices = "gallery-choices"
+    case galleryRows = "gallery-rows"
+    case galleryInputs = "gallery-inputs"
+    case galleryStatus = "gallery-status"
+    case galleryIdentity = "gallery-identity"
+    case galleryType = "gallery-type"
+    case galleryTokens = "gallery-tokens"
+
+    /// The gallery section this scene shows, if it is a gallery scene.
+    var gallerySection: GallerySection? {
+        switch self {
+        case .galleryActions: .actions
+        case .galleryChoices: .choices
+        case .galleryRows: .rows
+        case .galleryInputs: .inputs
+        case .galleryStatus: .status
+        case .galleryIdentity: .identity
+        case .galleryType: .type
+        case .galleryTokens: .tokens
+        default: nil
+        }
+    }
 
     /// Puts the window in this scene's state.
     func apply(store: AppStore, router: AppRouter, daemon: DaemonController, notifier: AppNotifier) async {
@@ -48,6 +72,8 @@ enum SnapScene: String, CaseIterable {
         daemon.preview(nil)
         notifier.preview(.allowed, prompt: false)
         await store.cancelGithubSignIn()
+        KitGalleryState.shared.isShown = gallerySection != nil
+        KitGalleryState.shared.section = gallerySection
         router.show(.overview)
         router.rowModes = [:]
         router.rowNotes = [:]
@@ -59,7 +85,9 @@ enum SnapScene: String, CaseIterable {
         await mock?.simulate(preflight: nil)
         await store.refresh()
         switch self {
-        case .overview: break
+        case .overview, .galleryActions, .galleryChoices, .galleryRows, .galleryInputs, .galleryStatus, .galleryIdentity,
+            .galleryType, .galleryTokens:
+            break
         case .daemonStarting: daemon.preview(.starting)
         case .daemonApproval: daemon.preview(.needsApproval)
         case .notificationPrompt: notifier.preview(.notDetermined, prompt: true)
@@ -172,7 +200,8 @@ enum SnapScene: String, CaseIterable {
 /// Screenshot mode for agents.
 ///   APP_STORE=/tmp/test.store APP_SNAPSHOT=/tmp/shots ~/Applications/Ratchet.app/Contents/MacOS/Ratchet
 /// writes <scene>-light.png and <scene>-dark.png for every SnapScene (the four pages, the optimization detail live,
-/// finished and without a win, the four New optimization steps), and settings-<tab>-light.png and -dark.png for
+/// finished and without a win, the four New optimization steps, the eight gallery-<section> scenes of the parts gallery),
+/// and settings-<tab>-light.png and -dark.png for
 /// every Settings tab, then quits. Each PNG gets a <scene>-<mode>-layout.json with the grid probes
 /// (tools/check-layout.swift).
 /// APP_SNAPSHOT_PAGES=overview,new-budget limits the scenes. "all" means every scene; add "settings" for Settings.
