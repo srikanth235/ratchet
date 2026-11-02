@@ -8,6 +8,8 @@ pub mod cli;
 pub mod client;
 pub mod commands;
 pub mod io;
+pub mod mcp;
+pub mod table;
 
 use clap::Parser;
 

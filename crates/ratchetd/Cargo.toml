@@ -25,6 +25,7 @@ server = [
     "dep:async-trait",
     "dep:libc",
     "dep:ratchet-github",
+    "dep:ratchet-mcp",
     "ratchet-connectors/store",
 ]
 
@@ -50,6 +51,7 @@ ratchet-env = { path = "../ratchet-env", optional = true }
 ratchet-agents = { path = "../ratchet-agents", optional = true }
 ratchet-engine = { path = "../ratchet-engine", optional = true }
 ratchet-github = { path = "../ratchet-github", optional = true }
+ratchet-mcp = { path = "../ratchet-mcp", optional = true }
 ratchet-ledger = { path = "../ratchet-ledger", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }

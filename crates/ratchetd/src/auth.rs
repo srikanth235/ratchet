@@ -150,7 +150,7 @@ impl TokenAuth {
     }
 }
 
-fn unauthorized(message: &str) -> Response {
+pub(crate) fn unauthorized(message: &str) -> Response {
     let body = ApiError {
         code: ErrorCode::Unauthorized,
         message: message.to_owned(),

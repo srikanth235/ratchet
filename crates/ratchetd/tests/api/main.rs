@@ -5,6 +5,7 @@ mod auth;
 mod common;
 mod contract;
 mod electron_api;
+mod mcp;
 mod openapi;
 mod overview;
 mod real_service;

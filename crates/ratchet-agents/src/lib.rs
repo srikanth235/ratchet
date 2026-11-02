@@ -32,6 +32,7 @@ pub mod local_agents;
 pub mod process;
 pub mod runner_loop;
 pub mod runner_main;
+pub mod runner_mcp;
 pub mod scripted;
 pub mod testing;
 pub mod workdir;
@@ -90,6 +91,7 @@ pub use runner_main::{
     AGENT_ENV_PASSTHROUGH, RunnerMainError, RunnerMainOptions, parse_secret_refs, runner_main,
     validate_config,
 };
+pub use runner_mcp::RunnerToolBackend;
 pub use scripted::{
     AgentScript, ScriptAttempt, ScriptStep, ScriptedAgent, ScriptedAgentOptions, StepCondition,
     price_usage,

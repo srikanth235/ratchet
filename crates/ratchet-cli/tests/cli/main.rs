@@ -4,4 +4,5 @@
 mod binary;
 mod common;
 mod daemon;
+mod mcp;
 mod offline;

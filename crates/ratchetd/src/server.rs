@@ -24,6 +24,8 @@ use crate::service::{AppService, ServiceError};
 pub fn build_router(state: AppState, auth: TokenAuth) -> Router {
     let (router, _) = api_router().split_for_parts();
     let spec = Arc::new(crate::openapi::openapi_json());
+    // A session token opens /v1/mcp/* and nothing else; the owner token does not open those two routes.
+    let mcp_routes = crate::mcp::routes::router(state.clone());
     router
         .route(
             "/v1/openapi.json",
@@ -38,6 +40,7 @@ pub fn build_router(state: AppState, auth: TokenAuth) -> Router {
         .fallback(not_found)
         .with_state(state)
         .layer(middleware::from_fn_with_state(auth, require_token))
+        .merge(mcp_routes)
 }
 
 async fn not_found() -> Response {
@@ -93,6 +96,8 @@ pub struct DaemonConfig {
     pub token_store: Option<Arc<dyn TokenStore>>,
     /// Events a reconnecting client can still catch up on.
     pub event_window: usize,
+    /// MCP sessions and drafts; default an empty hub (drafts then need `McpHub::set_hosts`).
+    pub mcp: Option<Arc<crate::mcp::McpHub>>,
 }
 
 impl DaemonConfig {
@@ -101,6 +106,7 @@ impl DaemonConfig {
             socket_path: socket_path.into(),
             token_store: None,
             event_window: DEFAULT_WINDOW,
+            mcp: None,
         }
     }
 }
@@ -111,6 +117,8 @@ pub struct Daemon {
     /// The token clients must send (also in the token store).
     pub token: String,
     pub hub: EventHub,
+    /// Issue and revoke MCP session tokens here.
+    pub mcp: Arc<crate::mcp::McpHub>,
     shutdown: watch::Sender<bool>,
     serve: JoinHandle<io::Result<()>>,
     bridge: JoinHandle<()>,
@@ -130,6 +138,7 @@ impl Daemon {
         let hub = EventHub::new(cfg.event_window);
         let bridge = hub.bridge(service.subscribe());
         let (shutdown, down) = watch::channel(false);
+        let mcp = cfg.mcp.unwrap_or_default();
         let state = AppState {
             service,
             hub: hub.clone(),
@@ -138,6 +147,7 @@ impl Daemon {
                 .map_or(0, |d| d.as_millis() as i64),
             socket_path: Some(cfg.socket_path.display().to_string()),
             shutdown: down.clone(),
+            mcp: mcp.clone(),
         };
         let app = build_router(state, TokenAuth::new(token.clone()));
         let mut stop = down;
@@ -153,6 +163,7 @@ impl Daemon {
             socket_path: cfg.socket_path,
             token,
             hub,
+            mcp,
             shutdown,
             serve,
             bridge,

@@ -242,3 +242,148 @@ impl ProcessHandle for FakeProcess {
         }
     }
 }
+
+/// The MCP server `server` as each harness hands it to its CLI, read back: what Claude Code's `--mcp-config`, Codex's `-c`
+/// overrides and overlay `config.toml`, and Grok's `config.toml` and ACP `session/new` actually start. A test launches these to
+/// prove a CLI would get a working Ratchet server.
+pub fn rendered_mcp_servers(
+    server: &ratchet_core::ports::McpServer,
+) -> Vec<(&'static str, ratchet_core::ports::McpServer)> {
+    use ratchet_core::ports::McpServer;
+    use serde_json::Value;
+    use std::collections::BTreeMap;
+
+    let name = server.name.clone();
+    let strings = |v: &Value| -> Vec<String> {
+        v.as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|s| s.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let mut out = Vec::new();
+
+    // Claude Code: --mcp-config JSON
+    let claude = crate::claude_code::claude_mcp_config(std::slice::from_ref(server));
+    let c = &claude["mcpServers"][&name];
+    out.push((
+        "claude-code",
+        McpServer {
+            name: name.clone(),
+            command: c["command"].as_str().unwrap_or_default().to_owned(),
+            args: strings(&c["args"]),
+            env: c["env"]
+                .as_object()
+                .map(|m| {
+                    m.iter()
+                        .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_owned()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        },
+    ));
+
+    // Codex: `-c mcp_servers.<name>.command="..."` and friends (TOML values written as JSON-compatible text)
+    let mut codex = McpServer {
+        name: name.clone(),
+        ..McpServer::default()
+    };
+    let prefix = format!("mcp_servers.{name}.");
+    for o in crate::codex::codex_mcp_overrides(std::slice::from_ref(server)) {
+        let Some((key, value)) = o.split_once('=') else {
+            continue;
+        };
+        let Some(key) = key.strip_prefix(&prefix) else {
+            continue;
+        };
+        let value: Value = serde_json::from_str(value).unwrap_or(Value::Null);
+        match key {
+            "command" => codex.command = value.as_str().unwrap_or_default().to_owned(),
+            "args" => codex.args = strings(&value),
+            k => {
+                if let Some(env) = k.strip_prefix("env.") {
+                    codex.env.insert(
+                        env.to_owned(),
+                        value.as_str().unwrap_or_default().to_owned(),
+                    );
+                }
+            }
+        }
+    }
+    out.push(("codex -c", codex));
+
+    // the TOML tables of a Codex overlay and a Grok per-session config
+    let toml_server = |text: &str| -> McpServer {
+        let mut s = McpServer {
+            name: name.clone(),
+            ..McpServer::default()
+        };
+        let mut in_env = false;
+        let mut in_server = false;
+        for line in text.lines() {
+            let line = line.trim();
+            if line.starts_with('[') {
+                in_server = line == format!("[mcp_servers.{name}]")
+                    || line == format!("[mcp_servers.{name}.env]");
+                in_env = line == format!("[mcp_servers.{name}.env]");
+                continue;
+            }
+            if !in_server {
+                continue;
+            }
+            let Some((k, v)) = line.split_once('=') else {
+                continue;
+            };
+            let (k, v) = (
+                k.trim(),
+                serde_json::from_str::<Value>(v.trim()).unwrap_or(Value::Null),
+            );
+            if in_env {
+                s.env
+                    .insert(k.to_owned(), v.as_str().unwrap_or_default().to_owned());
+            } else if k == "command" {
+                s.command = v.as_str().unwrap_or_default().to_owned();
+            } else if k == "args" {
+                s.args = strings(&v);
+            }
+        }
+        s
+    };
+    out.push((
+        "codex config.toml",
+        toml_server(&crate::codex::codex_mcp_toml(std::slice::from_ref(server))),
+    ));
+    out.push((
+        "grok config.toml",
+        toml_server(&crate::grok::grok_config_toml(std::slice::from_ref(server))),
+    ));
+
+    // Grok ACP: session/new { mcpServers }
+    let acp = crate::grok_acp::acp_mcp_servers(std::slice::from_ref(server));
+    let a = &acp[0];
+    let env: BTreeMap<String, String> = a["env"]
+        .as_array()
+        .map(|e| {
+            e.iter()
+                .map(|p| {
+                    (
+                        p["name"].as_str().unwrap_or_default().to_owned(),
+                        p["value"].as_str().unwrap_or_default().to_owned(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    out.push((
+        "grok acp",
+        McpServer {
+            name: name.clone(),
+            command: a["command"].as_str().unwrap_or_default().to_owned(),
+            args: strings(&a["args"]),
+            env,
+        },
+    ));
+    out
+}
