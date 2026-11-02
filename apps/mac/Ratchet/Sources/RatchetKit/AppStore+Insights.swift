@@ -1,37 +1,6 @@
 import Foundation
 
-/// The reads behind the live log, the Result details and the Benchmarks page. Separate from `RatchetClient` (which refines
-/// it) so a client that has no answer, like a test double, compiles without them.
-public protocol RatchetInsightsClient: Sendable {
-    /// An agent's log. Without `cursor`: the newest `limit` lines (oldest first). With it: only lines newer than the cursor.
-    func agentLog(agentID: String, after cursor: Int64?, limit: Int) async throws -> AgentLogPage
-    /// Spend breakdown, "where the time went", before/after rows and the winning change of one optimization.
-    func insights(optimizationID: String) async throws -> RunInsights
-    /// The ratchet of one metric (`metric` is one of the series' options; nil is the objective).
-    func benchmarkSeries(optimizationID: String, metric: String?) async throws -> BenchmarkSeries
-    /// Every candidate with its verdict and bench results.
-    func candidateResults(optimizationID: String) async throws -> [CandidateResult]
-}
-
-extension RatchetInsightsClient {
-    public func agentLog(agentID: String, after cursor: Int64?, limit: Int) async throws -> AgentLogPage {
-        throw RatchetClientError.unavailable("This client has no agent log.")
-    }
-
-    public func insights(optimizationID: String) async throws -> RunInsights {
-        throw RatchetClientError.unavailable("This client has no result details.")
-    }
-
-    public func benchmarkSeries(optimizationID: String, metric: String?) async throws -> BenchmarkSeries {
-        throw RatchetClientError.unavailable("This client has no benchmark series.")
-    }
-
-    public func candidateResults(optimizationID: String) async throws -> [CandidateResult] {
-        throw RatchetClientError.unavailable("This client has no candidate results.")
-    }
-}
-
-/// What the store keeps for the screens above, apart from the main state: one entry per agent or optimization that was opened.
+/// What the store keeps for the Result, live log and Benchmarks screens, apart from the main state: one entry per agent or optimization that was opened.
 public struct InsightsState: Sendable {
     public var logs: [String: AgentLog] = [:]
     public var insights: [String: RunInsights] = [:]

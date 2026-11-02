@@ -58,7 +58,7 @@ public final class AppStore {
     @ObservationIgnored private var errorCameFromLoading = false
     /// The GitHub sign-in in progress: its code is shown until the account appears or the flow ends.
     public private(set) var githubFlow: GithubSignInFlow?
-    /// Agent logs, result details and benchmark series of what was opened (see RatchetClient+Insights.swift).
+    /// Agent logs, result details and benchmark series of what was opened (see AppStore+Insights.swift).
     public internal(set) var insight = InsightsState()
     /// Whether the keychain can hold tokens and keys, and whether "Sign in with GitHub" has a real client id.
     public private(set) var connectorSetup = ConnectorSetup()
