@@ -23,6 +23,7 @@ pub fn env_for(name: SecretName) -> &'static [&'static str] {
     match name {
         SecretName::AnthropicApiKey => &["ANTHROPIC_API_KEY"],
         SecretName::OpenaiApiKey => &["OPENAI_API_KEY"],
+        SecretName::XaiApiKey => &["XAI_API_KEY"],
         SecretName::GithubToken => &["GITHUB_TOKEN", "GH_TOKEN"],
     }
 }
@@ -69,6 +70,7 @@ fn connector_secret_name(name: SecretName) -> ratchet_connectors::SecretName {
     match name {
         SecretName::AnthropicApiKey => ratchet_connectors::SecretName::AnthropicApiKey,
         SecretName::OpenaiApiKey => ratchet_connectors::SecretName::OpenaiApiKey,
+        SecretName::XaiApiKey => ratchet_connectors::SecretName::XaiApiKey,
         SecretName::GithubToken => ratchet_connectors::SecretName::GithubToken,
     }
 }
@@ -350,6 +352,7 @@ impl SettingsStore {
         SecretsPresent {
             anthropic_api_key: self.has_secret(SecretName::AnthropicApiKey),
             openai_api_key: self.has_secret(SecretName::OpenaiApiKey),
+            xai_api_key: self.has_secret(SecretName::XaiApiKey),
             github_token: self.has_secret(SecretName::GithubToken),
         }
     }

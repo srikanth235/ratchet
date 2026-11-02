@@ -68,17 +68,25 @@ pub enum SecretName {
     AnthropicApiKey,
     #[serde(rename = "openaiApiKey")]
     OpenaiApiKey,
+    #[serde(rename = "xaiApiKey")]
+    XaiApiKey,
     #[serde(rename = "githubToken")]
     GithubToken,
 }
 
 impl SecretName {
-    pub const ALL: [SecretName; 3] = [Self::AnthropicApiKey, Self::OpenaiApiKey, Self::GithubToken];
+    pub const ALL: [SecretName; 4] = [
+        Self::AnthropicApiKey,
+        Self::OpenaiApiKey,
+        Self::XaiApiKey,
+        Self::GithubToken,
+    ];
 
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::AnthropicApiKey => "anthropicApiKey",
             Self::OpenaiApiKey => "openaiApiKey",
+            Self::XaiApiKey => "xaiApiKey",
             Self::GithubToken => "githubToken",
         }
     }
@@ -100,6 +108,9 @@ impl std::str::FromStr for SecretName {
 pub struct SecretsPresent {
     pub anthropic_api_key: bool,
     pub openai_api_key: bool,
+    /// Absent in a response from an older daemon: no key.
+    #[serde(default)]
+    pub xai_api_key: bool,
     pub github_token: bool,
 }
 
@@ -108,6 +119,7 @@ impl SecretsPresent {
         match n {
             SecretName::AnthropicApiKey => self.anthropic_api_key,
             SecretName::OpenaiApiKey => self.openai_api_key,
+            SecretName::XaiApiKey => self.xai_api_key,
             SecretName::GithubToken => self.github_token,
         }
     }
@@ -116,6 +128,7 @@ impl SecretsPresent {
         match n {
             SecretName::AnthropicApiKey => self.anthropic_api_key = present,
             SecretName::OpenaiApiKey => self.openai_api_key = present,
+            SecretName::XaiApiKey => self.xai_api_key = present,
             SecretName::GithubToken => self.github_token = present,
         }
     }
@@ -166,6 +179,7 @@ pub enum ConnectionTarget {
     Github,
     Anthropic,
     Openai,
+    Xai,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -298,8 +312,55 @@ pub enum HarnessAuth {
     SignedOut,
 }
 
+/// How a harness is paid for on this machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub enum HarnessBilling {
+    /// The user's plan (Claude Max, ChatGPT, grok.com): no extra dollars, but plan limits apply.
+    #[serde(rename = "subscription")]
+    Subscription,
+    /// An API key: every token is billed.
+    #[serde(rename = "api-key")]
+    ApiKey,
+}
+
+/// What a model is picked for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelUseVm {
+    Chat,
+    Optimization,
+}
+
+/// USD per million tokens at list price.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenPriceVm {
+    pub input_per_m: f64,
+    #[schema(required = true)]
+    pub cached_input_per_m: Option<f64>,
+    pub output_per_m: f64,
+}
+
+/// One model a harness accepts (`--model`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelVm {
+    /// What is passed to the CLI.
+    pub id: String,
+    pub label: String,
+    /// Other names the CLI accepts for the same model.
+    pub aliases: Vec<String>,
+    /// The uses this model is the harness's default for.
+    pub default_for: Vec<ModelUseVm>,
+    /// Absent when the CLI reports dollars itself.
+    #[schema(required = true)]
+    pub price: Option<TokenPriceVm>,
+    #[schema(required = true)]
+    pub context_window: Option<u64>,
+}
+
 /// One detected agent CLI.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HarnessVm {
     pub kind: HarnessKind,
@@ -311,4 +372,15 @@ pub struct HarnessVm {
     pub auth: HarnessAuth,
     /// What to do next, or what was found. Never contains a credential.
     pub hint: String,
+    /// The models this harness accepts, from the catalog.
+    #[serde(default)]
+    pub models: Vec<ModelVm>,
+    /// The model optimizations use unless one is chosen (the catalog's default for optimizations).
+    #[serde(default)]
+    #[schema(required = true)]
+    pub default_model: Option<String>,
+    /// Subscription (the user's login) or API key; absent while signed out.
+    #[serde(default)]
+    #[schema(required = true)]
+    pub billing: Option<HarnessBilling>,
 }

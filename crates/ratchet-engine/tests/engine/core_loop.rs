@@ -2382,3 +2382,43 @@ async fn exposes_its_mode() {
     let h = Harness::new(Default::default()).await;
     assert_eq!(h.engine.mode().to_string(), "simulation");
 }
+
+#[tokio::test]
+async fn a_cloud_optimization_with_grok_puts_xai_api_key_on_its_runner() {
+    use ratchet_core::enums::{AgentKind, AgentsWhere};
+    let h = Harness::new(HarnessOptions {
+        settings: ratchet_engine::EngineSettings {
+            secrets: Some(Arc::new(|kind, name| match (kind, name) {
+                (_, "GITHUB_TOKEN") => Some("ghp_value-of-git".to_owned()),
+                (AgentKind::Grok, "XAI_API_KEY") => Some("xai-value-of-grok".to_owned()),
+                _ => None,
+            })),
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+    .await;
+    h.begin(BeginOptions {
+        agents: Some(vec![AgentKind::Grok]),
+        agents_where: Some(AgentsWhere::Cloud),
+        ..begin_opts()
+    })
+    .await
+    .expect("begin");
+    let secrets = h.compute.secrets.lock().unwrap().clone();
+    assert_eq!(
+        secrets
+            .get("opt-test/opt-test-grok/XAI_API_KEY")
+            .map(String::as_str),
+        Some("xai-value-of-grok")
+    );
+    // the runner is told where to fetch it (a reference, never the value)
+    let started = h.runners.started.lock().unwrap().clone();
+    assert_eq!(started.len(), 1);
+    assert!(
+        h.log
+            .all()
+            .iter()
+            .any(|l| l == "compute.putSecret:opt-test-grok:XAI_API_KEY")
+    );
+}

@@ -303,6 +303,7 @@ async fn real_service(args: &ServeArgs, ledger_path: Option<PathBuf>) -> Result<
     });
     let mut opts = RealServiceOptions::new(settings, support.join("sandboxes"));
     opts.ledger_path = ledger_path;
+    opts.models_file = Some(support.join("models.json"));
     opts.live_defaults = live_defaults;
     opts.repo_root = repo_root;
     opts.work_root = support.join("sim").join(std::process::id().to_string());

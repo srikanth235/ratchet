@@ -536,3 +536,56 @@ async fn binary_exits_two_with_a_message_when_misconfigured() {
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("RATCHET_OPTIMIZATION_ID is required"));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn runner_main_hands_xai_api_key_to_the_agent_environment() {
+    let s = setup();
+    s.store
+        .put(
+            &format!("{}config.json", runner_prefix("opt1", "cc")),
+            serde_json::to_string(&s.config).unwrap().as_bytes(),
+        )
+        .await
+        .unwrap();
+    let aws = FakeSpawner::with_plan(|_, _| FakeProcessSpec::stdout("xai-abcdefghijklmnop1234\n"));
+    let agent_env: Arc<Mutex<HashMap<String, String>>> = Arc::default();
+    let captured = agent_env.clone();
+    let mut env = s.env.clone();
+    env.extend(env_of(&[
+        (
+            "RATCHET_SECRET_REFS",
+            "XAI_API_KEY=/ratchet/opt1/cc/XAI_API_KEY",
+        ),
+        ("AWS_REGION", "us-east-1"),
+    ]));
+    runner_main(RunnerMainOptions {
+        env,
+        store: Some(s.store.clone()),
+        spawner: Some(Arc::new(aws.clone())),
+        adapter_factory: Some(Arc::new(move |_, e| {
+            *captured.lock().unwrap() = e.clone();
+            Arc::new(ScriptedAgent::new(AgentScript {
+                name: "x".into(),
+                attempts: vec![],
+            })) as Arc<dyn AgentAdapter>
+        })),
+        log: Some(Arc::new(|_| {})),
+        ..RunnerMainOptions::default()
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        agent_env
+            .lock()
+            .unwrap()
+            .get("XAI_API_KEY")
+            .map(String::as_str),
+        Some("xai-abcdefghijklmnop1234")
+    );
+    assert!(
+        aws.calls()[0]
+            .args
+            .iter()
+            .any(|a| a == "/ratchet/opt1/cc/XAI_API_KEY")
+    );
+}

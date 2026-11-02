@@ -73,6 +73,7 @@ pub fn setting_for_secret_env(name: &str) -> Option<&'static str> {
     match name {
         "ANTHROPIC_API_KEY" => Some("anthropicApiKey"),
         "OPENAI_API_KEY" => Some("openaiApiKey"),
+        "XAI_API_KEY" => Some("xaiApiKey"),
         "GITHUB_TOKEN" => Some("githubToken"),
         _ => None,
     }
@@ -104,6 +105,7 @@ pub fn secret_source(
         let agent = match name {
             "ANTHROPIC_API_KEY" => ConnectorAgent::ClaudeCode,
             "OPENAI_API_KEY" => ConnectorAgent::Codex,
+            "XAI_API_KEY" => ConnectorAgent::Grok,
             _ => return None,
         };
         if let Some(k) = keys.get(&agent) {
@@ -216,5 +218,28 @@ mod tests {
         let src = secret_source(&resolved(None, &[], &[ConnectorAgent::Codex]), env);
         assert_eq!(src(AgentKind::Codex, "OPENAI_API_KEY"), None);
         assert_eq!(src(AgentKind::ClaudeCode, "GITHUB_TOKEN"), None);
+    }
+
+    /// P2: a Grok cloud run gets `XAI_API_KEY` from the chosen xAI key connector, else from the environment's xAI key, and
+    /// never from the environment next to a chosen Grok login
+    #[test]
+    fn the_secret_source_answers_xai_api_key_for_grok() {
+        let env = |k: &str| (k == "xaiApiKey").then(|| "xai-env".to_owned());
+        let src = secret_source(
+            &resolved(None, &[(ConnectorAgent::Grok, "xai-chosen")], &[]),
+            env,
+        );
+        assert_eq!(
+            src(AgentKind::Grok, "XAI_API_KEY").as_deref(),
+            Some("xai-chosen")
+        );
+        let src = secret_source(&resolved(None, &[], &[]), env);
+        assert_eq!(
+            src(AgentKind::Grok, "XAI_API_KEY").as_deref(),
+            Some("xai-env")
+        );
+        let src = secret_source(&resolved(None, &[], &[ConnectorAgent::Grok]), env);
+        assert_eq!(src(AgentKind::Grok, "XAI_API_KEY"), None);
+        assert_eq!(setting_for_secret_env("XAI_API_KEY"), Some("xaiApiKey"));
     }
 }

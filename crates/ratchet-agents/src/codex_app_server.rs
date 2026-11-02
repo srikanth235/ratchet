@@ -20,8 +20,10 @@ use tokio::sync::mpsc;
 use crate::classify::{FailureKind, FailureOnce, classify_status, classify_text};
 use crate::cli_agent::{as_record, build_env, num, pointer, str_of, truncate};
 use crate::codex::{CodexAdapter, CodexPricing};
+use crate::detect::HarnessKind;
 use crate::harness::{CLOSE_GRACE, HANDSHAKE_TIMEOUT, Scratch};
 use crate::live::{RpcClient, RpcError, RpcMessage, parse_rpc};
+use crate::models::resolve_model;
 use crate::process::{ProcessExit, SpawnOptions};
 
 /// How a turn ended, as `turn/completed` says.
@@ -488,7 +490,7 @@ impl CodexLiveSession {
                 let clock = clock.clone();
                 move || clock.now()
             },
-            adapter.options.pricing,
+            adapter.pricing_for(spec),
         )));
         let (tx, rx) = mpsc::unbounded_channel();
         let rpc = RpcClient::spawn(
@@ -547,6 +549,7 @@ impl CodexLiveSession {
                 "sandbox": access,
             });
             if let Some(model) = spec.model.as_ref().filter(|m| !m.is_empty()) {
+                let model = &resolve_model(HarnessKind::Codex, model).id;
                 params["model"] = json!(model);
             }
             match spec.resume.as_ref().filter(|r| !r.is_empty()) {

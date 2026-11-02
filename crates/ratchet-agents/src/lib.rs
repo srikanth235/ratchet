@@ -29,6 +29,7 @@ pub mod harness;
 pub mod inbox;
 pub mod live;
 pub mod local_agents;
+pub mod models;
 pub mod process;
 pub mod runner_loop;
 pub mod runner_main;
@@ -80,6 +81,7 @@ pub use local_agents::{
     LocalAdapterOptions, LocalAgentControlOptions, create_local_agent_control,
     local_adapter_factory, local_adapter_for, local_agent_problem,
 };
+pub use models::{ModelCatalog, ModelInfo, ModelUse, ResolvedModel, TokenPrice, resolve_model};
 pub use process::{
     LineSplitter, RunProcessOptions, RunProcessResult, Spawner, TokioSpawner, run_process,
 };
