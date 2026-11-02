@@ -28,7 +28,7 @@ struct DaemonStatusView: View {
     private var title: String {
         switch daemon.phase {
         case .needsApproval: "Allow Ratchet to run in the background"
-        case .failed: "Ratchet could not start"
+        case .failed: daemon.isUnbundled ? "This build has no background service" : "Ratchet could not start"
         case .stopped: "The background service is off"
         case .checking, .starting, .running: "Starting Ratchet…"
         }
@@ -38,7 +38,10 @@ struct DaemonStatusView: View {
         switch daemon.phase {
         case .needsApproval:
             "Optimizations keep running after you quit the app. macOS asks for your OK once: switch on Ratchet under Login Items in System Settings."
-        case .failed(let why): why
+        case .failed(let why):
+            daemon.isUnbundled
+                ? "This copy of Ratchet was built without ratchetd inside (RATCHET_SKIP_DAEMON=1, or the Rust build failed), so it cannot run optimizations. Install Rust and run ./build.sh again, or start ratchetd yourself and open the app with RATCHET_HOME set to its folder."
+                : why
         case .stopped: "Optimizations cannot run while it is off."
         case .checking, .starting, .running: "Getting the background service ready. This takes a few seconds."
         }
@@ -53,9 +56,13 @@ struct DaemonStatusView: View {
                 Button("Check again") { daemon.recheck() }.buttonStyle(.kit(.quiet))
             }
         case .failed:
-            HStack(spacing: Space.sm) {
-                Button("Try again") { daemon.startAgain() }.buttonStyle(.kit(.primary))
-                Button("Open log") { DaemonLog.reveal() }.buttonStyle(.kit(.quiet))
+            if daemon.isUnbundled {
+                Button("Check again") { daemon.probeNow() }.buttonStyle(.kit(.primary))
+            } else {
+                HStack(spacing: Space.sm) {
+                    Button("Try again") { daemon.startAgain() }.buttonStyle(.kit(.primary))
+                    Button("Open log") { DaemonLog.reveal() }.buttonStyle(.kit(.quiet))
+                }
             }
         case .stopped:
             Button("Start") { daemon.startAgain() }.buttonStyle(.kit(.primary))

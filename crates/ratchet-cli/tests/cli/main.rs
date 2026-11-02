@@ -3,6 +3,7 @@
 
 mod binary;
 mod common;
+mod contract;
 mod daemon;
 mod mcp;
 mod offline;

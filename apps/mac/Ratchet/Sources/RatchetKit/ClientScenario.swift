@@ -11,4 +11,6 @@ public protocol ClientScenario: Sendable {
     func simulate(keychainAvailable available: Bool) async
     /// "What's missing" answers this list instead of working it out; nil goes back to working it out.
     func simulate(preflight items: [PreflightItem]?) async
+    /// A world with nothing in it, for the empty states of a snapshot; `false` brings the sample data back (only if it was emptied).
+    func simulate(empty: Bool) async
 }

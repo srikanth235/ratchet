@@ -21,26 +21,30 @@ final class AppRouter {
     /// The wizard's loading work. It ends with the wizard: closing it or going elsewhere cancels what it was still doing.
     @ObservationIgnored private var wizardTask: Task<Void, Never>?
 
+    /// Where the window is, as plain values, for `RouteRules` (RatchetKit, tested).
+    private var route: RouteState {
+        get { RouteState(page: page.rawValue, optimizationID: optimizationID, wizardOpen: wizard != nil) }
+        set {
+            page = Page(rawValue: newValue.page) ?? page
+            optimizationID = newValue.optimizationID
+            if !newValue.wizardOpen { closeWizard() }
+        }
+    }
+
     /// A page from the sidebar. Choosing the page you are on goes back to its list.
     func show(_ target: Page) {
-        if target == page { optimizationID = nil }
-        page = target
-        closeWizard()
-        if target != .optimizations { optimizationID = nil }
+        route = RouteRules.show(target.rawValue, from: route)
     }
 
     func open(optimization id: String) {
-        page = .optimizations
-        optimizationID = id
-        closeWizard()
+        route = RouteRules.open(optimization: id, from: route)
     }
 
     func startWizard(client: any RatchetClient, templateID: String? = nil) {
         closeWizard()
         let flow = NewOptimizationFlow(client: client)
         wizard = flow
-        page = .optimizations
-        optimizationID = nil
+        route = RouteRules.startWizard(from: route)
         wizardTask = Task {
             await flow.load()
             if Task.isCancelled { return }

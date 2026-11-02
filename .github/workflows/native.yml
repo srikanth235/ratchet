@@ -54,6 +54,12 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace --no-fail-fast
+      # The CLI contract (agent-cli skill; .claude/skills/ratchet/SKILL.md) on the built binaries: help lists every command,
+      # --json parses, a wrong id exits 1 with a hint, --yes is required. tests/cli/contract.rs runs the same in-process.
+      - name: CLI contract
+        run: |
+          cargo build -p ratchet-cli -p ratchetd
+          bash crates/ratchet-cli/tests/contract.sh target/debug/ratchet target/debug/ratchetd
 
   # `if:` cannot look at the file system, so a tiny job decides whether apps/mac exists.
   detect-mac:
@@ -112,6 +118,11 @@ jobs:
         env:
           RATCHET_REQUIRE_DAEMON: "1"
         run: ./build.sh --universal
+      # agent-cli skill: the same CLI contract on the copy that ships inside the app bundle.
+      - name: CLI contract (bundled)
+        run: |
+          bash "$GITHUB_WORKSPACE/crates/ratchet-cli/tests/contract.sh" \
+            "$HOME/Applications/$APP_NAME.app/Contents/Helpers/ratchet" "$HOME/Applications/$APP_NAME.app/Contents/Helpers/ratchetd"
       # test-mac-app skill, level 1: Swift Testing unit tests of RatchetKit (formatting, store, mock client, wizard).
       - name: Unit tests
         run: swift test --scratch-path "$HOME/Library/Developer/$APP_NAME/test-build" 2>&1 | { grep -v '✔ Test' || true; } | tail -n 300
@@ -169,6 +180,13 @@ jobs:
           else
             echo "no layout files or no tools/check-layout.swift"
           fi
+      # test-mac-app skill, level 3: the debug bridge. A debug build (compiled with the bridge; the release build above has
+      # none) is started in test mode and driven with tools/ratchetctl.sh: status, open, appearance, snapshot, selftest.
+      # It replaces the installed release copy, so it runs after every step that needs that one.
+      - name: Debug bridge
+        run: |
+          RATCHET_SKIP_DAEMON=1 ./build.sh --debug
+          tools/bridge-test.sh "$HOME/Applications/$APP_NAME.app"
       - name: Upload snapshots
         if: always()
         uses: actions/upload-artifact@v4

@@ -12,10 +12,22 @@ enum SelfTest {
     static var live: Bool { CommandLine.arguments.contains("--selftest-live") }
     /// Read by AppDelegate.applicationWillTerminate.
     static var exitCode: Int32 = 0
-    private static var failures = 0
-    private static var count = 0
+    static var failures = 0
+    static var count = 0
+    /// Every PASS / FAIL line of this run, for the debug bridge's `selftest` reply.
+    static var output: [String] = []
 
-    static func runIfRequested(store: AppStore, router: AppRouter, daemon: DaemonController) {
+    /// Runs the whole self-test on the sample client inside an app that is already running (the debug bridge's
+    /// `selftest`) and returns the counts and lines. Test mode only; it changes the sample data.
+    static func runNow(store: AppStore, router: AppRouter, notifier: AppNotifier) async -> (checks: Int, failures: Int, lines: [String]) {
+        failures = 0
+        count = 0
+        output = []
+        await run(store: store, router: router, notifier: notifier)
+        return (count, failures, output)
+    }
+
+    static func runIfRequested(store: AppStore, router: AppRouter, daemon: DaemonController, notifier: AppNotifier) {
         guard requested else { return }
         // Print each line at once, so a crash keeps the lines before it.
         setvbuf(stdout, nil, _IOLBF, 0)
@@ -33,13 +45,13 @@ enum SelfTest {
             return
         }
         Task {
-            await run(store: store, router: router)
+            await run(store: store, router: router, notifier: notifier)
             print(failures == 0 ? "SELFTEST PASS \(count) checks" : "SELFTEST FAIL \(failures) of \(count) checks")
             finish(code: failures == 0 ? 0 : 1)
         }
     }
 
-    private static func run(store: AppStore, router: AppRouter) async {
+    private static func run(store: AppStore, router: AppRouter, notifier: AppNotifier) async {
         // Store: the first load.
         check("the store loaded", store.isLoaded)
         check("test mode runs on demo data", store.isDemoData)
@@ -203,9 +215,15 @@ enum SelfTest {
         let item = LoginItem(touchesSystem: false)
         check("test mode never registers the app", item.set(true) == nil && item.state == .on && item.set(false) == nil && item.state == .off)
 
-        for name in ["chart.line.uptrend.xyaxis", "gearshape", "link"] {
+        for name in ["chart.line.uptrend.xyaxis", "gearshape", "link"] + SettingsTab.allCases.map(\.symbol) {
             check("SF Symbol \(name) exists", NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil)
         }
+
+        // The system's side of the app: menus, icons, notifications, links, the event stream (SelfTestAudits.swift).
+        await auditMenus()
+        auditIcons()
+        await auditNotifications(store: store, router: router, notifier: notifier)
+        await auditEventStream(store: store)
     }
 
     /// The real client path end to end: the generated client, the unix socket, the bearer token, the mapping, the event
@@ -292,10 +310,12 @@ enum SelfTest {
         }
     }
 
-    private static func check(_ name: String, _ ok: Bool, _ detail: String = "") {
+    static func check(_ name: String, _ ok: Bool, _ detail: String = "") {
         count += 1
         if !ok { failures += 1 }
-        print(ok ? "PASS \(name)" : "FAIL \(name)\(detail.isEmpty ? "" : ": \(detail)")")
+        let line = ok ? "PASS \(name)" : "FAIL \(name)\(detail.isEmpty ? "" : ": \(detail)")"
+        output.append(line)
+        print(line)
     }
 
     /// Quits through NSApp.terminate, never exit(), and closes sheets first:

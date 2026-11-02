@@ -66,6 +66,39 @@ enum SnapScene: String, CaseIterable {
         }
     }
 
+    // The daemon not answering: failed, stopped, and a build with no ratchetd inside.
+    case daemonFailed = "daemon-failed"
+    case daemonStopped = "daemon-stopped"
+    case daemonUnbundled = "daemon-unbundled"
+    // Nothing yet: the pages with no optimizations, no wins, no benchmark runs.
+    case emptyOverview = "empty-overview"
+    case emptyOptimizations = "empty-optimizations"
+    case emptyBenchmarks = "empty-benchmarks"
+    // The menu bar panel, hosted in a window so it can be captured: with running optimizations, and with none.
+    case menuBar = "menubar"
+    case menuBarEmpty = "menubar-empty"
+    // Settings with notifications denied in System Settings. Last: it opens the Settings window.
+    case notificationsDenied = "notifications-denied"
+
+    /// What a scene is a picture of.
+    enum Subject { case window, menuBar, settings }
+
+    var subject: Subject {
+        switch self {
+        case .menuBar, .menuBarEmpty: .menuBar
+        case .notificationsDenied: .settings
+        default: .window
+        }
+    }
+
+    /// Scenes that show the app with nothing in it.
+    var isEmpty: Bool {
+        switch self {
+        case .emptyOverview, .emptyOptimizations, .emptyBenchmarks, .menuBarEmpty: true
+        default: false
+        }
+    }
+
     /// Puts the window in this scene's state.
     func apply(
         store: AppStore, router: AppRouter, connectors: ConnectorsPageState, daemon: DaemonController, notifier: AppNotifier
@@ -86,11 +119,19 @@ enum SnapScene: String, CaseIterable {
         let mock = store.scenario
         await mock?.simulate(keychainAvailable: true)
         await mock?.simulate(preflight: nil)
+        // Empty scenes empty the sample world; every other scene brings the sample data back.
+        await mock?.simulate(empty: isEmpty)
         await store.refresh()
         switch self {
-        case .overview, .galleryActions, .galleryChoices, .galleryRows, .galleryInputs, .galleryStatus, .galleryIdentity,
-            .galleryType, .galleryTokens:
+        case .overview, .emptyOverview, .menuBar, .menuBarEmpty, .galleryActions, .galleryChoices, .galleryRows, .galleryInputs,
+            .galleryStatus, .galleryIdentity, .galleryType, .galleryTokens:
             break
+        case .emptyOptimizations: router.show(.optimizations)
+        case .emptyBenchmarks: router.show(.benchmarks)
+        case .daemonFailed: daemon.preview(.failed("Ratchet's background service did not start."))
+        case .daemonStopped: daemon.preview(.stopped)
+        case .daemonUnbundled: daemon.previewUnbundled()
+        case .notificationsDenied: notifier.preview(.denied, prompt: false)
         case .daemonStarting: daemon.preview(.starting)
         case .daemonApproval: daemon.preview(.needsApproval)
         case .notificationPrompt: notifier.preview(.notDetermined, prompt: true)
@@ -227,27 +268,13 @@ enum Snapshot {
         let only = env["APP_SNAPSHOT_PAGES"].map { Set($0.split(separator: ",").map(String.init)) }
         let everything = only == nil || only?.contains("all") == true
         Task {
-            // A sleeping display gives screencapture nothing. Declaring user
-            // activity wakes it; the assertion keeps it on until the run quits.
-            var activity: IOPMAssertionID = 0
-            IOPMAssertionDeclareUserActivity("Snapshots" as CFString, kIOPMUserActiveLocal, &activity)
-            var awake: IOPMAssertionID = 0
-            IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
-                                        IOPMAssertionLevel(kIOPMAssertionLevelOn), "Snapshots" as CFString, &awake)
-            try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-            try? await Task.sleep(for: .seconds(1.5))
-            for mode in ["light", "dark"] {
-                NSApp.appearance = NSAppearance(named: mode == "light" ? .aqua : .darkAqua)
-                for scene in SnapScene.allCases where everything || only?.contains(scene.rawValue) == true {
-                    await scene.apply(store: store, router: router, connectors: connectors, daemon: daemon, notifier: notifier)
-                    try? await Task.sleep(for: .seconds(1.0))
-                    capture(to: "\(dir)/\(scene.rawValue)-\(mode).png")
-                }
-            }
+            await shootScenes(
+                dir: dir, everything: everything, only: only, store: store, router: router, connectors: connectors,
+                openSettings: openSettings, daemon: daemon, notifier: notifier)
             if everything || only?.contains("settings") == true {
                 await SnapScene.overview.apply(
                     store: store, router: router, connectors: connectors, daemon: daemon, notifier: notifier)
-                let main = NSApp.windows.first { $0.canBecomeMain && !$0.isSheet }
+                let main = mainWindow
                 loginItem.preview(.off)
                 openSettings()
                 try? await Task.sleep(for: .seconds(1))
@@ -287,16 +314,75 @@ enum Snapshot {
         }
     }
 
+    /// The app's main window: titled "Ratchet", not Settings and not a sheet.
+    static var mainWindow: NSWindow? {
+        NSApp.windows.first { $0.canBecomeMain && !$0.isSheet && $0.title == "Ratchet" }
+            ?? NSApp.windows.first { $0.canBecomeMain && !$0.isSheet }
+    }
+
+    /// Takes the picture of a scene whose state is already applied: the main window, the menu bar panel in a window of its
+    /// own, or the Settings window. The debug bridge's `snapshot:<scene>` uses this too.
+    static func captureSubject(
+        of scene: SnapScene, to path: String, store: AppStore, router: AppRouter, openSettings: OpenSettingsAction
+    ) async {
+        switch scene.subject {
+        case .window:
+            capture(to: path)
+        case .menuBar:
+            // The menu bar panel belongs to the system; host the same view in a window to capture it.
+            let window = MenuBarCapture.show(store: store, router: router)
+            try? await Task.sleep(for: .seconds(0.6))
+            capture(to: path, window: window)
+            window.close()
+        case .settings:
+            let main = mainWindow
+            openSettings()
+            router.settingsTab = .general
+            try? await Task.sleep(for: .seconds(1))
+            let settings = NSApp.windows.first {
+                $0.isVisible && $0 !== main && !$0.isSheet && $0.styleMask.contains(.titled)
+            }
+            capture(to: path, window: settings)
+            settings?.close()
+        }
+    }
+
+    /// Every scene in light and dark. The display stays awake for the whole run and the assertions are released when
+    /// it ends, however it ends.
+    private static func shootScenes(
+        dir: String, everything: Bool, only: Set<String>?, store: AppStore, router: AppRouter,
+        connectors: ConnectorsPageState, openSettings: OpenSettingsAction, daemon: DaemonController, notifier: AppNotifier
+    ) async {
+        // A sleeping display gives screencapture nothing. Declaring user activity wakes it; the assertion keeps it on.
+        var power = SnapshotPower()
+        defer { power.release() }
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try? await Task.sleep(for: .seconds(1.5))
+        for mode in ["light", "dark"] {
+            NSApp.appearance = NSAppearance(named: mode == "light" ? .aqua : .darkAqua)
+            for scene in SnapScene.allCases where everything || only?.contains(scene.rawValue) == true {
+                await scene.apply(store: store, router: router, connectors: connectors, daemon: daemon, notifier: notifier)
+                try? await Task.sleep(for: .seconds(1.0))
+                let path = "\(dir)/\(scene.rawValue)-\(mode).png"
+                await captureSubject(of: scene, to: path, store: store, router: router, openSettings: openSettings)
+            }
+        }
+        // Leave the app as the next phase of the run expects it.
+        await SnapScene.overview.apply(
+            store: store, router: router, connectors: connectors, daemon: daemon, notifier: notifier)
+        power.release()
+    }
+
     /// Captures the real window with screencapture, so glass, sidebars, and
     /// materials look exactly as on screen. That needs Screen Recording
     /// permission for the app that started this one (your terminal, or Claude).
     /// Without it, falls back to drawing the view hierarchy, which leaves
     /// sidebars and glass blank.
-    private static func capture(to path: String, window: NSWindow? = nil) {
+    static func capture(to path: String, window: NSWindow? = nil) {
         // Another app can hide this one while snapshots run (computer use hides
         // apps it does not control). Hidden windows cannot be captured.
         if NSApp.isHidden { NSApp.unhideWithoutActivation() }
-        guard let window = window ?? NSApp.windows.first(where: { $0.canBecomeMain && !$0.isSheet }) else {
+        guard let window = window ?? mainWindow else {
             print("SNAPSHOT no window")
             return
         }
@@ -326,5 +412,44 @@ enum Snapshot {
             try? data.write(to: URL(fileURLWithPath: path))
             print("SNAPSHOT \(path) (fallback: no Screen Recording permission, sidebars and glass are blank)")
         }
+    }
+}
+
+/// The IOPM assertions of a snapshot run: user activity to wake the display, and "no display sleep" to keep it on. Released
+/// once, in a `defer`, when the run ends.
+struct SnapshotPower {
+    private var activity: IOPMAssertionID = 0
+    private var awake: IOPMAssertionID = 0
+    private var released = false
+
+    init() {
+        IOPMAssertionDeclareUserActivity("Snapshots" as CFString, kIOPMUserActiveLocal, &activity)
+        IOPMAssertionCreateWithName(
+            kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn),
+            "Snapshots" as CFString, &awake)
+    }
+
+    mutating func release() {
+        guard !released else { return }
+        released = true
+        if activity != 0 { IOPMAssertionRelease(activity) }
+        if awake != 0 { IOPMAssertionRelease(awake) }
+    }
+}
+
+/// Hosts the menu bar panel's view in a window, so snapshot mode and the debug bridge can capture what the system's
+/// panel shows.
+enum MenuBarCapture {
+    static func show(store: AppStore, router: AppRouter) -> NSWindow {
+        let host = NSHostingView(rootView: MenuBarView().environment(store).environment(router))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 240), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        // Closing must not free it a second time.
+        window.isReleasedWhenClosed = false
+        window.title = "Menu bar"
+        window.contentView = host
+        window.setContentSize(host.fittingSize)
+        window.center()
+        window.orderFrontRegardless()
+        return window
     }
 }

@@ -61,7 +61,7 @@ struct MenuBarView: View {
             Hairline()
             HStack(alignment: .top, spacing: Space.xs) {
                 StatusDot(tone: store.sandboxStore.sandbox.isOn ? .ok : .off)
-                Text(sandboxLine).kitType(.caption).foregroundStyle(Ink.textMuted)
+                Text(MenuBarRules.sandboxLine(store.sandboxStore.sandbox)).kitType(.caption).foregroundStyle(Ink.textMuted)
             }
             HStack(spacing: Space.sm) {
                 Button("Open Ratchet") { show {} }.buttonStyle(.kit(.quiet, small: true))
@@ -77,13 +77,6 @@ struct MenuBarView: View {
         .tint(Ink.brass)
     }
 
-    private var sandboxLine: String {
-        guard store.sandboxStore.sandbox.isOn else { return "Sandbox off" }
-        var line = "Sandbox on · " + (store.sandboxStore.sandbox.account ?? "AWS") + " · " + Money.exact(store.sandboxStore.sandbox.costSoFarUSD) + " so far"
-        if let offAt = store.sandboxStore.sandbox.offAt { line += " · off at " + Elapsed.timeOfDay(offAt) }
-        return line
-    }
-
     private func runRow(_ optimization: Optimization) -> some View {
         VStack(alignment: .leading, spacing: Space.xs) {
             HStack {
@@ -93,23 +86,10 @@ struct MenuBarView: View {
                     Text(Percent.signed(change)).kitType(.mono).foregroundStyle(Ink.ok)
                 }
             }
-            ThinBar(fraction: timeFraction(optimization))
-            Text(runNote(optimization)).kitType(.caption).foregroundStyle(Ink.textFaint)
+            ThinBar(fraction: MenuBarRules.timeFraction(optimization))
+            Text(MenuBarRules.runNote(optimization)).kitType(.caption).foregroundStyle(Ink.textFaint)
         }
         .contentShape(.rect)
-    }
-
-    private func timeFraction(_ optimization: Optimization) -> Double {
-        let total = optimization.timeLimitHours * 3600
-        guard total > 0, let left = optimization.secondsLeft else { return 0 }
-        return 1 - left / total
-    }
-
-    private func runNote(_ optimization: Optimization) -> String {
-        var parts: [String] = []
-        if let left = optimization.secondsLeft { parts.append(Elapsed.hm(left) + " left") }
-        parts.append(Money.short(optimization.spentUSD) + " spent")
-        return parts.joined(separator: " · ")
     }
 
     /// Brings the window forward, then runs `action`.

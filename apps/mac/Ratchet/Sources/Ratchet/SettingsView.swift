@@ -4,6 +4,15 @@ import SwiftUI
 /// The Settings window (Command-Comma): General, and the same Connectors as the sidebar page.
 struct SettingsView: View {
     @Environment(AppRouter.self) private var router
+    @Environment(DaemonController.self) private var daemon
+    @Environment(AppNotifier.self) private var notifier
+    @Environment(LoginItem.self) private var loginItem
+
+    /// A permission is missing and the person may be fixing it in System Settings right now.
+    private var watchingPermissions: Bool {
+        notifier.authorization == .denied || notifier.authorization == .notDetermined
+            || loginItem.state == .needsApproval || daemon.phase == .needsApproval
+    }
 
     var body: some View {
         @Bindable var router = router
@@ -15,6 +24,18 @@ struct SettingsView: View {
             }
         }
         .noInitialFocus()
+        // While Settings shows a missing permission, look again every two seconds: the answer changes in System
+        // Settings, and the app does not always get a notification when it does.
+        .task(id: watchingPermissions) {
+            guard watchingPermissions else { return }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                await notifier.refreshAuthorization()
+                loginItem.refresh()
+                daemon.recheck()
+                CommandLineTool.shared.refresh()
+            }
+        }
     }
 
     @ViewBuilder
@@ -59,7 +80,7 @@ struct GeneralSettings: View {
     @Environment(DaemonController.self) private var daemon
     @Environment(AppNotifier.self) private var notifier
     @Environment(LoginItem.self) private var loginItem
-    @State private var installNote: String?
+    private let cli = CommandLineTool.shared
 
     var body: some View {
         Section("Menu bar") {
@@ -124,14 +145,21 @@ struct GeneralSettings: View {
             }
         }
         Section("Command line") {
-            LabeledContent("ratchet", value: CommandLineTool.installed ? "Installed in /usr/local/bin" : "Not installed")
+            LabeledContent("ratchet", value: commandLineStatus)
             if CommandLineTool.available {
-                Button(CommandLineTool.installed ? "Remove command line tool" : "Install command line tool…") {
-                    installNote = CommandLineTool.installed ? CommandLineTool.uninstall() : CommandLineTool.install()
+                HStack {
+                    if cli.isInstalled {
+                        Button("Remove command line tool") { cli.uninstall() }
+                    } else {
+                        Button(cli.hasBrokenLink ? "Repair command line tool" : "Install command line tool") { cli.installForUser() }
+                    }
+                    if !cli.systemState.isInstalled {
+                        Button("Install for all users…") { cli.installForEveryone() }
+                    }
                 }
-                if let installNote { Text(installNote).kitType(.caption).foregroundStyle(Ink.textFaint) }
+                if let note = cli.note { Text(note).kitType(.caption).foregroundStyle(Ink.textFaint) }
             }
-            Text("Adds a ratchet command to your Terminal, for scripts and agents. Only with your OK; it is a link to the copy inside this app.")
+            Text("Adds a ratchet command to your Terminal, for scripts and agents. It goes in ~/.local/bin, a link to the copy inside this app. \"All users\" puts one in /usr/local/bin and asks for your password.")
                 .kitType(.caption).foregroundStyle(Ink.textFaint)
         }
         Section("Data") {
@@ -144,6 +172,22 @@ struct GeneralSettings: View {
             LabeledContent("Overview, Optimizations, Benchmarks, Connectors", value: "Command-1 to 4")
             LabeledContent("Refresh", value: "Command-R")
         }
+    }
+
+    private var commandLineStatus: String {
+        let tool = cli
+        if tool.userState.isInstalled {
+            let hint = tool.userFolderOnPath == false ? " (add it to PATH, see below)" : ""
+            return "Installed in ~/.local/bin" + hint
+        }
+        if tool.systemState.isInstalled { return "Installed in /usr/local/bin" }
+        for (state, folder) in [(tool.userState, "~/.local/bin"), (tool.systemState, "/usr/local/bin")] {
+            switch state {
+            case .broken, .otherCopy, .notALink: return state.sentence(directory: folder)
+            case .missing, .linked: continue
+            }
+        }
+        return "Not installed"
     }
 
     private var loginItemNote: String {
