@@ -35,6 +35,23 @@ struct StoreTests {
         #expect(store.lastError == nil)
     }
 
+    @Test func theScenarioEmptiesTheSampleWorldForTheEmptyStatesAndBringsItBack() async {
+        let (store, _) = await loaded()
+        let scenario = try? #require(store.scenario)
+        await scenario?.simulate(empty: true)
+        await store.refresh()
+        #expect(store.optimizationStore.optimizations.isEmpty)
+        #expect(store.benchmarks.isEmpty)
+        #expect(!store.sandboxStore.sandbox.isOn)
+        await scenario?.simulate(empty: false)
+        await store.refresh()
+        #expect(store.optimizationStore.optimizations.count == 5)
+        // Asking for the sample again changes nothing once it is back.
+        await scenario?.simulate(empty: false)
+        await store.refresh()
+        #expect(store.optimizationStore.optimizations.count == 5)
+    }
+
     // MARK: Events through the reducer
 
     @Test func eventsFromTheSampleClientDriveEveryStore() async {
