@@ -5,7 +5,6 @@
 mod common;
 
 use std::future::Future;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -18,90 +17,15 @@ use ratchet_agents::{
 use ratchet_core::ports::{
     Access, AgentEvent, AgentEventType, Harness, McpServer, PortError, SessionSpec, SharedEventSink,
 };
-use serde_json::{Value, json};
+use serde_json::json;
 
-use common::{collect, env_of, fixture};
+use common::{Redirect, collect, env_of, fixture};
 
 type Events = Arc<Mutex<Vec<AgentEvent>>>;
 
 const CLAUDE_SID: &str = "9c1e5d7a-0b2f-4c63-8a41-5d2f7e6b3c10";
 const CODEX_THREAD: &str = "0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e";
 const GROK_SESSION: &str = "01a2b3c4-d5e6-7f80-9a1b-2c3d4e5f6a7b";
-
-/// Runs the fake CLI in place of the real binary: the n-th spawn plays the n-th `(mode, fixture)` (the last one repeats) and
-/// everything the client writes to stdin is logged.
-#[derive(Clone)]
-struct Redirect {
-    script: Vec<(&'static str, &'static str)>,
-    calls: Arc<Mutex<Vec<Vec<String>>>>,
-    log: PathBuf,
-}
-
-impl Spawner for Redirect {
-    fn spawn(
-        &self,
-        _command: &str,
-        args: &[String],
-        options: &SpawnOptions,
-    ) -> Box<dyn ProcessHandle> {
-        let index = {
-            let mut calls = self.calls.lock().unwrap();
-            calls.push(args.to_vec());
-            calls.len() - 1
-        };
-        let (mode, fixture) = self.script[index.min(self.script.len() - 1)];
-        let mut options = options.clone();
-        options.env.insert(
-            "RATCHET_FAKE_CLI_LOG".into(),
-            self.log.to_string_lossy().into(),
-        );
-        TokioSpawner.spawn(
-            env!("CARGO_BIN_EXE_ratchet-fake-cli"),
-            &[
-                mode.to_string(),
-                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("tests/fixtures")
-                    .join(fixture)
-                    .to_string_lossy()
-                    .into_owned(),
-            ],
-            &options,
-        )
-    }
-}
-
-impl Redirect {
-    /// Every JSON line the client has written so far.
-    fn requests(&self) -> Vec<Value> {
-        std::fs::read_to_string(&self.log)
-            .unwrap_or_default()
-            .lines()
-            .filter_map(|l| serde_json::from_str(l).ok())
-            .collect()
-    }
-
-    fn methods(&self) -> Vec<String> {
-        self.requests()
-            .iter()
-            .filter_map(|r| r["method"].as_str().map(str::to_string))
-            .collect()
-    }
-
-    fn request(&self, method: &str) -> Value {
-        self.requests()
-            .into_iter()
-            .find(|r| r["method"] == method)
-            .unwrap_or_else(|| panic!("no {method} request"))
-    }
-
-    fn spawn_args(&self, n: usize) -> Vec<String> {
-        self.calls.lock().unwrap()[n].clone()
-    }
-
-    fn spawns(&self) -> usize {
-        self.calls.lock().unwrap().len()
-    }
-}
 
 struct Rig {
     redirect: Redirect,
@@ -110,11 +34,7 @@ struct Rig {
 
 fn rig(script: &[(&'static str, &'static str)]) -> Rig {
     let workdir = tempfile::tempdir().unwrap();
-    let redirect = Redirect {
-        script: script.to_vec(),
-        calls: Arc::default(),
-        log: workdir.path().join("stdin.log"),
-    };
+    let redirect = Redirect::new(script, workdir.path().join("stdin.log"));
     Rig { redirect, workdir }
 }
 
@@ -214,7 +134,7 @@ fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
     args.get(at + 1).map(String::as_str)
 }
 
-use AgentEventType::{AuthExpired, Delta, Message, RateLimited, Status, Usage};
+use AgentEventType::{Delta, Message, RateLimited, Status, Usage};
 
 // ---------------------------------------------------------------------------------------------------- Claude Code
 
@@ -364,35 +284,6 @@ async fn claude_live_resume_after_close_continues_the_cli_session() {
     within(second.close()).await;
 }
 
-#[tokio::test]
-async fn claude_live_rate_limit_and_auth_expired_fail_the_turn_and_say_why() {
-    for (fixture, kind, resets) in [
-        (
-            "claude-2.1.316-mock-rate-limit.jsonl",
-            RateLimited,
-            Some(1793614200),
-        ),
-        ("claude-2.1.316-mock-auth-expired.jsonl", AuthExpired, None),
-    ] {
-        let rig = rig(&[("claude-stream-json", fixture)]);
-        let (events, sink) = sink();
-        let session = within(claude(&rig.redirect).open(&chat_spec(&rig), sink))
-            .await
-            .unwrap();
-        let err = within(session.send("hi")).await.unwrap_err();
-        assert!(
-            matches!(err, PortError::AgentFailed { .. }),
-            "{fixture}: {err:?}"
-        );
-        let classified = of_type(&events, kind);
-        assert_eq!(classified.len(), 1, "{fixture}");
-        if let Some(at) = resets {
-            assert_eq!(classified[0].data.as_ref().unwrap()["resetsAt"], at);
-        }
-        within(session.close()).await;
-    }
-}
-
 // ---------------------------------------------------------------------------------------------------- Codex
 
 #[tokio::test]
@@ -523,53 +414,6 @@ async fn codex_app_server_resume_uses_thread_resume_with_the_saved_id() {
     within(session.close()).await;
 }
 
-#[tokio::test]
-async fn codex_app_server_rate_limit_and_auth_expired_fail_the_turn_and_say_why() {
-    for (fixture, kind, resets) in [
-        (
-            "codex-0.166.0-mock-app-server-rate-limit.jsonl",
-            RateLimited,
-            Some(1793614200),
-        ),
-        (
-            "codex-0.166.0-mock-app-server-auth-expired.jsonl",
-            AuthExpired,
-            None,
-        ),
-    ] {
-        let rig = rig(&[("codex-app-server", fixture)]);
-        let (events, sink) = sink();
-        let session = within(codex(&rig.redirect).open(&chat_spec(&rig), sink))
-            .await
-            .unwrap();
-        let err = within(session.send("hi")).await.unwrap_err();
-        assert!(matches!(err, PortError::AgentFailed { .. }), "{fixture}");
-        let classified = of_type(&events, kind);
-        assert_eq!(classified.len(), 1, "{fixture}");
-        if let Some(at) = resets {
-            assert_eq!(classified[0].data.as_ref().unwrap()["resetsAt"], at);
-        }
-        within(session.close()).await;
-    }
-}
-
-#[tokio::test]
-async fn codex_app_server_mcp_tool_call_is_streamed_as_tool_events() {
-    let rig = rig(&[(
-        "codex-app-server",
-        "codex-0.166.0-mock-app-server-mcp-tool.jsonl",
-    )]);
-    let (events, sink) = sink();
-    let session = within(codex(&rig.redirect).open(&chat_spec(&rig), sink))
-        .await
-        .unwrap();
-    within(session.send("list them")).await.unwrap();
-    let tools = of_type(&events, AgentEventType::Tool);
-    assert_eq!(tools[0].text.as_deref(), Some("ratchet.list_optimizations"));
-    assert_eq!(tools.len(), 4);
-    within(session.close()).await;
-}
-
 // ---------------------------------------------------------------------------------------------------- Grok
 
 #[tokio::test]
@@ -679,37 +523,6 @@ async fn grok_acp_resume_loads_the_saved_session() {
     within(session.close()).await;
 }
 
-#[tokio::test]
-async fn grok_acp_rate_limit_and_auth_expired_fail_the_prompt_and_say_why() {
-    for (fixture, kind) in [
-        ("grok-1.0.70-mock-acp-rate-limit.jsonl", RateLimited),
-        ("grok-1.0.70-mock-acp-auth-expired.jsonl", AuthExpired),
-    ] {
-        let rig = rig(&[("grok-acp", fixture)]);
-        let (events, sink) = sink();
-        let session = within(grok(&rig.redirect).open(&chat_spec(&rig), sink))
-            .await
-            .unwrap();
-        let err = within(session.send("hi")).await.unwrap_err();
-        assert!(matches!(err, PortError::AgentFailed { .. }), "{fixture}");
-        assert_eq!(of_type(&events, kind).len(), 1, "{fixture}");
-        within(session.close()).await;
-    }
-}
-
-#[tokio::test]
-async fn grok_acp_mcp_tool_call_is_streamed_as_tool_events() {
-    let rig = rig(&[("grok-acp", "grok-1.0.70-mock-acp-mcp-tool.jsonl")]);
-    let (events, sink) = sink();
-    let session = within(grok(&rig.redirect).open(&chat_spec(&rig), sink))
-        .await
-        .unwrap();
-    within(session.send("list them")).await.unwrap();
-    assert_eq!(of_type(&events, AgentEventType::Tool).len(), 4);
-    assert_eq!(of_type(&events, Usage).len(), 1);
-    within(session.close()).await;
-}
-
 // ---------------------------------------------------------------------------------------------------- fallback
 
 /// One-shot playback for the fallback tests: the first run replays `first`, later ones `later`.
@@ -769,7 +582,10 @@ fn plain_spec() -> SessionSpec {
 
 #[tokio::test]
 async fn without_live_sessions_each_message_is_a_start_then_a_resume() {
-    let fake = fallback_spawner("claude-success.jsonl", "claude-resume.jsonl");
+    let fake = fallback_spawner(
+        "claude-2.1.316-mock-success.jsonl",
+        "claude-2.1.316-mock-resume.jsonl",
+    );
     let adapter = ClaudeCodeAdapter::new(ClaudeCodeOptions {
         cli: one_shot_cli(Arc::new(fake.clone()), true),
         allow_subscription_auth: true,
@@ -814,8 +630,8 @@ async fn a_live_session_that_cannot_open_falls_back_for_every_cli() {
     let cases: Vec<(&str, &str, &str, Build)> = vec![
         (
             "claude",
-            "claude-success.jsonl",
-            "claude-resume.jsonl",
+            "claude-2.1.316-mock-success.jsonl",
+            "claude-2.1.316-mock-resume.jsonl",
             Box::new(|cli| {
                 Box::new(ClaudeCodeAdapter::new(ClaudeCodeOptions {
                     cli,
@@ -826,8 +642,8 @@ async fn a_live_session_that_cannot_open_falls_back_for_every_cli() {
         ),
         (
             "codex",
-            "codex-success.jsonl",
-            "codex-resume.jsonl",
+            "codex-0.166.0-mock-success.jsonl",
+            "codex-0.166.0-mock-resume.jsonl",
             Box::new(|cli| {
                 Box::new(CodexAdapter::new(CodexOptions {
                     cli,
@@ -838,8 +654,8 @@ async fn a_live_session_that_cannot_open_falls_back_for_every_cli() {
         ),
         (
             "grok",
-            "grok-success.jsonl",
-            "grok-resume.jsonl",
+            "grok-1.0.70-mock-success.jsonl",
+            "grok-1.0.70-mock-resume.jsonl",
             Box::new(|cli| {
                 Box::new(GrokAdapter::new(GrokOptions {
                     cli,

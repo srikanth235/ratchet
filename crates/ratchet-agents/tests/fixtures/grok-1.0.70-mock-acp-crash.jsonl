@@ -1,0 +1,5 @@
+{"jsonrpc":"2.0","id":"$ID","result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[{"id":"xai.api_key"},{"id":"cached_token"}]}}
+{"jsonrpc":"2.0","id":"$ID","result":{}}
+{"jsonrpc":"2.0","id":"$ID","result":{"sessionId":"01a2b3c4-d5e6-7f80-9a1b-2c3d4e5f6a7b"}}
+{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"01a2b3c4-d5e6-7f80-9a1b-2c3d4e5f6a7b","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Counting "}}}}
+{"$exit":137}

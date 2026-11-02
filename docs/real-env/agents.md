@@ -208,10 +208,12 @@ TID=$(jq -r 'select(.type=="thread.started") | .thread_id' /tmp/codex-turn1.json
 echo 'Now say goodbye.' | codex exec resume "$TID" --json --skip-git-repo-check - | tee /tmp/codex-turn2.jsonl
 ```
 
-Copy the transcripts into `crates/ratchet-agents/tests/fixtures/` as `real-claude-*.jsonl` / `real-codex-*.jsonl` (strip
-anything sensitive). `test/real-fixtures.test.ts` parses every `real-*` fixture and fails if the parser loses the session
-id, drops a usage event, or skips a known event type, so a CLI release that changes the format shows up as a red test.
-Compare `parser.unknownTypes` for each real transcript and decide whether any unknown type matters.
+Record real transcripts with `scripts/record-fixtures.sh` (it detects the CLI version, scrubs secrets and machine paths, and names
+the files `<cli>-<version>-real-<behaviour>.jsonl` in `crates/ratchet-agents/tests/fixtures/`). By hand, copy a transcript
+there under that name and strip anything sensitive. `tests/real_fixtures.rs` parses every `real` fixture and fails if the parser
+loses the session id, drops a usage event, skips a known event type, or the file holds anything credential-looking, so a CLI
+release that changes the format shows up as a red test. Compare `parser.unknownTypes` for each real transcript and decide whether
+any unknown type matters.
 
 ### 1. One adapter turn through the package
 

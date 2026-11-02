@@ -130,7 +130,7 @@ fn runner_config_wire_shape() {
 #[test]
 fn claude_transcript_as_agent_events() {
     let mut parser = ClaudeStreamParser::new(|| 1_000);
-    let mut events = parser.push(&fixture("claude-success.jsonl"));
+    let mut events = parser.push(&fixture("claude-2.1.316-mock-success.jsonl"));
     events.extend(parser.end());
     insta::assert_json_snapshot!(events);
 }
@@ -138,7 +138,7 @@ fn claude_transcript_as_agent_events() {
 #[test]
 fn codex_transcript_as_agent_events() {
     let mut parser = CodexStreamParser::new(|| 1_000, None);
-    let mut events = parser.push(&fixture("codex-success.jsonl"));
+    let mut events = parser.push(&fixture("codex-0.166.0-mock-success.jsonl"));
     events.extend(parser.end());
     insta::assert_json_snapshot!(events);
 }

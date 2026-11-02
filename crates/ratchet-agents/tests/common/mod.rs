@@ -15,8 +15,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use ratchet_agents::process::{ProcessHandle, SpawnOptions, Spawner, TokioSpawner};
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 pub const SEED_FILES: [(&str, &str); 3] = [
     ("src/app.txt", "line 1\nline 2\nline 3\n"),
@@ -509,4 +510,89 @@ pub fn every_attempt_has_realistic_usage(script: &ratchet_agents::AgentScript) -
     script.attempts.iter().all(|a| {
         a.steps.iter().any(|s| matches!(s, ratchet_agents::ScriptStep::Usage { input_tokens, output_tokens, .. } if *input_tokens > 10_000 && *output_tokens > 100))
     })
+}
+
+// ---------------------------------------------------------------- the fake CLI binary
+
+/// Runs the fake CLI in place of the real binary: the n-th spawn plays the n-th `(mode, fixture)` (the last one repeats) and
+/// everything the client writes to stdin is logged.
+#[derive(Clone)]
+pub struct Redirect {
+    pub script: Vec<(&'static str, &'static str)>,
+    pub calls: Arc<Mutex<Vec<Vec<String>>>>,
+    pub log: PathBuf,
+}
+
+impl Spawner for Redirect {
+    fn spawn(
+        &self,
+        _command: &str,
+        args: &[String],
+        options: &SpawnOptions,
+    ) -> Box<dyn ProcessHandle> {
+        let index = {
+            let mut calls = self.calls.lock().unwrap();
+            calls.push(args.to_vec());
+            calls.len() - 1
+        };
+        let (mode, fixture) = self.script[index.min(self.script.len() - 1)];
+        let mut options = options.clone();
+        options.env.insert(
+            "RATCHET_FAKE_CLI_LOG".into(),
+            self.log.to_string_lossy().into(),
+        );
+        TokioSpawner.spawn(
+            env!("CARGO_BIN_EXE_ratchet-fake-cli"),
+            &[
+                mode.to_string(),
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures")
+                    .join(fixture)
+                    .to_string_lossy()
+                    .into_owned(),
+            ],
+            &options,
+        )
+    }
+}
+
+impl Redirect {
+    pub fn new(script: &[(&'static str, &'static str)], log: PathBuf) -> Self {
+        Self {
+            script: script.to_vec(),
+            calls: Arc::default(),
+            log,
+        }
+    }
+
+    /// Every JSON line the client has written so far.
+    pub fn requests(&self) -> Vec<Value> {
+        std::fs::read_to_string(&self.log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect()
+    }
+
+    pub fn methods(&self) -> Vec<String> {
+        self.requests()
+            .iter()
+            .filter_map(|r| r["method"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    pub fn request(&self, method: &str) -> Value {
+        self.requests()
+            .into_iter()
+            .find(|r| r["method"] == method)
+            .unwrap_or_else(|| panic!("no {method} request"))
+    }
+
+    pub fn spawn_args(&self, n: usize) -> Vec<String> {
+        self.calls.lock().unwrap()[n].clone()
+    }
+
+    pub fn spawns(&self) -> usize {
+        self.calls.lock().unwrap().len()
+    }
 }
