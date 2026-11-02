@@ -1,0 +1,6 @@
+{"t":"session","id":"echo-session-1"}
+{"t":"delta","text":"Hello. "}
+{"t":"delta","text":"Ask me anything."}
+{"t":"message","text":"Hello. Ask me anything."}
+{"t":"usage","input":120,"output":18,"cost":0.0021}
+{"t":"done"}

@@ -24,6 +24,8 @@
 //! A fixture line `{"$hold":true}` cuts a batch short: the lines before it are printed, the turn stays open, and the lines after
 //! it wait for the client to interrupt (`control_request` for Claude, `turn/interrupt` for Codex, `session/cancel` for Grok).
 //! The interrupt releases the next batch as usual; for ACP, `$ID` then stands for the id of the held `session/prompt`.
+//! A fixture line `{"$exit":N}` is a crash: the lines before it are printed, then the process exits with code N at once (mid-turn
+//! for the long-lived modes). In `replay` mode it sets the exit code the same way.
 //! Everything read from stdin is appended to the file named by `RATCHET_FAKE_CLI_LOG`, when set, for assertions.
 
 use std::io::{BufRead, Write};
@@ -66,7 +68,12 @@ fn replay(lines: &[&str], args: &[String]) {
         .and_then(|v| v.parse::<u64>().ok())
         .unwrap_or(0);
     let mut out = std::io::stdout().lock();
+    let mut crash = None;
     for line in lines {
+        if let Some(code) = exit_directive(line) {
+            crash = Some(code);
+            break;
+        }
         let _ = writeln!(out, "{line}");
         let _ = out.flush();
         if delay > 0 {
@@ -76,9 +83,11 @@ fn replay(lines: &[&str], args: &[String]) {
     if let Some(stderr) = opt(args, "--stderr") {
         eprintln!("{stderr}");
     }
-    let code = opt(args, "--exit-code")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
+    let code = crash.unwrap_or_else(|| {
+        opt(args, "--exit-code")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0)
+    });
     std::process::exit(code);
 }
 
@@ -86,8 +95,17 @@ fn is_hold(line: &str) -> bool {
     line.contains("\"$hold\"")
 }
 
+/// `{"$exit":N}`: the exit code of a crash directive.
+fn exit_directive(line: &str) -> Option<i32> {
+    serde_json::from_str::<serde_json::Value>(line)
+        .ok()?
+        .get("$exit")?
+        .as_i64()
+        .and_then(|n| i32::try_from(n).ok())
+}
+
 fn is_response(line: &str) -> bool {
-    line.contains("\"$ID\"")
+    line.contains("\"$ID\"") || exit_directive(line).is_some()
 }
 
 fn is_result(line: &str) -> bool {
@@ -150,10 +168,16 @@ fn serve(mode: &str, lines: &[&str]) {
                 };
                 let first = cursor + first;
                 if mode == "codex-app-server" {
-                    lines[first + 1..]
+                    let next = lines[first + 1..]
                         .iter()
                         .position(|l| is_response(l))
-                        .map_or(lines.len(), |i| first + 1 + i)
+                        .map_or(lines.len(), |i| first + 1 + i);
+                    // a crash directive ends the batch and is part of it
+                    if next < lines.len() && exit_directive(lines[next]).is_some() {
+                        next + 1
+                    } else {
+                        next
+                    }
                 } else {
                     first + 1
                 }
@@ -167,6 +191,10 @@ fn serve(mode: &str, lines: &[&str]) {
         held = hold.map(|_| id.clone());
         cursor = next;
         for line in batch {
+            if let Some(code) = exit_directive(line) {
+                let _ = out.flush();
+                std::process::exit(code);
+            }
             let _ = writeln!(out, "{}", line.replace("\"$ID\"", &id));
         }
         let _ = out.flush();

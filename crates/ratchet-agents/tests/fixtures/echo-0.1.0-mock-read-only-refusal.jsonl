@@ -1,0 +1,6 @@
+{"t":"session","id":"echo-session-1"}
+{"t":"tool","phase":"call","id":"c1","name":"write_file","input":{"path":"src/app.txt"}}
+{"t":"tool","phase":"result","id":"c1","text":"refused: read-only session","error":true}
+{"t":"message","text":"I cannot change files in this session."}
+{"t":"usage","input":80,"output":10,"cost":0.001}
+{"t":"done"}

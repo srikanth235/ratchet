@@ -57,7 +57,7 @@ fn label(e: &AgentEvent) -> String {
 
 #[test]
 fn parser_joins_text_deltas_into_messages_and_maps_tool_calls_and_the_end_line_to_usage() {
-    let (parser, events) = parse("grok-success.jsonl", None);
+    let (parser, events) = parse("grok-1.0.70-mock-success.jsonl", None);
     assert_eq!(parser.session_id.as_deref(), Some(SID));
     assert_eq!(
         events.iter().map(label).collect::<Vec<_>>(),
@@ -116,10 +116,10 @@ fn parser_joins_text_deltas_into_messages_and_maps_tool_calls_and_the_end_line_t
 
 #[test]
 fn parser_is_chunking_independent() {
-    let (_, whole) = parse("grok-success.jsonl", None);
+    let (_, whole) = parse("grok-1.0.70-mock-success.jsonl", None);
     for size in [1, 13, 100] {
         assert_eq!(
-            parse("grok-success.jsonl", Some(size)).1,
+            parse("grok-1.0.70-mock-success.jsonl", Some(size)).1,
             whole,
             "chunk size {size}"
         );
@@ -128,7 +128,7 @@ fn parser_is_chunking_independent() {
 
 #[test]
 fn parser_tolerates_unknown_events_and_stdout_noise() {
-    let (parser, events) = parse("grok-noisy.jsonl", None);
+    let (parser, events) = parse("grok-1.0.70-mock-noisy.jsonl", None);
     assert_eq!(
         events.iter().map(label).collect::<Vec<_>>(),
         ["tool:call", "tool:result", "message", "usage"]
@@ -147,7 +147,7 @@ fn parser_tolerates_unknown_events_and_stdout_noise() {
 
 #[test]
 fn parser_a_stop_reason_other_than_end_turn_fails_the_turn() {
-    let (parser, events) = parse("grok-stopped.jsonl", None);
+    let (parser, events) = parse("grok-1.0.70-mock-stopped.jsonl", None);
     assert!(parser.turn.failed && !parser.turn.completed);
     assert!(parser.turn.error.as_deref().unwrap().contains("max_turns"));
     assert_eq!(parser.session_id.as_deref(), Some(SID));
@@ -156,7 +156,7 @@ fn parser_a_stop_reason_other_than_end_turn_fails_the_turn() {
 
 #[test]
 fn parser_error_line_fails_the_turn_with_the_vendor_message() {
-    let (parser, _) = parse("grok-error.jsonl", None);
+    let (parser, _) = parse("grok-1.0.70-mock-error.jsonl", None);
     assert!(parser.turn.failed && !parser.turn.completed);
     assert!(parser.turn.error.as_deref().unwrap().contains("429"));
 }
@@ -187,7 +187,7 @@ async fn start_runs_grok_headless_with_the_prompt_in_a_file_and_returns_the_sess
         seen.lock()
             .unwrap()
             .push(std::fs::read_to_string(&call.args[at + 1]).unwrap());
-        FakeProcessSpec::stdout(fixture("grok-success.jsonl")).with_chunk_size(40)
+        FakeProcessSpec::stdout(fixture("grok-1.0.70-mock-success.jsonl")).with_chunk_size(40)
     });
     let adapter = GrokAdapter::new(GrokOptions {
         cli: CliAgentOptions {
@@ -247,7 +247,7 @@ async fn resume_passes_the_session_id_to_resume() {
         seen.lock()
             .unwrap()
             .push(std::fs::read_to_string(&call.args[at + 1]).unwrap());
-        FakeProcessSpec::stdout(fixture("grok-resume.jsonl"))
+        FakeProcessSpec::stdout(fixture("grok-1.0.70-mock-resume.jsonl"))
     });
     let adapter = GrokAdapter::new(GrokOptions {
         cli: CliAgentOptions {
@@ -293,7 +293,9 @@ async fn resume_passes_the_session_id_to_resume() {
 
 #[tokio::test]
 async fn permission_mode_sandbox_and_turn_limit_are_configurable() {
-    let fake = FakeSpawner::new(FakeProcessSpec::stdout(fixture("grok-success.jsonl")));
+    let fake = FakeSpawner::new(FakeProcessSpec::stdout(fixture(
+        "grok-1.0.70-mock-success.jsonl",
+    )));
     let adapter = GrokAdapter::new(GrokOptions {
         cli: CliAgentOptions {
             spawner: Some(Arc::new(fake.clone())),
@@ -335,7 +337,7 @@ async fn permission_mode_sandbox_and_turn_limit_are_configurable() {
 #[tokio::test]
 async fn an_error_line_becomes_an_error_carrying_the_vendor_message() {
     let (_, adapter) = adapter_for(
-        FakeProcessSpec::stdout(fixture("grok-error.jsonl")).with_exit(1),
+        FakeProcessSpec::stdout(fixture("grok-1.0.70-mock-error.jsonl")).with_exit(1),
         &KEYED,
     );
     let (events, on_event) = collect();
@@ -356,7 +358,7 @@ async fn an_error_line_becomes_an_error_carrying_the_vendor_message() {
 #[tokio::test]
 async fn a_stop_reason_other_than_end_turn_fails_the_agent() {
     let (_, adapter) = adapter_for(
-        FakeProcessSpec::stdout(fixture("grok-stopped.jsonl")),
+        FakeProcessSpec::stdout(fixture("grok-1.0.70-mock-stopped.jsonl")),
         &KEYED,
     );
     let err = adapter
@@ -392,7 +394,7 @@ async fn non_zero_exit_without_an_end_event_carries_stderr() {
 
 #[tokio::test]
 async fn abort_kills_the_process_group_and_fails_with_aborted() {
-    let first = fixture("grok-success.jsonl")
+    let first = fixture("grok-1.0.70-mock-success.jsonl")
         .split('\n')
         .take(6)
         .collect::<Vec<_>>()

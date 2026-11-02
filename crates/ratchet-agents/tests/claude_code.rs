@@ -52,7 +52,7 @@ fn kinds(events: &[AgentEvent]) -> Vec<AgentEventType> {
 #[test]
 fn parser_maps_a_full_transcript_to_status_message_tool_usage_events() {
     use AgentEventType::*;
-    let (parser, events) = parse("claude-success.jsonl", None);
+    let (parser, events) = parse("claude-2.1.316-mock-success.jsonl", None);
     assert_eq!(parser.session_id.as_deref(), Some(SID));
     assert_eq!(parser.model.as_deref(), Some("claude-sonnet-5-5"));
     assert_eq!(
@@ -107,10 +107,10 @@ fn parser_maps_a_full_transcript_to_status_message_tool_usage_events() {
 
 #[test]
 fn parser_is_identical_however_the_stream_is_chunked_including_one_char_chunks() {
-    let (_, whole) = parse("claude-success.jsonl", None);
+    let (_, whole) = parse("claude-2.1.316-mock-success.jsonl", None);
     for size in [1, 7, 64, 1000] {
         assert_eq!(
-            parse("claude-success.jsonl", Some(size)).1,
+            parse("claude-2.1.316-mock-success.jsonl", Some(size)).1,
             whole,
             "chunk size {size}"
         );
@@ -134,7 +134,7 @@ fn parser_holds_a_partial_last_line_and_parses_an_unterminated_final_line_on_end
 #[test]
 fn parser_skips_unknown_event_and_block_types_and_garbage_lines() {
     use AgentEventType::*;
-    let (parser, events) = parse("claude-noisy.jsonl", None);
+    let (parser, events) = parse("claude-2.1.316-mock-noisy.jsonl", None);
     assert_eq!(kinds(&events), vec![Status, Message, Tool, Usage]);
     assert_eq!(parser.malformed_lines, 3); // stdout noise, the array, the object without type
     assert_eq!(
@@ -155,7 +155,7 @@ fn parser_skips_unknown_event_and_block_types_and_garbage_lines() {
 #[test]
 fn parser_reports_error_results_as_error_events_and_keeps_the_usage() {
     use AgentEventType::*;
-    let (parser, events) = parse("claude-error-execution.jsonl", None);
+    let (parser, events) = parse("claude-2.1.316-mock-error-execution.jsonl", None);
     // the result's text is a 401, which is also an expired login
     assert_eq!(kinds(&events), vec![Status, Usage, Error, AuthExpired]);
     assert!(
@@ -172,7 +172,7 @@ fn parser_reports_error_results_as_error_events_and_keeps_the_usage() {
 
 #[test]
 fn parser_treats_error_max_turns_as_an_error_subtype_result() {
-    let (parser, _) = parse("claude-error-max-turns.jsonl", None);
+    let (parser, _) = parse("claude-2.1.316-mock-error-max-turns.jsonl", None);
     let result = parser.result.unwrap();
     assert!(result.is_error);
     assert_eq!(result.subtype, "error_max_turns");
@@ -207,7 +207,7 @@ async fn start(
 #[tokio::test]
 async fn start_builds_the_command_line_pipes_the_prompt_on_stdin_and_returns_the_session() {
     let (fake, adapter) = adapter_for(
-        FakeProcessSpec::stdout(fixture("claude-success.jsonl")).with_chunk_size(50),
+        FakeProcessSpec::stdout(fixture("claude-2.1.316-mock-success.jsonl")).with_chunk_size(50),
         &KEYED,
     );
     let (events, on_event) = collect();
@@ -257,7 +257,9 @@ async fn start_builds_the_command_line_pipes_the_prompt_on_stdin_and_returns_the
 
 #[tokio::test]
 async fn honours_binary_path_permission_mode_tool_lists_and_prompt_as_argument() {
-    let fake = FakeSpawner::new(FakeProcessSpec::stdout(fixture("claude-success.jsonl")));
+    let fake = FakeSpawner::new(FakeProcessSpec::stdout(fixture(
+        "claude-2.1.316-mock-success.jsonl",
+    )));
     let adapter = ClaudeCodeAdapter::new(ClaudeCodeOptions {
         cli: CliAgentOptions {
             spawner: Some(Arc::new(fake.clone())),
@@ -302,7 +304,7 @@ async fn honours_binary_path_permission_mode_tool_lists_and_prompt_as_argument()
 #[tokio::test]
 async fn resume_passes_resume_id_sends_the_message_and_keeps_the_session_id() {
     let (fake, adapter) = adapter_for(
-        FakeProcessSpec::stdout(fixture("claude-resume.jsonl")),
+        FakeProcessSpec::stdout(fixture("claude-2.1.316-mock-resume.jsonl")),
         &KEYED,
     );
     let mut session = AgentSession {
@@ -350,7 +352,7 @@ async fn resume_passes_resume_id_sends_the_message_and_keeps_the_session_id() {
 #[tokio::test]
 async fn resume_follows_a_new_session_id_if_the_cli_forks_one() {
     let (_, adapter) = adapter_for(
-        FakeProcessSpec::stdout(fixture("claude-resume-new-id.jsonl")),
+        FakeProcessSpec::stdout(fixture("claude-2.1.316-mock-resume-new-id.jsonl")),
         &KEYED,
     );
     let mut session = AgentSession {
@@ -410,7 +412,7 @@ async fn resume_of_an_unknown_session_turns_a_non_zero_exit_with_stderr_into_an_
 #[tokio::test]
 async fn an_is_error_result_fails_the_turn_with_the_error_event_emitted_once() {
     let (_, adapter) = adapter_for(
-        FakeProcessSpec::stdout(fixture("claude-error-execution.jsonl")).with_exit(1),
+        FakeProcessSpec::stdout(fixture("claude-2.1.316-mock-error-execution.jsonl")).with_exit(1),
         &KEYED,
     );
     let (events, on_event) = collect();
@@ -430,7 +432,7 @@ async fn an_is_error_result_fails_the_turn_with_the_error_event_emitted_once() {
 #[tokio::test]
 async fn error_max_turns_ends_the_turn_normally_so_the_runner_can_carry_on() {
     let (_, adapter) = adapter_for(
-        FakeProcessSpec::stdout(fixture("claude-error-max-turns.jsonl")),
+        FakeProcessSpec::stdout(fixture("claude-2.1.316-mock-error-max-turns.jsonl")),
         &KEYED,
     );
     let session = start(&adapter, &spec(), |_| {}).await.unwrap();
@@ -439,7 +441,7 @@ async fn error_max_turns_ends_the_turn_normally_so_the_runner_can_carry_on() {
 
 #[tokio::test]
 async fn a_stream_that_ends_without_a_result_line_is_an_error_even_with_exit_zero() {
-    let head = fixture("claude-success.jsonl")
+    let head = fixture("claude-2.1.316-mock-success.jsonl")
         .split('\n')
         .take(3)
         .collect::<Vec<_>>()
@@ -467,7 +469,7 @@ async fn a_missing_binary_is_reported_not_raised_raw() {
 
 #[tokio::test]
 async fn abort_signals_the_process_group_with_sigterm_and_fails_with_aborted() {
-    let head = fixture("claude-success.jsonl")
+    let head = fixture("claude-2.1.316-mock-success.jsonl")
         .split('\n')
         .take(2)
         .collect::<Vec<_>>()

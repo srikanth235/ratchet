@@ -1,0 +1,4 @@
+{"type":"thread.started","thread_id":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"bash -lc 'ls'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"$exit":137}
