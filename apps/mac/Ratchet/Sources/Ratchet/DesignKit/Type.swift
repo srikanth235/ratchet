@@ -86,9 +86,9 @@ extension View {
     @ViewBuilder
     func kitType(_ type: KitType) -> some View {
         if let line = type.minLine {
-            font(type.font).tracking(type.tracking).frame(minHeight: line)
+            font(type.font).tracking(type.tracking).frame(minHeight: line).textProbe(size: type.pointSize)
         } else {
-            font(type.font).tracking(type.tracking)
+            font(type.font).tracking(type.tracking).textProbe(size: type.pointSize)
         }
     }
 }

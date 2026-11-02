@@ -59,27 +59,9 @@ private struct TextProbe: ViewModifier {
     }
 }
 
-/// A `Text` set in a kit role. In snapshot mode its frame is noted for the contrast check.
-struct KitTypedText: View {
-    let text: Text
-    let minLine: CGFloat?
-    let size: CGFloat
-
-    var body: some View {
-        Group {
-            if let minLine {
-                text.frame(minHeight: minLine)
-            } else {
-                text
-            }
-        }
-        .modifier(TextProbe(size: size))
-    }
-}
-
-extension Text {
-    /// `kitType` for a `Text`: the same font, tracking and minimum line, and in snapshot mode the text's frame for the contrast check.
-    func kitType(_ type: KitType) -> some View {
-        KitTypedText(text: font(type.font).tracking(type.tracking), minLine: type.minLine, size: type.pointSize)
+extension View {
+    /// In snapshot mode, notes this view's frame for the contrast check (a view set in a kit role: text, or a label).
+    func textProbe(size: CGFloat) -> some View {
+        modifier(TextProbe(size: size))
     }
 }
