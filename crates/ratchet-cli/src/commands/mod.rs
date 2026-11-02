@@ -95,6 +95,7 @@ pub async fn dispatch(cli: Cli, io: &dyn Io) -> i32 {
         Command::Init(args) => return init::run_init(args, json, io),
         Command::Baseline(args) => return baseline::run_baseline(args, json, io).await,
         Command::Templates => return init::list_all(json, io),
+        Command::Mcp => return crate::mcp::serve(&cli).await,
         _ => {}
     }
     let conn = Connection {

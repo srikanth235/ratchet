@@ -6,6 +6,7 @@
 //! ratchetd launchagent install     write ~/Library/LaunchAgents/com.ratchet.ratchetd.plist and load it
 //! ratchetd launchagent uninstall
 //! ratchetd launchagent print       print the plist (for an SMAppService bundle: --bundle-program)
+//! ratchetd mcp --session <token>   the Ratchet MCP server on stdio, for one harness session (talks to the daemon's socket)
 //! ```
 
 use std::path::PathBuf;
@@ -44,11 +45,24 @@ enum Command {
     /// Run one full optimization on a shipped demo, headless, and print the summary. Exits 0 when it verified a
     /// win (the old `node packages/runtime/dist/bin/simulate.js`).
     Simulate(SimulateArgs),
+    /// The Ratchet MCP server on stdio. A harness CLI starts it with the session token it was given; it forwards every
+    /// tool call to the daemon over the local socket, which checks the token and the tool set.
+    Mcp(McpArgs),
     /// Install or remove the LaunchAgent.
     Launchagent {
         #[command(subcommand)]
         action: LaunchAgentCmd,
     },
+}
+
+#[derive(Args, Clone)]
+struct McpArgs {
+    /// The session's capability token (issued by the daemon when the session started).
+    #[arg(long, env = "RATCHET_MCP_SESSION", hide_env_values = true)]
+    session: String,
+    /// The daemon's unix socket (default: its standard location).
+    #[arg(long, env = "RATCHET_SOCKET")]
+    socket: Option<PathBuf>,
 }
 
 #[derive(Args, Clone)]
@@ -186,8 +200,30 @@ async fn main() -> Result<()> {
         Some(Command::Serve(a)) => serve(a).await,
         Some(Command::Openapi(a)) => generate(&a),
         Some(Command::Simulate(a)) => simulate_demo(a).await,
+        Some(Command::Mcp(a)) => mcp(a).await,
         Some(Command::Launchagent { action }) => launch_agent(action),
     }
+}
+
+/// `ratchetd mcp`: stdio on one side, the daemon's socket on the other. Nothing but JSON-RPC may reach stdout.
+async fn mcp(args: McpArgs) -> Result<()> {
+    use ratchet_mcp::socket::SocketBackend;
+    use ratchet_mcp::{McpServer, ServerInfo, SessionTools};
+    let socket = args.socket.unwrap_or_else(paths::socket_path);
+    let backend = SocketBackend::new(socket, args.session);
+    let session = backend
+        .describe()
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    tracing::info!(session = %session.id, set = session.set.as_str(), "ratchet MCP server");
+    let provider = Arc::new(SessionTools::new(session.set, Arc::new(backend)));
+    McpServer::new(
+        ServerInfo::ratchet(Some(session.set.instructions())),
+        provider,
+    )
+    .serve(tokio::io::stdin(), tokio::io::stdout())
+    .await
+    .context("the MCP stream failed")
 }
 
 fn wants_log_file(cli: &Cli) -> bool {
@@ -232,7 +268,11 @@ async fn serve(args: ServeArgs) -> Result<()> {
         Some(p) => Some(PathBuf::from(p)),
         None => Some(paths::ledger_path()),
     };
-    let (service, stop): (Arc<dyn AppService>, Stop) = match args.mode {
+    let (service, stop, hosts): (
+        Arc<dyn AppService>,
+        Stop,
+        Arc<dyn ratchetd::mcp::ConfigHosts>,
+    ) = match args.mode {
         Mode::Sim => {
             let service = SimService::new(SimOptions {
                 ledger_path,
@@ -246,18 +286,22 @@ async fn serve(args: ServeArgs) -> Result<()> {
             (
                 Arc::new(service),
                 Box::new(move || Box::pin(async move { s.shutdown() })),
+                Arc::new(ratchetd::mcp::MockHosts::new()),
             )
         }
         Mode::Real => {
             let service = real_service(&args, ledger_path).await?;
             let s = service.clone();
             (
-                Arc::new(service),
+                Arc::new(service.clone()),
                 Box::new(move || Box::pin(async move { s.shutdown().await })),
+                Arc::new(service),
             )
         }
     };
-    let daemon = Daemon::start(service, DaemonConfig::new(&socket))
+    let mut config = DaemonConfig::new(&socket);
+    config.mcp = Some(Arc::new(ratchetd::mcp::McpHub::with_hosts(hosts)));
+    let daemon = Daemon::start(service, config)
         .await
         .with_context(|| format!("cannot listen on {}", socket.display()))?;
     shutdown_signal().await;

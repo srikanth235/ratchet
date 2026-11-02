@@ -99,7 +99,11 @@ pub async fn run(c: &Client, cmd: Command, json: bool, io: &dyn Io) -> R {
         Command::Inspect { target } => inspect(c, &target, json, io).await,
         Command::Overview { range } => overview(c, range.as_str(), json, io).await,
         Command::Connectors => connectors(c, json, io).await,
-        Command::Validate { .. } | Command::Init(_) | Command::Baseline(_) | Command::Templates => {
+        Command::Validate { .. }
+        | Command::Init(_)
+        | Command::Baseline(_)
+        | Command::Templates
+        | Command::Mcp => {
             unreachable!("offline commands are dispatched before the client is built")
         }
     }

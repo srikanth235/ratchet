@@ -1156,6 +1156,22 @@ fn validate_create(input: &CreateOptimizationInput) -> ServiceResult<()> {
     }
 }
 
+/// The MCP server commits a draft's config through the signed-in GitHub account.
+#[async_trait]
+impl crate::mcp::ConfigHosts for RealService {
+    async fn host_for(&self, repo: &str) -> ServiceResult<Arc<dyn ratchet_core::ports::GitHost>> {
+        let slug = slug_of(repo).ok_or_else(|| {
+            ServiceError::Invalid(format!("{repo} is not a GitHub repository (owner/name)"))
+        })?;
+        match self.0.product.github_host(&slug).map_err(service_error)? {
+            Some(host) => Ok(host),
+            None => Err(ServiceError::NotReady(
+                "sign in to GitHub in Settings to draft an optimization".into(),
+            )),
+        }
+    }
+}
+
 #[async_trait]
 impl AppService for RealService {
     fn engine(&self) -> EngineInfo {

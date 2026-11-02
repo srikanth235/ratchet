@@ -17,6 +17,8 @@ path = "src/main.rs"
 [dependencies]
 ratchet-core = { path = "../ratchet-core" }
 ratchetd = { path = "../ratchetd", default-features = false }
+ratchet-mcp = { path = "../ratchet-mcp" }
+async-trait = "0.1"
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 http-body-util = "0.1"

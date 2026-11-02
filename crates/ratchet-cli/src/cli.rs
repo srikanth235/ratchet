@@ -138,6 +138,11 @@ pub enum Command {
     },
     /// Saved GitHub / AWS / agent connectors (provisional).
     Connectors,
+    /// Serve every command above as an MCP tool on stdio, for clients with no shell.
+    ///
+    /// Register it in one line: `claude mcp add ratchet -- ratchet mcp`. Reads the daemon's token from ratchetd.token on every
+    /// call. Destructive tools (run, stop, pr, env end) only preview until the call has `confirm: true`, like `--yes`.
+    Mcp,
 }
 
 #[derive(Args, Debug, Default, Clone)]

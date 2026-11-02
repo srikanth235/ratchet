@@ -29,6 +29,8 @@ pub struct AppState {
     pub socket_path: Option<String>,
     /// Flips to `true` on shutdown: SSE streams end so the server can drain.
     pub shutdown: watch::Receiver<bool>,
+    /// MCP session tokens and drafts (`/v1/mcp/*`).
+    pub mcp: Arc<crate::mcp::McpHub>,
 }
 
 /// All routes (without the auth layer and without `/v1/openapi.json`).

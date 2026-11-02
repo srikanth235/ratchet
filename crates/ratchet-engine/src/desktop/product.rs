@@ -1101,6 +1101,15 @@ impl ProductEngine {
             let rt = self.sim(self.sim_project_for(repo)).await?;
             return rt.git.diff(base_ref, sha).await.map(Some).map_err(port);
         };
+        let Some(git) = self.github_host(&slug)? else {
+            return Ok(None);
+        };
+        git.diff(base_ref, sha).await.map(Some).map_err(port)
+    }
+
+    /// The git host of a GitHub repo (`owner/name`) with the signed-in token, cached per repo. `None` without a token.
+    pub fn github_host(&self, slug: &str) -> EngineResult<Option<Arc<GitHubGitHost>>> {
+        let slug = slug.to_owned();
         let Some(cfg) = &self.0.opts.live else {
             return Ok(None);
         };
@@ -1124,7 +1133,7 @@ impl ProductEngine {
                 g
             }
         };
-        git.diff(base_ref, sha).await.map(Some).map_err(port)
+        Ok(Some(git))
     }
 
     /// Stop the control loops and dispose every runtime. Idempotent.
