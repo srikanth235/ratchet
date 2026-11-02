@@ -12,7 +12,7 @@ public protocol ChatClient: Sendable {
     func send(chatID: String, text: String) async throws -> ChatReceipt
     /// The chat's live stream. The first event is `.ready`. `lastEventID` continues a stream that dropped: events after it are
     /// replayed, or `.ready` says `resync` when they are gone. A failed turn arrives as `.failed` followed by `.done`.
-    func stream(chatID: String, lastEventID: Int64?) async -> AsyncThrowingStream<ChatEvent, any Error>
+    func stream(chatID: String, lastEventID: Int64?) async -> AsyncThrowingStream<ChatFrame, any Error>
     /// Stops the reply being written. What was written stays.
     func interrupt(chatID: String) async throws
     /// Ends the chat and forgets its history.

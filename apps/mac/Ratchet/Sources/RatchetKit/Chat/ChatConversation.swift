@@ -18,6 +18,8 @@ public struct ChatConversation: Sendable, Equatable {
     public var lastOutcome: ChatOutcome?
     /// The stream could not replay what was missed: fetch the chat again (`ChatClient.chat`) and `replace(with:)`.
     public var needsReload = false
+    /// A request of the person's failed before the chat could answer (sending while it replies, a chat that is gone).
+    public var actionError: String?
 
     public init(_ chat: Chat) {
         self.chat = chat
@@ -36,6 +38,12 @@ public struct ChatConversation: Sendable, Equatable {
         needsReload = false
     }
 
+    /// Applies an event with its place in the stream: the resume position moves to its id.
+    public mutating func apply(_ frame: ChatFrame) {
+        apply(frame.event)
+        if let id = frame.id { chat.lastEventID = max(chat.lastEventID, id) }
+    }
+
     public mutating func apply(_ event: ChatEvent) {
         switch event {
         case .ready(let ready):
@@ -46,6 +54,7 @@ public struct ChatConversation: Sendable, Equatable {
         case .message(let message):
             if message.role == .user {
                 error = nil
+                actionError = nil
                 lastOutcome = nil
             }
             if message.role == .assistant {

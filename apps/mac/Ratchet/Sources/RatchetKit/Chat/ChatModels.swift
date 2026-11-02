@@ -265,3 +265,15 @@ public enum ChatEvent: Sendable, Equatable {
     /// The turn failed; `done` follows.
     case failed(ChatError)
 }
+
+/// One event of a stream with its place in it. `id` counts up per chat; `ready` has none. A client that reconnects asks for
+/// the events after the last `id` it saw.
+public struct ChatFrame: Sendable, Equatable {
+    public var id: Int64?
+    public var event: ChatEvent
+
+    public init(id: Int64? = nil, event: ChatEvent) {
+        self.id = id
+        self.event = event
+    }
+}

@@ -11,9 +11,9 @@ struct ChatTests {
     }
 
     private func read(
-        _ stream: AsyncThrowingStream<ChatEvent, any Error>, until stop: (ChatEvent) -> Bool
-    ) async throws -> [ChatEvent] {
-        var events: [ChatEvent] = []
+        _ stream: AsyncThrowingStream<ChatFrame, any Error>, until stop: (ChatFrame) -> Bool
+    ) async throws -> [ChatFrame] {
+        var events: [ChatFrame] = []
         for try await event in stream {
             events.append(event)
             if stop(event) { break }
@@ -21,8 +21,8 @@ struct ChatTests {
         return events
     }
 
-    private func isDone(_ event: ChatEvent) -> Bool {
-        if case .done = event { return true }
+    private func isDone(_ frame: ChatFrame) -> Bool {
+        if case .done = frame.event { return true }
         return false
     }
 
@@ -53,9 +53,9 @@ struct ChatTests {
         let client = make()
         let chat = try await client.startChat(NewChat(repo: "acme/shop"))
         let stream = await client.stream(chatID: chat.id, lastEventID: 0)
-        let events = try await read(stream, until: { if case .tool = $0 { return true } else { return false } })
-        #expect(events.first == ChatEvent.ready(ChatReady(state: .idle, lastSeq: 0, lastEventID: 1)))
-        if case .tool(let step)? = events.last { #expect(step.summary == "Reading acme/shop") } else { Issue.record("no checkout step") }
+        let events = try await read(stream, until: { if case .tool = $0.event { return true } else { return false } })
+        #expect(events.first?.event == ChatEvent.ready(ChatReady(state: .idle, lastSeq: 0, lastEventID: 1)))
+        if case .tool(let step)? = events.last?.event { #expect(step.summary == "Reading acme/shop") } else { Issue.record("no checkout step") }
     }
 
     // MARK: A turn
@@ -68,9 +68,9 @@ struct ChatTests {
         #expect(receipt.turn == 1)
         let events = try await read(stream, until: isDone)
 
-        guard case .ready(let ready) = events.first else { Issue.record("not ready first"); return }
+        guard case .ready(let ready)? = events.first?.event else { Issue.record("not ready first"); return }
         #expect(ready.state == .idle && !ready.resync)
-        #expect(events.contains { if case .delta = $0 { return true } else { return false } })
+        #expect(events.contains { if case .delta = $0.event { return true } else { return false } })
         var conversation = ChatConversation(chat)
         for event in events { conversation.apply(event) }
         #expect(conversation.chat.messages.map(\.role) == [.user, .assistant])
@@ -198,10 +198,10 @@ struct ChatTests {
         _ = try await client.send(chatID: chat.id, text: "two")
         let stream = await client.stream(chatID: chat.id, lastEventID: seen)
         let events = try await read(stream, until: isDone)
-        guard case .ready(let ready) = events.first else { Issue.record("not ready first"); return }
+        guard case .ready(let ready)? = events.first?.event else { Issue.record("not ready first"); return }
         #expect(!ready.resync)
         // Only the second turn is replayed: the user's echo comes first.
-        if case .message(let message) = events[1] { #expect(message.text == "two") } else { Issue.record("replay began with \(events[1])") }
+        if case .message(let message) = events[1].event { #expect(message.text == "two") } else { Issue.record("replay began with \(events[1].event)") }
     }
 
     @Test func aStreamTooFarBehindMustResync() async throws {
@@ -210,7 +210,7 @@ struct ChatTests {
         for turn in 0..<40 { _ = try await client.send(chatID: chat.id, text: "message \(turn)") }
         let stream = await client.stream(chatID: chat.id, lastEventID: 1)
         let events = try await read(stream, until: { _ in true })
-        guard case .ready(let ready) = events.first else { Issue.record("not ready first"); return }
+        guard case .ready(let ready)? = events.first?.event else { Issue.record("not ready first"); return }
         #expect(ready.resync)
         var conversation = ChatConversation(chat)
         conversation.apply(.ready(ready))

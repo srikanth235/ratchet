@@ -19,7 +19,7 @@ public actor MockChatClient: ChatClient {
     }
 
     private var chats: [String: Stored] = [:]
-    private var subscribers: [String: [UUID: AsyncThrowingStream<ChatEvent, any Error>.Continuation]] = [:]
+    private var subscribers: [String: [UUID: AsyncThrowingStream<ChatFrame, any Error>.Continuation]] = [:]
     private var counter = 0
     private var noticedHarnesses: Set<Harness> = []
     private let now: Date
@@ -77,8 +77,8 @@ public actor MockChatClient: ChatClient {
         return ChatReceipt(seq: userSeq, turn: turn)
     }
 
-    public func stream(chatID: String, lastEventID: Int64?) async -> AsyncThrowingStream<ChatEvent, any Error> {
-        let (stream, continuation) = AsyncThrowingStream<ChatEvent, any Error>.makeStream()
+    public func stream(chatID: String, lastEventID: Int64?) async -> AsyncThrowingStream<ChatFrame, any Error> {
+        let (stream, continuation) = AsyncThrowingStream<ChatFrame, any Error>.makeStream()
         guard let stored = chats[chatID] else {
             continuation.finish(throwing: RatchetClientError.notFound("chat \(chatID)"))
             return stream
@@ -88,10 +88,10 @@ public actor MockChatClient: ChatClient {
         let gone = lastEventID.map { $0 < newest && oldest > $0 + 1 } ?? false
         let replay = (lastEventID != nil && !gone) ? stored.log.filter { $0.id > (lastEventID ?? 0) } : []
         let pending = (lastEventID == nil && !stored.conversation.reply.isEmpty) ? stored.conversation.reply : nil
-        continuation.yield(.ready(ChatReady(
+        continuation.yield(ChatFrame(event: .ready(ChatReady(
             state: stored.conversation.chat.state, lastSeq: stored.conversation.lastSeq, lastEventID: newest, resync: gone,
-            pending: pending)))
-        for entry in replay { continuation.yield(entry.event) }
+            pending: pending))))
+        for entry in replay { continuation.yield(ChatFrame(id: entry.id, event: entry.event)) }
 
         let token = UUID()
         subscribers[chatID, default: [:]][token] = continuation
@@ -192,7 +192,7 @@ public actor MockChatClient: ChatClient {
         if stored.log.count > Self.retained { stored.log.removeFirst(stored.log.count - Self.retained) }
         chats[id] = stored
         if let open = subscribers[id] {
-            for continuation in open.values { continuation.yield(event) }
+            for continuation in open.values { continuation.yield(ChatFrame(id: entry.id, event: event)) }
         }
     }
 
