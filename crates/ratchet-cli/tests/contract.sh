@@ -11,7 +11,7 @@ fail=0
 ok()   { echo "CONTRACT ok   $*"; }
 bad()  { echo "CONTRACT FAIL $*"; fail=1; }
 
-commands="validate init baseline templates status list show run stop report pr candidates history spend activity agent events chat env cost repos inspect overview connectors open mcp"
+commands="validate init baseline templates status list show run stop report pr candidates history spend activity agent agents events chat env cost repos inspect overview home value schedule pr-merged connectors open mcp"
 
 # 1. --help lists every command, and nothing the contract does not know.
 help=$("$ratchet" --help) || bad "--help exits non-zero"

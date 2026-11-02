@@ -33,8 +33,8 @@ fails it prints what to do.
 | `ratchet report <id>` | The markdown report |
 | `ratchet open <page or id>` | Show a page (overview, optimizations, benchmarks, connectors, new) or an optimization in the Mac app |
 
-Others: `candidates`, `history`, `spend`, `activity`, `agent pause|resume|message|log`, `events`, `env list|end`, `cost
-reconcile`, `repos`, `inspect`, `overview`, `connectors`, and the offline `validate`, `init`, `baseline`, `templates`.
+Others: `candidates`, `history`, `spend`, `activity`, `agent pause|resume|message|log`, `agents show|set` (an optimization's agent order and fallback rules), `events`, `env list|end`, `cost
+reconcile`, `repos`, `inspect`, `overview`, `home` (the value line above the composer), `value` and `schedule` (what an improvement is worth, how often it runs), `pr-merged` (record a merged pull request), `connectors`, and the offline `validate`, `init`, `baseline`, `templates`.
 
 ## Chat and MCP
 
