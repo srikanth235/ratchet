@@ -957,14 +957,20 @@ async fn records_token_usage_from_runner_events_as_spend_category_tokens() {
 #[tokio::test]
 async fn subscription_usage_is_counted_in_tokens_and_never_trips_the_budget() {
     let h = Harness::new(Default::default()).await;
-    let b = begun(&h).await; // budget $1
+    let b = h
+        .begin(BeginOptions {
+            budget_usd: Some(50.0),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
     let claude = b.agent(ClaudeCode);
     h.runners.emit(
         &claude,
         vec![ev(AgentEventType::Usage).with_usage(AgentUsage {
             input_tokens: 5_000_000,
             output_tokens: 400_000,
-            cost_usd: Some(50.0), // a list-price estimate: the plan already covers it
+            cost_usd: Some(500.0), // a list-price estimate: the plan already covers it
             billing: Billing::Subscription,
         })],
     );
@@ -985,7 +991,13 @@ async fn subscription_usage_is_counted_in_tokens_and_never_trips_the_budget() {
 #[tokio::test]
 async fn api_usage_beside_subscription_usage_is_split_and_only_the_dollars_trip_the_budget() {
     let h = Harness::new(Default::default()).await;
-    let b = begun(&h).await; // budget $1
+    let b = h
+        .begin(BeginOptions {
+            budget_usd: Some(50.0),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
     let claude = b.agent(ClaudeCode);
     h.runners.emit(
         &claude,
@@ -999,7 +1011,7 @@ async fn api_usage_beside_subscription_usage_is_split_and_only_the_dollars_trip_
             ev(AgentEventType::Usage).with_usage(AgentUsage {
                 input_tokens: 2_000,
                 output_tokens: 200,
-                cost_usd: Some(40.0),
+                cost_usd: Some(400.0),
                 billing: Billing::Subscription,
             }),
         ],
@@ -1015,11 +1027,10 @@ async fn api_usage_beside_subscription_usage_is_split_and_only_the_dollars_trip_
         vec![ev(AgentEventType::Usage).with_usage(AgentUsage {
             input_tokens: 1,
             output_tokens: 1,
-            cost_usd: Some(5.0),
+            cost_usd: Some(60.0),
             billing: Billing::Api,
         })],
     );
-    h.cycle(1).await;
     h.cycle(1).await;
     assert_eq!(h.status(&b.id).await, OptimizationStatus::Stopped);
 }

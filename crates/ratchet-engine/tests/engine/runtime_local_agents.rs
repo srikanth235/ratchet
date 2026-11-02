@@ -183,7 +183,7 @@ async fn runs_a_claude_code_agent_in_a_worktree_verifies_its_commit_then_removes
         installed: true,
         version: Some("2.1.4".into()),
         path: Some(bin.join("claude").display().to_string()),
-        auth: HarnessAuth::ApiKey, // a key: the run is billed per token (a login is a subscription, no dollars)
+        auth: HarnessAuth::SignedIn,
         hint: String::new(),
     };
     let agents_root = root.join("agents");
@@ -387,11 +387,8 @@ async fn runs_a_claude_code_agent_in_a_worktree_verifies_its_commit_then_removes
         ),
         (id.as_str(), "completed")
     );
-    assert!(
-        (receipt.spend_usd - 0.06).abs() < 1e-5,
-        "{}",
-        receipt.spend_usd
-    ); // two agent turns at the CLI's own cost report ($0.03 each)
+    // the fake CLI is signed in (a subscription): its two turns, which report $0.03 each, cost no dollars
+    assert_eq!(receipt.spend_usd, 0.0);
     assert!(!agents_root.join(&id).exists()); // teardown released the local clone
     assert!(
         sandbox_provider
