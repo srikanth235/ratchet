@@ -67,7 +67,7 @@ enum SelfTest {
         // Live events through the store.
         await store.loadDetail(id: "opt-checkout")
         check("the live optimization has agents", store.details["opt-checkout"]?.agents.count == 2)
-        if let mock = store.client as? MockRatchetClient {
+        if let mock = store.scenario {
             let before = store.optimization(id: "opt-checkout")?.spentUSD ?? 0
             // The store follows the event stream by itself; give it a moment to apply what the client emitted.
             for _ in 0..<2 { await mock.advance() }
@@ -211,7 +211,7 @@ enum SelfTest {
     /// The real client path end to end: the generated client, the unix socket, the bearer token, the mapping, the event
     /// stream, against `ratchetd serve --mode sim`. Run by tools/smoke-daemon.sh; nothing here touches the sample data.
     private static func runLive(store: AppStore, daemon: DaemonController) async {
-        check("the app uses the daemon, not the sample client", !(store.client is MockRatchetClient) && !Store.isOverridden)
+        check("the app uses the daemon, not the sample client", store.scenario == nil && !Store.isOverridden)
         check("the daemon answers on the socket", daemon.phase.isRunning, "\(daemon.phase)")
         check("the store loaded from the daemon", store.isLoaded, store.lastError ?? "no error recorded")
         check("the overview comes from the daemon", store.overview != nil)

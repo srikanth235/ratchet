@@ -130,10 +130,12 @@ enum Store {
     @MainActor
     static func makeStore() -> AppStore {
         if isOverridden {
-            return AppStore(client: MockRatchetClient(now: fixedNow, live: false), cacheURL: nil, isDemoData: true)
+            let sample = MockRatchetClient(now: fixedNow, live: false)
+            return AppStore(client: sample, scenario: sample, cacheURL: nil, isDemoData: true)
         }
         if ProcessInfo.processInfo.environment["APP_DEMO"] == "1" {
-            return AppStore(client: MockRatchetClient(now: Date(), live: true), cacheURL: cacheURL(demo: true), isDemoData: true)
+            let sample = MockRatchetClient(now: Date(), live: true)
+            return AppStore(client: sample, scenario: sample, cacheURL: cacheURL(demo: true), isDemoData: true)
         }
         let demoMode = UserDefaults.standard.string(forKey: DaemonController.modeKey) == DaemonMode.demo.rawValue
         return AppStore(

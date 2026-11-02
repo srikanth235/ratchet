@@ -57,7 +57,7 @@ enum SnapScene: String, CaseIterable {
         router.connectorSheet = nil
         router.templateProposal = nil
         router.advancedExpanded = false
-        let mock = store.client as? MockRatchetClient
+        let mock = store.scenario
         await mock?.simulate(keychainAvailable: true)
         await mock?.simulate(preflight: nil)
         await store.refresh()

@@ -40,6 +40,8 @@ struct CachedState: Codable {
 @MainActor @Observable
 public final class AppStore {
     public let client: any RatchetClient
+    /// How a test, snapshot or the self-test drives a sample client (time, setup answers); nil with the real daemon.
+    public let scenario: (any ClientScenario)?
 
     public private(set) var overview: Overview?
     public private(set) var optimizations: [Optimization] = []
@@ -78,8 +80,9 @@ public final class AppStore {
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private var pendingWins: [String: RatchetMove] = [:]
 
-    public init(client: any RatchetClient, cacheURL: URL? = nil, isDemoData: Bool = false) {
+    public init(client: any RatchetClient, scenario: (any ClientScenario)? = nil, cacheURL: URL? = nil, isDemoData: Bool = false) {
         self.client = client
+        self.scenario = scenario
         self.cacheURL = cacheURL
         self.isDemoData = isDemoData
         restoreCache()
