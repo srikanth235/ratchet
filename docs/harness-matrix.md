@@ -138,8 +138,10 @@ same everywhere: local only, the user's own unmodified CLI and login, no credent
 
 ## 5. Fixtures
 
-In `crates/ratchet-agents/tests/fixtures/`. `mock` = written from docs/source (◐), never emitted by the real CLI. The existing
-fixtures are untouched.
+In `crates/ratchet-agents/tests/fixtures/`. Every file is named `<cli>-<version>-<real|mock>-<behaviour>.jsonl`
+(`tests/real_fixtures.rs` rejects any other name). `real` = emitted by the real CLI, recorded with `scripts/record-fixtures.sh`;
+`mock` = written from docs/source (◐), never emitted by the real CLI. The fixtures that predate S0 (`success`, `resume`, `noisy`,
+`error`, …) were hand-written, so P8 renamed them to `…-mock-…` under the version this document was written against.
 
 | Behaviour | Claude Code 2.1.316 | Codex 0.166.0 | Grok 1.0.70 |
 |---|---|---|---|
@@ -344,3 +346,25 @@ the daemon binary, off for the older tests).
 Read `story`, `spent.detail` and `forecast` instead of computing from `value`; draw `chart` (dashed `pendingUsdPerYear`); show
 `emptyState` for `phase != wins`; per row show `pending` dimmed with "pending"; link the footnote "Edit value" to the Value row
 (`/value`), and a Schedule row (`/schedule`); Home header from `GET /v1/home`. `ValueModelVm`/`ScheduleVm` need client mapping.
+
+## 7. P8 result: conformance, recorder, canary
+
+- **Conformance** (`tests/conformance.rs`): one table of scenarios (start, resume, deltas, tool call/result, usage/cost, rate limit,
+  auth expired, crash, interrupt, MCP tool call, read-only refusal) run against Claude Code, Codex, Grok and a test-only fourth
+  harness, one-shot (`AgentAdapter::start`/`resume` through `FakeSpawner`) and live (`Harness::open` against `tests/fake_cli`;
+  spawn-per-turn for the harness with no live protocol). A harness is one `Subject` row: how to build it and which fixture plays each
+  scenario. What the table pins for every harness: a rate limit is one `rate_limited` event whose `data.resetsAt` is epoch **seconds**
+  when the CLI said when the limit lifts (the fallback layer waits) and `null` otherwise (it switches or cools down); an expired login
+  is one `auth_expired` event with no reset time; a crash is an `error` event and a failed turn.
+- **Adding a harness**: its adapter plus `<cli>-<version>-mock-<behaviour>.jsonl` fixtures plus one `Subject` row. The test-only `echo`
+  harness (`tests/conformance/echo.rs`, `echo-0.1.0-mock-*.jsonl`) is the proof: nothing under `src/` and no scenario knows it, and
+  `a_fourth_harness_passes_the_whole_suite_with_nothing_but_an_adapter_and_fixtures` runs it alone.
+- **Per-harness differences the table records** (not bugs in the table): `codex exec` sends messages whole (no deltas) and reports an MCP
+  or patch item once, on completion, as a call with **no result event** (the app-server protocol has both halves); Grok's one-shot
+  stream flushes the text it had when the process died as a message; the Grok ACP session fixture carries no usage (the MCP fixture does).
+- **`fake_cli`** gained `{"$exit":N}`: a fixture line that ends the process with that code mid-turn (a crash).
+- **Recorder**: `scripts/record-fixtures.sh` (plan by default, `--yes` to record, `--json`). Rate limits cannot be recorded on demand, so
+  those fixtures stay `mock`.
+- **Canary**: `.github/workflows/harness-canary.yml`, committed **disabled** (`workflow_dispatch` only; the cron is commented out until
+  real-world testing is approved). It installs the latest CLIs, records fresh transcripts with `CANARY_*` test keys, runs the
+  conformance suite and the real-transcript check on the fresh files, and opens or updates one `harness-canary` issue on drift.

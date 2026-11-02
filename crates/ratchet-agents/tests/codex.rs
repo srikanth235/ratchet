@@ -64,7 +64,7 @@ fn label(e: &AgentEvent) -> String {
 
 #[test]
 fn parser_maps_items_to_message_and_tool_events_and_turn_completed_to_usage() {
-    let (parser, events) = parse("codex-success.jsonl", None, None);
+    let (parser, events) = parse("codex-0.166.0-mock-success.jsonl", None, None);
     assert_eq!(parser.thread_id.as_deref(), Some(TID));
     assert_eq!(
         events.iter().map(label).collect::<Vec<_>>(),
@@ -120,7 +120,7 @@ fn parser_estimates_cost_when_pricing_is_given_with_cached_input_at_the_cached_r
         cached_input_per_m: Some(0.125),
         output_per_m: 10.0,
     };
-    let (_, events) = parse("codex-success.jsonl", None, Some(pricing));
+    let (_, events) = parse("codex-0.166.0-mock-success.jsonl", None, Some(pricing));
     let cost = events
         .iter()
         .find(|e| e.event_type == AgentEventType::Usage)
@@ -135,10 +135,10 @@ fn parser_estimates_cost_when_pricing_is_given_with_cached_input_at_the_cached_r
 
 #[test]
 fn parser_is_chunking_independent() {
-    let (_, whole) = parse("codex-success.jsonl", None, None);
+    let (_, whole) = parse("codex-0.166.0-mock-success.jsonl", None, None);
     for size in [1, 13, 100] {
         assert_eq!(
-            parse("codex-success.jsonl", Some(size), None).1,
+            parse("codex-0.166.0-mock-success.jsonl", Some(size), None).1,
             whole,
             "chunk size {size}"
         );
@@ -148,7 +148,7 @@ fn parser_is_chunking_independent() {
 #[test]
 fn parser_tolerates_unknown_events_items_and_stdout_noise_and_non_fatal_errors_do_not_fail_the_turn()
  {
-    let (parser, events) = parse("codex-noisy.jsonl", None, None);
+    let (parser, events) = parse("codex-0.166.0-mock-noisy.jsonl", None, None);
     assert_eq!(events.iter().map(|e| e.event_type).collect::<Vec<_>>(), {
         use AgentEventType::*;
         vec![Status, Error, Tool, Message, Usage]
@@ -171,7 +171,7 @@ fn parser_tolerates_unknown_events_items_and_stdout_noise_and_non_fatal_errors_d
 
 #[test]
 fn parser_turn_failed_marks_the_turn_failed_with_the_vendor_message() {
-    let (parser, _) = parse("codex-failed.jsonl", None, None);
+    let (parser, _) = parse("codex-0.166.0-mock-failed.jsonl", None, None);
     assert!(parser.turn.failed && !parser.turn.completed);
     assert!(parser.turn.error.as_deref().unwrap().contains("429"));
 }
@@ -195,7 +195,7 @@ const KEYED: [(&str, &str); 2] = [("OPENAI_API_KEY", "sk-oai"), ("PATH", "/bin")
 #[tokio::test]
 async fn start_runs_codex_exec_json_with_the_prompt_on_stdin_via_dash_and_returns_the_thread_id() {
     let (fake, adapter) = adapter_for(
-        FakeProcessSpec::stdout(fixture("codex-success.jsonl")).with_chunk_size(40),
+        FakeProcessSpec::stdout(fixture("codex-0.166.0-mock-success.jsonl")).with_chunk_size(40),
         &KEYED,
     );
     let (events, on_event) = collect();
@@ -242,7 +242,7 @@ async fn start_runs_codex_exec_json_with_the_prompt_on_stdin_via_dash_and_return
 #[tokio::test]
 async fn resume_runs_codex_exec_resume_thread_json() {
     let (fake, adapter) = adapter_for(
-        FakeProcessSpec::stdout(fixture("codex-resume.jsonl")),
+        FakeProcessSpec::stdout(fixture("codex-0.166.0-mock-resume.jsonl")),
         &KEYED,
     );
     let mut session = AgentSession {
@@ -279,7 +279,9 @@ async fn resume_runs_codex_exec_resume_thread_json() {
 
 #[tokio::test]
 async fn sandbox_prompt_as_argument_and_extra_overrides_are_configurable() {
-    let fake = FakeSpawner::new(FakeProcessSpec::stdout(fixture("codex-success.jsonl")));
+    let fake = FakeSpawner::new(FakeProcessSpec::stdout(fixture(
+        "codex-0.166.0-mock-success.jsonl",
+    )));
     let adapter = CodexAdapter::new(CodexOptions {
         cli: CliAgentOptions {
             spawner: Some(Arc::new(fake.clone())),
@@ -319,7 +321,7 @@ async fn sandbox_prompt_as_argument_and_extra_overrides_are_configurable() {
 #[tokio::test]
 async fn turn_failed_becomes_an_error_carrying_the_vendor_message() {
     let (_, adapter) = adapter_for(
-        FakeProcessSpec::stdout(fixture("codex-failed.jsonl")).with_exit(1),
+        FakeProcessSpec::stdout(fixture("codex-0.166.0-mock-failed.jsonl")).with_exit(1),
         &KEYED,
     );
     let (events, on_event) = collect();
@@ -365,7 +367,7 @@ async fn non_zero_exit_without_turn_completed_carries_stderr() {
 
 #[tokio::test]
 async fn abort_kills_the_process_group_and_fails_with_aborted() {
-    let first = fixture("codex-success.jsonl")
+    let first = fixture("codex-0.166.0-mock-success.jsonl")
         .split('\n')
         .take(1)
         .collect::<Vec<_>>()
@@ -410,7 +412,7 @@ async fn cost_comes_from_the_catalog_price_of_the_chosen_model_and_an_unknown_mo
 {
     // catalog price: 1.25 in / 0.125 cached / 10 out per million tokens for gpt-5-codex
     let (_, adapter) = adapter_for(
-        FakeProcessSpec::stdout(fixture("codex-success.jsonl")),
+        FakeProcessSpec::stdout(fixture("codex-0.166.0-mock-success.jsonl")),
         &KEYED,
     );
     let (events, on_event) = collect();
@@ -426,7 +428,7 @@ async fn cost_comes_from_the_catalog_price_of_the_chosen_model_and_an_unknown_mo
 
     // an id the catalog does not know goes to the CLI untouched, and has no price
     let (fake, adapter) = adapter_for(
-        FakeProcessSpec::stdout(fixture("codex-success.jsonl")),
+        FakeProcessSpec::stdout(fixture("codex-0.166.0-mock-success.jsonl")),
         &KEYED,
     );
     let (events, on_event) = collect();

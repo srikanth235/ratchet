@@ -1,0 +1,6 @@
+{"t":"session","id":"echo-session-1"}
+{"t":"tool","phase":"call","id":"c1","name":"mcp__ratchet__list_optimizations","input":{"status":"running"}}
+{"t":"tool","phase":"result","id":"c1","text":"[{\"id\":\"opt_1\"}]","error":false}
+{"t":"message","text":"One optimization is running."}
+{"t":"usage","input":200,"output":20,"cost":0.003}
+{"t":"done"}

@@ -20,12 +20,11 @@ use ratchet_agents::{
     GrokStreamParser, TurnSignal,
 };
 use ratchet_core::ports::{
-    Access, AgentAdapter, AgentEvent, AgentEventType, AgentSpec, CancellationToken, Harness,
-    McpServer, PortError, SessionSpec,
+    Access, AgentEvent, AgentEventType, AgentSpec, Harness, McpServer, SessionSpec,
 };
 use serde_json::{Value, json};
 
-use common::{collect, env_of, fixture};
+use common::{env_of, fixture};
 
 fn of_type(events: &[AgentEvent], t: AgentEventType) -> Vec<&AgentEvent> {
     events.iter().filter(|e| e.event_type == t).collect()
@@ -209,7 +208,7 @@ async fn claude_one_shot_writes_the_mcp_config_for_the_run_and_removes_it_after(
         let path = flag(&call.args, "--mcp-config").unwrap().to_string();
         let json = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         sink.lock().unwrap().push((path, json));
-        FakeProcessSpec::stdout(fixture("claude-success.jsonl"))
+        FakeProcessSpec::stdout(fixture("claude-2.1.316-mock-success.jsonl"))
     });
     let a = ClaudeCodeAdapter::new(ClaudeCodeOptions {
         cli: cli(&fake, &[("PATH", "/bin")]),
@@ -245,7 +244,9 @@ async fn claude_one_shot_writes_the_mcp_config_for_the_run_and_removes_it_after(
 
 #[tokio::test]
 async fn claude_start_session_with_resume_continues_that_session() {
-    let fake = FakeSpawner::new(FakeProcessSpec::stdout(fixture("claude-resume.jsonl")));
+    let fake = FakeSpawner::new(FakeProcessSpec::stdout(fixture(
+        "claude-2.1.316-mock-resume.jsonl",
+    )));
     let a = ClaudeCodeAdapter::new(ClaudeCodeOptions {
         cli: cli(&fake, &[("PATH", "/bin")]),
         allow_subscription_auth: true,
@@ -353,43 +354,6 @@ fn claude_assistant_error_and_http_status_classify_without_the_rate_limit_event(
     assert!(p.parse_line(&warn.to_string()).is_empty() && p.failure.is_none());
 }
 
-#[tokio::test]
-async fn claude_one_shot_failure_carries_the_classified_event_and_the_error() {
-    for (name, kind) in [
-        (
-            "claude-2.1.316-mock-rate-limit.jsonl",
-            AgentEventType::RateLimited,
-        ),
-        (
-            "claude-2.1.316-mock-auth-expired.jsonl",
-            AgentEventType::AuthExpired,
-        ),
-    ] {
-        let fake = FakeSpawner::new(FakeProcessSpec::stdout(fixture(name)));
-        let a = ClaudeCodeAdapter::new(ClaudeCodeOptions {
-            cli: cli(&fake, &[("PATH", "/bin")]),
-            allow_subscription_auth: true,
-            ..ClaudeCodeOptions::default()
-        });
-        let (events, sink) = collect();
-        let err = a
-            .start(
-                &AgentSpec {
-                    workdir: "/w".into(),
-                    prompt: "p".into(),
-                    ..AgentSpec::default()
-                },
-                &sink,
-                None,
-            )
-            .await
-            .unwrap_err();
-        assert!(matches!(err, PortError::AgentFailed { .. }), "{name}");
-        let events = events.lock().unwrap();
-        assert_eq!(of_type(&events, kind).len(), 1, "{name}");
-    }
-}
-
 // ---------------------------------------------------------------------------------------------------- Codex
 
 #[test]
@@ -470,7 +434,7 @@ async fn codex_overlay_home_replaces_the_flags_and_links_the_login() {
             read("auth.json"),
             call.args.iter().any(|a| a.contains("mcp_servers")),
         ));
-        FakeProcessSpec::stdout(fixture("codex-success.jsonl"))
+        FakeProcessSpec::stdout(fixture("codex-0.166.0-mock-success.jsonl"))
     });
     let a = CodexAdapter::new(CodexOptions {
         cli: cli(&fake, &[("PATH", "/bin")]),
@@ -504,7 +468,9 @@ async fn codex_overlay_home_replaces_the_flags_and_links_the_login() {
 
 #[tokio::test]
 async fn codex_one_shot_passes_both_api_key_variables_and_the_prompt_on_stdin() {
-    let fake = FakeSpawner::new(FakeProcessSpec::stdout(fixture("codex-success.jsonl")));
+    let fake = FakeSpawner::new(FakeProcessSpec::stdout(fixture(
+        "codex-0.166.0-mock-success.jsonl",
+    )));
     let a = CodexAdapter::new(CodexOptions {
         cli: cli(&fake, &[("OPENAI_API_KEY", "sk"), ("PATH", "/bin")]),
         ..CodexOptions::default()
@@ -651,7 +617,7 @@ fn codex_app_server_interrupted_turn_is_a_status_not_an_error() {
 
 #[test]
 fn codex_exec_reasoning_is_thinking_only_when_asked_and_failures_are_classified() {
-    let text = fixture("codex-success.jsonl");
+    let text = fixture("codex-0.166.0-mock-success.jsonl");
     let run = |thinking: bool| {
         let mut p = CodexStreamParser::new(|| 1, None);
         p.emit_thinking = thinking;
@@ -728,7 +694,7 @@ async fn grok_overlay_home_holds_the_session_servers_and_the_api_key_goes_under_
         sink.lock()
             .unwrap()
             .push((read("config.toml"), read("auth.json")));
-        FakeProcessSpec::stdout(fixture("grok-success.jsonl"))
+        FakeProcessSpec::stdout(fixture("grok-1.0.70-mock-success.jsonl"))
     });
     // only the second name is set: both reach the child
     let a = GrokAdapter::new(GrokOptions {
@@ -877,41 +843,6 @@ fn grok_acp_errors_are_classified() {
     let (_, auth) = grok_acp("grok-1.0.70-mock-acp-auth-expired.jsonl");
     assert_eq!(of_type(&auth, AgentEventType::AuthExpired).len(), 1);
     assert_eq!(of_type(&auth, AgentEventType::Error).len(), 1);
-}
-
-#[tokio::test]
-async fn grok_one_shot_failure_returns_agent_failed_with_the_classified_event() {
-    for (name, kind) in [
-        (
-            "grok-1.0.70-mock-rate-limit.jsonl",
-            AgentEventType::RateLimited,
-        ),
-        (
-            "grok-1.0.70-mock-auth-expired.jsonl",
-            AgentEventType::AuthExpired,
-        ),
-    ] {
-        let fake = FakeSpawner::new(FakeProcessSpec::stdout(fixture(name)).with_exit(1));
-        let a = GrokAdapter::new(GrokOptions {
-            cli: cli(&fake, &[("XAI_API_KEY", "k"), ("PATH", "/bin")]),
-            ..GrokOptions::default()
-        });
-        let (events, sink) = collect();
-        let err = a
-            .start(
-                &AgentSpec {
-                    workdir: "/w".into(),
-                    prompt: "p".into(),
-                    ..AgentSpec::default()
-                },
-                &sink,
-                Some(&CancellationToken::new()),
-            )
-            .await
-            .unwrap_err();
-        assert!(matches!(err, PortError::AgentFailed { .. }), "{name}");
-        assert_eq!(of_type(&events.lock().unwrap(), kind).len(), 1, "{name}");
-    }
 }
 
 // ---------------------------------------------------------------------------------------------------- capabilities

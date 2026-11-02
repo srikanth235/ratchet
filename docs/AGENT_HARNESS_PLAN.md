@@ -229,7 +229,7 @@ each slot.
 
 - **Conformance suite** (`ratchet-agents/tests/conformance.rs`): the same scenarios run against every harness through `FakeSpawner`
   and recorded fixtures: start, resume, deltas, tool call/result, usage, rate limit, auth expired, crash, interrupt, MCP tool call.
-- **Fixtures carry their CLI version** in the file name (`claude-2.1.316-success.jsonl`); a recorder script
+- **Fixtures carry their CLI version** in the file name (`claude-2.1.316-mock-success.jsonl`: `<cli>-<version>-<real|mock>-<behaviour>`); a recorder script
   (`scripts/record-fixtures.sh`) regenerates them from the real CLIs.
 - **Live session fakes**: a fake CLI binary (Rust test helper) that speaks each long-lived protocol, for the chat engine tests.
 - **MCP server**: tool contract tests (schemas, refusals outside the tool set, token scoping).
@@ -438,6 +438,8 @@ No CLI installs. Codex and Grok are not installed in sessions; Claude Code is (`
 - Canary workflow file committed **disabled** until real-world testing is approved.
 - **Done when** adding a fourth harness only needs an adapter file + fixtures to pass the suite (proved with a test-only fake
   harness).
+- **Result (done):** see `docs/harness-matrix.md` section 7. Gate: `cargo test --workspace`, `cargo clippy --workspace --all-targets
+  -- -D warnings`, `cargo fmt --check`.
 
 ## 6. Risks
 
