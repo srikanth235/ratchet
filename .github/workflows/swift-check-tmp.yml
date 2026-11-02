@@ -1,0 +1,21 @@
+name: Swift check (temporary)
+# Temporary fast loop for the F2 refactor: debug build of every target plus the unit tests, no Rust, no snapshots.
+on:
+  push:
+    branches: [claude/harness-f2]
+    paths: ["apps/mac/**"]
+jobs:
+  swift:
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: apps/mac/Ratchet
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build --scratch-path "$HOME/Library/Developer/Ratchet/fast-build" 2>&1 | tail -n 150
+        shell: bash -o pipefail {0}
+      - name: Unit tests
+        run: swift test --scratch-path "$HOME/Library/Developer/Ratchet/fast-build" 2>&1 | { grep -v '✔ Test' || true; } | tail -n 300
+        shell: bash -o pipefail {0}
