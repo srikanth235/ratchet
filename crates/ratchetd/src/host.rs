@@ -225,6 +225,7 @@ mod tests {
         ApiEvent::RunActive {
             active,
             optimization_ids: vec![],
+            keeping_awake: active,
         }
     }
 
