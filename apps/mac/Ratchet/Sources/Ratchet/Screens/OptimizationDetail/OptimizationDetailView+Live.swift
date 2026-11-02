@@ -28,11 +28,20 @@ extension OptimizationDetailView {
                     .kitType(.body).foregroundStyle(Ink.textMuted)
             }
         }
-        HStack(alignment: .top, spacing: Space.pageX) {
-            KitSection("Best so far") { chart(optimization) }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            KitSection("Agents") { agentList }
-                .frame(width: 360, alignment: .leading)
+        // The agents sit beside the chart when there is room, and under it when there is not.
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: Space.pageX) {
+                KitSection("Best so far") { chart(optimization) }
+                    .frame(minWidth: Space.section * 12, idealWidth: Space.section * 12, maxWidth: .infinity, alignment: .leading)
+                KitSection("Agents") { agentList }
+                    .frame(width: Layout.sideColumn, alignment: .leading)
+            }
+            VStack(alignment: .leading, spacing: Space.block) {
+                KitSection("Best so far") { chart(optimization) }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                KitSection("Agents") { agentList }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         AgentLogSection(agents: detail?.agents ?? [])
         KitSection("Candidates") { CandidateTable(optimization: optimization, candidates: detail?.candidates ?? []) }
@@ -53,7 +62,7 @@ extension OptimizationDetailView {
                     StatusDot(tone: agent.state.tone)
                     VStack(alignment: .leading, spacing: 0) {
                         Text(agent.name).kitType(.bodyStrong).foregroundStyle(Ink.text).lineLimit(1)
-                        Text(agent.activity).kitType(.meta).foregroundStyle(Ink.textMuted).lineLimit(2)
+                        Text(agent.state.title + " · " + agent.activity).kitType(.meta).foregroundStyle(Ink.textMuted).lineLimit(2)
                         Text("Runs on \(agent.placement.title) · " + Plural.count(agent.evals, "eval") + " · " + Plural.count(agent.wins, "win"))
                             .kitType(.caption).foregroundStyle(Ink.textFaint)
                     }

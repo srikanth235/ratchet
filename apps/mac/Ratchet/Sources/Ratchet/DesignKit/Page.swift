@@ -3,7 +3,8 @@ import SwiftUI
 
 // Page-level parts: the scrolling page, its header, section headings, the hero number, the range switch.
 
-/// A scrolling page on the canvas, with the design's generous margins.
+/// A scrolling page on the canvas, with the design's generous margins. Every page has one content width (`Layout.contentWidth`),
+/// kept to the leading edge so probes line up; a page that needs another says why with `maxWidth`.
 struct KitPage<Content: View>: View {
     var maxWidth: CGFloat?
     let content: Content
@@ -21,7 +22,7 @@ struct KitPage<Content: View>: View {
                 VStack(alignment: .leading, spacing: Space.block) {
                     content
                 }
-                .frame(maxWidth: maxWidth ?? .infinity, alignment: .leading)
+                .frame(maxWidth: maxWidth ?? Layout.contentWidth, alignment: .leading)
                 .padding(.horizontal, Space.pageX)
                 .padding(.top, Space.pageTop)
                 .padding(.bottom, Space.pageBottom)
@@ -62,6 +63,7 @@ struct PageHeader<Trailing: View>: View {
             Spacer(minLength: Space.lg)
             trailing
         }
+        .dimsWhenInactive()
     }
 }
 
@@ -173,6 +175,16 @@ struct KitSwitch<Item: Identifiable & Hashable>: View {
                 Button(title(item)) { onSelect(item) }
                     .buttonStyle(RangeSegmentStyle(isSelected: item == selection))
                     .accessibilityAddTraits(item == selection ? .isSelected : [])
+            }
+        }
+        .dimsWhenInactive()
+        // Left and Right move the selection, as in every segmented control.
+        .onMoveCommand { direction in
+            guard let index = items.firstIndex(of: selection) else { return }
+            switch direction {
+            case .left: onSelect(items[max(index - 1, 0)])
+            case .right: onSelect(items[min(index + 1, items.count - 1)])
+            default: break
             }
         }
     }

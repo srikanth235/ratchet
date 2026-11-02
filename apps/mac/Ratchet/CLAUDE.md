@@ -61,6 +61,43 @@ Naming: a *harness* is an agent CLI (Claude Code, Codex, Grok): `Harness`, `Harn
 `DetectedHarness`. An *agent* is one running worker of an optimization. What a repo says about its benchmark is
 `BenchmarkDetection`.
 
+## The window shell (F4)
+
+The window is the native shell; the brand lives in the content. `ContentView` is a `NavigationSplitView`: the **system sidebar**
+(`Sidebar.swift`: the pages from `Page.sidebar`, then "Recent runs"; two levels, no action rows, no background or edge of its own;
+a selected run wears a brass wash) and the detail column under a native toolbar. Pages: Home, Overview, Optimizations, Agents,
+Benchmarks, Connectors; **Home and Agents are placeholders until P5b** (they fill `Screens/HomePage.swift` and `AgentsPage.swift`,
+everything around them is done). Command-1 to 6 follow `Page.sidebar`.
+
+- **Toolbar** (`Toolbar.swift`): `ShellToolbar` (declared on the detail column, never on the split view) holds the connection badge
+  ("Demo data", "Reconnecting…"), the sandbox status item (shape and word, popover with End Now) and New Optimization. Each page
+  adds its own items (the range on Overview, the filter on Optimizations, Refresh All and Add… on Connectors, the actions on
+  the open optimization) and a page-scoped `.searchable`. `SidebarCommands()` and `ToolbarCommands()` are on the scene.
+- **Title and restore**: `.navigationTitle` is the page ("New Optimization" in the flow), the subtitle a count, the range or the
+  open optimization's name. The window title is no longer "Ratchet", so the main window registers itself (`MainWindow`,
+  `UI/WindowBehavior.swift`); never look it up by title. `@SceneStorage` restores the page and the open optimization (ids only;
+  test and snapshot mode never restore).
+- **Lists**: `OptimizationTable` (`Screens/Shared.swift`) is a native `Table` (selection, sorting on every column, context menu, a
+  drag that carries the pull request's link, Return or double click opens). `OptimizationAction` and `OptimizationMenuItems`
+  (`Screens/OptimizationActions.swift`) are the one place for Open, Run Now, Stop…, Open Pull Request, Copy Link.
+- **Menus** (`FocusedActions.swift`): the table and the detail page publish the selected ids (`optimizationSelection`), the
+  Optimization menu, Export Report… and Add Connector… (File) and Find… (Edit) act on them. Stop never acts at once: it sets
+  `router.pendingStop` and the window shows one confirmation ("Stop Checkout p95?", "Wins found so far are kept."). Reversible
+  actions register Undo (Make Default, removing an AWS profile). "Run Now" starts an optimization that has not started
+  (`OptimizationsClient.runOptimization`, the daemon's `/start`).
+- **Settings**: four tabs, each one grouped `Form`, all 520 wide: General (menu bar, "Default for new optimizations"),
+  Notifications, This Mac (background service with Stop and Demo mode behind a confirmation, login item, command-line tool) and
+  Advanced. Templates, Connectors and agents are not in Settings.
+- **Liquid Glass**: sheets, popovers, bars and the menu bar window have no custom background. Floating surfaces (`KitComposer`,
+  `KitSteeringField`) are `.glassEffect()` inside a `KitGlassContainer`; P5b fills the containers and anchors them with
+  `.safeAreaInset(edge: .bottom)`. Custom chrome calls `.dimsWhenInactive()` (`appearsActive`).
+- **Daemon down**: with data on screen, `DaemonBanner` sits above every page and `\.daemonActionsEnabled` is false, which
+  disables New Optimization, Stop, Run Now, Open Pull Request, Add Connector… and End Now. Without data the full-window
+  `DaemonStatusView` stays. Empty, loading and failed-connector states are in `States.swift` and `ConnectorRow`; a broken
+  status always has its fix beside it (Sign in, Add key, Re-detect).
+- **Layout**: one content width (`Layout.contentWidth`) in `KitPage`; the page margin is `Space.pageX`, passed to `.gridArea(_,
+  inset:)`; side columns use `ViewThatFits`; nested radii use `ConcentricRectangle`; the ⋯ of a row is `KitMoreMenu` (28 pt hit area).
+
 ## The bundled daemon
 
 `./build.sh` also builds the Rust helpers (`tools/build-helpers.sh`, host arch; `--universal` for arm64 + x86_64 joined with `lipo`) and puts
@@ -77,8 +114,8 @@ Ratchet.app/Contents/
 The plists come from `ratchetd launchagent print --bundle-program ... [--demo]`. `DaemonController` (app target) registers one of them with
 `SMAppService.agent(plistName:)` on first launch; the rules (register, wait for the socket, approval in Login Items, restart, stop, switch
 to demo) are `DaemonLifecycle` in RatchetKit, a pure state machine with tests. While the socket is silent the window shows
-`DaemonStatusView` ("Starting Ratchet…", or the Login Items prompt, or a failure with Try again). Settings has Restart / Stop / Demo mode /
-Open log and notifications. A daemon you start yourself is used as is: set `RATCHET_HOME=<dir>` (or `RATCHET_SOCKET`) and the app only watches
+`DaemonStatusView` ("Starting Ratchet…", or the Login Items prompt, or a failure with Try again). Settings, This Mac, has Restart / Stop… / Demo
+mode / Open Log (Stop and Demo mode ask first). A daemon you start yourself is used as is: set `RATCHET_HOME=<dir>` (or `RATCHET_SOCKET`) and the app only watches
 that socket and registers nothing. A build with no `ratchetd` inside (`RATCHET_SKIP_DAEMON=1`, or the Rust build failed) and no `RATCHET_HOME`
 is `Management.unbundled`: `DaemonStatusView` says "This build has no background service" at once (not after 40 s of "Starting…"), and
 `build.sh` ends with a loud WARNING box. A new build can meet the previous build's daemon, because the LaunchAgent outlives the app: once per
@@ -145,9 +182,9 @@ Test and snapshot mode never register anything. Snapshot: `settings-login-approv
 ## Layout
 
 - `Sources/RatchetAPI/` generated OpenAPI types and client (see Data). `Sources/RatchetKit/` models (`Models/`, `Setup/`, `Insights/`), formatting, client protocols, mock, `Daemon/`, `Chat/`, `Store/`, `NewOptimizationFlow`, `AddConnectorForm`. No SwiftUI. Tests in `Tests/RatchetKitTests/`.
-- `Sources/Ratchet/` the app: `App.swift` (scenes, commands, `Store`), `ContentView.swift`, `Sidebar.swift`, `Pages.swift` (the `Page` enum: title, icon, availability, shortcut and destination of each page), `Router.swift`, `MenuBarView.swift`, `SettingsView.swift`, `Snapshot.swift`, `SelfTest.swift`, `DaemonController.swift`, `DaemonStatusView.swift`, `AppNotifier.swift`, `NotificationPrompt.swift`, `CommandLineTool.swift`, `DebugBridge.swift`, `SelfTestAudits.swift`.
+- `Sources/Ratchet/` the app: `App.swift` (scenes, commands, `Store`), `ContentView.swift`, `Sidebar.swift`, `Toolbar.swift`, `FocusedActions.swift`, `States.swift`, `Pages.swift` (the `Page` enum: title, icon, availability, shortcut and destination of each page), `Router.swift`, `MenuBarView.swift`, `SettingsView.swift`, `Snapshot.swift`, `SelfTest.swift`, `DaemonController.swift`, `DaemonStatusView.swift`, `AppNotifier.swift`, `NotificationPrompt.swift`, `CommandLineTool.swift`, `DebugBridge.swift`, `SelfTestAudits.swift`.
 - `Sources/Ratchet/Screens/` one file per screen, a folder when a screen has several views: Overview, Optimizations, `OptimizationDetail/`, New optimization steps, Benchmarks, `Connectors/` (page, row, edit form, device-flow card, Add sheet, `ConnectorsPageState`).
-- `Sources/Ratchet/DesignKit/` the design kit: `Tokens.swift` (Palette, Ink, Dim, Layout, Motion), `PartState.swift` (states, focus ring), `Type.swift`, `Icons.swift`, `Buttons.swift`, `Rows.swift`, `Choice.swift`, `Controls.swift` (chip, segmented, toggle, composer, settings sidebar, status shape), `Page.swift`, `KitGallery.swift` (`APP_KIT_GALLERY=1`; snapshot scenes `gallery-*`).
+- `Sources/Ratchet/DesignKit/` the design kit: `Tokens.swift` (Palette, Ink, Dim, Layout, Motion), `PartState.swift` (states, focus ring), `Type.swift`, `Icons.swift`, `Buttons.swift`, `Rows.swift`, `Choice.swift`, `Controls.swift` (chip, segmented, toggle, composer, settings sidebar, status shape), `Glass.swift` (glass container, steering field, dimsWhenInactive), `Page.swift`, `KitGallery.swift` (`APP_KIT_GALLERY=1`; snapshot scenes `gallery-*`).
 - `Sources/Ratchet/UI/` `Grid.swift` (the 4 pt scale, layout probes), `WindowBehavior.swift`.
 
 ## Build and check
@@ -158,7 +195,7 @@ Test and snapshot mode never register anything. Snapshot: `settings-login-approv
   audits the system's side (`SelfTestAudits.swift`): the Go and File menus against `Page.sidebar` and the commands (titles, keys, enabled),
   every `KitIcon` case (`CaseIterable`) drawn at 16 and 32 pt, a notification's content and destination round trip and a
   click through the router, the `ratchet://` scheme in `Info.plist`, and a short event-stream smoke test. `tools/smoke-daemon.sh` starts the bundled `ratchetd serve --mode sim` on a temp socket and runs `Ratchet --selftest-live` against it (the real client path); CI runs both.
-- Snapshots: `tools/snap.sh` writes `/tmp/Ratchet-shots/<scene>-light.png` and `-dark.png` for the four pages, the optimization detail (live, finished, no win), the four New optimization steps, and `settings-<tab>-*.png`, the parts gallery (`gallery-actions`, `-choices`, `-rows`, `-inputs`, `-status`, `-identity`, `-type`, `-tokens`), and the states `daemon-starting`, `daemon-approval`, `notification-prompt`, `connector-signin`, and the setup states `new-repo-found`, `new-repo-invalid`, `new-repo-template`, `new-local-folder`, `new-local-noremote`, `new-missing`, `connectors-add-github`, `connectors-add-aws`, `connectors-add-agent`, `connectors-edit`, `connectors-rename`, `connectors-check`, `connectors-keychain`, `template-pr`, `settings-advanced`, and the scenes `daemon-failed`, `daemon-stopped`, `daemon-unbundled`, `empty-overview`, `empty-optimizations`,
+- Snapshots: `tools/snap.sh` writes `/tmp/Ratchet-shots/<scene>-light.png` and `-dark.png` for the pages (Home and Agents too), the optimization detail (live, finished, no win), the four New optimization steps, and `settings-<tab>-*.png` (general, notifications, this-mac, advanced, plus `settings-advanced-open` and `settings-login-approval`), the parts gallery (`gallery-actions`, `-choices`, `-rows`, `-inputs`, `-status`, `-identity`, `-type`, `-tokens`), and the states `daemon-starting`, `daemon-approval`, `notification-prompt`, `connector-signin`, and the setup states `new-repo-found`, `new-repo-invalid`, `new-repo-template`, `new-local-folder`, `new-local-noremote`, `new-missing`, `connectors-add-github`, `connectors-add-aws`, `connectors-add-agent`, `connectors-edit`, `connectors-rename`, `connectors-check`, `connectors-keychain`, `template-pr`, `settings-advanced`, and the scenes `daemon-failed`, `daemon-stopped`, `daemon-unbundled`, `daemon-down` (the banner over a page with data), `loading-overview`, `failed-connector`, `empty-overview`, `empty-optimizations`,
   `empty-benchmarks` (the sample world emptied with `MockRatchetClient.simulate(empty:)`), `menubar`, `menubar-empty` (the menu bar panel's view hosted in a window,
   `MenuBarCapture`) and `notifications-denied` (Settings). `APP_SNAPSHOT_PAGES=overview,new-budget tools/snap.sh` limits the scenes.
 - Grid and kit lint: `tools/grid-lint.sh` (bash or zsh; every Swift file incl. `Tokens.swift`; also flags raw colors and SF Symbols outside the kit), then `swift tools/check-layout.swift /tmp/Ratchet-shots/*-layout.json`.
@@ -172,7 +209,7 @@ Test and snapshot mode never register anything. Snapshot: `settings-login-approv
 - Colors only through `Ink` (light and dark values), fonts only through `.kitType(...)`, icons through `KitIcon`.
 - Parts are real controls (`Button` with a `ButtonStyle`), never a shape with a tap gesture. Each takes `forcedPartState` and is shown in every state in `KitGallery`.
 - `.tint(Ink.brass)` is set at each scene root; motion only through `Motion` (nil under Reduce Motion).
-- Window chrome (title bar, toolbar, menus, sheets, popovers) stays system. Every action has a menu item and a shortcut: Command-N new optimization, Command-1 to 9 for the pages in `Page.sidebar` order.
+- Window chrome (title bar, toolbar, sidebar, menus, sheets, popovers) stays system: no custom background behind it. Every action has a menu item and a shortcut: Command-N new optimization, Command-1 to 9 for the pages in `Page.sidebar` order.
 - Pure app logic (menu bar `timeFraction`/`runNote`/`sandboxLine`, the CLI link states, route rules, links, the debug bridge protocol) lives in RatchetKit with tests, not in views.
 - Money, percents and durations go through `Money`, `Percent`, `Elapsed` in the Kit, so the tests cover them.
 - Main-actor default isolation in the app target; the Kit target is nonisolated, its types are `Sendable` structs, `MockRatchetClient` is an actor and `DaemonRatchetClient` a `Sendable` class. The stores are `@MainActor @Observable` classes.

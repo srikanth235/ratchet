@@ -17,6 +17,9 @@ public protocol OptimizationsClient: Sendable {
     func candidates(optimizationID: String) async throws -> [Candidate]
     func ratchetHistory(optimizationID: String) async throws -> [RatchetMove]
     func startOptimization(_ request: StartRequest) async throws -> Optimization
+    /// "Run Now": starts the baseline and the agents of an optimization that has not started. Idempotent while it runs;
+    /// refused once it ended.
+    func runOptimization(id: String) async throws -> Optimization
     /// The kill switch: stops the agents, revokes their keys and ends the run. Wins found so far are kept.
     func stopOptimization(id: String) async throws
     /// Opens the pull request with the squashed verified wins and returns where it is. Refused without a verified win.

@@ -9,7 +9,7 @@ struct OptimizationDetailView: View {
     @Environment(AppStore.self) var store
     @Environment(AppRouter.self) var router
     @Environment(\.openURL) var openURL
-    @State var confirmingStop = false
+    @Environment(\.daemonActionsEnabled) var actionsEnabled
 
     var detail: OptimizationDetail? { store.optimizationStore.details[id] }
     var optimization: Optimization? { store.optimizationStore.optimization(id: id) ?? detail?.optimization }
@@ -26,6 +26,7 @@ struct OptimizationDetailView: View {
                     }
                     .buttonStyle(.kit(.link))
                     header(optimization)
+                        .gridProbe("header", area: "detail")
                     if optimization.status.isFinished {
                         resultBody(optimization)
                     } else {
@@ -36,6 +37,37 @@ struct OptimizationDetailView: View {
                 ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
+        .gridArea("detail", inset: Space.pageX)
+        .toolbar {
+            // Actions on the open optimization: the same as the Optimization menu and the table's context menu.
+            ToolbarItemGroup {
+                if let optimization {
+                    if OptimizationAction.canRun(optimization) {
+                        Button("Run Now", systemImage: "play") { Task { await store.optimizationStore.runNow(id) } }
+                            .disabled(!actionsEnabled)
+                            .help("Start this optimization now (Shift-Command-R)")
+                    }
+                    if OptimizationAction.canOpenPullRequest(optimization) {
+                        Button(optimization.prNumber.map { "Open Pull Request #\($0)" } ?? "Create Pull Request", systemImage: "arrow.triangle.pull") {
+                            Task { await OptimizationAction.openPullRequest(optimization, store: store) }
+                        }
+                        .disabled(!actionsEnabled && optimization.prNumber == nil)
+                        .help("Open the pull request with the verified wins (Shift-Command-P)")
+                    }
+                    if optimization.status.isFinished {
+                        Button("Export Report…", systemImage: "square.and.arrow.up") {
+                            Task { await OptimizationAction.exportReport(optimization, store: store) }
+                        }
+                        .help("Save the report as a markdown file (Shift-Command-E)")
+                    } else {
+                        Button("Stop…", systemImage: "stop.circle") { router.pendingStop = id }
+                            .disabled(!actionsEnabled)
+                            .help("Stop this optimization (Command-Period)")
+                    }
+                }
+            }
+        }
+        .focusedSceneValue(\.optimizationSelection, [id])
         .task(id: id) {
             await store.optimizationStore.loadDetail(id: id)
             if store.optimizationStore.details[id]?.optimization.status.isFinished == true { await store.insight.loadInsights(id) }
@@ -44,57 +76,21 @@ struct OptimizationDetailView: View {
 
     // MARK: Header
 
+    /// The title, where it runs and its status word. The actions are in the toolbar.
     func header(_ optimization: Optimization) -> some View {
         PageHeader(optimization.title, subtitle: optimization.repo + " · " + optimization.branch) {
             StatusLabel(tone: optimization.status.tone, text: optimization.status.title)
             if optimization.status == .waiting {
                 Button("Review environment") { router.reviewEnvironment(of: optimization, client: store.client) }
                     .buttonStyle(.kit(.primary))
-            }
-            if let number = optimization.prNumber {
-                Button("Open pull request #\(number)") { openPullRequest(optimization, number) }
-                    .buttonStyle(.kit(.primary))
-            } else if optimization.status.isFinished && optimization.winsCount > 0 {
-                Button("Create pull request") { Task { if let url = await store.optimizationStore.openPullRequest(id) { openURL(url) } } }
-                    .buttonStyle(.kit(.primary))
-            }
-            if optimization.status.isFinished {
-                Button("Export report") { Task { await exportReport() } }
-                    .buttonStyle(.kit(.quiet))
-            } else {
-                Button("Stop…") { confirmingStop = true }
-                    .buttonStyle(.kit(.quiet))
-                    .confirmationDialog(
-                        "Stop this optimization?", isPresented: $confirmingStop, titleVisibility: .visible
-                    ) {
-                        Button("Stop and revoke keys", role: .destructive) { Task { await store.optimizationStore.stopOptimization(id) } }
-                        Button("Keep running", role: .cancel) {}
-                    } message: {
-                        Text("The agents stop, their keys are revoked and the sandbox is removed once nothing else uses it. Wins found so far are kept.")
-                    }
+                    .disabled(!actionsEnabled)
             }
         }
     }
 
     /// Where the pull request is: the address the daemon gave, else GitHub's.
     func openPullRequest(_ optimization: Optimization, _ number: Int) {
-        let address = optimization.prURL ?? "https://github.com/\(optimization.repo)/pull/\(number)"
-        if let url = URL(string: address) { openURL(url) }
-    }
-
-    /// The markdown report, through the system save dialog.
-    @MainActor
-    func exportReport() async {
-        guard let report = await store.optimizationStore.report(id) else { return }
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = report.fileName
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            try report.markdown.write(to: url, atomically: true, encoding: .utf8)
-        } catch {
-            store.reportProblem(error.localizedDescription)
-        }
+        NSWorkspace.shared.open(OptimizationAction.link(for: optimization))
     }
 
     // MARK: Shared

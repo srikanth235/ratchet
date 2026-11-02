@@ -143,3 +143,49 @@ struct KitIconButtonStyle: ButtonStyle {
         }
     }
 }
+
+/// The ⋯ of a row: an `ellipsis` symbol in a 28 pt hit area (the smallest target), opening the row's actions. Every action
+/// in the menu is also in the context menu and the menu bar. Always labelled.
+struct KitMoreMenu<Items: View>: View {
+    let label: String
+    let items: Items
+
+    init(_ label: String, @ViewBuilder items: () -> Items) {
+        self.label = label
+        self.items = items()
+    }
+
+    var body: some View {
+        Menu {
+            items
+        } label: {
+            MoreGlyph()
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .accessibilityLabel(label)
+        .help(label)
+    }
+
+    private struct MoreGlyph: View {
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.forcedPartState) private var forced
+        @State private var hovering = false
+
+        var body: some View {
+            let state = PartState.resolve(forced: forced, isEnabled: isEnabled, pressed: false, hovering: hovering,
+                                          focused: false)
+            Image(systemName: "ellipsis")
+                .imageScale(.large)
+                .foregroundStyle(state == .hover || state == .pressed ? Ink.text : Ink.textMuted)
+                .frame(width: Dim.buttonHeightSmall, height: Dim.buttonHeightSmall)
+                .background(RoundedRectangle(cornerRadius: Dim.radiusButton, style: .continuous)
+                    .fill(state == .hover || state == .pressed ? Ink.hover : Color.clear))
+                .opacity(state == .disabled ? Dim.disabledOpacity : 1)
+                .contentShape(.rect)
+                .onHover { hovering = $0 }
+                .animation(Motion.hover, value: hovering)
+        }
+    }
+}

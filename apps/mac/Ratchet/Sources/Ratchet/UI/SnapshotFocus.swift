@@ -9,4 +9,6 @@ final class SnapshotFocus {
     var target: String?
     /// The metric the benchmark run should show ("p99"), or nil for the objective.
     var metric: String?
+    /// Snapshot mode only: show the first-load state (grey blocks) even though the data is there (v0.3.1 screen 14).
+    var showsLoading = false
 }

@@ -1,7 +1,9 @@
 import RatchetKit
 import SwiftUI
 
-/// The Settings window (Command-Comma): General, and the same Connectors as the sidebar page.
+/// The Settings window (Command-Comma): four tabs, each one grouped `Form`, every tab 520 wide so the window never changes
+/// width. Native layout and controls; text through `.kitType`, colour through `Ink`. Settings apply at once. Templates, Connectors
+/// and agents live in the window's pages, not here.
 struct SettingsView: View {
     @Environment(AppRouter.self) private var router
     @Environment(DaemonController.self) private var daemon
@@ -40,56 +42,178 @@ struct SettingsView: View {
 
     @ViewBuilder
     private func page(_ tab: SettingsTab) -> some View {
-        switch tab {
-        case .general:
-            Form { GeneralSettings() }
-                .formStyle(.grouped)
-                .fitsContent()
-                .frame(width: Layout.settingsWidth)
-        case .connectors:
-            ConnectorsPage(embedded: true)
-                .frame(width: 800, height: 600)
+        Form {
+            switch tab {
+            case .general: GeneralSettings()
+            case .notifications: NotificationSettings()
+            case .thisMac: ThisMacSettings()
+            case .advanced: AdvancedSettingsPane()
+            }
         }
+        .formStyle(.grouped)
+        .fitsContent()
+        .frame(width: Layout.settingsWidth)
     }
 }
 
 /// The Settings tabs. Snapshot mode walks through every case.
 enum SettingsTab: String, CaseIterable, Identifiable {
-    case general, connectors
+    case general, notifications
+    case thisMac = "this-mac"
+    case advanced
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .general: "General"
-        case .connectors: "Connectors"
+        case .notifications: "Notifications"
+        case .thisMac: "This Mac"
+        case .advanced: "Advanced"
         }
     }
 
     var symbol: String {
         switch self {
         case .general: "gearshape"
-        case .connectors: "link"
+        case .notifications: "bell"
+        case .thisMac: "desktopcomputer"
+        case .advanced: "gearshape.2"
         }
     }
 }
 
+// MARK: - General
+
 struct GeneralSettings: View {
+    @AppStorage("menuBarItem") private var showMenuBarItem = true
+    @Environment(AppRouter.self) private var router
+    @Environment(\.openWindow) private var openWindow
+
+    /// The order optimizations try the agents in, as the Agents page keeps it.
+    private var agentOrder: String {
+        let order = UserDefaultsHarnessPreferences().optimizationOrder
+        return order.isEmpty ? "Automatic" : order.map(\.title).joined(separator: " → ")
+    }
+
+    var body: some View {
+        Section {
+            Toggle("Show Ratchet in the menu bar", isOn: $showMenuBarItem)
+                .controlSize(.mini)
+        } header: {
+            Text("Menu bar").kitType(.microStrong).foregroundStyle(Ink.textFaint)
+        } footer: {
+            Text("Running optimizations, what needs you and the sandbox, one click away. Closing the window keeps Ratchet running while this is on.")
+                .kitType(.caption).foregroundStyle(Ink.textFaint)
+        }
+        Section {
+            LabeledContent("Agents", value: agentOrder)
+            Button("Change on the Agents Page") {
+                LaunchContext.revealWindow { openWindow(id: "main") }
+                router.show(.agents)
+            }
+        } header: {
+            Text("Default for new optimizations").kitType(.microStrong).foregroundStyle(Ink.textFaint)
+        } footer: {
+            Text("A new optimization starts from these. Each optimization shows “Using default” until you change it there.")
+                .kitType(.caption).foregroundStyle(Ink.textFaint)
+        }
+    }
+}
+
+// MARK: - Notifications
+
+struct NotificationSettings: View {
+    @Environment(AppNotifier.self) private var notifier
+
+    var body: some View {
+        Section {
+            switch notifier.authorization {
+            case .allowed:
+                ForEach(NotificationCategory.allCases) { category in
+                    NotificationSwitch(category: category)
+                }
+            case .denied:
+                LabeledContent("Notifications", value: "Off in System Settings")
+                Button("Open Notification Settings") { notifier.openSystemSettings() }
+            case .notDetermined, .unknown:
+                LabeledContent("Notifications", value: "Not turned on yet")
+                Button("Turn on notifications") { Task { await notifier.requestPermission() } }
+            }
+        } header: {
+            Text("Tell me when").kitType(.microStrong).foregroundStyle(Ink.textFaint)
+        } footer: {
+            Text(footer).kitType(.caption).foregroundStyle(Ink.textFaint)
+        }
+    }
+
+    private var footer: String {
+        switch notifier.authorization {
+        case .allowed: "Posted only while Ratchet is in the background."
+        case .denied: "Notifications for Ratchet are off in System Settings, so nothing can reach you."
+        case .notDetermined, .unknown:
+            "Ratchet can tell you when a win is ready to merge, a budget is reached or a run finishes. It never asks anything else."
+        }
+    }
+}
+
+private struct NotificationSwitch: View {
+    let category: NotificationCategory
+    @AppStorage private var isOn: Bool
+
+    init(category: NotificationCategory) {
+        self.category = category
+        _isOn = AppStorage(wrappedValue: true, category.defaultsKey)
+    }
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            VStack(alignment: .leading) {
+                Text(category.title)
+                Text(category.explanation).kitType(.caption).foregroundStyle(Ink.textFaint)
+            }
+        }
+        .controlSize(.mini)
+    }
+}
+
+// MARK: - This Mac
+
+/// What belongs to this Mac: the background service, the login item and the command-line tool. Stop and Demo mode ask first.
+struct ThisMacSettings: View {
     @AppStorage("menuBarItem") private var showMenuBarItem = true
     @Environment(AppStore.self) private var store
     @Environment(DaemonController.self) private var daemon
-    @Environment(AppNotifier.self) private var notifier
     @Environment(LoginItem.self) private var loginItem
+    @State private var confirmingStop = false
+    @State private var pendingDemo: Bool?
     private let cli = CommandLineTool.shared
 
     var body: some View {
-        Section("Menu bar") {
-            Toggle("Show Ratchet in the menu bar", isOn: $showMenuBarItem)
-            Text("Running optimizations, what needs you and the sandbox, one click away. Closing the window keeps Ratchet running while this is on.")
-                .kitType(.caption)
-                .foregroundStyle(Ink.textFaint)
+        Section {
+            statusRow
+            if daemon.management == .managed {
+                Toggle("Demo mode", isOn: Binding(get: { daemon.mode == .demo }, set: { pendingDemo = $0 }))
+                    .controlSize(.mini)
+                HStack {
+                    Button("Restart") { daemon.restart() }
+                    if daemon.phase == .stopped {
+                        Button("Start") { daemon.startAgain() }
+                    } else {
+                        Button("Stop…") { confirmingStop = true }
+                    }
+                    Button("Open Log") { DaemonLog.reveal() }
+                }
+            }
+        } header: {
+            Text("Background service").kitType(.microStrong).foregroundStyle(Ink.textFaint)
+        } footer: {
+            Text(daemon.management == .managed
+                 ? "ratchetd keeps optimizations running after you quit Ratchet. Stopping it pauses them. Login Items in System Settings lists it as Ratchet. Demo mode runs it on made-up data with no accounts; your real optimizations come back when you switch it off."
+                 : "Ratchet is not managing the background service in this copy.")
+                .kitType(.caption).foregroundStyle(Ink.textFaint)
         }
-        Section("Startup") {
+        Section {
             Toggle("Launch at login", isOn: Binding(
                 get: { loginItem.state.isRequested },
                 set: { on in
@@ -97,81 +221,67 @@ struct GeneralSettings: View {
                     if on { showMenuBarItem = true }
                     if let problem = loginItem.set(on) { store.reportProblem(problem) }
                 }))
+                .controlSize(.mini)
                 .disabled(loginItem.state == .unavailable)
-            Text(loginItemNote)
-                .font(.caption)
-                .foregroundStyle(.secondary)
             if loginItem.state == .needsApproval {
                 Button("Open Login Items") { loginItem.openSystemSettings() }
             }
+        } header: {
+            Text("Login item").kitType(.microStrong).foregroundStyle(Ink.textFaint)
+        } footer: {
+            Text(loginItemNote).kitType(.caption).foregroundStyle(Ink.textFaint)
         }
-        Section("Background service") {
-            LabeledContent("Status", value: statusText)
-            if daemon.management == .managed {
-                Toggle("Demo mode", isOn: Binding(
-                    get: { daemon.mode == .demo },
-                    set: { on in
-                        daemon.setMode(on ? .demo : .real)
-                        Task { await store.useSource(isDemoData: on, cacheURL: Store.cacheURL(demo: on)) }
-                    }))
-                Text("Demo mode runs ratchetd on made-up data, with no accounts. Your real optimizations are untouched and come back when you switch it off.")
-                    .kitType(.caption).foregroundStyle(Ink.textFaint)
-                HStack {
-                    Button("Restart") { daemon.restart() }
-                    if daemon.phase == .stopped {
-                        Button("Start") { daemon.startAgain() }
-                    } else {
-                        Button("Stop") { daemon.stop() }
-                    }
-                    Button("Open log") { DaemonLog.reveal() }
-                }
-                Text("ratchetd keeps optimizations running after you quit Ratchet. Stopping it pauses them. Login Items in System Settings lists it as Ratchet.")
-                    .kitType(.caption).foregroundStyle(Ink.textFaint)
-            }
-        }
-        Section("Notifications") {
-            switch notifier.authorization {
-            case .allowed:
-                ForEach(NotificationCategory.allCases) { category in
-                    NotificationSwitch(category: category)
-                }
-            case .denied:
-                Text("Notifications for Ratchet are off in System Settings.").kitType(.caption).foregroundStyle(Ink.textFaint)
-                Button("Open Notification Settings") { notifier.openSystemSettings() }
-            case .notDetermined, .unknown:
-                Text("Ratchet can tell you when a win is ready to merge, an environment waits for approval, a budget is reached or a run finishes.")
-                    .kitType(.caption).foregroundStyle(Ink.textFaint)
-                Button("Turn on notifications") { Task { await notifier.requestPermission() } }
-            }
-        }
-        Section("Command line") {
+        Section {
             LabeledContent("ratchet", value: commandLineStatus)
             if CommandLineTool.available {
                 HStack {
                     if cli.isInstalled {
-                        Button("Remove command line tool") { cli.uninstall() }
+                        Button("Remove") { cli.uninstall() }
                     } else {
-                        Button(cli.hasBrokenLink ? "Repair command line tool" : "Install command line tool") { cli.installForUser() }
+                        Button(cli.hasBrokenLink ? "Repair" : "Install") { cli.installForUser() }
                     }
                     if !cli.systemState.isInstalled {
-                        Button("Install for all users…") { cli.installForEveryone() }
+                        Button("Install for All Users…") { cli.installForEveryone() }
                     }
                 }
-                if let note = cli.note { Text(note).kitType(.caption).foregroundStyle(Ink.textFaint) }
             }
-            Text("Adds a ratchet command to your Terminal, for scripts and agents. It goes in ~/.local/bin, a link to the copy inside this app. \"All users\" puts one in /usr/local/bin and asks for your password.")
-                .kitType(.caption).foregroundStyle(Ink.textFaint)
+        } header: {
+            Text("Command-line tool").kitType(.microStrong).foregroundStyle(Ink.textFaint)
+        } footer: {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                if let note = cli.note { Text(note) }
+                Text("Adds a ratchet command to your Terminal, for scripts and agents. It goes in ~/.local/bin, a link to the copy inside this app. “All users” puts one in /usr/local/bin and asks for your password.")
+            }
+            .kitType(.caption).foregroundStyle(Ink.textFaint)
         }
-        Section("Data") {
-            LabeledContent("Source", value: sourceText)
-            LabeledContent("Optimizations", value: "\(store.optimizationStore.optimizations.count)")
+    }
+
+    /// Stop and Demo mode change what is running: each asks once, says what happens, and can be cancelled.
+    private var statusRow: some View {
+        LabeledContent("Status", value: statusText)
+        .confirmationDialog("Stop the background service?", isPresented: $confirmingStop, titleVisibility: .visible) {
+            Button("Stop", role: .destructive) { daemon.stop() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Running optimizations pause until you start it again.")
         }
-        AdvancedSettingsSection()
-        Section("Shortcuts") {
-            LabeledContent("New optimization", value: "Command-N")
-            LabeledContent("Overview, Optimizations, Benchmarks, Connectors", value: "Command-1 to 4")
-            LabeledContent("Refresh", value: "Command-R")
+        .confirmationDialog(
+            pendingDemo == true ? "Switch to demo mode?" : "Switch back to your real data?",
+            isPresented: Binding(get: { pendingDemo != nil }, set: { if !$0 { pendingDemo = nil } }),
+            titleVisibility: .visible, presenting: pendingDemo
+        ) { on in
+            Button("Switch", role: on ? .destructive : nil) { setDemo(on) }
+            Button("Cancel", role: .cancel) {}
+        } message: { on in
+            Text(on
+                 ? "Real runs pause until you switch back. Demo mode shows made-up data and uses no accounts."
+                 : "Your real optimizations come back. The made-up data goes away.")
         }
+    }
+
+    private func setDemo(_ on: Bool) {
+        daemon.setMode(on ? .demo : .real)
+        Task { await store.useSource(isDemoData: on, cacheURL: Store.cacheURL(demo: on)) }
     }
 
     private var commandLineStatus: String {
@@ -208,29 +318,27 @@ struct GeneralSettings: View {
         case .failed(let why): "Failed: " + why
         }
     }
+}
+
+// MARK: - Advanced
+
+struct AdvancedSettingsPane: View {
+    @Environment(AppStore.self) private var store
+    @Environment(DaemonController.self) private var daemon
+
+    var body: some View {
+        Section {
+            LabeledContent("Source", value: sourceText)
+            LabeledContent("Optimizations", value: "\(store.optimizationStore.optimizations.count)")
+        } header: {
+            Text("Data").kitType(.microStrong).foregroundStyle(Ink.textFaint)
+        }
+        AdvancedSettingsSection()
+    }
 
     private var sourceText: String {
         if Store.isOverridden { return "Sample data (test mode)" }
         if daemon.management == .none { return "Sample data" }
         return store.isDemoData ? "ratchetd, demo mode" : "ratchetd"
-    }
-}
-
-private struct NotificationSwitch: View {
-    let category: NotificationCategory
-    @AppStorage private var isOn: Bool
-
-    init(category: NotificationCategory) {
-        self.category = category
-        _isOn = AppStorage(wrappedValue: true, category.defaultsKey)
-    }
-
-    var body: some View {
-        Toggle(isOn: $isOn) {
-            VStack(alignment: .leading) {
-                Text(category.title)
-                Text(category.explanation).kitType(.caption).foregroundStyle(Ink.textFaint)
-            }
-        }
     }
 }

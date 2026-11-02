@@ -75,3 +75,24 @@ private struct WindowHook: NSViewRepresentable {
         }
     }
 }
+
+/// The main window, found once: its title follows the page now, so nothing may look for it by the name "Ratchet".
+enum MainWindow {
+    private(set) static weak var window: NSWindow?
+
+    static func register(_ new: NSWindow?) { if new != nil { window = new } }
+}
+
+/// A zero-size view that tells `MainWindow` which window it sits in.
+struct MainWindowRegistrar: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { Probe() }
+
+    func updateNSView(_ view: NSView, context: Context) {}
+
+    final class Probe: NSView {
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            MainWindow.register(window)
+        }
+    }
+}

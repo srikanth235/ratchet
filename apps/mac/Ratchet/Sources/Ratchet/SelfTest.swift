@@ -75,6 +75,14 @@ enum SelfTest {
         router.show(.optimizations)
         check("choosing Optimizations again goes back to the list", router.optimizationID == nil)
         check("every page in the sidebar has its own Command-number", Set(Page.sidebar.compactMap(\.shortcutNumber)).count == Page.sidebar.count)
+        check("Home and Agents are in the sidebar", Page.sidebar.contains(.home) && Page.sidebar.contains(.agents))
+        router.show(.home)
+        check("Home opens", router.page == .home)
+        router.show(.agents)
+        check("Agents opens", router.page == .agents)
+        router.show(.overview)
+        check("the Settings window has four tabs", SettingsTab.allCases.count == 4)
+        check("Settings has no Connectors tab", !SettingsTab.allCases.contains { $0.title == "Connectors" })
 
         // Live events through the store.
         await store.optimizationStore.loadDetail(id: "opt-checkout")
@@ -215,7 +223,9 @@ enum SelfTest {
         let item = LoginItem(touchesSystem: false)
         check("test mode never registers the app", item.set(true) == nil && item.state == .on && item.set(false) == nil && item.state == .off)
 
-        for name in ["chart.line.uptrend.xyaxis", "gearshape", "link"] + SettingsTab.allCases.map(\.symbol) {
+        // The symbols of the toolbar and the menus (the system's own icons, never the kit's).
+        let toolbarSymbols = ["plus", "arrow.clockwise", "play", "stop.circle", "square.and.arrow.up", "arrow.triangle.pull", "ellipsis"]
+        for name in ["chart.line.uptrend.xyaxis", "gearshape", "link"] + toolbarSymbols + SettingsTab.allCases.map(\.symbol) {
             check("SF Symbol \(name) exists", NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil)
         }
 

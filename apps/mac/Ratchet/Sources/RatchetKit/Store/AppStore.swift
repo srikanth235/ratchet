@@ -30,6 +30,8 @@ public final class AppStore {
     public private(set) var benchmarks: [BenchmarkRun] = []
     public private(set) var repos: [Repo] = []
     public private(set) var isLoaded = false
+    /// When the last refresh reached the daemon: "last updated 14:02" in the banner shown while it is down.
+    public private(set) var lastUpdated: Date?
     /// Which parts of the last refresh failed, with the reason; empty when all worked.
     public private(set) var sectionErrors: [LoadSection: String] = [:]
     /// Whether the live connection to the daemon is up. Not part of the cache.
@@ -133,7 +135,10 @@ public final class AppStore {
         if let value = Self.take(receiptNow, .sandbox, &failures) { sandboxStore.receipt = value }
 
         sectionErrors = failures
-        if failures.count < LoadSection.allCases.count { isLoaded = true }
+        if failures.count < LoadSection.allCases.count {
+            isLoaded = true
+            lastUpdated = Date()
+        }
         if let first = LoadSection.allCases.compactMap({ failures[$0] }).first {
             errors.failLoading(first)
         } else {

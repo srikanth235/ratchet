@@ -61,13 +61,16 @@ ctl open:connectors >"$out"; check "open:connectors" '[[ "$(field $out status.pa
 ctl open:opt-checkout >"$out"
 check "open:<id> selects the optimization" '[[ "$(field $out status.page)" == optimizations && "$(field $out status.selectedOptimization)" == opt-checkout ]]'
 ctl open:benchmarks >"$out"; check "open:benchmarks" '[[ "$(field $out status.page)" == benchmarks && -z "$(field $out status.selectedOptimization)" ]]'
+# Home and Agents are pages of the sidebar now (their screens come with the chat work).
+ctl open:home >"$out"; check "open:home" '[[ "$(field $out status.page)" == home ]]'
+ctl open:agents >"$out"; check "open:agents" '[[ "$(field $out status.page)" == agents ]]'
 
 # appearance
 ctl appearance:dark >"$out"; check "appearance:dark" '[[ "$(field $out status.appearance)" == dark ]]'
 ctl appearance:light >"$out"; check "appearance:light" '[[ "$(field $out status.appearance)" == light ]]'
 
 # snapshot scenes: the menu bar panel hosted in a window, an empty state, a daemon state.
-for scene in menubar menubar-empty daemon-failed empty-overview; do
+for scene in menubar menubar-empty daemon-failed daemon-down loading-overview failed-connector empty-overview; do
   ctl snapshot:$scene >"$out"
   png="$home/bridge/snapshots/$scene-light.png"
   check "snapshot:$scene writes a PNG" '[[ -s "$png" ]]'

@@ -68,6 +68,20 @@ extension MockRatchetClient {
         return optimization
     }
 
+    public func runOptimization(id: String) async throws -> Optimization {
+        guard var detail = world.details[id] else { throw RatchetClientError.notFound("optimization \(id)") }
+        guard !detail.optimization.status.isFinished else { throw RatchetClientError.invalid("This optimization already ended.") }
+        var started = detail.optimization
+        started.status = .running
+        if started.secondsLeft == nil { started.secondsLeft = started.timeLimitHours * 3600 }
+        if started.startedAt == nil { started.startedAt = world.now }
+        detail.optimization = started
+        world.details[id] = detail
+        if let at = world.optimizations.firstIndex(where: { $0.id == id }) { world.optimizations[at] = started }
+        emit([.optimizationUpdated(started)])
+        return started
+    }
+
     public func stopOptimization(id: String) async throws {
         guard var detail = world.details[id] else { throw RatchetClientError.notFound("optimization \(id)") }
         guard !detail.optimization.status.isFinished else { throw RatchetClientError.invalid("This optimization already ended.") }

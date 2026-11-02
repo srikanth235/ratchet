@@ -2,8 +2,9 @@ import AppKit
 import RatchetKit
 import SwiftUI
 
-/// The window: a sidebar with four pages and the sandbox status line, and the page (or the New optimization flow)
-/// beside it.
+/// The window: the system sidebar (the pages and the recent runs) and, beside it, the page or the New optimization flow, under
+/// a native toolbar. Banners (the daemon is down, an action failed) sit above the page. The title bar names the page; the
+/// page and the open optimization are restored with the scene.
 struct ContentView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
@@ -14,14 +15,25 @@ struct ContentView: View {
     @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
     @State private var ran = false
+    // The scene's own memory of where it was: the page and the open optimization (ids only, never data).
+    @SceneStorage("shell.page") private var storedPage = ""
+    @SceneStorage("shell.optimization") private var storedOptimization = ""
+    @State private var restoredOptimization = false
 
     var body: some View {
         NavigationSplitView {
             SidebarView()
-                .navigationSplitViewColumnWidth(Dim.sidebarWidth)
+                .navigationSplitViewColumnWidth(min: Dim.sidebarWidth, ideal: Dim.sidebarWidth, max: Dim.sidebarWidth + Space.section * 2)
         } detail: {
             let showsStatus = daemon.showsStatusScreen(storeLoaded: store.isLoaded)
             VStack(spacing: 0) {
+                // The service is down but there is data to show: say so on every page, above it.
+                if !showsStatus && !daemon.phase.isRunning && daemon.phase != .checking {
+                    DaemonBanner()
+                        .padding(.horizontal, Space.pageX)
+                        .padding(.top, Space.sm)
+                        .transition(.opacity)
+                }
                 // What went wrong stays on every page until it is dismissed or the next action starts.
                 if let message = store.lastError, !showsStatus {
                     ErrorBanner(message: message) { store.dismissError() }
@@ -36,13 +48,29 @@ struct ContentView: View {
                     DetailRoot()
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Ink.canvas)
             .animation(Motion.step, value: store.lastError)
+            .animation(Motion.step, value: daemon.phase)
+            .navigationTitle(navigationTitle)
+            .navigationSubtitle(navigationSubtitle)
         }
-        .toolbar(removing: .title)
-        // The page starts at the top edge, as in the design; the traffic lights sit over the sidebar.
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .environment(\.daemonActionsEnabled, daemon.phase.isRunning)
         .noInitialFocus()
+        .background(MainWindowRegistrar())
+        .confirmationDialog(
+            stopTitle, isPresented: Binding(get: { router.pendingStop != nil }, set: { if !$0 { router.pendingStop = nil } }),
+            titleVisibility: .visible, presenting: router.pendingStop
+        ) { id in
+            Button("Stop", role: .destructive) { Task { await store.optimizationStore.stopOptimization(id) } }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("Wins found so far are kept.")
+        }
+        .onChange(of: router.page) { _, page in storedPage = page.rawValue }
+        .onChange(of: router.optimizationID) { _, id in storedOptimization = id ?? "" }
         .task {
+            restorePage()
             wire()
             daemon.start()
             // Started by the login item: only the menu bar item shows. The window stays alive, hidden, so the data keeps
@@ -53,6 +81,7 @@ struct ContentView: View {
         .task(id: daemon.phase.isRunning) {
             guard daemon.phase.isRunning else { return }
             await store.start()
+            restoreOptimization()
             await notifier.refreshAuthorization()
             guard !ran else { return }
             ran = true
@@ -81,6 +110,46 @@ struct ContentView: View {
 }
 
 extension ContentView {
+    /// The window title: the page, or the flow. Never the app's name.
+    private var navigationTitle: String {
+        router.wizard != nil ? "New Optimization" : router.page.title
+    }
+
+    /// Every page has a subtitle: the open optimization, a count, the range.
+    private var navigationSubtitle: String {
+        if let flow = router.wizard { return flow.step.caption }
+        switch router.page {
+        case .home: return "Describe what to optimize"
+        case .overview: return store.range.title
+        case .optimizations:
+            if let id = router.optimizationID, let optimization = store.optimizationStore.optimization(id: id) { return optimization.title }
+            return Plural.count(store.optimizationStore.optimizations.count, "optimization")
+        case .agents: return "Agent CLIs on this Mac"
+        case .benchmarks: return Plural.count(store.benchmarks.count, "run")
+        case .connectors: return Plural.count(store.connectorStore.connectors.count, "connector")
+        }
+    }
+
+    private var stopTitle: String {
+        guard let id = router.pendingStop, let optimization = store.optimizationStore.optimization(id: id) else { return "Stop this optimization?" }
+        return "Stop \(optimization.title)?"
+    }
+
+    /// Comes back to the page the scene was on. Test and snapshot runs always start on Overview.
+    private func restorePage() {
+        guard !Store.isOverridden, let page = Page(rawValue: storedPage), page != router.page else { return }
+        router.show(page)
+    }
+
+    /// The open optimization comes back once the list is there to say it still exists.
+    private func restoreOptimization() {
+        guard !Store.isOverridden, !restoredOptimization else { return }
+        restoredOptimization = true
+        guard !storedOptimization.isEmpty, router.optimizationID == nil, router.wizard == nil,
+              store.optimizationStore.optimization(id: storedOptimization) != nil else { return }
+        router.open(optimization: storedOptimization)
+    }
+
     /// Connects the store's events to notifications, and a click on a notification to the right screen.
     private func wire() {
         store.enabledNotifications = { NotificationPreferences.enabled }
@@ -129,7 +198,12 @@ extension ContentView {
 
 private struct DetailRoot: View {
     @Environment(AppRouter.self) private var router
-    @Environment(ConnectorsPageState.self) private var connectors
+    @Environment(AppStore.self) private var store
+
+    private var showsConnectionBadge: Bool {
+        if case .reconnecting = store.streamState { return true }
+        return store.isDemoData
+    }
 
     var body: some View {
         Group {
@@ -140,7 +214,6 @@ private struct DetailRoot: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Ink.canvas)
-        .ignoresSafeArea(.container, edges: .top)
+        .toolbar { ShellToolbar(showsConnectionBadge: showsConnectionBadge) }
     }
 }

@@ -9,24 +9,24 @@ struct NewOptimizationView: View {
     @Environment(AppRouter.self) private var router
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Space.block) {
-                    header
-                        .gridProbe("header", area: "wizard")
-                    stepContent
-                        .gridProbe("step", area: "wizard")
-                }
-                .frame(maxWidth: 1080, alignment: .leading)
-                .padding(.horizontal, Space.pageX)
-                .padding(.top, Space.pageTop)
-                .padding(.bottom, Space.lg)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.block) {
+                header
+                    .gridProbe("header", area: "wizard")
+                stepContent
+                    .gridProbe("step", area: "wizard")
             }
-            footer
+            .frame(maxWidth: Layout.contentWidth, alignment: .leading)
+            .padding(.horizontal, Space.pageX)
+            .padding(.top, Space.pageTop)
+            .padding(.bottom, Space.lg)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .scrollEdgeEffectStyle(.soft, for: .bottom)
+        // Back and Continue stay at the bottom edge: an inset, so the page scrolls clear of them and under their soft edge.
+        .safeAreaInset(edge: .bottom, spacing: 0) { footer }
         .background(Ink.canvas)
-        .gridArea("wizard")
+        .gridArea("wizard", inset: Space.pageX)
     }
 
     private var header: some View {
@@ -69,8 +69,6 @@ struct NewOptimizationView: View {
         .padding(.horizontal, Space.pageX)
         .padding(.vertical, flow.step == .environment ? Space.md : Space.lg)
         .frame(maxWidth: .infinity)
-        .overlay(alignment: .top) { Hairline() }
-        .background(Ink.canvas)
     }
 
     private var footerButtons: some View {

@@ -11,6 +11,8 @@ final class AppRouter {
     var wizard: NewOptimizationFlow?
     /// Settings > General > Advanced (development) is open. Collapsed every time the app starts.
     var advancedExpanded = false
+    /// Stop… from the header, the table, the context menu or the menu bar: the optimization the one confirmation asks about.
+    var pendingStop: String?
     /// "Use template": the template whose pull request is being set up.
     var templateProposal: TemplateProposalFlow?
     /// Settings reopens on the last tab. Test and snapshot runs leave it alone.

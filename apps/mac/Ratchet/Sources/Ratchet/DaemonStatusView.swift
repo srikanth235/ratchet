@@ -22,6 +22,7 @@ struct DaemonStatusView: View {
         .padding(Space.pageX)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Ink.canvas)
+        .gridArea("daemon-status", inset: Space.pageX)
         .accessibilityElement(children: .contain)
     }
 

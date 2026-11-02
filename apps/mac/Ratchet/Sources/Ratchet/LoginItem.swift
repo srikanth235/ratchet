@@ -96,7 +96,7 @@ enum LaunchContext {
     }
 
     /// The app's main window (not Settings, not the menu bar panel).
-    private static var mainWindows: [NSWindow] { NSApp.windows.filter { $0.canBecomeMain && $0.title == "Ratchet" } }
+    private static var mainWindows: [NSWindow] { MainWindow.window.map { [$0] } ?? [] }
 
     /// Hides the window and the Dock icon. The view stays alive, so the store keeps loading and notifications keep coming.
     static func hideWindow() {

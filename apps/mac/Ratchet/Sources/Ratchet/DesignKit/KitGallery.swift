@@ -100,6 +100,12 @@ struct KitGallery: View {
             stateRow("Link") { _ in Button("Show sign-in steps") {}.buttonStyle(.kit(.link)) }
             stateRow("Icon button") { _ in KitIconButton(icon: .plus, label: "Add connector") {} }
             stateRow("Icon button, small") { _ in KitIconButton(icon: .close, label: "Dismiss", small: true) {} }
+            stateRow("More menu", note: "28 pt hit area") { _ in
+                KitMoreMenu("Actions for acme-prod") {
+                    Button("Make Default") {}
+                    Button("Rename…") {}
+                }
+            }
         }
     }
 
@@ -177,6 +183,17 @@ struct KitGallery: View {
             stateGrid {
                 stateRow("Field", note: "pressed, selected: n/a", states: [.rest, .hover, .focused, .disabled]) { _ in
                     TextField("Repository", text: $fieldText).kitField()
+                }
+            }
+            caption("Steering field (glass in a container, anchored with a safe-area inset): rest, hover, focused, disabled")
+            Grid(alignment: .topLeading, horizontalSpacing: Space.xl, verticalSpacing: Space.xl) {
+                GridRow {
+                    steering(.rest)
+                    steering(.hover)
+                }
+                GridRow {
+                    steering(.focused)
+                    steering(.disabled)
                 }
             }
             caption("Composer: rest, hover, focused, disabled, sending, filled")
@@ -308,6 +325,18 @@ struct KitGallery: View {
             StatusLabel(tone: tone, text: word)
             StatusShape(tone: tone, size: Space.section)
         }
+    }
+
+    private func steering(_ forced: PartState) -> some View {
+        KitSteeringField(isFocused: forced == .focused) {
+            Text("Tell the agents what to try next")
+                .kitType(.body).foregroundStyle(Ink.textMuted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(Space.sm)
+        }
+        .environment(\.forcedPartState, forced)
+        .disabled(forced == .disabled)
+        .frame(width: Self.cell * 3 + Space.xxl)
     }
 
     private func composer(_ forced: PartState?, text: Binding<String>, sending: Bool = false) -> some View {
