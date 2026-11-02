@@ -13,9 +13,18 @@ to `design/v02/ref-*.png` by `design/render-reference.mjs`, and `native.yml` com
 | `Benchmarks.dc.html` | 5 · Benchmark history |
 | `Result.dc.html` | 6 · Result & teardown |
 
-## v0.3.1 mockups
+## v0.3.2 mockups
 
-`design/v03.html` is the source of the 22 screens of the v0.3.1 design (dark; Home, Overview and Run also in light). It is generated:
+`design/v03.html` is the source of the 25 screens (dark; Home, Overview and Run also in light). It is generated. Since F7 it follows the shipped Mac app for the shell and
+pages, and stays the reference for the draft card, the run timeline and the agents order editor:
+
+- **Follows the app:** sidebar pages Home, Overview, Optimizations, Agents, Benchmarks, Connectors (no Customize) and Recent runs; native toolbar (title and subtitle, sandbox pill,
+  one New Optimization, then page actions and page-scoped search); the Overview period picker and the Optimizations filter live on the page; four Settings tabs (General,
+  Notifications, This Mac, Advanced); Agents, Connectors and Optimization settings as shipped.
+- **Reference for the app:** draft card rows (Goal, Benchmark, Agents, Repository, Cloud, Schedule, Budget) with quiet Change actions, "Written by Claude Code · model", a footer that
+  never wraps and a three-step drafting state; one run timeline with verdict and blocked cards and a steering composer docked under the scrolling log; the same agents order
+  editor on Home and in the draft card; one sidebar selection style for pages and runs; "1 needs you".
+- Screens: s1 Home, s9 Overview, s23 Optimizations, s2 Run, s3 Optimization settings, s4 Benchmarks, s5 Connectors, s7 Agents, s8 New Optimization, s24 draft with the order editor, s25 Menu bar, plus states.
 
 | Step | Command |
 |---|---|

@@ -36,7 +36,7 @@ const ANNOT = '[data-go],[data-toast],[data-pop],[data-pane],[data-swap],.tog,.a
   await p.evaluate(() => window.__go('s1')); await p.keyboard.press('Control+,'); if (await cur() !== 's6') fails.push('Ctrl+, did not open Settings');
   await p.keyboard.press('Escape'); if (await cur() !== 's1') fails.push('Esc did not return from Settings');
   await p.evaluate(() => window.__go('s6'));
-  for (const t of ['Defaults', 'Notifications', 'This Mac', 'General']) { await p.click(`#s6 .stabs span[data-pane="${t}"]`); const on = await p.$eval('#s6 .pane.on', e => e.dataset.panel); if (on !== t) fails.push('settings tab ' + t + ' -> ' + on); }
+  for (const t of ['Notifications', 'This Mac', 'Advanced', 'General']) { await p.click(`#s6 .stabs span[data-pane="${t}"]`); const on = await p.$eval('#s6 .pane.on', e => e.dataset.panel); if (on !== t) fails.push('settings tab ' + t + ' -> ' + on); }
   await p.mouse.click(1400, 700); if (await cur() === 's6') fails.push('click outside Settings did not close it');
   // popover chip toggles
   await p.evaluate(() => window.__go('s1')); await p.click('#s1 .chip[data-pop="p1"]').catch(() => {});
