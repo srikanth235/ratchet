@@ -70,9 +70,9 @@ Benchmarks, Connectors. Command-1 to 6 follow `Page.sidebar`.
 
 - **Toolbar** (`Toolbar.swift`): `ShellToolbar` (declared on the detail column, never on the split view) holds the connection badge
   ("Demo data", "Reconnecting…"), the sandbox status item (shape and word, popover with End Now) and New Optimization. Each page
-  adds its own items (the filter on Optimizations, Refresh All and Add… on Connectors, the actions on the open optimization;
+  adds its own items (Refresh All and Add… on Connectors, the actions on the open optimization;
   a `ToolbarSpacer` after New Optimization keeps them in their own capsule) and a page-scoped `.searchable`. The Overview's range
-  (`RangeSwitch`) is on the page, in its header, not in the toolbar. `SidebarCommands()` and `ToolbarCommands()` are on the scene.
+  (`RangeSwitch`) and the Optimizations filter (`KitSegmented`) are on the page, in its header, not in the toolbar. `SidebarCommands()` and `ToolbarCommands()` are on the scene.
 - **Title and restore**: `.navigationTitle` is the page ("New Optimization" in the flow), the subtitle a count, the range or the
   open optimization's name. The window title is no longer "Ratchet", so the main window registers itself (`MainWindow`,
   `UI/WindowBehavior.swift`); never look it up by title. `@SceneStorage` restores the page and the open optimization (ids only;
@@ -121,8 +121,8 @@ test, snapshot and `APP_DEMO` mode, the daemon's otherwise. Screens (`Screens/Ho
 - **Ask about a run**: "Ask…" in the run header (and in ⋯) calls `ChatHub.askAboutRun`: a chat bound to the optimization
   (`NewChat(optimization:)`, which the daemon already gives the run's context) on the default agent, in `AskRunSheet`; it is the creation
   conversation's `ConversationBody` without a draft card. One chat per optimization while the app runs. Done or Escape closes it.
-- **The draft card** lists Repository, Measures, Agents, Cloud, Each run, Schedule, Output, Config (`DraftCardModel.allRows` adds the first
-  and the Cloud row when the daemon did not send them); each editable row has a quiet "Change" (read out as "Change agents") opening the
+- **The draft card** lists Goal, Measures, Agents, Repository, Cloud, Each run, Schedule, Output, Config (`DraftCardModel.allRows` adds
+  Repository and Cloud after Agents when the daemon did not send them); each editable row has a quiet "Change" (read out as "Change agents") opening the
   same editors as the Home chips. The drafting state shows the three steps (read, picked, drafting), not a bare "Working".
 - Popovers (`Chat/Popovers.swift`) are shared by the chips, the card rows and the settings rows. Snapshot scenes: `home*`, `conversation-*`,
   `run-*`, `optimization-settings*`, `agents-signin`, `overview-nowins`, `connectors-discover`, `menubar-awake`, `run-bottom`, `run-ask`, `connector-sso`, `overview-footnote`, `value-row`; the self-test drives a simulated

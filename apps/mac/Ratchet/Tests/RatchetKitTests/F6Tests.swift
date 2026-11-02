@@ -124,8 +124,9 @@ struct F6ModelTests {
         await settle { card.card != nil && !card.isDrafting }
         follow.cancel()
         let keys = card.rows.map(\.row.key)
-        #expect(keys.first == "repo")
-        #expect(keys.firstIndex(of: "cloud") == (keys.firstIndex(of: "agents") ?? -2) + 1)
+        // Agents, then Repository, then Cloud, as in the prototype.
+        #expect(keys.firstIndex(of: "repo") == (keys.firstIndex(of: "agents") ?? -2) + 1)
+        #expect(keys.firstIndex(of: "cloud") == (keys.firstIndex(of: "repo") ?? -2) + 1)
         let repo = try #require(card.rows.first { $0.row.key == "repo" })
         #expect(repo.row.value == "acme/shop" && !repo.isEditable)
         let cloud = try #require(card.rows.first { $0.row.key == "cloud" })

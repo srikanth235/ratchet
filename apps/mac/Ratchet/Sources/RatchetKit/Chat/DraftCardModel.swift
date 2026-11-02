@@ -77,20 +77,22 @@ public final class DraftCardModel {
     /// The setup agent is writing a new draft: the composer shows Stop.
     public var isDrafting: Bool { session?.isReplying ?? false }
 
-    /// What the card lists: the daemon's rows, with Repository first and Cloud after Agents whenever the daemon did not send them,
-    /// so every draft says where it reads from and where it runs (the same two rows as the Home chips).
+    /// What the card lists: the daemon's rows, with Repository and then Cloud after Agents whenever the daemon did not send them, so
+    /// every draft says where it reads from and where it runs (the same two as the Home chips).
     public var allRows: [ChatCardRow] {
         var list = card?.rows ?? []
+        var at = list.firstIndex { $0.key == "agents" }.map { $0 + 1 } ?? list.count
         if !list.contains(where: { $0.key == "repo" }) {
             let repo = card?.repo ?? session?.core.chat.repo
-            list.insert(ChatCardRow(key: "repo", label: "Repository", value: repo ?? "Not chosen"), at: 0)
+            list.insert(ChatCardRow(key: "repo", label: "Repository", value: repo ?? "Not chosen"), at: at)
+            at += 1
         }
         if !list.contains(where: { $0.key == "cloud" }) {
-            let row = ChatCardRow(
-                key: "cloud", label: "Cloud", value: cloudAccount.map { $0 + " · AWS" } ?? "None · agents run on this Mac",
-                editable: !cloudAccounts.isEmpty, options: cloudAccounts.map { ChatCardOption(label: $0, value: $0) })
-            let after = list.firstIndex { $0.key == "agents" }.map { $0 + 1 } ?? list.count
-            list.insert(row, at: after)
+            list.insert(
+                ChatCardRow(
+                    key: "cloud", label: "Cloud", value: cloudAccount.map { $0 + " · AWS" } ?? "None · agents run on this Mac",
+                    editable: !cloudAccounts.isEmpty, options: cloudAccounts.map { ChatCardOption(label: $0, value: $0) }),
+                at: at)
         }
         return list
     }

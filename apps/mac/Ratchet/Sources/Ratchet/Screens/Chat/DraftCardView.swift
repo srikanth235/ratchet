@@ -1,7 +1,7 @@
 import RatchetKit
 import SwiftUI
 
-/// The draft card of the creation conversation (screens 8 and 18): Repository, Measures, Agents, Cloud, Each run, Schedule, Output,
+/// The draft card of the creation conversation (screens 8 and 18): Goal, Measures, Agents, Repository, Cloud, Each run, Schedule, Output,
 /// Config. Each editable row has its own quiet "Change" (read out as "Change agents") that opens a popover; a change is said to the chat, the card updates, and the
 /// row shows "Updated" with Undo. Start Over, Create and Run Once · ≈$38 and Create Optimization are at the foot; nothing waits
 /// on a human after them.

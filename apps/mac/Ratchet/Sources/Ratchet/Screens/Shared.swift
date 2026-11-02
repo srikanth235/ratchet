@@ -51,10 +51,7 @@ struct ResultCell: View {
     let optimization: Optimization
 
     var body: some View {
-        if optimization.status == .failed {
-            // A failed run says why, not what it had found before it failed.
-            Text(optimization.failureReason ?? "the run did not finish").kitType(.meta).foregroundStyle(Ink.bad).lineLimit(1)
-        } else if let change = optimization.change, let text = optimization.resultText {
+        if let change = optimization.change, let text = optimization.resultText {
             HStack(spacing: Space.sm) {
                 Text(Percent.signed(change))
                     .kitType(.mono)
@@ -81,17 +78,15 @@ struct ValueCell: View {
 
     var body: some View {
         let pending = Self.isPending(optimization)
-        // A failed run delivers nothing, whatever it had estimated.
-        let value = optimization.status == .failed ? nil : optimization.valuePerYearUSD
         HStack(spacing: Space.xs) {
             if pending { Text("pending").kitType(.micro).foregroundStyle(Ink.textFaint) }
-            Text(value.map(Money.short) ?? "—")
+            Text(optimization.valuePerYearUSD.map(Money.short) ?? "—")
                 .kitType(.mono)
-                .foregroundStyle(value == nil || pending ? Ink.textFaint : Ink.text)
+                .foregroundStyle(optimization.valuePerYearUSD == nil || pending ? Ink.textFaint : Ink.text)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(value.map { Money.short($0) + " a year" + (pending ? ", pending until its pull request merges" : "") } ?? "No value yet")
+        .accessibilityLabel(optimization.valuePerYearUSD.map { Money.short($0) + " a year" + (pending ? ", pending until its pull request merges" : "") } ?? "No value yet")
     }
 }
 
@@ -197,7 +192,9 @@ struct OptimizationTable: View {
         .accessibilityLabel("Optimizations")
     }
 
+    /// The grey line under the status: the time left while it runs, why it failed after a failure.
     private static func caption(_ optimization: Optimization) -> String? {
+        if optimization.status == .failed { return optimization.failureReason }
         guard optimization.status == .running, let left = optimization.secondsLeft else { return nil }
         return Elapsed.hm(left) + " left"
     }
