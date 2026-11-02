@@ -226,4 +226,39 @@ struct ChatTests {
         await #expect(throws: RatchetClientError.self) { try await client.chat(id: chat.id, after: nil, limit: 10) }
         await #expect(throws: RatchetClientError.self) { try await client.end(chatID: chat.id) }
     }
+
+    // MARK: Scripted replies
+
+    @Test func aQueuedReplyAnswersTheNextTurnInsteadOfTheDefaultScript() async throws {
+        let mock = make()
+        let scenario: any ChatScenario = mock
+        let card = ChatCard(id: "d1", title: "Checkout p95", rows: [ChatCardRow(key: "goal", label: "Goal", value: "p95")])
+        await scenario.queue(ChatReplyScript(text: "Here is a draft.", card: card))
+        let chat = try await mock.startChat(NewChat())
+        let stream = await mock.stream(chatID: chat.id, lastEventID: nil)
+        _ = try await mock.send(chatID: chat.id, text: "anything")
+        let events = try await read(stream, until: isDone)
+        var conversation = ChatConversation(chat)
+        for event in events { conversation.apply(event) }
+        #expect(conversation.cards.map(\.id) == ["d1"])
+        #expect(conversation.chat.messages.last?.text == "Here is a draft.")
+        // The queue is used up: the default script is back.
+        _ = try await mock.send(chatID: chat.id, text: "again")
+        let after = try await mock.chat(id: chat.id, after: nil, limit: 50)
+        #expect(after.messages.last?.text == "Noted: again")
+    }
+
+    @Test func aQueuedErrorFailsTheTurnWithThatError() async throws {
+        let mock = make()
+        let error = ChatError(code: .unavailable, harness: .grok, title: "Grok is offline", message: "", fixes: [.retry])
+        await mock.queue(ChatReplyScript(error: error))
+        let chat = try await mock.startChat(NewChat(harness: .grok))
+        let stream = await mock.stream(chatID: chat.id, lastEventID: nil)
+        _ = try await mock.send(chatID: chat.id, text: "hi")
+        let events = try await read(stream, until: isDone)
+        var conversation = ChatConversation(chat)
+        for event in events { conversation.apply(event) }
+        #expect(conversation.error == error)
+        #expect(conversation.lastOutcome == .failed)
+    }
 }

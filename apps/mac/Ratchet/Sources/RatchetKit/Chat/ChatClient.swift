@@ -18,3 +18,23 @@ public protocol ChatClient: Sendable {
     /// Ends the chat and forgets its history.
     func end(chatID: String) async throws
 }
+
+/// One scripted reply for a test, a snapshot or the self-test: what the next turn of a chat says, optionally with a card, or fails
+/// like this. Reached through `ChatScenario`, so nothing downcasts a `ChatClient` to its mock.
+public struct ChatReplyScript: Sendable, Equatable {
+    public var text: String
+    public var card: ChatCard?
+    public var error: ChatError?
+
+    public init(text: String = "", card: ChatCard? = nil, error: ChatError? = nil) {
+        self.text = text
+        self.card = card
+        self.error = error
+    }
+}
+
+/// How a test, a snapshot or the self-test makes a sample chat client say something particular.
+public protocol ChatScenario: Sendable {
+    /// The next turn (of any chat) answers like this instead of its default script. Scripts play in the order they were queued.
+    func queue(_ reply: ChatReplyScript) async
+}

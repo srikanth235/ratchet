@@ -4,7 +4,7 @@ import Foundation
 /// (`docs/ratchet-chat.md`, "Simulation"): events carry ids and are replayed from `lastEventID`; a message with
 /// `[simulate:rate-limit]`, `[simulate:auth-expired]`, `[simulate:crash]` or `[simulate:slow]` produces that failure; a message
 /// that mentions a "draft" produces a draft card.
-public actor MockChatClient: ChatClient {
+public actor MockChatClient: ChatClient, ChatScenario {
     private struct Entry: Sendable {
         var id: Int64
         var event: ChatEvent
@@ -21,6 +21,7 @@ public actor MockChatClient: ChatClient {
     private var chats: [String: Stored] = [:]
     private var subscribers: [String: [UUID: AsyncThrowingStream<ChatFrame, any Error>.Continuation]] = [:]
     private var counter = 0
+    private var queued: [ChatReplyScript] = []
     private var noticedHarnesses: Set<Harness> = []
     private let now: Date
     private let ready: [Harness]
@@ -122,7 +123,30 @@ public actor MockChatClient: ChatClient {
 
     // MARK: Script
 
+    public func queue(_ reply: ChatReplyScript) {
+        queued.append(reply)
+    }
+
+    private func play(_ script: ChatReplyScript, _ id: String, chat: Chat, turn: Int) {
+        if let error = script.error {
+            record(id, .failed(error))
+            record(id, .done(turn: turn, outcome: .failed, usage: ChatUsage()))
+            return
+        }
+        if let card = script.card { record(id, .card(card, replaces: nil)) }
+        for word in script.text.split(separator: " ", omittingEmptySubsequences: false) {
+            record(id, .delta(String(word) + " "))
+        }
+        record(id, .message(ChatMessage(
+            seq: takeSeq(id), role: .assistant, text: script.text, at: now, harness: chat.harness, model: chat.model)))
+        record(id, .done(turn: turn, outcome: .completed, usage: ChatUsage()))
+    }
+
     private func script(_ id: String, chat: Chat, text: String, turn: Int) {
+        if !queued.isEmpty {
+            play(queued.removeFirst(), id, chat: chat, turn: turn)
+            return
+        }
         let lower = text.lowercased()
         let harness = chat.harness
         if lower.contains("[simulate:rate-limit]") {
