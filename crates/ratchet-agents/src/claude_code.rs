@@ -198,9 +198,11 @@ impl ClaudeStreamParser {
         )
     }
 
+    /// The first signal of a turn wins: the `rate_limit_event` carries the reset time that the assistant line and the result lack.
     fn signal(&mut self, at: i64, kind: FailureKind, text: &str) -> Vec<AgentEvent> {
-        self.failure = Some(kind);
-        self.turn_failure.emit(at, kind, text).into_iter().collect()
+        let event = self.turn_failure.emit(at, kind, text);
+        self.failure = self.turn_failure.kind();
+        event.into_iter().collect()
     }
 
     fn system(&mut self, raw: &Map<String, Value>, at: i64) -> Vec<AgentEvent> {
@@ -882,7 +884,7 @@ pub struct ClaudeLiveSession {
     process: LiveProcess,
     turns: tokio::sync::Mutex<mpsc::UnboundedReceiver<Turn>>,
     session_id: Arc<std::sync::Mutex<Option<String>>>,
-    interrupted: AtomicBool,
+    interrupted: Arc<AtomicBool>,
     interrupt_note: tokio::sync::Notify,
     busy: AtomicBool,
     events: SharedEventSink,
@@ -913,6 +915,8 @@ impl ClaudeLiveSession {
         let line_tx = tx.clone();
         let line_id = session_id.clone();
         let line_events = events.clone();
+        let interrupted = Arc::new(AtomicBool::new(false));
+        let line_interrupted = interrupted.clone();
         let process = LiveProcess::spawn(
             adapter.cli.spawner.as_ref(),
             &adapter.cli.binary,
@@ -923,6 +927,12 @@ impl ClaudeLiveSession {
             },
             move |_, line| {
                 for e in parser.parse_line(line) {
+                    // the user stopped this turn: the CLI's "interrupted" result is not an error to show
+                    if line_interrupted.load(Ordering::SeqCst)
+                        && e.event_type == AgentEventType::Error
+                    {
+                        continue;
+                    }
                     line_events(e);
                 }
                 if let Some(id) = parser.session_id.clone() {
@@ -966,7 +976,7 @@ impl ClaudeLiveSession {
             process,
             turns: tokio::sync::Mutex::new(rx),
             session_id,
-            interrupted: AtomicBool::new(false),
+            interrupted,
             interrupt_note: tokio::sync::Notify::new(),
             busy: AtomicBool::new(false),
             events,

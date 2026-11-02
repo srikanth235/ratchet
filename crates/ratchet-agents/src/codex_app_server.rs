@@ -467,7 +467,6 @@ pub struct CodexLiveSession {
     parser: Arc<Mutex<CodexAppServerParser>>,
     thread_id: String,
     busy: AtomicBool,
-    interrupted: AtomicBool,
     events: SharedEventSink,
     clock: Arc<dyn Clock>,
     _scratch: Scratch,
@@ -584,7 +583,6 @@ impl CodexLiveSession {
             parser,
             thread_id,
             busy: AtomicBool::new(false),
-            interrupted: AtomicBool::new(false),
             events,
             clock,
             _scratch: scratch,
@@ -610,7 +608,6 @@ impl LiveSession for CodexLiveSession {
     async fn send(&self, text: &str) -> PortResult<()> {
         let mut notes = self.notes.lock().await;
         while notes.try_recv().is_ok() {}
-        self.interrupted.store(false, Ordering::SeqCst);
         self.busy.store(true, Ordering::SeqCst);
         let started = self
             .rpc
@@ -623,24 +620,18 @@ impl LiveSession for CodexLiveSession {
         let result = match started {
             Ok(r) => {
                 self.parser.lock().unwrap().learn_ids(&r);
-                loop {
-                    match notes.recv().await {
-                        Some(Note::Turn(TurnSignal::Completed | TurnSignal::Interrupted)) => {
-                            break Ok(());
-                        }
-                        Some(Note::Turn(TurnSignal::Failed(message))) => {
-                            // the parser already reported the error and its classification
-                            break Err(PortError::AgentFailed {
-                                message,
-                                exit_code: None,
-                                stderr: Some(self.rpc.process().stderr_tail()),
-                            });
-                        }
-                        Some(Note::Exited(how)) => {
-                            break self.fail(format!("codex app-server exited with {how}"));
-                        }
-                        None => break self.fail("codex app-server ended".to_string()),
+                match notes.recv().await {
+                    Some(Note::Turn(TurnSignal::Completed | TurnSignal::Interrupted)) => Ok(()),
+                    // the parser already reported the error and its classification
+                    Some(Note::Turn(TurnSignal::Failed(message))) => Err(PortError::AgentFailed {
+                        message,
+                        exit_code: None,
+                        stderr: Some(self.rpc.process().stderr_tail()),
+                    }),
+                    Some(Note::Exited(how)) => {
+                        self.fail(format!("codex app-server exited with {how}"))
                     }
+                    None => self.fail("codex app-server ended".to_string()),
                 }
             }
             Err(RpcError::Rpc(e)) => {
@@ -681,7 +672,6 @@ impl LiveSession for CodexLiveSession {
         let Some(turn_id) = turn_id else {
             return Ok(());
         };
-        self.interrupted.store(true, Ordering::SeqCst);
         // the turn ends with `turn/completed` (interrupted), which is what `send` waits for
         match self
             .rpc

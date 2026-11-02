@@ -1981,4 +1981,49 @@ mod tests {
             r#"{"at":5,"type":"tool","data":{"name":"x"}}"#
         );
     }
+
+    #[test]
+    fn session_spec_from_agent_spec_keeps_the_old_defaults_and_round_trips() {
+        let agent = AgentSpec {
+            workdir: "/w".into(),
+            prompt: "p".into(),
+            model: Some("m".into()),
+            env: None,
+            max_turns: Some(3),
+        };
+        let spec = SessionSpec::from(&agent);
+        assert_eq!(spec.access, Access::Edit { network: true });
+        assert_eq!(spec.agent_spec(), agent);
+        let json = serde_json::to_value(&spec).unwrap();
+        assert_eq!(
+            json["access"],
+            serde_json::json!({"edit": {"network": true}})
+        );
+        assert!(json.get("mcp").is_none() && json.get("resume").is_none());
+        assert_eq!(serde_json::from_value::<SessionSpec>(json).unwrap(), spec);
+        // the read-only form and an MCP server decode from the documented shapes
+        let spec: SessionSpec = serde_json::from_str(
+            r#"{"workdir":"/w","prompt":"p","access":"read-only","mcp":[{"name":"ratchet","command":"x"}],"systemAppend":"hi","resume":"abc"}"#,
+        )
+        .unwrap();
+        assert_eq!(spec.access, Access::ReadOnly);
+        assert_eq!(spec.mcp[0].args, Vec::<String>::new());
+        assert_eq!(spec.resume.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn new_agent_event_types_use_snake_case_names() {
+        for (t, name) in [
+            (AgentEventType::Delta, "delta"),
+            (AgentEventType::Thinking, "thinking"),
+            (AgentEventType::RateLimited, "rate_limited"),
+            (AgentEventType::AuthExpired, "auth_expired"),
+        ] {
+            assert_eq!(serde_json::to_value(t).unwrap(), name);
+            assert_eq!(
+                serde_json::from_value::<AgentEventType>(name.into()).unwrap(),
+                t
+            );
+        }
+    }
 }
