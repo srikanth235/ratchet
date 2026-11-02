@@ -240,22 +240,106 @@ each slot.
 
 ## 5. Phases
 
-Each phase is one or more Sonnet high-effort sessions. Every phase ends green on `cargo test`, `cargo clippy -D warnings`, the Swift
-build and snapshot checks, and is committed to this branch.
+Each phase is one or more Sonnet high-effort sessions. Every phase ends green on `cargo test` and `cargo clippy -D warnings`.
 
-| # | Phase | Depends on | Sessions |
-|---|---|---|---|
-| S0 | Spike: confirm the `?` cells | — | 1 |
-| P1 | Harness layer + new events | S0 | 1 |
-| P2 | Model catalog, xAI key, auth matrix, preflight | P1 | 1 |
-| P3 | Ratchet MCP server | P1 | 1 |
-| P4 | Chat engine + API | P1, P3 | 1–2 |
-| P5 | Mac app: composer, chat, steering, Agents page | P4 (API), P2 | 2 |
-| P6 | Optimizations: harness list, fallback, MCP for agents | P1, P2, P3 | 1 |
-| P7 | Cost split + Overview | P2, P6 | 1 |
-| P8 | Conformance suite, fixture recorder, canary definition | P1–P6 | 1 |
+Sessions run on Linux and can't build Swift. For any phase that touches `apps/mac`, the gate is the `mac-app` job in
+`.github/workflows/native.yml` (macos-26) on the phase branch: build, unit tests, grid lint, self-test, daemon smoke, light and dark
+snapshots, and the layout check. The session pushes, waits for that job, reads its logs, fixes until green, and then looks at the
+uploaded snapshots against the mockups.
 
-P2 and P3 run in parallel. P5 starts on mocks as soon as the P4 API is fixed. P6 runs in parallel with P4/P5.
+The review in srikanth235/ratchet#10 is folded in. **F** phases fix what exists; **P** phases build the harness work. The `#10 §n`
+references point to that issue's sections. A phase is done only when every #10 item it owns is ticked.
+
+| # | Phase | Depends on | Sessions | #10 items |
+|---|---|---|---|---|
+| S0 | Spike: confirm the `?` cells | — | 1 | — (done) |
+| P1 | Harness layer + new events | S0 | 1 | — |
+| F0 | Hotfixes | — | 1 | Fix first: keep-awake `Lagged` bug, errors shown, launch at login; §7 `--yes` on CLI |
+| F1 | Mockups v0.3.1 | — | 1 | Fix first: one value story, PR-free config, control borders; §5 mockup items; §6; §3 mockup items; empty/error/light states |
+| F2 | App foundation: architecture + performance | F0 | 1–2 | §1, §2 |
+| F3 | App foundation: design system, kit, icon | F1 | 1 | §4 |
+| F4 | App foundation: native shell + Liquid Glass | F2, F3 | 1 | §3 app items, §6 app items |
+| F5 | Test, build, OS, CLI tooling | F0 | 1 | §7 (except MCP and keep-awake, see P3 and P6) |
+| P2 | Model catalog, xAI key, auth matrix, preflight | P1 | 1 | — |
+| P3 | Ratchet MCP server (session + owner mode) | P1 | 1 | §7 MCP |
+| P4 | Chat engine + API | P1, P3 | 1–2 | — |
+| P5 | Mac app: composer, chat, steering, Agents page | P4 (API), P2, F4 | 2 | §5 chat, composer, draft card, steering, agents items |
+| P6 | Optimizations: harness list, fallback, MCP for agents, no-wait environment | P1, P2, P3 | 1 | Fix first: no "Waiting on you"; §7 local-only keep-awake |
+| P7 | Cost split + Overview | P2, P6 | 1 | §5 Overview items |
+| P8 | Conformance suite, fixture recorder, canary definition | P1–P6 | 1 | — |
+
+**Parallel tracks.** Rust: P1 → (P2 ∥ P3) → (P4 ∥ P6) → P7 → P8. App: F0 → (F1 ∥ F2 ∥ F5) → F3 → F4 → P5. The tracks meet at P5, which
+starts on mocks once the P4 API is fixed. Parallel sessions push to their own branches (`claude/harness-<phase>`). The orchestrator
+merges each into `claude/peaceful-lamport-leak6p` and re-runs the checks before dependants start.
+
+### Skills every session loads
+
+The app's scope and features are growing, so every session loads the relevant Bama skills (`.claude/skills/`) before writing code. It
+then runs each skill's own checks before committing. The session prompt names the skills, and the session says which it used in its
+summary.
+
+| Phase | Skills |
+|---|---|
+| Any Swift change | `swift-swiftui`, `build-and-verify`, `test-mac-app` |
+| Any screen, sheet or control | `mac-design`, `layout-grid`, `ux-design`, `design:accessibility-review` |
+| DesignKit, tokens, parts, icon (F3) | `design-kit`, `design-system`, `app-icon` |
+| Refactors (F2, P5 start) | `improve-architecture` |
+| Hot paths: streaming, lists, charts (F2, P4/P5) | `performance` |
+| Menu bar, login item, power, URL scheme, notifications (F0, F5, P6) | `os-integrations` |
+| CLI and MCP (F0, F5, P3) | `agent-cli` |
+| New flows or screens (F1, P5) | `user-stories` (acceptance criteria), `ux-design` |
+| Mockups (F1) | `design:design-critique`, `design:accessibility-review` |
+| Phase end, any app phase | `improve-loop` rules for story-by-story verify; `design:design-critique` on the new snapshots |
+
+### F0 — Hotfixes
+
+- ratchetd keep-awake loop: continue on `RecvError::Lagged` and resync from `run_active()` (`crates/ratchetd/src/main.rs:324-330`).
+- Show `AppStore.lastError` in a dismissible banner and clear it when the next action starts.
+- "Launch at login" via `SMAppService.mainApp`, starting with only the menu bar item, so notifications keep coming.
+- CLI `run`, `stop`, `env end` and `pr` require `--yes`; without it they print a preview.
+- **Done when** a test proves the loop survives `Lagged`, the banner has a snapshot, and the CLI contract tests cover `--yes`.
+
+### F1 — Mockups v0.3.1
+
+- Apply every mockup item in #10 to `design/v03.html` and the prototype, keeping the full scope.
+- Add empty, error, loading, daemon-down and light-mode screens, and render the PNGs again.
+- **Done when** the critique and accessibility checks pass again with no 🔴 items left.
+
+### F2 — App foundation: architecture and performance
+
+- #10 §1, in order, one commit per step with no behaviour change:
+  - protocol split
+  - `SSEConnection`
+  - `DaemonRatchetClient` extractions
+  - mock split and contract suite
+  - store split and `EventReducer`
+  - navigation
+  - `Harness` naming
+- #10 §2: event coalescing, capped refresh, per-section errors, observable split, log race, formatter, lazy lists, off-main cache,
+  eviction, structured event task.
+- **Done when** contract tests pass against both clients and the self-test passes.
+
+### F3 — App foundation: design system, kit and icon
+
+- `design/KIT.md`, `design/DESIGN-SYSTEM.md`, `KitGallery`, forced states and focus rings.
+- Accent `.tint`, tokens reconciled with v0.3.1, `Layout` enum, Increase Contrast and Reduce Motion.
+- The v0.3 parts: composer, chip, segmented control, toggle, settings sidebar.
+- Icon: legible at 16 pt, a dark variant, one source.
+- **Done when** the gallery snapshots show every part in every state in light and dark, and the grid lint is clean on all of Sources.
+
+### F4 — App foundation: native shell and Liquid Glass
+
+- System sidebar, toolbar with New, search and filters, Settings scene at 520 wide, context menus with `Table`, and menu commands.
+- No custom backgrounds behind sheets and bars, glass on the floating composer, and chrome that dims when the window is inactive.
+- Window title and scene restore.
+- **Done when** the snapshots match v0.3.1 and the `mac-design` and `layout-grid` checks pass.
+
+### F5 — Test, build, OS and CLI tooling
+
+- Debug bridge, `ratchet://` URL scheme and `ratchet open`, self-test audits, missing snapshot scenes.
+- `build.sh` restarts the daemon, and the app checks the daemon version.
+- CLI install to `~/.local/bin`, a `.claude/skills/ratchet` skill for agents, and the CLI auto-starts the daemon.
+- **Done when** an agent can drive the running app through the bridge in a test.
 
 ### S0 — Spike on mocks (1 session)
 
@@ -297,6 +381,8 @@ No CLI installs. Codex and Grok are not installed in sessions; Claude Code is (`
 - New crate `ratchet-mcp` (stdio JSON-RPC, MCP spec), tool sets from 4.2, schemas generated from `ratchet-core` types.
 - `ratchetd mcp --session <token>`; `ratchet-runner mcp` for the cloud tool set.
 - Token issue/revoke in `ratchetd`.
+- Owner mode: `ratchet mcp`, which reads `ratchetd.token`, offers one tool per CLI command generated from the CLI's command table,
+  and can be registered with `claude mcp add` (#10 §7, `agent-cli`).
 - **Done when** each CLI (via fixtures/fake) lists exactly its tool set; out-of-set calls are refused; `draft_optimization` writes to
   `ratchet/config` only (tested against the fake git host).
 
@@ -313,6 +399,14 @@ No CLI installs. Codex and Grok are not installed in sessions; Claude Code is (`
 - `ChatClient` (SSE), `ChatStore`, mocks.
 - Home composer with harness/model picker; creation conversation with draft card; Steer on optimization detail.
 - Agents page (s7) per 4.8; optimization settings: where + harness order.
+- #10 §5 items for these screens:
+  - draft card: popovers per row, Undo, Stop / Start Over, errors, "Create and Run Once" with its cost
+  - steering timeline with read receipts
+  - replies marked with agent and model, Retry / Copy, first-use data notice
+  - composer chips as popovers
+  - every broken status shows a button to fix it
+  - editable optimization settings rows (Agents, Value, Archive)
+  - Run header with status, Stop, Pause Schedule and Open PR
 - **Done when** build-and-verify snapshots match the v0.3 mockups (s1, s7, s8) in light and dark, and the in-app self-test drives a
   simulated chat to a created optimization.
 
@@ -321,7 +415,9 @@ No CLI installs. Codex and Grok are not installed in sessions; Claude Code is (`
 - `agents:` list + policy in optimization settings (ledger) and `ratchet.yaml` (optional override).
 - Fallback state machine in the runner loop (4.6) with ledger events; auto-resume when a harness returns.
 - Optimization tool set attached to every agent turn; steering notes read at each turn.
-- Power assertion for local runs.
+- Power assertion (`IOPMAssertion`) only while local agents run, shown in the menu bar (#10 §7).
+- No human gate: drop the "Waiting on you: approve the environment" state; checks run on their own and fall back to a smaller setup;
+  "Needs you" only for what a person must do (#10 Fix first).
 - **Done when** simulation tests cover: rate limit → wait; rate limit long → switch; auth expired → switch; all down → pause →
   resume; steering note reaches the next turn.
 
@@ -329,6 +425,8 @@ No CLI installs. Codex and Grok are not installed in sessions; Claude Code is (`
 
 - `billing` on usage; ledger columns; budget guard counts dollars only.
 - Overview: spend split (AWS / agents API / included in plan), return computed on dollars; forecast split.
+- One value story on Home and Overview ("delivered" + "pending"), a labelled spend line, a "pending" label in the table, an empty
+  state, and a Value row the footnote links to (#10).
 - **Done when** Overview snapshots show both a key-billed and a subscription optimization correctly.
 
 ### P8 — Conformance and canary
