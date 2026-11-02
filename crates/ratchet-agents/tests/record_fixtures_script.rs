@@ -21,7 +21,7 @@ impl Sandbox {
         let bin = dir.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
         for tool in [
-            "env", "grep", "sed", "head", "id", "mktemp", "timeout", "rm", "mkdir", "dirname",
+            "env", "grep", "sed", "head", "id", "mktemp", "timeout", "perl", "rm", "mkdir", "dirname",
             "cat", "tr", "sh", "bash", "printf", "pwd", "mv", "touch",
         ] {
             let found = ["/usr/bin", "/bin", "/usr/local/bin"]
