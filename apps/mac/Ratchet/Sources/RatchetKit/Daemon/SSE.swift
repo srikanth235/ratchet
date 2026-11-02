@@ -155,9 +155,12 @@ enum DaemonEvent: Sendable, Equatable {
         var signedIn: Bool?
     }
 
+    /// One decoder for every message of every stream (it is never reconfigured, and decoding with it is reentrant).
+    private nonisolated(unsafe) static let decoder = JSONDecoder()
+
     /// nil when the message is not JSON at all.
     static func decode(_ message: SSEMessage) -> DaemonEvent? {
-        guard let payload = try? JSONDecoder().decode(Payload.self, from: Data(message.data.utf8)) else { return nil }
+        guard let payload = try? decoder.decode(Payload.self, from: Data(message.data.utf8)) else { return nil }
         let type = message.event == "message" ? (payload.type ?? message.event) : message.event
         switch type {
         case "hello":
