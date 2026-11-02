@@ -85,7 +85,8 @@ New event types (additive to `AgentEventType`):
 | `RateLimited { resets_at? }` | classified from each CLI's error shape | fallback (4.6) |
 | `AuthExpired` | login or key rejected | fallback, Agents settings |
 
-**Per-CLI mapping.** ✓ = verified against the CLI here (`claude 2.1.316`) or already in code. ? = to confirm in spike S0.
+**Per-CLI mapping.** ✓ = verified against the CLI here (`claude 2.1.316`) or already in code. ? = S0 fills it from docs and source,
+with mock fixtures (no Codex / Grok installs).
 
 | Capability | Claude Code | Codex | Grok |
 |---|---|---|---|
@@ -254,15 +255,22 @@ build and snapshot checks, and is committed to this branch.
 
 P2 and P3 run in parallel. P5 starts on mocks as soon as the P4 API is fixed. P6 runs in parallel with P4/P5.
 
-### S0 — Spike (1 session)
+### S0 — Spike on mocks (1 session)
 
-- Install `@openai/codex` and the Grok CLI in the session; record exact versions.
-- For Codex and Grok, confirm: delta events, long-lived protocol (`codex app-server`, Grok ACP), MCP injection flag, read-only mode,
-  system-prompt add-on, rate-limit and auth-error output shapes. For Claude: the rate-limit and auth-error shapes.
-- Capture one fixture per behaviour per CLI.
-- **Done when** `docs/harness-matrix.md` replaces every `?` in 4.1 with ✓ + flag, or ✗ + the fallback chosen; fixtures committed.
-- Needs: the CLIs installed and API keys for the three providers (spike only; not product real-world testing). If keys aren't
-  available, record from documented output and mark the cell "unverified".
+No CLI installs. Codex and Grok are not installed in sessions; Claude Code is (`2.1.316`).
+
+- For each `?` cell in 4.1, read the CLI's published docs and open source (Codex is open source; Grok's ACP output is already parsed
+  in `grok.rs`) and write down the flag or protocol, with the source link.
+- Write **mock fixtures** from that: one per behaviour per CLI (deltas, live session, MCP tool call, read-only refusal, rate limit,
+  auth expired). File names say `mock` and the documented CLI version: `codex-0.166.0-mock-rate-limit.jsonl`. Claude ones that can be
+  produced without a login are recorded for real.
+- A **fake CLI binary** (`ratchet-agents/tests/fake_cli`) that replays a fixture and speaks each long-lived protocol, for P1 and P4.
+- **Done when** `docs/harness-matrix.md` gives every cell one of: ✓ verified (real CLI), ◐ from docs (mock fixture), ✗ missing +
+  fallback; and the fixtures and fake CLI are committed.
+- Every ◐ cell keeps its fallback wired (spawn-per-turn + resume, whole messages, config overlay), so a wrong guess degrades chat
+  speed, never correctness.
+- ◐ cells are confirmed with the real CLIs during real-world testing (not approved yet); a mismatch is a parser fix plus new
+  fixtures.
 
 ### P1 — Harness layer
 
@@ -333,8 +341,9 @@ P2 and P3 run in parallel. P5 starts on mocks as soon as the P4 API is fixed. P6
 | Risk | Mitigation |
 |---|---|
 | A CLI changes its stream format | tolerant parsers, versioned fixtures, canary, minimum version in detection |
+| Mock fixtures (◐) don't match the real Codex / Grok | each ◐ cell keeps a working fallback; confirmed in real-world testing; canary catches drift |
 | Codex or Grok lack a long-lived mode | spawn-per-turn + resume (works today); chat is slower to first token |
-| Provider terms on driving a subscription login headlessly | local only, the user's own CLI and login, no credential leaves the Mac; confirm terms in S0 |
+| Provider terms on driving a subscription login headlessly | local only, the user's own CLI and login, no credential leaves the Mac; S0 notes each provider's published terms |
 | Plan rate limits stall unattended runs | fallback across harnesses; wait-until-reset; pause/auto-resume |
 | Mac sleeps during a local optimization | power assertion; recommend cloud for long runs |
 | Agent escapes read-only in chat | read-only enforced by each CLI's own sandbox + no shell tool; Ratchet tools are the only write path |
