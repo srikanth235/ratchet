@@ -32,7 +32,7 @@ extension FocusedValues {
     }
 }
 
-/// The Optimization menu, Export in File, Add Connector… in File, and Find in Edit.
+/// The Optimization menu (with Add Connector… and Export Report…) and Find in Edit.
 struct OptimizationCommands: Commands {
     let store: AppStore
     let router: AppRouter
@@ -76,15 +76,13 @@ struct OptimizationCommands: Commands {
                 if let selected { OptimizationAction.copyLinks([selected]) }
             }
             .disabled(selected == nil)
-        }
-        CommandGroup(after: .newItem) {
+            Divider()
             Button("Add Connector…") {
                 router.show(.connectors)
                 connectors.sheet = ConnectorSheetRequest(kind: .github)
             }
             .keyboardShortcut("n", modifiers: [.command, .shift])
             .disabled(!serviceUp)
-            Divider()
             Button("Export Report…") {
                 if let selected { Task { await OptimizationAction.exportReport(selected, store: store) } }
             }

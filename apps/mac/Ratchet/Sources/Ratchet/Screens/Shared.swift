@@ -158,6 +158,7 @@ struct OptimizationTable: View {
         } primaryAction: { ids in
             if ids.count == 1, let id = ids.first { router.open(optimization: id) }
         }
+        .onChange(of: rows.map(\.id)) { _, ids in selection.formIntersection(ids) }
         .focusedSceneValue(\.optimizationSelection, Array(selection))
         .frame(height: sizesToRows ? CGFloat(rows.count) * Self.rowHeight + Self.headerHeight : nil)
         .scrollDisabled(sizesToRows)

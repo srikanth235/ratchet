@@ -66,7 +66,7 @@ struct KitSteeringField<Content: View>: View {
         KitGlassContainer {
             content
                 .padding(Space.sm)
-                .background(Ink.raisedSoft, in: ConcentricRectangle(corners: .concentric(minimum: 8)))
+                .background(Ink.raisedSoft, in: ConcentricRectangle())
                 .padding(Space.sm)
                 .frame(maxWidth: .infinity)
                 .kitGlass()

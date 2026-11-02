@@ -191,7 +191,7 @@ struct ThisMacSettings: View {
 
     var body: some View {
         Section {
-            LabeledContent("Status", value: statusText)
+            statusRow
             if daemon.management == .managed {
                 Toggle("Demo mode", isOn: Binding(get: { daemon.mode == .demo }, set: { pendingDemo = $0 }))
                     .controlSize(.mini)
@@ -254,7 +254,11 @@ struct ThisMacSettings: View {
             }
             .kitType(.caption).foregroundStyle(Ink.textFaint)
         }
-        // Stop and Demo mode change what is running: each asks once, says what happens, and can be cancelled.
+    }
+
+    /// Stop and Demo mode change what is running: each asks once, says what happens, and can be cancelled.
+    private var statusRow: some View {
+        LabeledContent("Status", value: statusText)
         .confirmationDialog("Stop the background service?", isPresented: $confirmingStop, titleVisibility: .visible) {
             Button("Stop", role: .destructive) { daemon.stop() }
             Button("Cancel", role: .cancel) {}

@@ -17,7 +17,7 @@ enum OptimizationAction {
     }
 
     /// The pull request when there is one, else the `ratchet://` link that opens the optimization in the app.
-    static func link(for optimization: Optimization) -> URL {
+    nonisolated static func link(for optimization: Optimization) -> URL {
         if let address = optimization.prURL, let url = URL(string: address) { return url }
         if let number = optimization.prNumber, let url = URL(string: "https://github.com/\(optimization.repo)/pull/\(number)") {
             return url
