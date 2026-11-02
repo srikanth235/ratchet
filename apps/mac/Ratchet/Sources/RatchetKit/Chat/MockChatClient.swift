@@ -3,7 +3,8 @@ import Foundation
 /// A `ChatClient` with no model behind it, for tests, snapshots and demo mode. It follows the daemon's scripted harness
 /// (`docs/ratchet-chat.md`, "Simulation"): events carry ids and are replayed from `lastEventID`; a message with
 /// `[simulate:rate-limit]`, `[simulate:auth-expired]`, `[simulate:crash]` or `[simulate:slow]` produces that failure; a message
-/// that mentions a "draft" produces a draft card.
+/// that mentions a "draft" (or any message of a chat on a repo) produces a draft card, "create it" creates it, a message in a
+/// chat on an optimization is a steering note, and `[simulate:env-fail]` fails the draft's environment check.
 public actor MockChatClient: ChatClient, ChatScenario {
     private struct Entry: Sendable {
         var id: Int64
@@ -16,6 +17,18 @@ public actor MockChatClient: ChatClient, ChatScenario {
         var nextSeq: Int64 = 1
         var nextEvent: Int64 = 1
         var log: [Entry] = []
+        var draft: DraftState?
+        var createdCount = 0
+    }
+
+    /// What the scripted harness remembers of the draft it is talking about, so "use Grok too" changes the next card.
+    private struct DraftState: Sendable {
+        var cardID: String
+        var agents: [Harness]
+        var budget = 50
+        var schedule: String? = "every night at 02:00"
+        var smaller = false
+        var created = false
     }
 
     private var chats: [String: Stored] = [:]
@@ -114,6 +127,16 @@ public actor MockChatClient: ChatClient, ChatScenario {
         record(chatID, .done(turn: stored.turn, outcome: .interrupted, usage: ChatUsage()))
     }
 
+    public func withdrawNote(chatID: String, noteID: String, text: String) async throws {
+        guard let stored = chats[chatID] else { throw RatchetClientError.notFound("chat \(chatID)") }
+        guard var note = stored.conversation.cards.first(where: { $0.id == noteID && $0.kind == .note }) else {
+            throw RatchetClientError.notFound("note \(noteID)")
+        }
+        guard note.status == .queued else { throw RatchetClientError.invalid("An agent has already read that note.") }
+        note.status = .replaced
+        record(chatID, .note(note))
+    }
+
     public func end(chatID: String) async throws {
         guard chats.removeValue(forKey: chatID) != nil else { throw RatchetClientError.notFound("chat \(chatID)") }
         if let open = subscribers.removeValue(forKey: chatID) {
@@ -125,6 +148,16 @@ public actor MockChatClient: ChatClient, ChatScenario {
 
     public func queue(_ reply: ChatReplyScript) {
         queued.append(reply)
+    }
+
+    public func readNotes(chatID: String, by harness: Harness, at date: Date) {
+        guard let stored = chats[chatID] else { return }
+        for var note in stored.conversation.cards where note.kind == .note && note.status == .queued {
+            note.status = .read
+            note.readBy = harness.title
+            note.readAt = date
+            record(chatID, .note(note))
+        }
     }
 
     private func play(_ script: ChatReplyScript, _ id: String, chat: Chat, turn: Int) {
@@ -167,26 +200,34 @@ public actor MockChatClient: ChatClient, ChatScenario {
             record(id, .done(turn: turn, outcome: .failed, usage: ChatUsage()))
         } else if lower.contains("[simulate:slow]") {
             record(id, .delta("Working on it"))
+        } else if let optimization = chat.optimization {
+            steer(id, chat: chat, optimization: optimization, text: text, turn: turn)
+        } else if isCreate(lower), let draft = chats[id]?.draft, !draft.created {
+            create(id, chat: chat, draft: draft, once: lower.contains("once"), turn: turn)
+        } else if lower.contains("draft") || lower.contains("[simulate:env-fail]") || chat.repo != nil || chats[id]?.draft != nil {
+            makeDraft(id, chat: chat, text: text, lower: lower, turn: turn)
         } else {
-            reply(id, chat: chat, text: text, turn: turn)
+            say(id, chat: chat, text: "Noted: " + text, turn: turn)
         }
     }
 
-    private func reply(_ id: String, chat: Chat, text: String, turn: Int) {
+    private func isCreate(_ lower: String) -> Bool {
+        let trimmed = lower.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        return trimmed.hasPrefix("create it") || trimmed == "go ahead" || trimmed == "yes"
+    }
+
+    private func steps(_ id: String, turn: Int) {
         record(id, .tool(ChatToolStep(id: "t\(turn)", name: "list_templates", state: .running, summary: "Looking at the templates")))
         record(id, .tool(ChatToolStep(id: "t\(turn)", name: "list_templates", state: .done, summary: "Looked at the templates")))
-        var answer = "Noted: " + text
-        if text.lowercased().contains("draft") {
-            let card = ChatCard(
-                id: "draft-\(turn)", title: "Make it faster", subtitle: chat.repo ?? "No repo", repo: chat.repo,
-                rows: [
-                    ChatCardRow(key: "goal", label: "Goal", value: "Make it faster"),
-                    ChatCardRow(key: "limits", label: "Each run", value: "$50 · 2 h", editable: true),
-                ])
-            let replaces = turn > 1 ? "draft-\(turn - 1)" : nil
-            record(chat.id, .card(card, replaces: replaces))
-            answer = "Here is a draft. Say \"create it\" to start."
-        }
+    }
+
+    /// A reply with text, word by word, and the end of the turn.
+    private func say(_ id: String, chat: Chat, text answer: String, turn: Int) {
+        steps(id, turn: turn)
+        finish(id, chat: chat, answer: answer, turn: turn)
+    }
+
+    private func finish(_ id: String, chat: Chat, answer: String, turn: Int) {
         for word in answer.split(separator: " ", omittingEmptySubsequences: false) {
             record(id, .delta(String(word) + " "))
         }
@@ -195,6 +236,91 @@ public actor MockChatClient: ChatClient, ChatScenario {
         let usage = ChatUsage(inputTokens: 120, outputTokens: 40, costUSD: 0, billing: .subscription)
         record(id, .usage(usage))
         record(id, .done(turn: turn, outcome: .completed, usage: usage))
+    }
+
+    // MARK: Drafts
+
+    private func makeDraft(_ id: String, chat: Chat, text: String, lower: String, turn: Int) {
+        steps(id, turn: turn)
+        var draft = chats[id]?.draft ?? DraftState(cardID: "", agents: [chat.harness])
+        let previous = draft.cardID.isEmpty ? nil : draft.cardID
+        draft.cardID = "draft-\(turn)"
+        draft.created = false
+        if let budget = Self.dollars(in: lower) { draft.budget = budget }
+        if lower.contains("every night") || lower.contains("nightly") { draft.schedule = "every night at 02:00" }
+        if lower.contains("weekdays") { draft.schedule = "weekdays at 02:00" }
+        if lower.contains("once") && !lower.contains("every") { draft.schedule = nil }
+        for other in Harness.allCases where lower.contains("use " + other.title.lowercased()) && ready.contains(other) {
+            if !draft.agents.contains(other) { draft.agents.append(other) }
+        }
+        if lower.contains("smaller") { draft.smaller = true }
+        chats[id]?.draft = draft
+        var card = Self.card(draft, chat: chat, ready: ready)
+        var answer = "Here is a draft. Say \"create it\" to start."
+        if lower.contains("[simulate:env-fail]") {
+            card.status = .failed
+            card.errorTitle = "Couldn't lock the environment"
+            card.errorMessage = "A smaller setup (API + Postgres, no load generator host) fits under $1/h but measures less."
+            answer = "The environment needs a smaller setup. Pick a fix below, or say what to change."
+        }
+        record(id, .card(card, replaces: previous))
+        finish(id, chat: chat, answer: answer, turn: turn)
+    }
+
+    private func create(_ id: String, chat: Chat, draft: DraftState, once: Bool, turn: Int) {
+        steps(id, turn: turn)
+        var next = draft
+        next.created = true
+        if once { next.schedule = nil }
+        chats[id]?.draft = next
+        chats[id]?.createdCount += 1
+        var card = Self.card(next, chat: chat, ready: ready)
+        card.status = .created
+        card.optimization = "opt-created-\(chats[id]?.createdCount ?? 1)"
+        record(id, .card(card, replaces: nil))
+        finish(id, chat: chat, answer: "Created. The first run starts now.", turn: turn)
+    }
+
+    private func steer(_ id: String, chat: Chat, optimization: String, text: String, turn: Int) {
+        let seq = takeSeq(id)
+        let note = ChatCard(
+            id: "note-\(seq)", kind: .note, status: .queued, title: text, optimization: optimization)
+        record(id, .note(note))
+        finish(id, chat: chat, answer: "Noted. An agent reads it at its next candidate.", turn: turn)
+    }
+
+    /// The first whole number after a "$" in the text.
+    static func dollars(in text: String) -> Int? {
+        guard let dollar = text.firstIndex(of: "$") else { return nil }
+        let digits = text[text.index(after: dollar)...].prefix { $0.isNumber }
+        return Int(digits)
+    }
+
+    private static func card(_ draft: DraftState, chat: Chat, ready: [Harness]) -> ChatCard {
+        let agentTitles = draft.agents.map(\.title).joined(separator: " → ")
+        let options = ready.map { ChatCardOption(label: $0.title, value: $0.rawValue) }
+        let schedule = draft.schedule ?? "run once, now"
+        let rows: [ChatCardRow] = [
+            ChatCardRow(key: "goal", label: "Goal", value: "Make it faster", editable: true, raw: .string("Make it faster")),
+            ChatCardRow(
+                key: "measure", label: "Measures", value: "p95 of POST /checkout · lower is better", editable: true,
+                raw: .object(["metric": .string("p95"), "direction": .string("minimize")])),
+            ChatCardRow(
+                key: "agents", label: "Agents", value: agentTitles + " · on this Mac", editable: true, options: options,
+                raw: .array(draft.agents.map { .string($0.rawValue) })),
+            ChatCardRow(
+                key: "limits", label: "Each run", value: "up to $\(draft.budget) and 2 h", editable: true,
+                raw: .object(["budgetUsd": .number(Double(draft.budget))])),
+            ChatCardRow(
+                key: "schedule", label: "Schedule", value: schedule, editable: true,
+                raw: draft.schedule.map { .string($0) } ?? .null),
+            ChatCardRow(key: "output", label: "Output", value: "a pull request with verified wins"),
+            ChatCardRow(
+                key: "config", label: "Config", value: "ratchet.yaml · bench/latency.js → branch ratchet/config",
+                raw: .object(["branch": .string("ratchet/config")])),
+        ]
+        return ChatCard(
+            id: draft.cardID, title: "Make it faster", subtitle: "up to $\(draft.budget) per run", repo: chat.repo, rows: rows)
     }
 
     // MARK: Bookkeeping

@@ -179,7 +179,7 @@ struct StoreTests {
 struct ChatStoreTests {
     private func make() -> (ChatStore, MockChatClient) {
         let client = MockChatClient(now: Date(timeIntervalSince1970: 1_793_452_800))
-        return (ChatStore(client: client, pause: { _ in }), client)
+        return (ChatStore(client: client, coalescing: .zero, pause: { _ in }), client)
     }
 
     private func settle(_ store: ChatStore, _ id: String, until done: @MainActor (ChatConversation) -> Bool) async {
@@ -228,7 +228,7 @@ struct ChatStoreTests {
     }
 
     @Test func startingWithNoHarnessReadySaysWhy() async {
-        let store = ChatStore(client: MockChatClient(readyHarnesses: []), pause: { _ in })
+        let store = ChatStore(client: MockChatClient(readyHarnesses: []), coalescing: .zero, pause: { _ in })
         #expect(await store.start() == nil)
         #expect(store.startError?.contains("No agent is signed in") == true)
     }

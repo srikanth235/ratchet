@@ -12,6 +12,10 @@ public struct ChatConversation: Sendable, Equatable {
     public var steps: [ChatToolStep] = []
     /// Draft and note cards by id, in the order they first appeared.
     public var cards: [ChatCard] = []
+    /// The user message (by `seq`) each card answers: a card is shown under the reply of that turn.
+    public private(set) var cardAnchors: [String: Int64] = [:]
+    /// The steps of finished turns by the user message they belong to; `steps` holds the turn in progress until it is over.
+    public private(set) var turnSteps: [Int64: [ChatToolStep]] = [:]
     /// The last turn failed like this; cleared when the person says something again.
     public var error: ChatError?
     public var lastUsage: ChatUsage?
@@ -35,8 +39,30 @@ public struct ChatConversation: Sendable, Equatable {
     public mutating func replace(with fresh: Chat) {
         chat = fresh
         reply = fresh.pending ?? ""
+        thinking = ""
+        steps = []
         needsReload = false
+        // The stored history carries its cards and steps as messages: rebuild what the stream would have built.
+        cards = []
+        cardAnchors = [:]
+        turnSteps = [:]
+        var anchor: Int64 = 0
+        for message in fresh.messages {
+            switch message.role {
+            case .user:
+                anchor = message.seq
+            case .tool:
+                if let step = message.tool { turnSteps[anchor, default: []].append(step) }
+            case .card, .note:
+                if let card = message.card { place(card, anchor: anchor) }
+            case .assistant:
+                break
+            }
+        }
     }
+
+    /// The seq of the newest user message: the turn in progress belongs to it.
+    public var currentAnchor: Int64 { chat.messages.last { $0.role == .user }?.seq ?? 0 }
 
     /// Applies an event with its place in the stream: the resume position moves to its id.
     public mutating func apply(_ frame: ChatFrame) {
@@ -53,6 +79,7 @@ public struct ChatConversation: Sendable, Equatable {
             if let pending = ready.pending { reply = pending }
         case .message(let message):
             if message.role == .user {
+                steps = []
                 error = nil
                 actionError = nil
                 lastOutcome = nil
@@ -82,9 +109,9 @@ public struct ChatConversation: Sendable, Equatable {
             if let replaces, let at = cards.firstIndex(where: { $0.id == replaces }) {
                 cards[at].status = .replaced
             }
-            upsert(card)
+            place(card, anchor: currentAnchor)
         case .note(let card):
-            upsert(card)
+            place(card, anchor: currentAnchor)
         case .usage(let usage):
             lastUsage = usage
         case .done(_, let outcome, let usage):
@@ -93,17 +120,20 @@ public struct ChatConversation: Sendable, Equatable {
             lastUsage = usage
             reply = ""
             thinking = ""
+            if !steps.isEmpty { turnSteps[currentAnchor] = steps }
             steps = []
         case .failed(let failure):
             error = failure
         }
     }
 
-    private mutating func upsert(_ card: ChatCard) {
+    /// A card in its place: new cards take the turn they arrived in, an update keeps where its card already is.
+    private mutating func place(_ card: ChatCard, anchor: Int64) {
         if let at = cards.firstIndex(where: { $0.id == card.id }) {
             cards[at] = card
         } else {
             cards.append(card)
+            cardAnchors[card.id] = anchor
         }
     }
 }

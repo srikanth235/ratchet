@@ -17,6 +17,20 @@ public protocol ChatClient: Sendable {
     func interrupt(chatID: String) async throws
     /// Ends the chat and forgets its history.
     func end(chatID: String) async throws
+    /// Takes back a steering note that no agent has read yet. The daemon has no route for it: the default asks the chat, in
+    /// words, to disregard the note (`ChatClient.withdrawal(of:)`). `MockChatClient` marks the card withdrawn.
+    func withdrawNote(chatID: String, noteID: String, text: String) async throws
+}
+
+extension ChatClient {
+    /// What a person says to take a note back.
+    public static func withdrawal(of text: String) -> String {
+        "Withdraw my earlier note \"\(text)\": do not act on it."
+    }
+
+    public func withdrawNote(chatID: String, noteID: String, text: String) async throws {
+        _ = try await send(chatID: chatID, text: Self.withdrawal(of: text))
+    }
 }
 
 /// One scripted reply for a test, a snapshot or the self-test: what the next turn of a chat says, optionally with a card, or fails
@@ -37,4 +51,6 @@ public struct ChatReplyScript: Sendable, Equatable {
 public protocol ChatScenario: Sendable {
     /// The next turn (of any chat) answers like this instead of its default script. Scripts play in the order they were queued.
     func queue(_ reply: ChatReplyScript) async
+    /// An agent of the chat's optimization took up the queued notes: each becomes `read`, by `harness`, at `date`.
+    func readNotes(chatID: String, by harness: Harness, at date: Date) async
 }
