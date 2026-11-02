@@ -143,20 +143,20 @@ public struct RepoInspection: Hashable, Sendable {
     public var isUsable: Bool { outcome == .ready }
 
     /// The summary line the Goal step shows under "Benchmark".
-    public var harness: HarnessDetection {
+    public var detection: BenchmarkDetection {
         let id = repo ?? ""
         switch outcome {
         case .ready:
             let direction = (config?.lowerIsBetter ?? true) ? "lower" : "higher"
-            return HarnessDetection(
+            return BenchmarkDetection(
                 repoID: id, found: true, summary: "Found ratchet.yaml: \(config?.metricName ?? ""), \(direction) is better.",
                 suggestedTemplateID: suggestedTemplateID)
         case .unusable(let why):
-            return HarnessDetection(repoID: id, found: false, summary: why, suggestedTemplateID: suggestedTemplateID)
+            return BenchmarkDetection(repoID: id, found: false, summary: why, suggestedTemplateID: suggestedTemplateID)
         case .invalid:
-            return HarnessDetection(repoID: id, found: false, summary: "ratchet.yaml does not parse.", suggestedTemplateID: nil)
+            return BenchmarkDetection(repoID: id, found: false, summary: "ratchet.yaml does not parse.", suggestedTemplateID: nil)
         case .missing:
-            return HarnessDetection(
+            return BenchmarkDetection(
                 repoID: id, found: false, summary: "No benchmark found in this repo. Start from a template.",
                 suggestedTemplateID: suggestedTemplateID ?? templates.first?.id)
         }
@@ -350,34 +350,42 @@ public struct AwsProfiles: Hashable, Sendable {
 }
 
 /// One agent CLI the daemon found (or did not) on this Mac.
-public struct DetectedAgent: Identifiable, Hashable, Sendable {
+public struct DetectedHarness: Identifiable, Hashable, Sendable {
     public enum Auth: String, Sendable { case signedIn, apiKey, signedOut }
 
-    public var cli: AgentCLI
+    public var harness: Harness
     public var installed: Bool
     public var version: String?
     public var auth: Auth
+    /// The models its CLI offers and the one used when none is chosen; empty when the daemon did not say.
+    public var models: [HarnessModel]
+    public var defaultModel: String?
 
-    public var id: String { cli.rawValue }
+    public var id: String { harness.rawValue }
 
-    public init(cli: AgentCLI, installed: Bool, version: String? = nil, auth: Auth = .signedOut) {
-        self.cli = cli
+    public init(
+        harness: Harness, installed: Bool, version: String? = nil, auth: Auth = .signedOut,
+        models: [HarnessModel] = [], defaultModel: String? = nil
+    ) {
+        self.harness = harness
         self.installed = installed
         self.version = version
         self.auth = auth
+        self.models = models
+        self.defaultModel = defaultModel
     }
 
     /// "Claude Code · v2.1.4".
-    public var title: String { cli.title + (version.map { " · v" + $0 } ?? "") }
+    public var title: String { harness.title + (version.map { " · v" + $0 } ?? "") }
 
     /// The detected CLIs that have no login connector yet.
-    public static func addable(_ found: [DetectedAgent], connected: [Connector]) -> [DetectedAgent] {
-        let present = Set(connected.filter { $0.kind == .agent && $0.origin == .login }.compactMap(\.cli))
-        return found.filter { $0.installed && !present.contains($0.cli) }
+    public static func addable(_ found: [DetectedHarness], connected: [Connector]) -> [DetectedHarness] {
+        let present = Set(connected.filter { $0.kind == .agent && $0.origin == .login }.compactMap(\.harness))
+        return found.filter { $0.installed && !present.contains($0.harness) }
     }
 
     /// What to say when there is nothing to add.
-    public static func emptyNote(_ found: [DetectedAgent]) -> String {
+    public static func emptyNote(_ found: [DetectedHarness]) -> String {
         found.contains { $0.installed }
             ? "Your Claude Code, Codex and Grok logins are already listed."
             : "None of Claude Code, Codex or Grok was found."

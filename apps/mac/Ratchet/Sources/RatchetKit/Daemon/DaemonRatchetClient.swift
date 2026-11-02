@@ -403,14 +403,14 @@ public final class DaemonRatchetClient: RatchetClient {
         }
     }
 
-    public func detectHarness(repoID: String) async throws -> HarnessDetection {
+    public func detectBenchmark(repoID: String) async throws -> BenchmarkDetection {
         do {
             let input = VM.InspectRepoInput(source: .case1(.init(kind: .github, repo: repoID)))
             let inspected = try await api.inspectRepo(body: .json(input)).ok.body.json
-            return DaemonMapping.harness(repoID: repoID, inspected)
+            return DaemonMapping.benchmarkDetection(repoID: repoID, inspected)
         } catch {
             if let failure = daemonError(in: error), !failure.isUnsupported {
-                return HarnessDetection(repoID: repoID, found: false, summary: failure.message)
+                return BenchmarkDetection(repoID: repoID, found: false, summary: failure.message)
             }
             throw translate(error)
         }
@@ -444,7 +444,7 @@ public final class DaemonRatchetClient: RatchetClient {
                     list = try await api.addAwsConnector(body: .json(.init(profile: new.name))).ok.body.json
                 }
             case .agent:
-                let agent = VM.ConnectorAgent(rawValue: AgentCLI(named: new.name).rawValue) ?? .claudeCode
+                let agent = VM.ConnectorAgent(rawValue: Harness(named: new.name).rawValue) ?? .claudeCode
                 if let key = new.secret?.trimmingCharacters(in: .whitespacesAndNewlines), !key.isEmpty {
                     // The key goes to the daemon once; it files it in the Keychain and never returns it.
                     let label = new.name.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -76,17 +76,17 @@ struct SettingsCheckTests {
         #expect(SecretKind.anthropicKey.problem("sk-proj-abcdefghijklmnop")?.hasPrefix("Anthropic keys start with sk-ant-") == true)
         #expect(SecretKind.openaiKey.problem("sk-abcdefghijklmnopqrstuvwx") == nil)
         #expect(SecretKind.openaiKey.problem("sk-ant-abcdefghijklmnop") != nil)
-        #expect(AgentCLI.codex.secretKind == .openaiKey && AgentCLI.claudeCode.secretKind == .anthropicKey)
+        #expect(Harness.codex.secretKind == .openaiKey && Harness.claudeCode.secretKind == .anthropicKey)
         #expect(SecretKind.xaiKey.problem("xai-abcdefghijklmnopqrstuv") == nil)
         #expect(SecretKind.xaiKey.problem("sk-abcdefghijklmnopqrstuvwx")?.hasPrefix("xAI keys start with xai-") == true)
-        #expect(AgentCLI.grok.secretKind == .xaiKey && AgentCLI.grok.vendor == "xAI" && AgentCLI.grok.title == "Grok")
+        #expect(Harness.grok.secretKind == .xaiKey && Harness.grok.vendor == "xAI" && Harness.grok.title == "Grok")
     }
 
     @Test func anAgentIsNamedInFreeText() {
-        #expect(AgentCLI(named: "Grok · team key") == .grok)
-        #expect(AgentCLI(named: "codex") == .codex)
-        #expect(AgentCLI(named: "Claude Code") == .claudeCode)
-        #expect(AgentCLI(named: "something else") == .claudeCode)
+        #expect(Harness(named: "Grok · team key") == .grok)
+        #expect(Harness(named: "codex") == .codex)
+        #expect(Harness(named: "Claude Code") == .claudeCode)
+        #expect(Harness(named: "something else") == .claudeCode)
     }
 
     @Test func theAddButtonNeedsALongEnoughKeyWithNoProblem() {
@@ -145,7 +145,7 @@ struct RepoStepTests {
         #expect(config.evaluatorIsTemplate)
         #expect(config.protected.map(\.glob) == ["tests/**", "bench/**"])
         #expect(inspection.configYAML?.contains("direction: minimize") == true)
-        #expect(flow.harness?.summary == "Found ratchet.yaml: p95, lower is better.")
+        #expect(flow.detection?.summary == "Found ratchet.yaml: p95, lower is better.")
         #expect(!flow.showsYAML)
     }
 
@@ -159,7 +159,7 @@ struct RepoStepTests {
         #expect(inspection.problems.allSatisfy { !$0.message.isEmpty })
         #expect(!flow.repoIsUsable)
         #expect(!flow.canContinue)
-        #expect(flow.harness?.found == false)
+        #expect(flow.detection?.found == false)
     }
 
     @Test func aRepoWithoutRatchetYamlOffersTemplatesAndOpensAPullRequest() async throws {
@@ -216,7 +216,7 @@ struct RepoStepTests {
         #expect(why.contains("no GitHub remote"))
         #expect(!flow.repoIsUsable)
         #expect(!flow.canContinue)
-        #expect(flow.harness?.summary == why)
+        #expect(flow.detection?.summary == why)
         // Choosing a repo of the account again leaves the folder.
         await flow.selectRepo("acme-org/shop-api")
         #expect(flow.localFolder == nil)
@@ -487,32 +487,32 @@ struct ConnectorFormTests {
         let (store, client) = await make()
         try await store.client.removeConnector(id: "agent-codex-login")
         await store.refreshConnectors()
-        let seen = try await client.detectedAgents(redetect: false)
+        let seen = try await client.detectedHarnesses(redetect: false)
         let connected = try await client.connectors()
-        #expect(DetectedAgent.addable(seen, connected: connected).isEmpty)
-        #expect(DetectedAgent.emptyNote(seen) == "Your Claude Code, Codex and Grok logins are already listed.")
+        #expect(DetectedHarness.addable(seen, connected: connected).isEmpty)
+        #expect(DetectedHarness.emptyNote(seen) == "Your Claude Code, Codex and Grok logins are already listed.")
 
-        let after = try await client.detectedAgents(redetect: true)
-        let addable = DetectedAgent.addable(after, connected: connected)
-        #expect(addable.map(\.cli) == [.codex])
+        let after = try await client.detectedHarnesses(redetect: true)
+        let addable = DetectedHarness.addable(after, connected: connected)
+        #expect(addable.map(\.harness) == [.codex])
         #expect(addable.first?.title == "Codex · v0.166")
 
-        try await store.addConnectorChecked(NewConnector(kind: .agent, name: AgentCLI.codex.title))
-        let login = try #require(store.connectors.first { $0.cli == .codex })
+        try await store.addConnectorChecked(NewConnector(kind: .agent, name: Harness.codex.title))
+        let login = try #require(store.connectors.first { $0.harness == .codex })
         #expect(login.origin == .login && !login.canRunInCloud)
-        #expect(DetectedAgent.addable(after, connected: store.connectors).isEmpty)
+        #expect(DetectedHarness.addable(after, connected: store.connectors).isEmpty)
     }
 
     @Test func noCLIAtAllHasItsOwnNote() {
-        let none = AgentCLI.allCases.map { DetectedAgent(cli: $0, installed: false) }
-        #expect(DetectedAgent.emptyNote(none) == "None of Claude Code, Codex or Grok was found.")
+        let none = Harness.allCases.map { DetectedHarness(harness: $0, installed: false) }
+        #expect(DetectedHarness.emptyNote(none) == "None of Claude Code, Codex or Grok was found.")
     }
 
     @Test func anAgentKeyIsListedAsACloudCapableKey() async throws {
         let (store, _) = await make()
         try await store.addConnectorChecked(NewConnector(kind: .agent, name: "Claude Code", secret: "sk-ant-api03-abcdefgh"))
         let key = try #require(store.connectors.last { $0.kind == .agent })
-        #expect(key.origin == .apiKey && key.canRunInCloud && key.cli == .claudeCode)
+        #expect(key.origin == .apiKey && key.canRunInCloud && key.harness == .claudeCode)
         let encoded = try JSONEncoder().encode(store.connectors)
         #expect(!String(decoding: encoded, as: UTF8.self).contains("sk-ant-api03"))
     }
@@ -652,7 +652,7 @@ struct SetupDaemonTests {
         #expect(inspection.config?.metricName == "p95")
         #expect(inspection.config?.lowerIsBetter == true)
         #expect(inspection.configYAML?.contains("direction: minimize") == true)
-        #expect(inspection.harness.found)
+        #expect(inspection.detection.found)
     }
 
     @Test func aGitHubRepoIsSentByName() async throws {
@@ -662,7 +662,7 @@ struct SetupDaemonTests {
         let source = recorder.last("POST", "/v1/repos/inspections")?.json["source"] as? [String: Any]
         #expect(source?["kind"] as? String == "github" && source?["repo"] as? String == "acme/bare")
         #expect(inspection.outcome == .missing)
-        #expect(inspection.harness.summary.contains("template"))
+        #expect(inspection.detection.summary.contains("template"))
     }
 
     @Test func anInvalidConfigKeepsItsErrors() async throws {
@@ -824,7 +824,7 @@ struct SetupDaemonTests {
         #expect(list.first { $0.name == "acme-prod" }?.region?.isEmpty == false)
         #expect(list.first { $0.name == "Claude Code · your login" }?.origin == .login)
         #expect(list.first { $0.name == "Claude Code · team key" }?.origin == .apiKey)
-        #expect(list.filter { $0.kind == .agent }.allSatisfy { $0.cli == .claudeCode })
+        #expect(list.filter { $0.kind == .agent }.allSatisfy { $0.harness == .claudeCode })
     }
 
     @Test func awsProfilesAndDetectedCLIsDecode() async throws {
@@ -837,11 +837,11 @@ struct SetupDaemonTests {
         #expect(profiles.filesFound && profiles.ssoSessions == ["corp"])
         #expect(profiles.profiles == [AwsProfile(name: "acme", kind: .sso, ssoSession: "corp"), AwsProfile(name: "old", kind: .other)])
 
-        let found = try await client.detectedAgents(redetect: false)
+        let found = try await client.detectedHarnesses(redetect: false)
         #expect(found.map(\.installed) == [true, false])
         #expect(found.first?.title == "Claude Code · v2.1.4")
-        let again = try await client.detectedAgents(redetect: true)
-        #expect(again == [DetectedAgent(cli: .codex, installed: true, version: "0.166", auth: .apiKey)])
+        let again = try await client.detectedHarnesses(redetect: true)
+        #expect(again == [DetectedHarness(harness: .codex, installed: true, version: "0.166", auth: .apiKey)])
         #expect(recorder.seen.map(\.method) == ["GET", "GET", "POST"])
     }
 

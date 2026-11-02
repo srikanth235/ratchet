@@ -71,14 +71,14 @@ public protocol ConnectorsClient: Sendable {
     func refreshConnectors() async throws -> [Connector]
     func awsProfiles() async throws -> AwsProfiles
     /// The harnesses (agent CLIs) on this Mac; `redetect` probes the machine again first.
-    func detectedAgents(redetect: Bool) async throws -> [DetectedAgent]
+    func detectedHarnesses(redetect: Bool) async throws -> [DetectedHarness]
 }
 
 /// Setting up an optimization: repos, what step 1 learns about a repo, "What's missing", template pull requests,
 /// environment drafts, and the development overrides.
 public protocol SetupClient: Sendable {
     func repos() async throws -> [Repo]
-    func detectHarness(repoID: String) async throws -> HarnessDetection
+    func detectBenchmark(repoID: String) async throws -> BenchmarkDetection
     /// The signed-in account's repos whose name contains `query`. Empty (not an error) when not signed in to GitHub.
     func searchRepos(query: String) async throws -> [Repo]
     /// Reads `ratchet.yaml` from a GitHub repo or a local folder.

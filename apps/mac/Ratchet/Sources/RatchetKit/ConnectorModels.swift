@@ -47,47 +47,6 @@ public enum ConnectorOrigin: String, Codable, Sendable {
     case apiKey
 }
 
-/// The agent CLIs Ratchet drives.
-public enum AgentCLI: String, CaseIterable, Codable, Sendable, Identifiable {
-    case claudeCode = "claude-code"
-    case codex
-    case grok
-
-    public var id: String { rawValue }
-
-    public var title: String {
-        switch self {
-        case .claudeCode: "Claude Code"
-        case .codex: "Codex"
-        case .grok: "Grok"
-        }
-    }
-
-    /// Who issues the API key.
-    public var vendor: String {
-        switch self {
-        case .claudeCode: "Anthropic"
-        case .codex: "OpenAI"
-        case .grok: "xAI"
-        }
-    }
-
-    /// The key a pasted API key must look like.
-    public var secretKind: SecretKind {
-        switch self {
-        case .claudeCode: .anthropicKey
-        case .codex: .openaiKey
-        case .grok: .xaiKey
-        }
-    }
-
-    /// The agent named in free text ("Codex · team key"); Claude Code when it names none.
-    public init(named name: String) {
-        let lower = name.lowercased()
-        self = lower.contains("codex") ? .codex : lower.contains("grok") ? .grok : .claudeCode
-    }
-}
-
 public struct Connector: Identifiable, Codable, Hashable, Sendable {
     public var id: String
     public var kind: ConnectorKind
@@ -108,12 +67,12 @@ public struct Connector: Identifiable, Codable, Hashable, Sendable {
     public var profile: String?
     public var region: String?
     /// Agents: which CLI it drives.
-    public var cli: AgentCLI?
+    public var harness: Harness?
 
     public init(
         id: String, kind: ConnectorKind, name: String, detail: String, state: ConnectorState,
         isDefault: Bool = false, monthlyCapUSD: Double? = nil, usedThisMonthUSD: Double = 0, canRunInCloud: Bool = false,
-        origin: ConnectorOrigin? = nil, profile: String? = nil, region: String? = nil, cli: AgentCLI? = nil
+        origin: ConnectorOrigin? = nil, profile: String? = nil, region: String? = nil, harness: Harness? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -127,7 +86,7 @@ public struct Connector: Identifiable, Codable, Hashable, Sendable {
         self.origin = origin
         self.profile = profile
         self.region = region
-        self.cli = cli
+        self.harness = harness
     }
 
     /// Taken from the environment (`GITHUB_TOKEN`): the app can use it but neither rename nor remove it.

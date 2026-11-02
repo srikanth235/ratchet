@@ -15,8 +15,8 @@ struct NewOptimizationFlowTests {
         let flow = await flow()
         #expect(flow.step == .goal)
         #expect(flow.repoID == "acme-org/shop-api")
-        #expect(flow.harness?.found == true)
-        #expect(flow.harness?.suggestedTemplateID == "http-latency")
+        #expect(flow.detection?.found == true)
+        #expect(flow.detection?.suggestedTemplateID == "http-latency")
         #expect(flow.title == "New optimization")
         #expect(!flow.canContinue)
         #expect(flow.budgetUSD == 50)
@@ -41,8 +41,8 @@ struct NewOptimizationFlowTests {
     @Test func choosingARepoRefreshesTheHarness() async {
         let flow = await flow()
         await flow.selectRepo("acme-org/web-app")
-        #expect(flow.harness?.found == false)
-        #expect(flow.harness?.suggestedTemplateID == "build-size")
+        #expect(flow.detection?.found == false)
+        #expect(flow.detection?.suggestedTemplateID == "build-size")
         await flow.selectRepo("srikanth235/notes-sync")
         #expect(flow.branch == "trunk")
     }

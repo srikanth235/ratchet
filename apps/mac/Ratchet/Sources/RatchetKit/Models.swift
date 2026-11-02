@@ -486,7 +486,7 @@ public struct Repo: Identifiable, Codable, Hashable, Sendable {
     public var name: String { id.split(separator: "/").last.map(String.init) ?? id }
 }
 
-public struct HarnessDetection: Codable, Hashable, Sendable {
+public struct BenchmarkDetection: Codable, Hashable, Sendable {
     public var repoID: String
     public var found: Bool
     public var summary: String

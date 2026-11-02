@@ -223,9 +223,16 @@ extension DaemonRatchetClient {
         var installed: Bool
         var version: String?
         var auth: String
+        var defaultModel: String?
+        var models: [ModelPayload]?
+
+        struct ModelPayload: Decodable {
+            var id: String
+            var label: String
+        }
     }
 
-    public func detectedAgents(redetect: Bool) async throws -> [DetectedAgent] {
+    public func detectedHarnesses(redetect: Bool) async throws -> [DetectedHarness] {
         try await calling {
             let data: Data
             if redetect {
@@ -234,9 +241,12 @@ extension DaemonRatchetClient {
                 data = try await jsonCall(.get, "/v1/harnesses", operationID: "listHarnesses")
             }
             return try decode([HarnessPayload].self, data).compactMap { found in
-                guard let cli = AgentCLI(rawValue: found.kind) else { return nil }
-                let auth: DetectedAgent.Auth = found.auth == "api-key" ? .apiKey : found.auth == "signed-in" ? .signedIn : .signedOut
-                return DetectedAgent(cli: cli, installed: found.installed, version: found.version, auth: auth)
+                guard let harness = Harness(rawValue: found.kind) else { return nil }
+                let auth: DetectedHarness.Auth = found.auth == "api-key" ? .apiKey : found.auth == "signed-in" ? .signedIn : .signedOut
+                let models = (found.models ?? []).map { HarnessModel(id: $0.id, title: $0.label, harness: harness) }
+                return DetectedHarness(
+                    harness: harness, installed: found.installed, version: found.version, auth: auth,
+                    models: models, defaultModel: found.defaultModel)
             }
         }
     }

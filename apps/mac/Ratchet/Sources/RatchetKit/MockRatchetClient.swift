@@ -229,18 +229,18 @@ public actor MockRatchetClient: RatchetClient {
 
     public func repos() async throws -> [Repo] { world.repos }
 
-    public func detectHarness(repoID: String) async throws -> HarnessDetection {
+    public func detectBenchmark(repoID: String) async throws -> BenchmarkDetection {
         guard world.repos.contains(where: { $0.id == repoID }) else { throw RatchetClientError.notFound("repo \(repoID)") }
         switch repoID {
         case "acme-org/shop-api":
-            return HarnessDetection(repoID: repoID, found: true,
+            return BenchmarkDetection(repoID: repoID, found: true,
                                     summary: "Found a k6 script in bench/ and a docker-compose.yml. Looks like an HTTP latency test.",
                                     suggestedTemplateID: "http-latency")
         case "srikanth235/acme-cli":
-            return HarnessDetection(repoID: repoID, found: true, summary: "Found a hyperfine script in bench/.",
+            return BenchmarkDetection(repoID: repoID, found: true, summary: "Found a hyperfine script in bench/.",
                                     suggestedTemplateID: "cli-cold-start")
         default:
-            return HarnessDetection(repoID: repoID, found: false,
+            return BenchmarkDetection(repoID: repoID, found: false,
                                     summary: "No benchmark found in this repo. Start from a template.", suggestedTemplateID: "build-size")
         }
     }
@@ -263,13 +263,13 @@ public actor MockRatchetClient: RatchetClient {
         let isAWS = new.kind == .aws
         let isAgent = new.kind == .agent
         let cap: Double? = isAWS ? (new.monthlyCapUSD ?? (new.region == nil ? 100 : nil)) : nil
-        let cli: AgentCLI? = isAgent ? AgentCLI(named: name) : nil
+        let harness: Harness? = isAgent ? Harness(named: name) : nil
         let connector = Connector(
             id: "\(new.kind.rawValue)-added-\(counter)", kind: new.kind, name: name,
             detail: new.detail.isEmpty ? "Added just now" : new.detail,
             state: isAgent ? .valid : .connected, isDefault: !hasDefault, monthlyCapUSD: cap,
             canRunInCloud: isAgent && !(new.secret ?? "").isEmpty, origin: origin,
-            profile: isAWS ? name : nil, region: isAWS ? (new.region ?? "us-east-1") : nil, cli: cli)
+            profile: isAWS ? name : nil, region: isAWS ? (new.region ?? "us-east-1") : nil, harness: harness)
         world.connectors.append(connector)
         emit([.connectorsChanged(world.connectors)])
         return connector
@@ -494,11 +494,11 @@ public actor MockRatchetClient: RatchetClient {
             ssoSessions: ["acme"], filesFound: true)
     }
 
-    public func detectedAgents(redetect: Bool) async throws -> [DetectedAgent] {
+    public func detectedHarnesses(redetect: Bool) async throws -> [DetectedHarness] {
         if redetect { redetected = true }
         return [
-            DetectedAgent(cli: .claudeCode, installed: true, version: "2.1.314", auth: .signedIn),
-            DetectedAgent(cli: .codex, installed: redetected, version: redetected ? "0.166" : nil, auth: .signedOut),
+            DetectedHarness(harness: .claudeCode, installed: true, version: "2.1.314", auth: .signedIn),
+            DetectedHarness(harness: .codex, installed: redetected, version: redetected ? "0.166" : nil, auth: .signedOut),
         ]
     }
 

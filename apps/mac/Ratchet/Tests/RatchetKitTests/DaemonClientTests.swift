@@ -246,7 +246,7 @@ struct DaemonClientTests {
         daemon.route("POST /v1/repos/inspections", 409, #"{"code":"not_ready","message":"sign in to GitHub first"}"#)
         let client = make(daemon)
         #expect(try await client.repos().isEmpty)
-        let harness = try await client.detectHarness(repoID: "acme/x")
+        let harness = try await client.detectBenchmark(repoID: "acme/x")
         #expect(!harness.found && harness.summary == "sign in to GitHub first")
     }
 
@@ -257,7 +257,7 @@ struct DaemonClientTests {
         let client = make(daemon)
         #expect(try await client.repos().first?.id == "acme-org/shop-api")
         #expect(try await client.templates().count > 3)
-        #expect(try await client.detectHarness(repoID: "acme/search-api").found)
+        #expect(try await client.detectBenchmark(repoID: "acme/search-api").found)
     }
 
     // MARK: Acting

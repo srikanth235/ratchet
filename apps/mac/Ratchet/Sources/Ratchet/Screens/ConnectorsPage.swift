@@ -400,8 +400,8 @@ struct AddConnectorSheet: View {
     @State private var region = "us-east-1"
     @State private var cap = ""
     @State private var profiles: AwsProfiles?
-    @State private var found: [DetectedAgent]?
-    @State private var cli: AgentCLI = .claudeCode
+    @State private var found: [DetectedHarness]?
+    @State private var cli: Harness = .claudeCode
     @State private var apiKey = ""
     @State private var keyName = ""
     @State private var failure: String?
@@ -592,9 +592,9 @@ struct AddConnectorSheet: View {
             VStack(alignment: .leading, spacing: Space.sm) {
                 Text("Found on this Mac").kitType(.section).foregroundStyle(Ink.textMuted)
                 if let found {
-                    let addable = DetectedAgent.addable(found, connected: store.connectors)
+                    let addable = DetectedHarness.addable(found, connected: store.connectors)
                     if addable.isEmpty {
-                        Text(DetectedAgent.emptyNote(found)).kitType(.meta).foregroundStyle(Ink.textFaint)
+                        Text(DetectedHarness.emptyNote(found)).kitType(.meta).foregroundStyle(Ink.textFaint)
                     } else {
                         ForEach(addable) { agent in
                             HStack {
@@ -618,7 +618,7 @@ struct AddConnectorSheet: View {
                     .kitType(.caption).foregroundStyle(Ink.textFaint).fixedSize(horizontal: false, vertical: true)
                 if !canStore { keychainNotice("an API key") }
                 Picker("Agent", selection: $cli) {
-                    ForEach(AgentCLI.allCases) { Text($0.title).tag($0) }
+                    ForEach(Harness.allCases) { Text($0.title).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -630,15 +630,15 @@ struct AddConnectorSheet: View {
                 }
             }
         }
-        .task { found = try? await store.client.detectedAgents(redetect: false) }
+        .task { found = try? await store.client.detectedHarnesses(redetect: false) }
     }
 
-    private func addLogin(_ agent: DetectedAgent) {
+    private func addLogin(_ agent: DetectedHarness) {
         busy = true
         Task {
             defer { busy = false }
             do {
-                try await store.addConnectorChecked(NewConnector(kind: .agent, name: agent.cli.title))
+                try await store.addConnectorChecked(NewConnector(kind: .agent, name: agent.harness.title))
                 dismiss()
             } catch {
                 failure = error.localizedDescription
@@ -649,7 +649,7 @@ struct AddConnectorSheet: View {
     private func redetect() {
         Task {
             do {
-                found = try await store.client.detectedAgents(redetect: true)
+                found = try await store.client.detectedHarnesses(redetect: true)
                 await store.refreshConnectors()
                 failure = nil
             } catch {

@@ -233,7 +233,7 @@ enum SelfTest {
         // The setup routes.
         do {
             _ = try await store.client.awsProfiles()
-            _ = try await store.client.detectedAgents(redetect: false)
+            _ = try await store.client.detectedHarnesses(redetect: false)
             let advanced = try await store.client.advancedSettings()
             check("the development overrides are readable", !advanced.defaultModuleDir.isEmpty || advanced.moduleDir.isEmpty)
             _ = try await store.client.connectorSetup()
