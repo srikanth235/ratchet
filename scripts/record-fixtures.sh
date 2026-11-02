@@ -94,6 +94,20 @@ done
 
 say() { echo "$@" >&2; }
 
+# Run "$@" for at most TIMEOUT_S seconds. GNU `timeout` (or Homebrew's `gtimeout`) when present; macOS ships neither,
+# so fall back to perl's alarm (perl is in the base system), else run without a limit.
+with_timeout() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$TIMEOUT_S" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$TIMEOUT_S" "$@"
+  elif command -v perl >/dev/null 2>&1; then
+    perl -e 'alarm shift; exec @ARGV or exit 127' "$TIMEOUT_S" "$@"
+  else
+    "$@"
+  fi
+}
+
 RESULTS=()
 record_result() { # cli version behaviour file status [note]
   local note="${6:-}"
@@ -127,7 +141,7 @@ scrub() { # scratch-dir
   if [ "${#user}" -ge 3 ]; then
     expr+=(-e "s|/$user/|/recorder/|g")
   fi
-  sed "${expr[@]}"
+  sed ${expr[@]+"${expr[@]}"}
 }
 
 # Credential-looking strings that must never reach a fixture. Keep in step with `secret_in` in tests/real_fixtures.rs.
@@ -158,7 +172,7 @@ run_cli() {
       args=(-p --output-format stream-json --verbose --max-turns 1 --permission-mode dontAsk)
       [ "$behaviour" = deltas ] && args+=(--include-partial-messages)
       [ -n "$session" ] && args+=(--resume "$session")
-      printf '%s' "$PROMPT" | (cd "$scratch" && timeout "$TIMEOUT_S" "${env_prefix[@]}" claude "${args[@]}") >"$scratch/raw.jsonl" 2>/dev/null || code=$?
+      printf '%s' "$PROMPT" | (cd "$scratch" && with_timeout ${env_prefix[@]+"${env_prefix[@]}"} claude ${args[@]+"${args[@]}"}) >"$scratch/raw.jsonl" 2>/dev/null || code=$?
       ;;
     codex)
       if [ -n "$session" ]; then
@@ -166,13 +180,13 @@ run_cli() {
       else
         args=(exec --json --skip-git-repo-check --sandbox read-only)
       fi
-      printf '%s' "$PROMPT" | (cd "$scratch" && timeout "$TIMEOUT_S" "${env_prefix[@]}" codex "${args[@]}") >"$scratch/raw.jsonl" 2>/dev/null || code=$?
+      printf '%s' "$PROMPT" | (cd "$scratch" && with_timeout ${env_prefix[@]+"${env_prefix[@]}"} codex ${args[@]+"${args[@]}"}) >"$scratch/raw.jsonl" 2>/dev/null || code=$?
       ;;
     grok)
       printf '%s' "$PROMPT" >"$scratch/prompt.txt"
       args=(--prompt-file "$scratch/prompt.txt" --output-format streaming-json --sandbox read-only)
       [ -n "$session" ] && args+=(--resume "$session")
-      (cd "$scratch" && timeout "$TIMEOUT_S" "${env_prefix[@]}" grok "${args[@]}") >"$scratch/raw.jsonl" 2>/dev/null </dev/null || code=$?
+      (cd "$scratch" && with_timeout ${env_prefix[@]+"${env_prefix[@]}"} grok ${args[@]+"${args[@]}"}) >"$scratch/raw.jsonl" 2>/dev/null </dev/null || code=$?
       ;;
   esac
   return "$code"
