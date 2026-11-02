@@ -54,6 +54,18 @@ switch each in Settings): win ready to merge, environment drafted, budget limit,
 screen (`NotificationDestination`: the optimization, Connectors, or the New optimization flow). `NotificationRouting` (RatchetKit) is the pure
 decision function over two store states; the store calls it after each event and never on the first load.
 
+## Errors and launch at login
+
+`AppStore.lastError` is shown in `ErrorBanner` (`DesignKit/Banner.swift`) above the page, in `ContentView`: dismissible, and cleared when the
+next action starts (`beginAction()` in every store action) or on the close button (`dismissError()`). A failed Stop, pull request or End
+sandbox says what it was doing ("Couldn't stop the optimization. …"). A failed load clears on the next good load; a failed action is not
+wiped by a background refresh. Snapshot scene: `error-banner`.
+
+Settings > Startup has "Launch at login" (`LoginItem`, `SMAppService.mainApp`). A login launch (the open-application event carries
+'lgit', see `LaunchContext`) shows only the menu bar item: the window is hidden, not closed, so data keeps loading and notifications keep
+coming; the menu bar item, a notification click or the Dock icon brings it back. It needs the menu bar item, so turning it on turns that on.
+Test and snapshot mode never register anything. Snapshot: `settings-login-approval`.
+
 ## Layout
 
 - `Sources/RatchetAPI/` generated OpenAPI types and client (see Data). `Sources/RatchetKit/` models, formatting, client protocol, mock, daemon client (`Daemon/`), `AppStore`, `NewOptimizationFlow`. No SwiftUI. Tests in `Tests/RatchetKitTests/`.

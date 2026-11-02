@@ -3,7 +3,7 @@ import SwiftUI
 /// The icon set. Views name a `KitIcon`; the drawing lives here. One 16 x 16 box, one round stroke.
 /// Shapes follow the SVGs of design/v02.html.
 nonisolated enum KitIcon {
-    case overview, optimizations, benchmarks, connectors, check, back, plus
+    case overview, optimizations, benchmarks, connectors, check, back, plus, close, alert
 }
 
 private nonisolated struct KitGlyph: Shape {
@@ -47,6 +47,21 @@ private nonisolated struct KitGlyph: Shape {
             path.addLine(to: CGPoint(x: 8, y: 13))
             path.move(to: CGPoint(x: 3, y: 8))
             path.addLine(to: CGPoint(x: 13, y: 8))
+        case .close:
+            path.move(to: CGPoint(x: 4, y: 4))
+            path.addLine(to: CGPoint(x: 12, y: 12))
+            path.move(to: CGPoint(x: 12, y: 4))
+            path.addLine(to: CGPoint(x: 4, y: 12))
+        case .alert:
+            // A triangle with a bar and a dot: its shape says "problem" without relying on its color.
+            path.move(to: CGPoint(x: 8, y: 2.5))
+            path.addLine(to: CGPoint(x: 14, y: 13))
+            path.addLine(to: CGPoint(x: 2, y: 13))
+            path.closeSubpath()
+            path.move(to: CGPoint(x: 8, y: 6.5))
+            path.addLine(to: CGPoint(x: 8, y: 9.5))
+            path.move(to: CGPoint(x: 8, y: 11.2))
+            path.addLine(to: CGPoint(x: 8, y: 11.3))
         }
         let scale = rect.width / 16
         return path.applying(CGAffineTransform(scaleX: scale, y: scale))

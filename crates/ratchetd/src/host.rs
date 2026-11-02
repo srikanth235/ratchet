@@ -6,7 +6,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
-use ratchet_engine::desktop::PowerSaveBlocker;
+use ratchet_engine::desktop::{PowerSaveBlocker, PowerSaveHook};
+use tokio::sync::broadcast::{self, error::RecvError};
+
+use crate::api::ApiEvent;
 
 /// Keeps the machine awake by running a helper process for as long as the blocker is held (`caffeinate -i -w <pid>` on
 /// macOS: no idle sleep, and the helper exits by itself when the daemon does, so a crashed daemon cannot leave the Mac
@@ -89,6 +92,32 @@ impl Drop for CommandPowerBlocker {
     }
 }
 
+/// Drive `hook` from the daemon's events until the stream closes.
+///
+/// `RunActive` events switch the blocker. A slow loop can fall behind the broadcast channel and get
+/// `RecvError::Lagged`: that only means events were dropped (possibly a `RunActive`), so it asks `run_active` what is
+/// true now and carries on. Only `Closed` (the service is gone) ends the loop and releases the blocker. The state is
+/// also read once up front, since a run may have started before the subscription.
+pub async fn keep_awake<B: PowerSaveBlocker>(
+    hook: &PowerSaveHook<B>,
+    mut events: broadcast::Receiver<ApiEvent>,
+    run_active: impl Fn() -> bool,
+) {
+    hook.on_run_active(run_active());
+    loop {
+        match events.recv().await {
+            Ok(ApiEvent::RunActive { active, .. }) => hook.on_run_active(active),
+            Ok(_) => {}
+            Err(RecvError::Lagged(missed)) => {
+                tracing::warn!(missed, "keep-awake fell behind the event stream; resyncing");
+                hook.on_run_active(run_active());
+            }
+            Err(RecvError::Closed) => break,
+        }
+    }
+    hook.release();
+}
+
 /// The `Resources` directory of the app bundle `exe` lives in (`<App>/Contents/Helpers/ratchetd`), when it ships the
 /// OpenTofu module (`Resources/infra/aws`). The LaunchAgent plist cannot carry the bundle's absolute path, so the
 /// daemon finds it from where it is.
@@ -140,6 +169,134 @@ mod tests {
         assert!(hook.held());
         hook.on_run_active(false);
         assert!(!hook.held());
+    }
+
+    fn run_active_event(active: bool) -> ApiEvent {
+        ApiEvent::RunActive {
+            active,
+            optimization_ids: vec![],
+        }
+    }
+
+    /// A blocker that records start/stop, so a test can tell "released" from "never held".
+    #[derive(Default, Clone)]
+    struct Recording(std::sync::Arc<Mutex<Vec<&'static str>>>);
+
+    impl PowerSaveBlocker for Recording {
+        fn start(&self) -> u64 {
+            self.0.lock().unwrap().push("start");
+            1
+        }
+        fn stop(&self, _id: u64) {
+            self.0.lock().unwrap().push("stop");
+        }
+    }
+
+    async fn settle() {
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn keep_awake_survives_lagged_and_resyncs_from_the_engine() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let (tx, rx) = broadcast::channel::<ApiEvent>(2);
+        let rec = Recording::default();
+        let hook = Arc::new(PowerSaveHook::new(rec.clone()));
+        let active = Arc::new(AtomicBool::new(false));
+        let task = {
+            let (hook, active) = (hook.clone(), active.clone());
+            tokio::spawn(async move {
+                keep_awake(&*hook, rx, move || active.load(Ordering::SeqCst)).await;
+            })
+        };
+        settle().await;
+        assert!(!hook.held());
+
+        // The receiver is overrun while the loop has not run: 5 events into a channel of 2. The run-active (true)
+        // is among the dropped ones, but the engine says a run is active.
+        active.store(true, Ordering::SeqCst);
+        for e in [
+            run_active_event(true),
+            ApiEvent::Notice {
+                optimization_id: "o".into(),
+                level: ratchet_core::ports::NoticeLevel::Info,
+                text: "a".into(),
+            },
+            ApiEvent::Notice {
+                optimization_id: "o".into(),
+                level: ratchet_core::ports::NoticeLevel::Info,
+                text: "b".into(),
+            },
+            ApiEvent::Notice {
+                optimization_id: "o".into(),
+                level: ratchet_core::ports::NoticeLevel::Info,
+                text: "c".into(),
+            },
+            ApiEvent::Notice {
+                optimization_id: "o".into(),
+                level: ratchet_core::ports::NoticeLevel::Info,
+                text: "d".into(),
+            },
+        ] {
+            tx.send(e).unwrap();
+        }
+        settle().await;
+        assert!(!task.is_finished(), "Lagged must not end the loop");
+        assert!(hook.held(), "resynced to the engine's active state");
+
+        // and the loop still follows later events
+        active.store(false, Ordering::SeqCst);
+        tx.send(run_active_event(false)).unwrap();
+        settle().await;
+        assert!(!hook.held());
+        tx.send(run_active_event(true)).unwrap();
+        settle().await;
+        assert!(hook.held(), "events after the lag are still handled");
+
+        // only the channel closing ends it, and it releases the blocker
+        drop(tx);
+        task.await.unwrap();
+        assert!(!hook.held());
+        assert_eq!(rec.0.lock().unwrap().last(), Some(&"stop"));
+    }
+
+    #[tokio::test]
+    async fn keep_awake_resyncs_to_released_when_the_lagged_run_ended() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let (tx, rx) = broadcast::channel::<ApiEvent>(1);
+        let hook = Arc::new(PowerSaveHook::new(Recording::default()));
+        let active = Arc::new(AtomicBool::new(true)); // a run was already active at startup
+        let task = {
+            let (hook, active) = (hook.clone(), active.clone());
+            tokio::spawn(async move {
+                keep_awake(&*hook, rx, move || active.load(Ordering::SeqCst)).await;
+            })
+        };
+        settle().await;
+        assert!(hook.held(), "read once at startup");
+
+        // the run ends, but the `false` event is lost to the lag
+        active.store(false, Ordering::SeqCst);
+        for _ in 0..3 {
+            tx.send(run_active_event(true)).unwrap();
+        }
+        // (the one event the channel still holds is not a run-active, so only the resync can release)
+        tx.send(ApiEvent::Notice {
+            optimization_id: "o".into(),
+            level: ratchet_core::ports::NoticeLevel::Info,
+            text: "x".into(),
+        })
+        .unwrap();
+        settle().await;
+        assert!(!hook.held(), "the lag resynced to the engine: not active");
+        drop(tx);
+        task.await.unwrap();
     }
 
     #[test]

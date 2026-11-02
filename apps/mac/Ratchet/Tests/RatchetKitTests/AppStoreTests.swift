@@ -170,6 +170,40 @@ struct AppStoreTests {
         #expect(await store.report("opt-cli")?.fileName.hasSuffix(".md") == true)
     }
 
+    @Test func aFailedStopIsShownAndTheNextActionClearsIt() async {
+        let (store, _) = await loadedStore()
+        await store.stopOptimization("missing")
+        #expect(store.lastError?.hasPrefix("Couldn't stop the optimization.") == true)
+        // a background refresh does not wipe what the person has not read yet
+        await store.refresh()
+        #expect(store.lastError != nil)
+        // the banner's close button
+        store.dismissError()
+        #expect(store.lastError == nil)
+        // starting the next action clears it, even when that action goes well
+        await store.stopOptimization("missing")
+        #expect(store.lastError != nil)
+        await store.pauseAgent("agent-claude-team")
+        #expect(store.lastError == nil)
+    }
+
+    @Test func aFailedEndSandboxIsShown() async {
+        let (store, _) = await loadedStore()
+        await store.endSandbox()
+        #expect(store.lastError == nil)
+        await store.endSandbox()  // already off
+        #expect(store.lastError?.hasPrefix("Couldn't end the sandbox.") == true)
+        #expect(store.lastError?.contains("already off") == true)
+    }
+
+    @Test func aFailedLoadClearsWhenTheNextLoadWorks() async {
+        let (store, _) = await loadedStore()
+        await store.loadDetail(id: "missing")
+        #expect(store.lastError != nil)
+        await store.refresh()
+        #expect(store.lastError == nil)
+    }
+
     @Test func theLastSnapshotRendersBeforeTheClientAnswers() async {
         let url = FileManager.default.temporaryDirectory.appending(path: "ratchet-cache-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: url) }

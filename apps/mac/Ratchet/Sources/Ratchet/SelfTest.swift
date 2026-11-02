@@ -172,6 +172,37 @@ enum SelfTest {
         check("the candidate filter narrows the table", CandidateFilter.blocked.apply(to: store.insight.results["opt-checkout"] ?? []).count == 1)
 
         // Symbols used in the app exist.
+        // Errors reach the banner: a failed Stop says what happened, stays through a refresh, and the next action clears it.
+        await store.stopOptimization("opt-bundle")  // already ended
+        check("a failed Stop is recorded for the banner", store.lastError?.hasPrefix("Couldn't stop the optimization.") == true,
+              store.lastError ?? "no error")
+        await store.refresh()
+        check("a refresh does not wipe an error nobody has read", store.lastError != nil)
+        store.dismissError()
+        check("the banner's close button clears the error", store.lastError == nil)
+        await store.endSandbox()
+        await store.endSandbox()  // already off
+        check("a failed End sandbox is recorded", store.lastError?.hasPrefix("Couldn't end the sandbox.") == true,
+              store.lastError ?? "no error")
+        await store.pauseAgent("agent-claude-login")
+        check("the next action clears the previous error", store.lastError == nil)
+
+        // Launch at login: the system's answers map to what Settings shows, and a login launch is recognised.
+        check("an enabled login item reads as on", LoginItem.State(.enabled) == .on)
+        check("a login item waiting for approval still reads as requested", LoginItem.State(.requiresApproval).isRequested)
+        check("a missing login item reads as unavailable", LoginItem.State(.notFound) == .unavailable)
+        let normalLaunch = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEOpenApplication), targetDescriptor: nil,
+            returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+        check("a plain open is not a login launch", !LaunchContext.isLoginLaunch(normalLaunch))
+        let loginLaunch = NSAppleEventDescriptor(
+            eventClass: AEEventClass(kCoreEventClass), eventID: AEEventID(kAEOpenApplication), targetDescriptor: nil,
+            returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+        loginLaunch.setParam(NSAppleEventDescriptor(enumCode: 0x6C67_6974), forKeyword: AEKeyword(keyAEPropData))
+        check("an open with the login-item marker is a login launch", LaunchContext.isLoginLaunch(loginLaunch))
+        let item = LoginItem(touchesSystem: false)
+        check("test mode never registers the app", item.set(true) == nil && item.state == .on && item.set(false) == nil && item.state == .off)
+
         for name in ["chart.line.uptrend.xyaxis", "gearshape", "link"] {
             check("SF Symbol \(name) exists", NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil)
         }

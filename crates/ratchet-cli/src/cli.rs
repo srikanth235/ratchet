@@ -33,6 +33,10 @@ pub struct Cli {
     /// Machine-readable JSON output.
     #[arg(long, global = true)]
     pub json: bool,
+    /// Confirm a command that spends money or changes things (run, stop, env end, pr). Without it the command only
+    /// prints what it would do and exits 2.
+    #[arg(long, short = 'y', global = true)]
+    pub yes: bool,
     #[command(subcommand)]
     pub command: Command,
 }

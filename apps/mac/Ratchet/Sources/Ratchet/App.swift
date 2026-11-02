@@ -25,6 +25,7 @@ struct RatchetApp: App {
     @State private var router = AppRouter()
     @State private var daemon = DaemonController.make()
     @State private var notifier = AppNotifier(enabled: !Store.isOverridden)
+    @State private var loginItem = LoginItem(touchesSystem: !Store.isOverridden && ProcessInfo.processInfo.environment["APP_DEMO"] != "1")
     @AppStorage("menuBarItem") private var showMenuBarItem = true
 
     var body: some Scene {
@@ -34,6 +35,7 @@ struct RatchetApp: App {
                 .environment(router)
                 .environment(daemon)
                 .environment(notifier)
+                .environment(loginItem)
                 .overlay { if GridOverlay.enabled { GridOverlay() } }
                 .frame(minWidth: 1080, minHeight: 640)
         }
@@ -62,6 +64,7 @@ struct RatchetApp: App {
                 .environment(router)
                 .environment(daemon)
                 .environment(notifier)
+                .environment(loginItem)
         }
         .windowResizability(.contentSize)
 
@@ -81,10 +84,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         // The design's fonts, before the first view asks for one.
         _ = KitFonts.registered
+        // Started by the login item? Only the menu bar item shows then (see LaunchContext).
+        LaunchContext.record(NSAppleEventManager.shared().currentAppleEvent)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Started from a terminal, the process is not a foreground app yet.
+        if LaunchContext.startsInMenuBar { return }  // ContentView hides the window and keeps the Dock icon away
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
     }

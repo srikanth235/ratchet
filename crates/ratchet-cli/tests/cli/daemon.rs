@@ -124,6 +124,7 @@ async fn run_creates_starts_and_stop_ends() {
     let created = env
         .ratchet(&[
             "run",
+            "--yes",
             "--demo",
             "demo-search",
             "--no-start",
@@ -149,6 +150,7 @@ async fn run_creates_starts_and_stop_ends() {
     let started = env
         .ratchet(&[
             "run",
+            "--yes",
             "--demo",
             "demo-cli",
             "--agent",
@@ -168,13 +170,15 @@ async fn run_creates_starts_and_stop_ends() {
     assert_eq!(d.agents.len(), 2);
     assert_eq!(d.time_limit_s, 5400);
 
-    let stop = env.ratchet(&["stop", &id2, "--reason", "enough"]).await;
+    let stop = env
+        .ratchet(&["stop", &id2, "--reason", "enough", "--yes"])
+        .await;
     assert_eq!(stop.code, 0, "{}", stop.stderr);
     assert_eq!(stop.stdout, format!("stopped {id2}\n"));
     let d: OptimizationDetail = parse(&env.ratchet(&["show", &id2, "--json"]).await);
     assert_eq!(d.summary.status, UiStatus::Stopped);
     assert_eq!(
-        env.ratchet(&["stop", &id2, "--json"]).await.json()["stopped"],
+        env.ratchet(&["stop", &id2, "--json", "--yes"]).await.json()["stopped"],
         true
     );
     env.stop().await;
@@ -187,13 +191,14 @@ async fn run_needs_a_target_and_reports_the_daemons_complaints() {
     assert_eq!(o.code, 2);
     assert!(o.stderr.contains("needs a repo"));
     // a repo run without GitHub is refused with the reason
-    env.ratchet(&["run", "--demo", "demo-search", "--no-start"])
+    env.ratchet(&["run", "--yes", "--demo", "demo-search", "--no-start"])
         .await; // warm the sim
     env.sim.complete_github_flow();
     let off = ratchet(&[
         "--socket",
         &env.socket(),
         "run",
+        "--yes",
         "acme/search-api",
         "--budget",
         "-1",
@@ -212,7 +217,15 @@ async fn run_needs_a_target_and_reports_the_daemons_complaints() {
         off.stderr
     );
     let bad = env
-        .ratchet(&["run", "--demo", "demo-search", "--budget", "-1", "--json"])
+        .ratchet(&[
+            "run",
+            "--yes",
+            "--demo",
+            "demo-search",
+            "--budget",
+            "-1",
+            "--json",
+        ])
         .await;
     assert_eq!(bad.code, 1);
     let e: serde_json::Value = serde_json::from_str(&bad.stderr).unwrap();
@@ -236,6 +249,7 @@ async fn run_wait_follows_the_events_until_the_run_ends() {
     let o = env
         .ratchet(&[
             "run",
+            "--yes",
             "--demo",
             "demo-search",
             "--budget",
@@ -261,6 +275,7 @@ async fn run_wait_follows_the_events_until_the_run_ends() {
     let j = env
         .ratchet(&[
             "run",
+            "--yes",
             "--demo",
             "demo-search",
             "--budget",
@@ -284,6 +299,7 @@ async fn run_wait_gives_up_after_its_timeout_with_exit_1() {
     let o = env
         .ratchet(&[
             "run",
+            "--yes",
             "--demo",
             "demo-search",
             "--wait",
@@ -316,7 +332,7 @@ async fn report_pr_and_cost() {
     let rj: ReportVm = parse(&env.ratchet(&["report", "opt_demo_ingest", "--json"]).await);
     assert_eq!(rj.markdown, r.stdout);
 
-    let pr = env.ratchet(&["pr", "opt_demo_ingest"]).await;
+    let pr = env.ratchet(&["pr", "opt_demo_ingest", "--yes"]).await;
     assert_eq!(pr.code, 0, "{}", pr.stderr);
     assert!(
         pr.stdout
@@ -324,7 +340,7 @@ async fn report_pr_and_cost() {
     );
     let show = env.ratchet(&["show", "opt_demo_ingest"]).await;
     assert!(show.stdout.contains(pr.stdout.trim()), "{}", show.stdout);
-    let nope = env.ratchet(&["pr", "opt_demo_web"]).await;
+    let nope = env.ratchet(&["pr", "opt_demo_web", "--yes"]).await;
     assert_eq!(nope.code, 1);
     assert!(nope.stderr.contains("no verified wins"), "{}", nope.stderr);
 
@@ -486,15 +502,15 @@ async fn environments_list_and_end() {
         o.stdout
     );
     assert!(o.stdout.contains("last teardown:"));
-    let busy = env.ratchet(&["env", "end", "sbx-sim-1"]).await;
+    let busy = env.ratchet(&["env", "end", "sbx-sim-1", "--yes"]).await;
     assert_eq!(busy.code, 1);
     assert!(
         busy.stderr.contains("a run is still active"),
         "{}",
         busy.stderr
     );
-    env.ratchet(&["stop", "opt_demo_search"]).await;
-    let ended = env.ratchet(&["env", "end", "sbx-sim-1"]).await;
+    env.ratchet(&["stop", "opt_demo_search", "--yes"]).await;
+    let ended = env.ratchet(&["env", "end", "sbx-sim-1", "--yes"]).await;
     assert_eq!(ended.code, 0, "{}", ended.stderr);
     assert!(ended.stdout.starts_with("ended sbx-sim-1\n"));
     assert!(
@@ -642,4 +658,96 @@ async fn connection_problems_are_explained() {
     .await;
     assert_eq!(o.code, 0, "{}", o.stderr);
     env.stop().await;
+}
+
+/// The `--yes` contract: `run`, `stop`, `env end` and `pr` only preview without it, exit 2, and change nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn destructive_commands_preview_and_exit_2_without_yes() {
+    let env = Env::start().await;
+
+    let run = env
+        .ratchet(&[
+            "run",
+            "--demo",
+            "demo-search",
+            "--agent",
+            "claude-code,codex",
+            "--budget",
+            "20",
+            "--where",
+            "local",
+        ])
+        .await;
+    assert_eq!(run.code, 2, "{}", run.stderr);
+    assert!(
+        run.stdout.is_empty(),
+        "preview goes to stderr: {}",
+        run.stdout
+    );
+    for want in [
+        "demo-search",
+        "claude-code, codex",
+        "up to $20.00",
+        "local",
+        "re-run with --yes",
+        "Nothing was changed",
+    ] {
+        assert!(
+            run.stderr.contains(want),
+            "missing {want:?}:\n{}",
+            run.stderr
+        );
+    }
+
+    let cases: [(&[&str], &str); 3] = [
+        (&["stop", "opt_demo_search"], "Would stop opt_demo_search"),
+        (&["pr", "opt_demo_ingest"], "pull request"),
+        (
+            &["env", "end", "sbx-sim-1"],
+            "tear down the environment sbx-sim-1",
+        ),
+    ];
+    for (args, want) in cases {
+        let o = env.ratchet(args).await;
+        assert_eq!(o.code, 2, "{args:?}: {}", o.stderr);
+        assert!(o.stderr.contains(want), "{args:?}:\n{}", o.stderr);
+        assert!(o.stderr.contains("re-run with --yes"), "{}", o.stderr);
+    }
+
+    // --json: one object on stdout, a stable error code, and the preview
+    let j = env.ratchet(&["stop", "opt_demo_search", "--json"]).await;
+    assert_eq!(j.code, 2);
+    let v = j.json();
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["error"]["code"], "confirmation_required");
+    assert_eq!(v["changed"], false);
+    assert_eq!(v["preview"]["optimization"], "opt_demo_search");
+    assert!(j.stderr.is_empty(), "{}", j.stderr);
+
+    // nothing happened, and the optimization is still running
+    let d: OptimizationDetail = parse(&env.ratchet(&["show", "opt_demo_search", "--json"]).await);
+    assert_eq!(d.summary.status, UiStatus::Running);
+
+    // -y is the short form, and --yes works before the subcommand too
+    let stopped = env.ratchet(&["-y", "stop", "opt_demo_search"]).await;
+    assert_eq!(stopped.code, 0, "{}", stopped.stderr);
+    env.stop().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_preview_needs_no_daemon() {
+    // an unreachable socket: the refusal comes first, so it is still exit 2 rather than "cannot connect"
+    let o = ratchet(&["--socket", "/nonexistent/ratchetd.sock", "stop", "opt_x"]).await;
+    assert_eq!(o.code, 2, "{}", o.stderr);
+    assert!(o.stderr.contains("re-run with --yes"));
+    // with --yes it does try, and fails to connect (exit 1)
+    let o = ratchet(&[
+        "--socket",
+        "/nonexistent/ratchetd.sock",
+        "stop",
+        "opt_x",
+        "--yes",
+    ])
+    .await;
+    assert_eq!(o.code, 1, "{}", o.stderr);
 }

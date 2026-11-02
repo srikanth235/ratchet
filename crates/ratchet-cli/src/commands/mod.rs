@@ -3,6 +3,7 @@
 
 pub mod api;
 pub mod baseline;
+pub mod confirm;
 pub mod init;
 pub mod validate;
 
@@ -103,6 +104,11 @@ pub async fn dispatch(cli: Cli, io: &dyn Io) -> i32 {
         token_file: cli.token_file.clone(),
         token: cli.token.clone(),
     };
+    if !cli.yes
+        && let Some(preview) = confirm::preview(&cli.command)
+    {
+        return confirm::refuse(io, json, &preview);
+    }
     let client = match Client::resolve(&conn) {
         Ok(c) => c,
         Err(e) => return report_error(io, json, &e),

@@ -54,7 +54,7 @@ target/release/ratchetd serve --mode sim --ledger :memory:     # the simulation;
 target/release/ratchet status                                   # the CLI talks to the same socket
 target/release/ratchet init --template cli-cold-start           # write an evaluator template into a repository
 target/release/ratchet validate                                 # check ./ratchet.yaml
-target/release/ratchet run --demo demo-search --wait            # a whole run on a demo, through the daemon
+target/release/ratchet run --demo demo-search --wait --yes      # a whole run on a demo, through the daemon (--yes: without it, a preview)
 ```
 
 `ratchet --help` lists the commands; every one takes `--json`. The socket and its token live in

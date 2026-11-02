@@ -111,8 +111,7 @@ struct MenuBarView: View {
 
     /// Brings the window forward, then runs `action`.
     private func show(_ action: () -> Void) {
-        openWindow(id: "main")
-        NSApp.activate()
+        LaunchContext.revealWindow { openWindow(id: "main") }
         action()
     }
 }
