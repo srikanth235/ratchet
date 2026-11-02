@@ -51,7 +51,7 @@ actor OptimizationRowsCache {
     // MARK: Finished optimizations
 
     static func isFinished(_ vm: VM.OptimizationVm) -> Bool {
-        vm.status == .completed || vm.status == .stopped || vm.status == .failed
+        vm.status == .completed || vm.status == .stopped || vm.status == .failed || vm.status == .prOpen
     }
 
     /// The detail kept for this list entry, if the entry has not changed since it was kept.
