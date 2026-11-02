@@ -1178,6 +1178,32 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         default:
           $ref: '#/components/responses/Failure'
+  /v1/home:
+    get:
+      tags:
+      - overview
+      summary: 'Home: the line above the composer. `story` is the Overview''s `story`, from the same computation.'
+      operationId: getHome
+      parameters:
+      - name: range
+        in: query
+        description: Window of the numbers; default `90d`. The same ranges the Overview takes.
+        required: false
+        schema:
+          $ref: '#/components/schemas/OverviewRange'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HomeVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          $ref: '#/components/responses/Failure'
   /v1/optimizations:
     get:
       tags:
@@ -1425,6 +1451,38 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         default:
           $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/pull-request/merged:
+    post:
+      tags:
+      - reports
+      summary: 'Record that the optimization''s pull request was merged: its wins count as delivered from then on. 409 without a pull request.'
+      operationId: markPullRequestMerged
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PullRequestVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: No pull request yet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
   /v1/optimizations/{id}/ratchet:
     get:
       tags:
@@ -1505,6 +1563,65 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReportVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/schedule:
+    get:
+      tags:
+      - optimizations
+      summary: How often the optimization runs by itself (what the Overview's "Next 30 days" counts).
+      operationId: getSchedule
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+    put:
+      tags:
+      - optimizations
+      summary: Set (or, with `null`, clear) the schedule.
+      operationId: setSchedule
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetScheduleInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScheduleVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -1616,6 +1733,92 @@ paths:
           description: Stopped
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/value:
+    get:
+      tags:
+      - optimizations
+      summary: 'The Value row: what an improvement of this optimization''s metric is worth, in numbers and in plain words.'
+      operationId: getValueModel
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValueModelVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+    put:
+      tags:
+      - optimizations
+      summary: |-
+        Replace the value model. The wins already in the ledger are valued with it from now on; 400 for a `usdPerUnit` that is not
+        greater than 0.
+      operationId: setValueModel
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetValueModelInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValueModelVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+    delete:
+      tags:
+      - optimizations
+      summary: 'Remove the value model: the optimization''s wins have no dollar value afterwards.'
+      operationId: clearValueModel
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValueModelVm'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -4639,6 +4842,51 @@ components:
           type:
           - string
           - 'null'
+    HomePullRequests:
+      type: object
+      description: Pull requests behind the numbers.
+      required:
+      - open
+      - merged
+      properties:
+        merged:
+          type: integer
+          format: int64
+        open:
+          type: integer
+          format: int64
+          description: Opened and waiting for a merge.
+    HomeVm:
+      type: object
+      description: |-
+        `GET /v1/home`: the line above the composer. Its `story` is the Overview's `story`, computed by the same function, so the two
+        screens can never disagree.
+      required:
+      - range
+      - empty
+      - story
+      - optimizations
+      - pullRequests
+      - failed
+      properties:
+        empty:
+          type: boolean
+          description: 'No optimization yet: show the composer and no numbers.'
+        failed:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/OverviewNeed'
+            description: 'The most recent failed run, if one still needs a look ("1 run failed: CLI cold start").'
+        optimizations:
+          type: integer
+          format: int64
+          description: Optimizations in the range (drafts left out).
+        pullRequests:
+          $ref: '#/components/schemas/HomePullRequests'
+        range:
+          $ref: '#/components/schemas/OverviewRange'
+        story:
+          $ref: '#/components/schemas/ValueStory'
     InspectRepoInput:
       type: object
       required:
@@ -5100,12 +5348,100 @@ components:
             $ref: '#/components/schemas/OptimizationVm'
         range:
           $ref: '#/components/schemas/KpiRange'
+    OverviewChartPoint:
+      type: object
+      description: 'One point of the spend line and the value staircase: cumulative real dollars and the yearly value counted by then.'
+      required:
+      - at
+      - spentUsd
+      - deliveredUsdPerYear
+      - pendingUsdPerYear
+      - readyUsdPerYear
+      properties:
+        at:
+          type: integer
+          format: int64
+        deliveredUsdPerYear:
+          type: number
+          format: double
+          description: Yearly value of merged wins up to `at`.
+        pendingUsdPerYear:
+          type: number
+          format: double
+          description: Yearly value of wins in open pull requests up to `at` (the dashed step).
+        readyUsdPerYear:
+          type: number
+          format: double
+          description: Yearly value of wins with no pull request yet up to `at`.
+        spentUsd:
+          type: number
+          format: double
+          description: Real dollars spent from the start of the window up to `at`.
     OverviewDirection:
       type: string
       description: '`lower` = a smaller metric is better.'
       enum:
       - lower
       - higher
+    OverviewEmptyState:
+      type: object
+      description: 'The calm empty state: a title and one sentence. Present only when `phase` is not `wins`.'
+      required:
+      - title
+      - body
+      properties:
+        body:
+          type: string
+        title:
+          type: string
+    OverviewForecast:
+      type: object
+      description: '"Next 30 days": what the schedules will start and what that will cost, from what each scheduled optimization''s last run cost.'
+      required:
+      - days
+      - scheduledRuns
+      - unforecast
+      - expectedUsd
+      - expectedAwsUsd
+      - expectedAgentsApiUsd
+      - expectedIncludedTokens
+      - hardCapUsd
+      - line
+      properties:
+        days:
+          type: integer
+          format: int64
+        expectedAgentsApiUsd:
+          type: number
+          format: double
+        expectedAwsUsd:
+          type: number
+          format: double
+        expectedIncludedTokens:
+          type: integer
+          format: int64
+          description: Tokens the plan will cover ("included in your plan").
+        expectedUsd:
+          type: number
+          format: double
+          description: 'Expected real dollars: `expectedAwsUsd` + `expectedAgentsApiUsd`.'
+        hardCapUsd:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: 'The ceiling: the budgets of the optimizations that run (`spent.budgetUsd`). Spend stops at it.'
+        line:
+          type: string
+          description: '"62 runs · ~$140 · cap $500".'
+        scheduledRuns:
+          type: integer
+          format: int64
+          description: Runs the schedules start in the window.
+        unforecast:
+          type: integer
+          format: int64
+          description: Scheduled optimizations whose runs cannot be counted ahead ("on every push").
     OverviewNeed:
       type: object
       required:
@@ -5135,6 +5471,23 @@ components:
       - ship
       - failed
       - connector
+    OverviewPhase:
+      type: string
+      description: What the screen should say when there is nothing to show.
+      enum:
+      - empty
+      - no-wins
+      - wins
+    OverviewPullRequest:
+      type: object
+      required:
+      - url
+      - merged
+      properties:
+        merged:
+          type: boolean
+        url:
+          type: string
     OverviewRange:
       type: string
       description: Window the Overview covers. `all` = everything in the ledger.
@@ -5176,6 +5529,11 @@ components:
       - budgetUsd
       - live
       - valueUsdPerYear
+      - pullRequest
+      - valueState
+      - pending
+      - return
+      - valueModel
       properties:
         baseline:
           type:
@@ -5206,6 +5564,16 @@ components:
           type: string
         name:
           type: string
+        pending:
+          type: boolean
+          description: |-
+            True while the value only counts once a pull request merges (`value_state` is `pending` or `ready`): the row shows
+            its return dimmed with "pending".
+        pullRequest:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/OverviewPullRequest'
+            description: The pull request, once one exists. `merged` is what turns the value into delivered value.
         remainingS:
           type:
           - integer
@@ -5214,6 +5582,12 @@ components:
           description: Seconds left of the time limit while running, else `null`.
         repo:
           type: string
+        return:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: Yearly value per $1 spent on this optimization in the range; `null` without value or spend.
         spentUsd:
           type: number
           format: double
@@ -5228,6 +5602,14 @@ components:
           $ref: '#/components/schemas/StatusTone'
         unit:
           type: string
+        valueModel:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ValueModelVm'
+            description: The value model behind `valueUsdPerYear` (the Value row); `null` when the optimization has none.
+        valueState:
+          $ref: '#/components/schemas/OverviewValueState'
+          description: Delivered (merged), pending (open pull request), ready (no pull request yet) or none.
         valueUsdPerYear:
           type:
           - number
@@ -5243,17 +5625,37 @@ components:
       - usd
       - budgetUsd
       - optimizations
+      - awsUsd
+      - agentsApiUsd
+      - includedTokens
+      - detail
       properties:
+        agentsApiUsd:
+          type: number
+          format: double
+          description: Model tokens billed per token through a key.
+        awsUsd:
+          type: number
+          format: double
+          description: Environments, runners and storage on AWS.
         budgetUsd:
           type: number
           format: double
           description: Budget of the optimizations listed in `rows`.
+        detail:
+          type: string
+          description: '"AWS $121 · agents $63", or "AWS $121 · agents included in your plan (2.4M tokens)".'
+        includedTokens:
+          type: integer
+          format: int64
+          description: 'Tokens used on the user''s own plan ("included in your plan"): counted, never in `usd`.'
         optimizations:
           type: integer
           format: int64
         usd:
           type: number
           format: double
+          description: 'Real dollars in the range: `awsUsd` + `agentsApiUsd`. Agents on the user''s own plan cost nothing extra and are not in it.'
     OverviewValue:
       type: object
       required:
@@ -5269,6 +5671,14 @@ components:
         wins:
           type: integer
           format: int64
+    OverviewValueState:
+      type: string
+      description: Whether the value of an optimization's wins counts as delivered yet. Only a merged pull request delivers it.
+      enum:
+      - delivered
+      - pending
+      - ready
+      - none
     OverviewVm:
       type: object
       required:
@@ -5276,6 +5686,11 @@ components:
       - from
       - to
       - empty
+      - phase
+      - emptyState
+      - story
+      - forecast
+      - chart
       - spent
       - value
       - returnOnSpend
@@ -5283,9 +5698,21 @@ components:
       - needsYou
       - rows
       properties:
+        chart:
+          type: array
+          items:
+            $ref: '#/components/schemas/OverviewChartPoint'
+          description: Points of the "Value delivered vs spend" chart, oldest first, from the start of the window to now.
         empty:
           type: boolean
           description: The ledger has no optimization at all (the Overview shows one calm empty state).
+        emptyState:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/OverviewEmptyState'
+            description: 'What to say when `phase` is not `wins`: "No wins yet" and one sentence.'
+        forecast:
+          $ref: '#/components/schemas/OverviewForecast'
         from:
           type: integer
           format: int64
@@ -5294,13 +5721,18 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OverviewNeed'
+        phase:
+          $ref: '#/components/schemas/OverviewPhase'
+          description: '`empty` (no optimization), `no-wins` (some, none proven yet) or `wins`.'
         range:
           $ref: '#/components/schemas/OverviewRange'
         returnOnSpend:
           oneOf:
           - type: 'null'
           - $ref: '#/components/schemas/OverviewReturn'
-            description: '`null` without value or spend.'
+            description: |-
+              `value` divided by real dollars spent; `story.return` is the one the screens show (delivered value only). `null` without
+              value or spend.
         rows:
           type: array
           items:
@@ -5308,6 +5740,9 @@ components:
           description: Optimizations with activity in the range (drafts created in it included), newest first.
         spent:
           $ref: '#/components/schemas/OverviewSpent'
+        story:
+          $ref: '#/components/schemas/ValueStory'
+          description: The value story, the same object `GET /v1/home` returns.
         to:
           type: integer
           format: int64
@@ -5315,7 +5750,9 @@ components:
           oneOf:
           - type: 'null'
           - $ref: '#/components/schemas/OverviewValue'
-            description: '`null` when no optimization has a value model ("Set a value").'
+            description: |-
+              Every verified win in the range, merged or not (see `story` for what is delivered). `null` when no optimization has a
+              value model ("Set a value").
         wins:
           type: array
           items:
@@ -5330,6 +5767,7 @@ components:
       - usdPerYear
       - optimizationId
       - optimization
+      - state
       properties:
         at:
           type: integer
@@ -5343,10 +5781,31 @@ components:
           type: string
         optimizationId:
           type: string
+        state:
+          $ref: '#/components/schemas/OverviewValueState'
+          description: 'Where the win stands: merged (delivered), in an open pull request (pending) or not shipped yet.'
         usdPerYear:
           type: number
           format: double
           description: What this win added, USD per year.
+    PendingAmount:
+      type: object
+      description: Wins whose pull request is open.
+      required:
+      - usdPerYear
+      - wins
+      - pullRequests
+      properties:
+        pullRequests:
+          type: integer
+          format: int64
+          description: Open pull requests these wins are in ("$2.9k pending in 1 PR").
+        usdPerYear:
+          type: number
+          format: double
+        wins:
+          type: integer
+          format: int64
     PendingReplyVm:
       type: object
       description: 'The reply being written when the client asks: text not yet part of a `message`, so a client that joins late does not miss it.'
@@ -5815,6 +6274,37 @@ components:
           type: string
         selection:
           $ref: '#/components/schemas/RepoConnections'
+    ScheduleKind:
+      type: string
+      description: How often an optimization runs by itself (the Overview's "Next 30 days" counts these).
+      enum:
+      - once
+      - nightly
+      - weekdays
+      - weekly
+      - on-push
+    ScheduleVm:
+      type: object
+      description: '`GET /v1/optimizations/{id}/schedule`.'
+      required:
+      - schedule
+      - summary
+      - runsNext30Days
+      properties:
+        runsNext30Days:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          description: Runs this schedule starts in the next 30 days; `null` when it cannot be known ("on push").
+        schedule:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ScheduleKind'
+            description: '`null`: not scheduled, runs when started by hand.'
+        summary:
+          type: string
+          description: '"Every night", "Once a week", "Not scheduled".'
     SecretName:
       type: string
       enum:
@@ -5883,6 +6373,17 @@ components:
       properties:
         profile:
           type: string
+    SetScheduleInput:
+      type: object
+      description: '`PUT /v1/optimizations/{id}/schedule`.'
+      required:
+      - schedule
+      properties:
+        schedule:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ScheduleKind'
+            description: '`null` clears the schedule.'
     SetSecretInput:
       type: object
       required:
@@ -5890,6 +6391,36 @@ components:
       properties:
         value:
           type: string
+    SetValueModelInput:
+      type: object
+      description: |-
+        `PUT /v1/optimizations/{id}/value`: replaces the whole model. Fields left out take their defaults (`period` year, `basis`
+        estimated, no unit, no note); read the current model first to change one field.
+      required:
+      - usdPerUnit
+      properties:
+        basis:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ValueBasis'
+        note:
+          type:
+          - string
+          - 'null'
+          description: The model in plain words; at most 200 characters.
+        period:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ValuePeriod'
+        unit:
+          type:
+          - string
+          - 'null'
+          description: What one unit is called; at most 24 characters.
+        usdPerUnit:
+          type: number
+          format: double
+          description: Dollars per one unit of improvement per `period`; must be greater than 0.
     SettingsVm:
       type: object
       required:
@@ -6314,18 +6845,128 @@ components:
           oneOf:
           - type: 'null'
           - $ref: '#/components/schemas/ConfigSummary'
+    ValueAmount:
+      type: object
+      description: Wins counted in dollars per year.
+      required:
+      - usdPerYear
+      - wins
+      properties:
+        usdPerYear:
+          type: number
+          format: double
+        wins:
+          type: integer
+          format: int64
     ValueBasis:
       type: string
       description: '`estimated` until the value has been measured in production.'
       enum:
       - estimated
       - measured
+    ValueModelVm:
+      type: object
+      description: '`GET /v1/optimizations/{id}/value`.'
+      required:
+      - set
+      - metric
+      - direction
+      - usdPerUnit
+      - period
+      - unit
+      - basis
+      - note
+      - summary
+      properties:
+        basis:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ValueBasis'
+            description: '`estimated` until it has been measured in production.'
+        direction:
+          $ref: '#/components/schemas/Direction'
+          description: Which way the metric improves.
+        metric:
+          type: string
+          description: The metric the model prices, as the optimization measures it.
+        note:
+          type:
+          - string
+          - 'null'
+          description: The model in plain words, e.g. "ms saved x checkout volume".
+        period:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ValuePeriod'
+        set:
+          type: boolean
+          description: 'False until a model is set: the optimization''s wins then have no dollar value ("Set a value").'
+        summary:
+          type: string
+          description: 'One line for the row: "$1,200 per ms a year · estimated · ms saved x checkout volume", or "Not set".'
+        unit:
+          type:
+          - string
+          - 'null'
+          description: What one unit is called ("ms", "k/s").
+        usdPerUnit:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: Dollars per one unit of improvement per `period`; `null` while `set` is false.
     ValuePeriod:
       type: string
       description: The period a value-model amount is quoted for.
       enum:
       - month
       - year
+    ValueStory:
+      type: object
+      description: |-
+        The one value story Home and Overview both tell: what was spent, what is delivered, what is pending, what it returned.
+
+        `delivered` counts only wins in merged pull requests; `pending` those in open ones; `readyToShip` verified wins with no pull
+        request yet. `return` is `delivered` divided by `spentUsd` (real dollars only), `paybackDays` how long the spend takes to earn
+        back at that rate. Both are `null` until something is delivered and something was spent.
+      required:
+      - basis
+      - delivered
+      - pending
+      - readyToShip
+      - spentUsd
+      - return
+      - paybackDays
+      - line
+      properties:
+        basis:
+          $ref: '#/components/schemas/ValueBasis'
+          description: '`measured` only when every counted win has a measured value model.'
+        delivered:
+          $ref: '#/components/schemas/ValueAmount'
+        line:
+          type: string
+          description: 'The sentence both screens show: "$12.5k delivered + $2.9k pending · 68×". Empty without a value model.'
+        paybackDays:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: Days until the spend is earned back at the delivered rate.
+        pending:
+          $ref: '#/components/schemas/PendingAmount'
+        readyToShip:
+          $ref: '#/components/schemas/ValueAmount'
+        return:
+          type:
+          - number
+          - 'null'
+          format: double
+          description: Yearly value delivered per $1 spent ("68×"); `null` without delivered value or spend.
+        spentUsd:
+          type: number
+          format: double
+          description: Real dollars in the range (the same number as `spent.usd`).
     ValueSummary:
       type: object
       required:

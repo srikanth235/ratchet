@@ -482,7 +482,7 @@ async fn empty_states_say_whether_there_is_nothing_at_all_or_just_no_win_yet() {
     let v = views(&sim, &[], &[]);
     let o = v.overview(OverviewRange::Days90).await.unwrap();
     assert_eq!((o.phase, o.empty), (OverviewPhase::Empty, true));
-    let e = o.empty_state.unwrap();
+    let e = o.empty_state.clone().unwrap();
     assert_eq!(
         (e.title.as_str(), e.body.as_str()),
         ("No wins yet", "Start your first optimization.")
