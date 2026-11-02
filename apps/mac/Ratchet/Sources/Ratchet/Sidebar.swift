@@ -32,6 +32,11 @@ struct SidebarView: View {
                         .kitType(.caption).foregroundStyle(Ink.textFaint)
                         .padding(.horizontal, Space.md)
                         .help("The background service is starting. What you see is from the last time.")
+                } else if case .reconnecting = store.streamState {
+                    Text("Reconnecting…")
+                        .kitType(.caption).foregroundStyle(Ink.textFaint)
+                        .padding(.horizontal, Space.md)
+                        .help("The live connection to the background service dropped and is being retried. What you see may be a little old.")
                 } else if store.isDemoData {
                     Text("Demo data")
                         .kitType(.caption).foregroundStyle(Ink.textFaint)
