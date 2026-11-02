@@ -4,10 +4,10 @@ import SwiftUI
 // Small parts the chat screens share: a layout that wraps, the one-line notice, the user's bubble, the step line.
 
 /// Lays its children out left to right and wraps to the next line when the width runs out (the Home chips, the suggestions).
-struct FlowLayout: Layout {
+struct FlowLayout: SwiftUI.Layout {
     var spacing: CGFloat = Space.sm
 
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: LayoutSubviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? .infinity
         var x: CGFloat = 0
         var y: CGFloat = 0
@@ -27,7 +27,7 @@ struct FlowLayout: Layout {
         return CGSize(width: widest, height: y + rowHeight)
     }
 
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: LayoutSubviews, cache: inout ()) {
         var x = bounds.minX
         var y = bounds.minY
         var rowHeight: CGFloat = 0
