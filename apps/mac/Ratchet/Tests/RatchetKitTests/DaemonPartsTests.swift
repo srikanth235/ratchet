@@ -205,4 +205,93 @@ struct DaemonPartsTests {
         }
         #expect(attempt == 1)
     }
+
+    // MARK: ConnectionGate
+
+    private actor Order {
+        var events: [String] = []
+        func add(_ name: String) { events.append(name) }
+    }
+
+    @Test func theGateAdmitsUpToItsLimitThenQueuesInOrder() async throws {
+        let gate = ConnectionGate(limit: 2)
+        try await gate.acquire()
+        try await gate.acquire()
+        #expect(await gate.openCount == 2)
+        let order = Order()
+        let first = Task {
+            try await gate.acquire()
+            await order.add("first")
+        }
+        while await gate.waitingCount < 1 { await Task.yield() }
+        let second = Task {
+            try await gate.acquire()
+            await order.add("second")
+        }
+        while await gate.waitingCount < 2 { await Task.yield() }
+        await gate.release()
+        try await first.value
+        #expect(await order.events == ["first"])
+        await gate.release()
+        try await second.value
+        #expect(await order.events == ["first", "second"])
+        // The slots were passed on, not freed.
+        #expect(await gate.openCount == 2)
+        await gate.release()
+        await gate.release()
+        #expect(await gate.openCount == 0)
+    }
+
+    @Test func aWaitingRequestThatIsCancelledLeavesTheQueue() async throws {
+        let gate = ConnectionGate(limit: 1)
+        try await gate.acquire()
+        let waiting = Task { try await gate.acquire() }
+        while await gate.waitingCount < 1 { await Task.yield() }
+        waiting.cancel()
+        await #expect(throws: CancellationError.self) { try await waiting.value }
+        #expect(await gate.waitingCount == 0)
+        await gate.release()
+        #expect(await gate.openCount == 0)
+    }
+
+    // MARK: HTTP/1 parser
+
+    @Test func manyChunksInOneReadParseToTheWholeBody() throws {
+        var wire = Array("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n".utf8)
+        var expected: [UInt8] = []
+        for number in 0..<2000 {
+            let piece = Array("line \(number)\n".utf8)
+            wire += Array(String(piece.count, radix: 16).utf8) + [13, 10] + piece + [13, 10]
+            expected += piece
+        }
+        wire += Array("0\r\n\r\n".utf8)
+        var parser = HTTP1ResponseParser()
+        var body: [UInt8] = []
+        var ended = false
+        for event in try parser.feed(wire) {
+            switch event {
+            case .head(let head): #expect(head.status == 200)
+            case .body(let chunk): body += chunk
+            case .end: ended = true
+            }
+        }
+        #expect(body == expected)
+        #expect(ended && parser.isDone)
+    }
+
+    @Test func aResponseSplitAtEveryByteParsesTheSame() throws {
+        let wire = Array("HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\nhello world".utf8)
+        var parser = HTTP1ResponseParser()
+        var body: [UInt8] = []
+        var statuses: [Int] = []
+        for byte in wire {
+            for event in try parser.feed([byte]) {
+                if case .head(let head) = event { statuses.append(head.status) }
+                if case .body(let chunk) = event { body += chunk }
+            }
+        }
+        #expect(statuses == [200])
+        #expect(String(decoding: body, as: UTF8.self) == "hello world")
+        #expect(parser.isDone)
+    }
 }

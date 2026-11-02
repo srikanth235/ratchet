@@ -50,6 +50,20 @@ struct EventReducerTests {
         #expect(result.state.pendingWins["opt-checkout"] == nil)
     }
 
+    @Test func aReplayedMoveDoesNotNameTheNextWin() throws {
+        let before = state()
+        let old = try #require(before.details["opt-checkout"]?.moves.first)
+        let replayed = EventReducer.reduce(before, .moveAdded(optimizationID: "opt-checkout", move: old))
+        #expect(replayed.state.pendingWins["opt-checkout"] == nil)
+        #expect(replayed.touched.isEmpty)
+        // Of two new moves the newer one names it, in whatever order they arrive.
+        let early = RatchetMove(id: "m-early", at: now, value: 250, title: "Early")
+        let late = RatchetMove(id: "m-late", at: now.addingTimeInterval(60), value: 240, title: "Late")
+        var next = EventReducer.reduce(before, .moveAdded(optimizationID: "opt-checkout", move: late)).state
+        next = EventReducer.reduce(next, .moveAdded(optimizationID: "opt-checkout", move: early)).state
+        #expect(next.pendingWins["opt-checkout"]?.title == "Late")
+    }
+
     @Test func aWinWithoutAMoveIsAVerifiedWin() throws {
         let before = state()
         var changed = try checkout(before)

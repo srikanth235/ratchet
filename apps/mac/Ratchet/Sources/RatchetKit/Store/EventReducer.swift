@@ -80,8 +80,14 @@ public enum EventReducer {
             result.state.details[id] = detail
             result.touched.insert(.details)
         case .moveAdded(let id, let move):
-            result.state.pendingWins[id] = move
-            guard var detail = result.state.details[id], !detail.moves.contains(where: { $0.id == move.id }) else { break }
+            // The daemon announces the whole ratchet after each win, so most of what arrives is a replay of moves the detail
+            // already holds. Only a move that is new, and the newest of those, names the next win on the staircase.
+            let loaded = result.state.details[id]
+            let known = loaded?.moves.contains { $0.id == move.id } ?? false
+            if !known, result.state.pendingWins[id].map({ $0.at <= move.at }) ?? true {
+                result.state.pendingWins[id] = move
+            }
+            guard !known, var detail = loaded else { break }
             detail.moves.append(move)
             result.state.details[id] = detail
             result.touched.insert(.details)
