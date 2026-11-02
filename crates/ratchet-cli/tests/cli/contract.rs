@@ -52,7 +52,7 @@ fn listed_in_help(help: &str) -> Vec<String> {
                 break;
             }
             // "  list, ls  List optimizations." or "  show  One optimization."
-            if let Some(first) = line.trim().split_whitespace().next() {
+            if let Some(first) = line.split_whitespace().next() {
                 names.push(first.trim_end_matches(',').to_owned());
             }
         }
