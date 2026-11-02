@@ -35,7 +35,9 @@ extension SelfTest {
         // The creation conversation: steps stream, a draft card appears, a row changes with Updated and Undo.
         let card = hub.draftCard(chatID)
         let conversation = hub.conversation(chatID, router: router)
-        let drafted = await waitUntil { card.card != nil && !card.isDrafting }
+        let hasReply = { conversation.items.contains { if case .reply = $0 { true } else { false } } }
+        // The card arrives before the reply that goes with it; the turn is over once both are there.
+        let drafted = await waitUntil { card.card != nil && hasReply() && !card.isDrafting }
         check("the setup agent drafts a card", drafted)
         check("the card has Measures, Agents, Each run, Schedule, Output and Config rows", Set(card.rows.map(\.id)).isSuperset(of: ["agents", "limits", "schedule"]))
         check("Create and Create and Run Once are on, with the cost", card.canCreate && card.createAndRunOnceTitle.hasPrefix("Create and Run Once · "))
