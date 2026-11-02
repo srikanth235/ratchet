@@ -125,6 +125,7 @@ string_enum!(
     }
 );
 
+#[allow(clippy::derivable_impls)]
 impl Default for Billing {
     fn default() -> Self {
         Self::Api
