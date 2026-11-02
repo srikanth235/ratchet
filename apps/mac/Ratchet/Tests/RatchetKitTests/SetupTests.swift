@@ -841,8 +841,16 @@ struct SetupDaemonTests {
         #expect(found.map(\.installed) == [true, false])
         #expect(found.first?.title == "Claude Code · v2.1.4")
         let again = try await client.detectedHarnesses(redetect: true)
-        #expect(again == [DetectedHarness(harness: .codex, installed: true, version: "0.166", auth: .apiKey)])
+        #expect(again == [DetectedHarness(harness: .codex, installed: true, version: "0.166", auth: .apiKey, hint: "", path: "/x/codex")])
         #expect(recorder.seen.map(\.method) == ["GET", "GET", "POST"])
+    }
+
+    @Test func aDetectedHarnessSaysHowItIsBilled() async throws {
+        let recorder = RouteRecorder()
+        recorder.route("GET /v1/harnesses", 200, #"[{"kind":"claude-code","installed":true,"version":"2.1.4","path":"/usr/local/bin/claude","auth":"signed-in","hint":"","billing":"subscription"},{"kind":"codex","installed":true,"version":"0.166","path":null,"auth":"api-key","hint":"","billing":"api-key"},{"kind":"grok","installed":true,"version":null,"path":null,"auth":"signed-out","hint":"grok login","billing":null}]"#)
+        let found = try await make(recorder).detectedHarnesses(redetect: false)
+        #expect(found.map(\.billing) == [.subscription, .apiKey, nil])
+        #expect(found.last?.hint == "grok login")
     }
 
     // MARK: Drafts and settings

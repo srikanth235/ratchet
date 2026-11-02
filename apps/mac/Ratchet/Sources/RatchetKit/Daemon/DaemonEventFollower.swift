@@ -52,6 +52,8 @@ struct DaemonEventFollower: Sendable {
                     case .resync:
                         position = nil
                         continuation.yield(.resync)
+                    case .runActive(_, let ids, let awake):
+                        continuation.yield(.powerChanged(PowerState(keepingAwake: awake, localOptimizationIDs: ids)))
                     default:
                         tasks += FollowTask.tasks(for: event)
                     }

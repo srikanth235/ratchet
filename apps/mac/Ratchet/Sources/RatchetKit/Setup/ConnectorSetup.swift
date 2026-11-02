@@ -116,13 +116,24 @@ public struct DetectedHarness: Identifiable, Hashable, Sendable {
     /// The models its CLI offers and the one used when none is chosen; empty when the daemon did not say.
     public var models: [HarnessModel]
     public var defaultModel: String?
+    /// How its tokens are paid for: the user's plan (a login) or an API key. nil while signed out.
+    public var billing: Billing?
+    /// What to do next, or what was found ("Run `codex login`"); never a credential.
+    public var hint: String?
+    /// Where the CLI is on this Mac, when the daemon says.
+    public var path: String?
+
+    public enum Billing: String, Sendable { case subscription, apiKey }
 
     public var id: String { harness.rawValue }
 
     public init(
         harness: Harness, installed: Bool, version: String? = nil, auth: Auth = .signedOut,
-        models: [HarnessModel] = [], defaultModel: String? = nil
+        models: [HarnessModel] = [], defaultModel: String? = nil, billing: Billing? = nil, hint: String? = nil, path: String? = nil
     ) {
+        self.billing = billing
+        self.hint = hint
+        self.path = path
         self.harness = harness
         self.installed = installed
         self.version = version

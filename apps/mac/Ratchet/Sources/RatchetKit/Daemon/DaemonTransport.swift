@@ -94,6 +94,22 @@ struct DaemonTransport: Sendable {
         return Data(bytes)
     }
 
+    /// Opens a server-sent event stream the generated client does not hold (a chat's): the body is read by the caller, and an
+    /// error answer is turned into a `DaemonAPIError` like every other call.
+    func openStream(_ path: String, lastEventID: String?, operationID: String) async throws -> HTTPBody {
+        let base = URL(string: "http://localhost") ?? URL(fileURLWithPath: "/")
+        var request = HTTPRequest(method: .get, scheme: nil, authority: nil, path: path)
+        request.headerFields[.accept] = "text/event-stream"
+        if let lastEventID, let name = HTTPField.Name("Last-Event-ID") { request.headerFields[name] = lastEventID }
+        let transport = self.transport
+        let (_, body) = try await APIErrorMiddleware().intercept(request, body: nil, baseURL: base, operationID: operationID) {
+            request, body, url in
+            try await transport.send(request, body: body, baseURL: url, operationID: operationID)
+        }
+        guard let body else { throw RatchetClientError.unavailable("ratchetd sent an empty stream.") }
+        return body
+    }
+
 
     /// A JSON object from a dictionary; `NSNull()` writes a null.
     static func jsonBody(_ object: [String: Any]) throws -> Data {

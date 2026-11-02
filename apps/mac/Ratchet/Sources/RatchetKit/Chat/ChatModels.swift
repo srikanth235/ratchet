@@ -80,15 +80,20 @@ public struct ChatCardRow: Identifiable, Codable, Hashable, Sendable {
     public var value: String
     public var editable: Bool
     public var options: [ChatCardOption]
+    /// The row's value as data (a number, a list of harness ids, an object); `.null` when the daemon gave none.
+    public var raw: JSONValue
 
     public var id: String { key }
 
-    public init(key: String, label: String, value: String, editable: Bool = false, options: [ChatCardOption] = []) {
+    public init(
+        key: String, label: String, value: String, editable: Bool = false, options: [ChatCardOption] = [], raw: JSONValue = .null
+    ) {
         self.key = key
         self.label = label
         self.value = value
         self.editable = editable
         self.options = options
+        self.raw = raw
     }
 }
 

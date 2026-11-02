@@ -11,12 +11,27 @@ public protocol ChatClient: Sendable {
     /// Says something. Returns at once; the reply arrives on the stream. Throws `RatchetClientError.invalid` while replying.
     func send(chatID: String, text: String) async throws -> ChatReceipt
     /// The chat's live stream. The first event is `.ready`. `lastEventID` continues a stream that dropped: events after it are
-    /// replayed, or `.ready` says `resync` when they are gone. A failed turn arrives as `.failed` followed by `.done`.
+    /// replayed, or `.ready` says `resync` when they are gone. Pass the `lastEventID` the chat was fetched with (0 for a new chat): a
+    /// connection is made after this returns, so a nil position sees only what is written from then on. A failed turn arrives as `.failed` followed by `.done`.
     func stream(chatID: String, lastEventID: Int64?) async -> AsyncThrowingStream<ChatFrame, any Error>
     /// Stops the reply being written. What was written stays.
     func interrupt(chatID: String) async throws
     /// Ends the chat and forgets its history.
     func end(chatID: String) async throws
+    /// Takes back a steering note that no agent has read yet. The daemon has no route for it: the default asks the chat, in
+    /// words, to disregard the note (`ChatClient.withdrawal(of:)`). `MockChatClient` marks the card withdrawn.
+    func withdrawNote(chatID: String, noteID: String, text: String) async throws
+}
+
+extension ChatClient {
+    /// What a person says to take a note back.
+    public static func withdrawal(of text: String) -> String {
+        "Withdraw my earlier note \"\(text)\": do not act on it."
+    }
+
+    public func withdrawNote(chatID: String, noteID: String, text: String) async throws {
+        _ = try await send(chatID: chatID, text: Self.withdrawal(of: text))
+    }
 }
 
 /// One scripted reply for a test, a snapshot or the self-test: what the next turn of a chat says, optionally with a card, or fails
@@ -37,4 +52,6 @@ public struct ChatReplyScript: Sendable, Equatable {
 public protocol ChatScenario: Sendable {
     /// The next turn (of any chat) answers like this instead of its default script. Scripts play in the order they were queued.
     func queue(_ reply: ChatReplyScript) async
+    /// An agent of the chat's optimization took up the queued notes: each becomes `read`, by `harness`, at `date`.
+    func readNotes(chatID: String, by harness: Harness, at date: Date) async
 }
