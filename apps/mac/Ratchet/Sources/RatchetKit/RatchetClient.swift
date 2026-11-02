@@ -115,6 +115,16 @@ public protocol EventsClient: Sendable {
 /// never learn which implementation they talk to.
 public typealias RatchetClient = OptimizationsClient & ConnectorsClient & SetupClient & SandboxClient & EventsClient
 
+/// Whether the live connection to the daemon is up. The store keeps it (`AppStore.streamState`) so a stalled stream is never
+/// invisible.
+public enum StreamState: Sendable, Equatable {
+    /// The first connection is being made.
+    case connecting
+    case live
+    /// The connection dropped; it is tried again after a pause. `attempt` counts failures since the last good connection.
+    case reconnecting(attempt: Int, reason: String?)
+}
+
 /// One server-sent event. The app applies it to what it already shows; nothing polls.
 public enum RatchetEvent: Sendable, Equatable {
     case optimizationUpdated(Optimization)
@@ -132,6 +142,8 @@ public enum RatchetEvent: Sendable, Equatable {
     case receiptIssued(TeardownReceipt)
     /// The daemon could not replay what was missed (it restarted, or the gap is too old): reload everything shown.
     case resync
+    /// The live connection came up, dropped or is being retried.
+    case streamStateChanged(StreamState)
 }
 
 public enum RatchetClientError: Error, Sendable, Equatable, LocalizedError {

@@ -394,6 +394,7 @@ struct DaemonClientTests {
         daemon.streams([hello + #"event: resync\#ndata: {"type":"resync","reason":"restarted"}\#n\#n"#])
         let stream = await make(daemon).events()
         for await event in stream {
+            if case .streamStateChanged = event { continue }
             #expect(event == .resync)
             break
         }

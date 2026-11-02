@@ -51,6 +51,8 @@ public final class AppStore {
     public private(set) var sandbox: SandboxStatus = .off
     public private(set) var receipt: TeardownReceipt?
     public private(set) var isLoaded = false
+    /// Whether the live connection to the daemon is up. Not part of the cache.
+    public private(set) var streamState: StreamState = .connecting
     /// The last thing that failed, shown in the window's banner until it is dismissed or the next action starts.
     public private(set) var lastError: String?
     /// True while `lastError` came from loading data (cleared by the next good load). A failed action stays until the
@@ -246,6 +248,8 @@ public final class AppStore {
             receipt = issued
         case .resync:
             Task { await resync() }
+        case .streamStateChanged(let state):
+            streamState = state
         }
     }
 
