@@ -16,6 +16,8 @@ extension View {
 struct BenchmarksPage: View {
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(ChatHub.self) private var hub
+    @Environment(\.daemonActionsEnabled) private var actionsEnabled
 
     private let columns = [GridItem(.adaptive(minimum: 280), spacing: Space.md, alignment: .top)]
 
@@ -104,14 +106,12 @@ struct BenchmarksPage: View {
             Text("Measures " + template.measures + " · " + template.machine)
                 .kitType(.caption).foregroundStyle(Ink.textFaint)
             Spacer(minLength: Space.xs)
-            Button(template.kind == .demo ? "Try a demo" : "Use template") {
-                if template.kind == .demo {
-                    router.startWizard(client: store.client, templateID: template.id)
-                } else {
-                    router.templateProposal = TemplateProposalFlow(template: template, client: store.client)
-                }
+            // Both open the creation conversation with this template already chosen (the setup agent drafts from it).
+            Button(template.kind == .demo ? "Try a Demo…" : "Use Template…") {
+                Task { await hub.startFromTemplate(template, store: store, router: router) }
             }
             .buttonStyle(.kit(.quiet, small: true))
+            .disabled(!actionsEnabled)
         }
         .kitCard()
     }

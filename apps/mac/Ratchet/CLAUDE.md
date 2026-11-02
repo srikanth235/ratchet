@@ -66,8 +66,7 @@ Naming: a *harness* is an agent CLI (Claude Code, Codex, Grok): `Harness`, `Harn
 The window is the native shell; the brand lives in the content. `ContentView` is a `NavigationSplitView`: the **system sidebar**
 (`Sidebar.swift`: the pages from `Page.sidebar`, then "Recent runs"; two levels, no action rows, no background or edge of its own;
 a selected run wears a brass wash) and the detail column under a native toolbar. Pages: Home, Overview, Optimizations, Agents,
-Benchmarks, Connectors; **Home and Agents are placeholders until P5b** (they fill `Screens/HomePage.swift` and `AgentsPage.swift`,
-everything around them is done). Command-1 to 6 follow `Page.sidebar`.
+Benchmarks, Connectors. Command-1 to 6 follow `Page.sidebar`.
 
 - **Toolbar** (`Toolbar.swift`): `ShellToolbar` (declared on the detail column, never on the split view) holds the connection badge
   ("Demo data", "Reconnecting…"), the sandbox status item (shape and word, popover with End Now) and New Optimization. Each page
@@ -97,6 +96,26 @@ everything around them is done). Command-1 to 6 follow `Page.sidebar`.
   status always has its fix beside it (Sign in, Add key, Re-detect).
 - **Layout**: one content width (`Layout.contentWidth`) in `KitPage`; the page margin is `Space.pageX`, passed to `.gridArea(_,
   inset:)`; side columns use `ViewThatFits`; nested radii use `ConcentricRectangle`; the ⋯ of a row is `KitMoreMenu` (28 pt hit area).
+
+## The chat screens (P5b)
+
+`ChatHub` (`ChatHub.swift`, in the environment next to `AppStore`) owns what P5a built: `ChatStore`, `ValueStoryModel`, `AgentsPageModel`,
+`ComposerModel`, and hands out `ConversationModel`, `DraftCardModel`, `SteeringModel` and `OptimizationSettingsModel` by id. Sample clients in
+test, snapshot and `APP_DEMO` mode, the daemon's otherwise. Screens (`Screens/Home`, `Chat`, `Run`, `OptimizationDetail`, `AgentsPage`, `OverviewPage`):
+
+- **Home** (`HomePage`): value header (`ValueStory`, the same words as the Overview), glass `KitComposer` with five `PopoverChip`s (repo, cloud,
+  agents, limits, schedule), Return or Command-Return sends, suggestions, the first-use notice. Send opens the **creation conversation**
+  (`router.creationChatID`; `CreationView`, `DraftCardView`) in Home's place. It replaces the old wizard screens (ADR 0001; the logic stays in
+  RatchetKit). "Use Template…" starts the same conversation with the template chosen (`ChatHub.startFromTemplate`). Nothing waits on a person:
+  there is no Approve step, and an optimization that was created and not started reads "Not started".
+- **Optimization page** has two tabs (`router.detailTab`): Run (`RunHeader`: status word, Run Now, Stop…, Pause Schedule or Pause Agent, Open PR,
+  a ⋯ menu with Archive…; the log in three views in `RunLogSection`; the glass `SteeringBar`) and Settings (`OptimizationSettingsView`: rows with
+  tags, Edit popovers, Saved; Archive…). Pause Schedule clears the schedule and remembers it for Resume (this session only).
+- **Agents** (`AgentsPage`), **Overview** (`OverviewPage`, `ValueChart` with the dashed pending step and a text equivalent), the Connectors
+  **Yours | Discover** row (not on Agents), the menu bar's "Keeping your Mac awake" line (`AppStore.power`).
+- Popovers (`Chat/Popovers.swift`) are shared by the chips, the card rows and the settings rows. Snapshot scenes: `home*`, `conversation-*`,
+  `run-*`, `optimization-settings*`, `agents-signin`, `overview-nowins`, `connectors-discover`, `menubar-awake`; the self-test drives a simulated
+  chat to a created optimization (`SelfTestChat.swift`).
 
 ## The bundled daemon
 
@@ -139,7 +158,7 @@ stop the agent first: Settings, Stop). CI runs the same thing with `tools/smoke-
 `AppNotifier` (UNUserNotificationCenter). Permission is never asked at launch: the Overview shows a calm card once an optimization exists
 (`NotificationPrompt`), and Settings has a button. Posted only while the app is in the background. Categories (`NotificationCategory`, one
 switch each in Settings): win ready to merge, environment drafted, budget limit, run finished or failed, connector expired. A click opens the
-screen (`NotificationDestination`: the optimization, Connectors, or the New optimization flow). `NotificationRouting` (RatchetKit) is the pure
+screen (`NotificationDestination`: the optimization, Connectors, or Home with the composer). `NotificationRouting` (RatchetKit) is the pure
 decision function over two store states; the store calls it after each event and never on the first load.
 
 ## URL scheme and `ratchet open`

@@ -21,7 +21,8 @@ import SwiftUI
 @main
 struct RatchetApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @State private var store = Store.makeStore()
+    @State private var store: AppStore
+    @State private var hub: ChatHub
     @State private var router = AppRouter()
     @State private var connectorsState = ConnectorsPageState()
     @State private var daemon = DaemonController.make()
@@ -30,11 +31,18 @@ struct RatchetApp: App {
     @AppStorage("menuBarItem") private var showMenuBarItem = true
     @State private var gallery = KitGalleryState.shared
 
+    init() {
+        let store = Store.makeStore()
+        _store = State(initialValue: store)
+        _hub = State(initialValue: ChatHub.make(for: store))
+    }
+
     var body: some Scene {
         Window("Ratchet", id: "main") {
             ContentView()
                 .environment(store)
                 .environment(router)
+                .environment(hub)
                 .environment(connectorsState)
                 .environment(daemon)
                 .environment(notifier)
@@ -52,7 +60,7 @@ struct RatchetApp: App {
             ToolbarCommands()
             OptimizationCommands(store: store, router: router, daemon: daemon, connectors: connectorsState)
             CommandGroup(replacing: .newItem) {
-                Button("New Optimization") { router.startWizard(client: store.client) }
+                Button("New Optimization") { router.newOptimization() }
                     .keyboardShortcut("n")
                     .disabled(!daemon.phase.isRunning)
             }

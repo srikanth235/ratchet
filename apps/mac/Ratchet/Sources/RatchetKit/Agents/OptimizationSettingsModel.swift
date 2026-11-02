@@ -201,6 +201,42 @@ public final class OptimizationSettingsModel {
         }
     }
 
+    // MARK: Pause Schedule
+
+    /// The schedule that was paused, so Resume Schedule can put it back. Kept for this session: the daemon holds no paused state,
+    /// pausing is clearing the schedule.
+    public private(set) var pausedSchedule: ScheduleKind?
+
+    public var canPauseSchedule: Bool { schedule?.kind != nil }
+    public var isSchedulePaused: Bool { pausedSchedule != nil && schedule?.kind == nil }
+
+    /// "Pause Schedule" or "Resume Schedule".
+    public var pauseTitle: String { isSchedulePaused ? "Resume Schedule" : "Pause Schedule" }
+
+    /// Stops the schedule for now; the runs and wins stay.
+    @discardableResult
+    public func pauseSchedule() async -> Bool {
+        guard let kind = schedule?.kind else { return false }
+        let done = await saveSchedule(nil)
+        if done { pausedSchedule = kind }
+        return done
+    }
+
+    /// Puts the paused schedule back.
+    @discardableResult
+    public func resumeSchedule() async -> Bool {
+        guard let kind = pausedSchedule else { return false }
+        let done = await saveSchedule(kind)
+        if done { pausedSchedule = nil }
+        return done
+    }
+
+    /// The header button: pauses, or resumes.
+    @discardableResult
+    public func togglePause() async -> Bool {
+        isSchedulePaused ? await resumeSchedule() : await pauseSchedule()
+    }
+
     // MARK: Archive
 
     /// What the confirmation says: "Archive “Checkout p95”?" and what it does.

@@ -54,7 +54,11 @@ public final class ConversationModel {
 
     // MARK: Reading
 
-    public var items: [ChatItem] { session.map { ChatTimeline.items($0.conversation) } ?? [] }
+    public var items: [ChatItem] {
+        guard let session else { return [] }
+        session.observeStructure()
+        return ChatTimeline.items(session.conversation)
+    }
     public var isReplying: Bool { session?.isReplying ?? false }
 
     /// The live reply: a separate observable, so the text changing does not redraw the list.

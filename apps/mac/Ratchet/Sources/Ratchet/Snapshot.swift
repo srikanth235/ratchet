@@ -6,7 +6,6 @@ import SwiftUI
 /// What snapshot mode shoots, one PNG per scene and mode.
 enum SnapScene: String, CaseIterable {
     case overview, optimizations, benchmarks, connectors
-    // The pages whose screens come with the chat work (P5b): the shell around them is shot already.
     case home, agents
     // v0.3.1 screens 12 and 14, and 13 (a connector that needs signing in again): the service is down with data on screen,
     // the first load is under way, a failed connector with its fix beside it.
@@ -22,10 +21,6 @@ enum SnapScene: String, CaseIterable {
     case detailResultSpend = "detail-result-spend"
     case benchmarksRun = "benchmarks-run"
     case benchmarksRunP99 = "benchmarks-run-p99"
-    case newGoal = "new-goal"
-    case newConnections = "new-connections"
-    case newEnvironment = "new-environment"
-    case newBudget = "new-budget"
     // The states the bundled daemon and the notifications add.
     case daemonStarting = "daemon-starting"
     case daemonApproval = "daemon-approval"
@@ -33,13 +28,6 @@ enum SnapScene: String, CaseIterable {
     case connectorSignIn = "connector-signin"
     // A failed action: the dismissible banner above the page (Stop on an optimization that already ended).
     case errorBanner = "error-banner"
-    // Setup: finding the repo, "What's missing", the Connectors forms, "Use template".
-    case newRepoFound = "new-repo-found"
-    case newRepoInvalid = "new-repo-invalid"
-    case newRepoTemplate = "new-repo-template"
-    case newLocalFolder = "new-local-folder"
-    case newLocalNoRemote = "new-local-noremote"
-    case newMissing = "new-missing"
     case connectorsAddGithub = "connectors-add-github"
     case connectorsAddAWS = "connectors-add-aws"
     case connectorsAddAgent = "connectors-add-agent"
@@ -47,7 +35,24 @@ enum SnapScene: String, CaseIterable {
     case connectorsRename = "connectors-rename"
     case connectorsCheck = "connectors-check"
     case connectorsKeychain = "connectors-keychain"
-    case templatePR = "template-pr"
+    case connectorsDiscover = "connectors-discover"
+    // P5b: Home, the creation conversation, the run, the optimization's settings, the Agents page, the menu bar's keep-awake line.
+    case homeAgentsPopover = "home-agents-popover"
+    case homeEmpty = "home-empty"
+    case conversationDrafting = "conversation-drafting"
+    case conversationDraft = "conversation-draft"
+    case conversationDraftPopover = "conversation-draft-popover"
+    case conversationEnvError = "conversation-env-error"
+    case conversationLimit = "conversation-limit"
+    case runOverview = "run-overview"
+    case runByAgent = "run-by-agent"
+    case runEverything = "run-everything"
+    case runStop = "run-stop"
+    case optimizationSettings = "optimization-settings"
+    case optimizationSettingsPopover = "optimization-settings-popover"
+    case agentsSignIn = "agents-signin"
+    case overviewNoWins = "overview-nowins"
+    case menuBarAwake = "menubar-awake"
     // The parts gallery (DesignKit/KitGallery.swift): every part in every state, one section per scene.
     case galleryActions = "gallery-actions"
     case galleryChoices = "gallery-choices"
@@ -92,7 +97,7 @@ enum SnapScene: String, CaseIterable {
 
     var subject: Subject {
         switch self {
-        case .menuBar, .menuBarEmpty: .menuBar
+        case .menuBar, .menuBarEmpty, .menuBarAwake: .menuBar
         case .notificationsDenied: .settings
         default: .window
         }
@@ -101,14 +106,15 @@ enum SnapScene: String, CaseIterable {
     /// Scenes that show the app with nothing in it.
     var isEmpty: Bool {
         switch self {
-        case .emptyOverview, .emptyOptimizations, .emptyBenchmarks, .menuBarEmpty: true
+        case .emptyOverview, .emptyOptimizations, .emptyBenchmarks, .menuBarEmpty, .homeEmpty: true
         default: false
         }
     }
 
     /// Puts the window in this scene's state.
     func apply(
-        store: AppStore, router: AppRouter, connectors: ConnectorsPageState, daemon: DaemonController, notifier: AppNotifier
+        store: AppStore, router: AppRouter, hub: ChatHub, connectors: ConnectorsPageState, daemon: DaemonController,
+        notifier: AppNotifier
     ) async {
         // Every scene starts from the calm state.
         SnapshotFocus.shared.target = nil
@@ -120,22 +126,68 @@ enum SnapScene: String, CaseIterable {
         await store.connectorStore.cancelGithubSignIn()
         KitGalleryState.shared.isShown = gallerySection != nil
         KitGalleryState.shared.section = gallerySection
+        SnapshotFocus.shared.popover = nil
+        SnapshotFocus.shared.logTab = nil
+        SnapshotFocus.shared.connectorsTab = nil
+        router.closeConversation()
+        router.pendingStop = nil
+        router.pendingArchive = nil
+        router.detailTab = .run
         router.show(.overview)
         connectors.reset()
-        router.templateProposal = nil
         router.advancedExpanded = false
+        hub.signInHelp = nil
+        hub.homeNoticeClosed = false
+        hub.composer.text = ""
+        hub.composer.repo = nil
+        hub.composer.cloudAccount = nil
+        hub.composer.limits = nil
+        hub.composer.schedule = nil
+        store.apply(.powerChanged(PowerState()))
+        await hub.sampleStory?.use(self == .overviewNoWins ? .noWins : isEmpty ? .empty : .wins)
         let mock = store.scenario
         await mock?.simulate(keychainAvailable: true)
         await mock?.simulate(preflight: nil)
         // Empty scenes empty the sample world; every other scene brings the sample data back.
         await mock?.simulate(empty: isEmpty)
         await store.refresh()
+        await hub.refresh(store: store)
         switch self {
-        case .overview, .emptyOverview, .menuBar, .menuBarEmpty, .galleryActions, .galleryChoices, .galleryRows, .galleryInputs,
+        case .overview, .emptyOverview, .overviewNoWins, .menuBar, .menuBarEmpty, .galleryActions, .galleryChoices, .galleryRows, .galleryInputs,
             .galleryStatus, .galleryIdentity, .galleryType, .galleryTokens:
             break
-        case .home: router.show(.home)
+        case .home:
+            router.show(.home)
+            Self.fillComposer(hub)
+        case .homeEmpty: router.show(.home)
+        case .homeAgentsPopover:
+            router.show(.home)
+            Self.fillComposer(hub)
+            SnapshotFocus.shared.popover = ComposerChip.agents.popoverTitle
         case .agents: router.show(.agents)
+        case .agentsSignIn:
+            router.show(.agents)
+            hub.signInHelp = SignInHelp(harness: .codex, command: AgentsPageModel.signInCommand(.codex))
+        case .menuBarAwake:
+            store.apply(.powerChanged(PowerState(keepingAwake: true, localOptimizationIDs: ["opt-checkout"])))
+        case .connectorsDiscover:
+            router.show(.connectors)
+            SnapshotFocus.shared.connectorsTab = "discover"
+        case .conversationDrafting, .conversationDraft, .conversationDraftPopover, .conversationEnvError, .conversationLimit:
+            await Self.startConversation(self, hub: hub, router: router, store: store)
+        case .runOverview, .runByAgent, .runEverything:
+            await Self.openRun(self, store: store, router: router, hub: hub)
+        case .runStop:
+            router.open(optimization: "opt-checkout")
+            router.pendingStop = "opt-checkout"
+        case .optimizationSettings, .optimizationSettingsPopover:
+            router.open(optimization: "opt-checkout")
+            router.detailTab = .settings
+            let settings = hub.settings(for: "opt-checkout")
+            await settings.load()
+            // A saved row shows "Saved" beside it.
+            await settings.saveSchedule(.nightly)
+            if self == .optimizationSettingsPopover { SnapshotFocus.shared.popover = "Edit Agents" }
         case .daemonDown: daemon.preview(.stopped, statusScreen: false)
         case .loadingOverview: SnapshotFocus.shared.showsLoading = true
         case .failedConnector:
@@ -183,33 +235,6 @@ enum SnapScene: String, CaseIterable {
             await store.insight.loadBenchmark("opt-checkout", metric: nil)
             if self == .benchmarksRunP99 { SnapshotFocus.shared.metric = "p99" }
             SnapshotFocus.shared.target = "run"
-        case .newRepoFound, .newRepoInvalid, .newRepoTemplate, .newLocalFolder, .newLocalNoRemote, .newMissing:
-            let flow = NewOptimizationFlow(client: store.client)
-            router.show(.optimizations)
-            router.wizard = flow
-            await flow.load()
-            flow.goal = "Make checkout p95 faster"
-            switch self {
-            case .newRepoFound:
-                flow.showsYAML = true
-            case .newRepoInvalid:
-                flow.repoQuery = "search"
-                await flow.search()
-                await flow.selectRepo("acme-org/search-svc")
-            case .newRepoTemplate:
-                await flow.selectRepo("acme-org/web-app")
-                await flow.proposeTemplate("build-size")
-            case .newLocalFolder:
-                await flow.chooseLocalFolder("/Users/dev/shop-api")
-            case .newLocalNoRemote:
-                await flow.chooseLocalFolder("/Users/dev/scratch-no-remote")
-            default:
-                await mock?.simulate(preflight: [
-                    PreflightItem(id: "codex", label: "Codex is not signed in", state: .fail, detail: "Run `codex login` in a terminal, or add an API key in Connectors."),
-                    PreflightItem(id: "aws", label: "acme-staging needs signing in again", state: .warn, detail: "Run `aws sso login --profile acme-staging` before a long run."),
-                ])
-                await flow.go(to: .connections)
-            }
         case .connectorsAddGithub, .connectorsAddAWS, .connectorsAddAgent, .connectorsEdit, .connectorsRename, .connectorsCheck,
             .connectorsKeychain:
             router.show(.connectors)
@@ -229,34 +254,66 @@ enum SnapScene: String, CaseIterable {
                 await mock?.simulate(keychainAvailable: false)
                 await store.refresh()
             }
-        case .templatePR:
-            router.show(.benchmarks)
-            if let template = store.templates.first(where: { $0.id == "build-size" }) {
-                let flow = TemplateProposalFlow(template: template, client: store.client)
-                await flow.load()
-                if let repo = flow.repos.first(where: { $0.id == "acme-org/web-app" }) { flow.select(repo) }
-                await flow.openPullRequest()
-                router.templateProposal = flow
-            }
-        case .newGoal, .newConnections, .newEnvironment, .newBudget:
-            let flow = NewOptimizationFlow(client: store.client)
-            router.show(.optimizations)
-            router.wizard = flow
-            await flow.load()
-            flow.goal = "Make checkout p95 faster"
-            switch self {
-            case .newConnections:
-                await flow.go(to: .connections)
-            case .newEnvironment:
-                await flow.go(to: .environment)
-            case .newBudget:
-                await flow.go(to: .environment)
-                await flow.approveDraft()
-                await flow.go(to: .budget)
-            default:
-                break
-            }
         }
+    }
+
+    /// A composer as the mockup shows it: the repo, the cloud, the limits and the schedule set.
+    private static func fillComposer(_ hub: ChatHub) {
+        hub.composer.text = "Make checkout p95 faster in shop-api. Run it every night."
+        hub.composer.repo = "acme-org/shop-api"
+        hub.composer.cloudAccount = hub.composer.options.cloudAccounts.first
+        hub.composer.limits = LimitsEditor(budgetUSD: 50, hours: 2)
+        hub.composer.schedule = .nightly
+    }
+
+    /// Sends from Home and waits for what the scene shows: the draft card, the drafting state, or the error.
+    private static func startConversation(_ scene: SnapScene, hub: ChatHub, router: AppRouter, store: AppStore) async {
+        router.show(.home)
+        hub.composer.repo = scene == .conversationLimit ? nil : "acme-org/shop-api"
+        let words = "Make checkout p95 faster in shop-api. Run it every night, $50 a run."
+        switch scene {
+        case .conversationDrafting: hub.composer.text = "[simulate:slow] " + words
+        case .conversationEnvError: hub.composer.text = "[simulate:env-fail] " + words
+        case .conversationLimit: hub.composer.text = "[simulate:rate-limit] " + words
+        default: hub.composer.text = words
+        }
+        guard let id = await hub.sendFromHome(store: store, router: router) else { return }
+        let card = hub.draftCard(id)
+        let model = hub.conversation(id, router: router)
+        for _ in 0..<300 {
+            let ready: Bool
+            switch scene {
+            case .conversationDrafting: ready = model.isReplying
+            case .conversationLimit: ready = model.error != nil
+            default: ready = card.card != nil && !card.isDrafting
+            }
+            if ready { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        if scene == .conversationDraftPopover { SnapshotFocus.shared.popover = "Change agents" }
+    }
+
+    /// The run of the live optimization with two notes: the first read by Claude Code, the second still queued.
+    private static func openRun(_ scene: SnapScene, store: AppStore, router: AppRouter, hub: ChatHub) async {
+        router.open(optimization: "opt-checkout")
+        await store.optimizationStore.loadDetail(id: "opt-checkout")
+        for agent in store.optimizationStore.details["opt-checkout"]?.agents ?? [] { await store.insight.loadAgentLog(agent.id) }
+        switch scene {
+        case .runByAgent: SnapshotFocus.shared.logTab = "by-agent"
+        case .runEverything: SnapshotFocus.shared.logTab = "everything"
+        default: break
+        }
+        SnapshotFocus.shared.target = "log"
+        // The steering field is on screen now, and following its chat.
+        try? await Task.sleep(for: .milliseconds(500))
+        let steering = hub.steering(for: "opt-checkout")
+        steering.draft = "skip the cache layer, it is owned by another team"
+        await steering.send()
+        for _ in 0..<300 where steering.entries.count < 1 { try? await Task.sleep(for: .milliseconds(10)) }
+        if let chatID = steering.chatID { await hub.chatScenario?.readNotes(chatID: chatID, by: .claudeCode, at: Store.fixedNow) }
+        steering.draft = "focus on database queries"
+        await steering.send()
+        for _ in 0..<300 where steering.entries.count < 2 { try? await Task.sleep(for: .milliseconds(10)) }
     }
 }
 
@@ -270,7 +327,7 @@ enum SnapScene: String, CaseIterable {
 /// APP_SNAPSHOT_PAGES=overview,new-budget limits the scenes. "all" means every scene; add "settings" for Settings.
 enum Snapshot {
     static func runIfRequested(
-        store: AppStore, router: AppRouter, connectors: ConnectorsPageState, openSettings: OpenSettingsAction,
+        store: AppStore, router: AppRouter, hub: ChatHub, connectors: ConnectorsPageState, openSettings: OpenSettingsAction,
         daemon: DaemonController, notifier: AppNotifier, loginItem: LoginItem
     ) {
         let env = ProcessInfo.processInfo.environment
@@ -285,11 +342,11 @@ enum Snapshot {
         let everything = only == nil || only?.contains("all") == true
         Task {
             await shootScenes(
-                dir: dir, everything: everything, only: only, store: store, router: router, connectors: connectors,
+                dir: dir, everything: everything, only: only, store: store, router: router, hub: hub, connectors: connectors,
                 openSettings: openSettings, daemon: daemon, notifier: notifier)
             if everything || only?.contains("settings") == true {
                 await SnapScene.overview.apply(
-                    store: store, router: router, connectors: connectors, daemon: daemon, notifier: notifier)
+                    store: store, router: router, hub: hub, connectors: connectors, daemon: daemon, notifier: notifier)
                 let main = mainWindow
                 loginItem.preview(.off)
                 openSettings()
@@ -366,7 +423,7 @@ enum Snapshot {
     /// Every scene in light and dark. The display stays awake for the whole run and the assertions are released when
     /// it ends, however it ends.
     private static func shootScenes(
-        dir: String, everything: Bool, only: Set<String>?, store: AppStore, router: AppRouter,
+        dir: String, everything: Bool, only: Set<String>?, store: AppStore, router: AppRouter, hub: ChatHub,
         connectors: ConnectorsPageState, openSettings: OpenSettingsAction, daemon: DaemonController, notifier: AppNotifier
     ) async {
         // A sleeping display gives screencapture nothing. Declaring user activity wakes it; the assertion keeps it on.
@@ -377,7 +434,7 @@ enum Snapshot {
         for mode in ["light", "dark"] {
             NSApp.appearance = NSAppearance(named: mode == "light" ? .aqua : .darkAqua)
             for scene in SnapScene.allCases where everything || only?.contains(scene.rawValue) == true {
-                await scene.apply(store: store, router: router, connectors: connectors, daemon: daemon, notifier: notifier)
+                await scene.apply(store: store, router: router, hub: hub, connectors: connectors, daemon: daemon, notifier: notifier)
                 try? await Task.sleep(for: .seconds(1.0))
                 let path = "\(dir)/\(scene.rawValue)-\(mode).png"
                 await captureSubject(of: scene, to: path, store: store, router: router, openSettings: openSettings)
@@ -385,7 +442,7 @@ enum Snapshot {
         }
         // Leave the app as the next phase of the run expects it.
         await SnapScene.overview.apply(
-            store: store, router: router, connectors: connectors, daemon: daemon, notifier: notifier)
+            store: store, router: router, hub: hub, connectors: connectors, daemon: daemon, notifier: notifier)
         power.release()
     }
 

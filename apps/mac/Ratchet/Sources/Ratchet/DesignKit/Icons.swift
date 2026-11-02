@@ -5,6 +5,7 @@ import SwiftUI
 nonisolated enum KitIcon: CaseIterable {
     case overview, optimizations, benchmarks, connectors, check, back, plus, alert
     case chevronDown, arrowUp, close, sliders, bell, terminal, home, agents
+    case info, undo, stop
 }
 
 private nonisolated struct KitGlyph: Shape {
@@ -103,6 +104,24 @@ private nonisolated struct KitGlyph: Shape {
                 CGPoint(x: 8, y: 13.5), CGPoint(x: 6.6, y: 9.4), CGPoint(x: 2.5, y: 8), CGPoint(x: 6.6, y: 6.6),
             ])
             path.closeSubpath()
+        case .info:
+            // A circle with an i: a quiet note, not a problem.
+            path.addEllipse(in: CGRect(x: 2, y: 2, width: 12, height: 12))
+            path.move(to: CGPoint(x: 8, y: 7.2))
+            path.addLine(to: CGPoint(x: 8, y: 10.8))
+            path.move(to: CGPoint(x: 8, y: 5.3))
+            path.addLine(to: CGPoint(x: 8, y: 5.4))
+        case .undo:
+            // An arrow that turns back: Undo, Retry, Start Over.
+            path.move(to: CGPoint(x: 5.5, y: 3.5))
+            path.addLine(to: CGPoint(x: 3, y: 6))
+            path.addLine(to: CGPoint(x: 5.5, y: 8.5))
+            path.move(to: CGPoint(x: 3.5, y: 6))
+            path.addLine(to: CGPoint(x: 9, y: 6))
+            path.addCurve(to: CGPoint(x: 9, y: 12.5), control1: CGPoint(x: 13.5, y: 6), control2: CGPoint(x: 13.5, y: 12.5))
+            path.addLine(to: CGPoint(x: 6.5, y: 12.5))
+        case .stop:
+            path.addRoundedRect(in: CGRect(x: 4, y: 4, width: 8, height: 8), cornerSize: CGSize(width: 2, height: 2))
         }
         let scale = rect.width / 16
         return path.applying(CGAffineTransform(scaleX: scale, y: scale))

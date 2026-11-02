@@ -84,31 +84,6 @@ struct FieldBlock<Content: View>: View {
     }
 }
 
-/// The pull request a template added: where it is and what it changed.
-struct PullRequestResult: View {
-    let proposal: TemplateProposal
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Space.xs) {
-            HStack(spacing: Space.sm) {
-                KitIconView(icon: .check, size: Dim.icon, weight: 1.6).foregroundStyle(Ink.ok)
-                Text("Pull request opened").kitType(.bodyStrong).foregroundStyle(Ink.text)
-            }
-            if let url = proposal.url {
-                Link(proposal.prURL, destination: url)
-                    .kitType(.mono)
-                    .foregroundStyle(Ink.brassText)
-                    .lineLimit(1)
-            } else {
-                Text(proposal.prURL).kitType(.mono).foregroundStyle(Ink.textMuted)
-            }
-            Text(proposal.summary).kitType(.meta).foregroundStyle(Ink.textFaint).fixedSize(horizontal: false, vertical: true)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Pull request opened. " + proposal.prURL)
-    }
-}
-
 /// A hairline card around a block of settings.
 extension View {
     func setupPanel() -> some View {

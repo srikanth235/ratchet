@@ -16,7 +16,9 @@ struct AddConnectorSheet: View {
 
     init(request: ConnectorSheetRequest) {
         self.request = request
-        _form = State(initialValue: AddConnectorForm(kind: request.kind, showsToken: request.showsToken, awsProfile: request.pick))
+        var start = AddConnectorForm(kind: request.kind, showsToken: request.showsToken, awsProfile: request.pick)
+        if let harness = request.harness { start.harness = harness }
+        _form = State(initialValue: start)
     }
 
     private var canStore: Bool { store.connectorStore.connectorSetup.encryptionAvailable }

@@ -16,7 +16,7 @@ struct SidebarView: View {
     private var selection: Binding<SidebarItem?> {
         Binding(
             get: {
-                if router.wizard != nil { return nil }
+                if router.creationChatID != nil { return .page(.home) }
                 if router.page == .optimizations, let id = router.optimizationID { return .run(id) }
                 return .page(router.page)
             },
@@ -79,7 +79,7 @@ struct SidebarView: View {
                 .kitType(.caption).foregroundStyle(Ink.textFaint)
         } else {
             ForEach(recentRuns) { optimization in
-                let isSelected = router.page == .optimizations && router.optimizationID == optimization.id && router.wizard == nil
+                let isSelected = router.page == .optimizations && router.optimizationID == optimization.id
                 RunRow(optimization: optimization, isSelected: isSelected)
                     .tag(SidebarItem.run(optimization.id))
                     .listRowBackground(isSelected ? RunSelectionBackground(isActive: appearsActive) : nil)

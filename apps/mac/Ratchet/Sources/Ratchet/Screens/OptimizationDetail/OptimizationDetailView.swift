@@ -2,12 +2,14 @@ import AppKit
 import RatchetKit
 import SwiftUI
 
-/// One optimization. While it runs: best so far, spend, time left, the staircase, the agents, the candidates and their
-/// verdicts. Once it ended: the gain, the value, the pull request, what changed and the teardown receipt.
+/// One optimization, in two tabs: the run (header with status, Stop…, Pause Schedule and Open PR; while it runs: best so far, spend,
+/// the agents, the log in three views, the candidates, and the steering field; once it ended: the gain, the value, the pull request,
+/// what changed and the teardown receipt) and its settings (editable rows, Archive).
 struct OptimizationDetailView: View {
     let id: String
     @Environment(AppStore.self) var store
     @Environment(AppRouter.self) var router
+    @Environment(ChatHub.self) var hub
     @Environment(\.openURL) var openURL
     @Environment(\.daemonActionsEnabled) var actionsEnabled
 
@@ -25,12 +27,29 @@ struct OptimizationDetailView: View {
                         }
                     }
                     .buttonStyle(.kit(.link))
-                    header(optimization)
+                    RunHeader(optimization: optimization, detail: detail)
                         .gridProbe("header", area: "detail")
-                    if optimization.status.isFinished {
-                        resultBody(optimization)
-                    } else {
-                        liveBody(optimization)
+                    KitSegmented(
+                        items: DetailTab.allCases, selection: Binding(get: { router.detailTab }, set: { router.detailTab = $0 }),
+                        title: { $0.title },
+                        help: { $0 == .run ? "The log, the agents and the result" : "Goal, agents, limits, schedule and value" })
+                        .fixedSize()
+                        .dimsWhenInactive()
+                    switch router.detailTab {
+                    case .run:
+                        if optimization.status.isFinished {
+                            resultBody(optimization)
+                        } else {
+                            liveBody(optimization)
+                        }
+                    case .settings:
+                        OptimizationSettingsView(optimization: optimization, detail: detail)
+                    }
+                }
+                // The steering field floats over the log while the optimization runs.
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if router.detailTab == .run && !optimization.status.isFinished {
+                        SteeringBar(optimizationID: id)
                     }
                 }
             } else {
@@ -39,31 +58,12 @@ struct OptimizationDetailView: View {
         }
         .gridArea("detail", inset: Space.pageX)
         .toolbar {
-            // Actions on the open optimization: the same as the Optimization menu and the table's context menu.
             ToolbarItemGroup {
-                if let optimization {
-                    if OptimizationAction.canRun(optimization) {
-                        Button("Run Now", systemImage: "play") { Task { await store.optimizationStore.runNow(id) } }
-                            .disabled(!actionsEnabled)
-                            .help("Start this optimization now (Shift-Command-R)")
+                if let optimization, optimization.status.isFinished {
+                    Button("Export Report…", systemImage: "square.and.arrow.up") {
+                        Task { await OptimizationAction.exportReport(optimization, store: store) }
                     }
-                    if OptimizationAction.canOpenPullRequest(optimization) {
-                        Button(optimization.prNumber.map { "Open Pull Request #\($0)" } ?? "Create Pull Request", systemImage: "arrow.triangle.pull") {
-                            Task { await OptimizationAction.openPullRequest(optimization, store: store) }
-                        }
-                        .disabled(!actionsEnabled && optimization.prNumber == nil)
-                        .help("Open the pull request with the verified wins (Shift-Command-P)")
-                    }
-                    if optimization.status.isFinished {
-                        Button("Export Report…", systemImage: "square.and.arrow.up") {
-                            Task { await OptimizationAction.exportReport(optimization, store: store) }
-                        }
-                        .help("Save the report as a markdown file (Shift-Command-E)")
-                    } else {
-                        Button("Stop…", systemImage: "stop.circle") { router.pendingStop = id }
-                            .disabled(!actionsEnabled)
-                            .help("Stop this optimization (Command-Period)")
-                    }
+                    .help("Save the report as a markdown file (Shift-Command-E)")
                 }
             }
         }
@@ -71,20 +71,7 @@ struct OptimizationDetailView: View {
         .task(id: id) {
             await store.optimizationStore.loadDetail(id: id)
             if store.optimizationStore.details[id]?.optimization.status.isFinished == true { await store.insight.loadInsights(id) }
-        }
-    }
-
-    // MARK: Header
-
-    /// The title, where it runs and its status word. The actions are in the toolbar.
-    func header(_ optimization: Optimization) -> some View {
-        PageHeader(optimization.title, subtitle: optimization.repo + " · " + optimization.branch) {
-            StatusLabel(tone: optimization.status.tone, text: optimization.status.title)
-            if optimization.status == .waiting {
-                Button("Review environment") { router.reviewEnvironment(of: optimization, client: store.client) }
-                    .buttonStyle(.kit(.primary))
-                    .disabled(!actionsEnabled)
-            }
+            await hub.settings(for: id).load()
         }
     }
 

@@ -248,3 +248,23 @@ public struct HomeSummary: Hashable, Sendable {
         return parts.joined(separator: " · ")
     }
 }
+
+extension ValueOverview {
+    /// The chart in words (WCAG 1.1.1): the steps of delivered value, then where it ended and what is pending and spent.
+    /// "3 steps: +$2.4k on Aug 20, … Now $12.5k delivered, $2.9k pending, $184 spent."
+    public var chartSummary: String {
+        guard hasChart else { return "No chart yet." }
+        var steps: [String] = []
+        var previous = 0.0
+        for point in chart where point.deliveredUSDPerYear > previous + 0.5 {
+            steps.append("+" + Money.short(point.deliveredUSDPerYear - previous) + " on " + Elapsed.shortDate(point.at))
+            previous = point.deliveredUSDPerYear
+        }
+        var text = Plural.count(steps.count, "step")
+        if !steps.isEmpty { text += ": " + steps.joined(separator: ", ") }
+        text += ". Now " + story.deliveredText + " delivered"
+        if let pending = story.pendingText { text += ", " + pending }
+        text += ", " + story.spentText + " spent."
+        return text
+    }
+}

@@ -7,7 +7,7 @@ extension OptimizationStatus {
     var tone: StatusTone {
         switch self {
         case .running: .run
-        case .waiting: .wait
+        case .waiting: .off
         case .merged, .done: .ok
         case .noWin: .off
         }
@@ -63,6 +63,29 @@ struct ResultCell: View {
         } else {
             Text("no win yet").kitType(.meta).foregroundStyle(Ink.textFaint)
         }
+    }
+}
+
+/// "$4.8k", or "$2.9k pending" while the win is in an open pull request: pending value is quieter and never counts as delivered.
+struct ValueCell: View {
+    let optimization: Optimization
+
+    /// Verified wins whose pull request is open and not merged yet.
+    static func isPending(_ optimization: Optimization) -> Bool {
+        optimization.status == .done && optimization.prNumber != nil && optimization.valuePerYearUSD != nil
+    }
+
+    var body: some View {
+        let pending = Self.isPending(optimization)
+        HStack(spacing: Space.xs) {
+            if pending { Text("pending").kitType(.micro).foregroundStyle(Ink.textFaint) }
+            Text(optimization.valuePerYearUSD.map(Money.short) ?? "—")
+                .kitType(.mono)
+                .foregroundStyle(optimization.valuePerYearUSD == nil || pending ? Ink.textFaint : Ink.text)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(optimization.valuePerYearUSD.map { Money.short($0) + " a year" + (pending ? ", pending until its pull request merges" : "") } ?? "No value yet")
     }
 }
 
@@ -139,10 +162,7 @@ struct OptimizationTable: View {
             }
             .width(min: 72, ideal: 88, max: 120)
             TableColumn("Value / yr", value: \.valueSort) { optimization in
-                Text(optimization.valuePerYearUSD.map(Money.short) ?? "—")
-                    .kitType(.mono)
-                    .foregroundStyle(optimization.valuePerYearUSD == nil ? Ink.textFaint : Ink.text)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                ValueCell(optimization: optimization)
             }
             .width(min: 72, ideal: 96, max: 120)
         } rows: {

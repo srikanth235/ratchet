@@ -67,7 +67,7 @@ The mockup scale is 11 / 12.5 / 14. The app keeps 12 (`caption`) and 13.5 (`body
 ## Icons
 
 Drawn `Shape`s on a 16 x 16 box, one 1.5 round stroke, never an SF Symbol outside `DesignKit/` (`grid-lint.sh` checks). Views name a `KitIcon`; `KitIconView`
-sets size and weight. Set: overview, optimizations, benchmarks, connectors, home, agents, check, back, plus, alert, chevronDown, arrowUp, close, sliders, bell, terminal. The toolbar and the ⋯ menu use SF Symbols (system chrome). An icon-only
+sets size and weight. Set: overview, optimizations, benchmarks, connectors, home, agents, check, back, plus, alert, chevronDown, arrowUp, close, sliders, bell, terminal, info, undo, stop. The toolbar and the ⋯ menu use SF Symbols (system chrome). An icon-only
 button is a `KitIconButton`, which requires a label (VoiceOver and tooltip).
 
 ## Parts
@@ -95,7 +95,7 @@ States for every part: rest, hover, pressed, selected, focused, disabled. `force
 | Steering field (`Glass`) | `KitSteeringField`: glass container, control edge, concentric inner area; the screen fills it and passes `isFocused` | states: rest, hover, focused, disabled. Anchor with `.safeAreaInset(edge: .bottom)` |
 | Glass container (`Glass`) | `KitGlassContainer`, `.kitGlass()` | one per floating group; no glass on glass; tint only to carry meaning |
 | More menu (`Buttons`) | `KitMoreMenu`: an `ellipsis` symbol in a 28 pt hit area, opens the row's actions | always labelled; every action is also in the context menu and the menu bar |
-| Popover chip | 28 high, title + chevron, `controlBorder` | open: brass edge; the caller attaches the popover |
+| Popover chip | 28 high, title + chevron, `controlBorder` | open: brass edge; set (not a default): brass text and edge; the label is the popover's title; `PopoverChip` attaches the popover |
 | Segmented control | 32 high, bordered, segments split by `hairlineStrong` | selected: lifted + brass underline; Left/Right move |
 | Range switch (`KitSwitch`) | text-only segments | chart ranges |
 | Toggle (`KitToggleStyle`) | 40 x 24 track, knob 16 | on: brass track, dark knob; real `Toggle` |

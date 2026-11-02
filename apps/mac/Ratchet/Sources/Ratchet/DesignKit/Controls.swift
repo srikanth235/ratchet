@@ -10,6 +10,10 @@ import SwiftUI
 struct KitChip: View {
     let title: String
     var isOpen = false
+    /// The person set this chip (it is not a default): the text and the edge wear the accent.
+    var isSet = false
+    /// What a screen reader says ("Change agents"); the chip's text is then its value.
+    var label: String?
     let action: () -> Void
 
     var body: some View {
@@ -19,22 +23,25 @@ struct KitChip: View {
                 KitIconView(icon: .chevronDown, size: Dim.icon - Space.xs)
             }
         }
-        .buttonStyle(KitChipStyle(isOpen: isOpen))
-        .accessibilityValue(isOpen ? "Open" : "")
+        .buttonStyle(KitChipStyle(isOpen: isOpen, isSet: isSet))
+        .accessibilityLabel(label ?? title)
+        .accessibilityValue(label == nil ? (isOpen ? "Open" : "") : title + (isOpen ? ", open" : ""))
         .accessibilityHint("Opens a list of choices")
     }
 }
 
 struct KitChipStyle: ButtonStyle {
     var isOpen = false
+    var isSet = false
 
     func makeBody(configuration: Configuration) -> some View {
-        PartBody(configuration: configuration, isOpen: isOpen)
+        PartBody(configuration: configuration, isOpen: isOpen, isSet: isSet)
     }
 
     private struct PartBody: View {
         let configuration: ButtonStyleConfiguration
         let isOpen: Bool
+        let isSet: Bool
         @Environment(\.isEnabled) private var isEnabled
         @Environment(\.isFocused) private var isFocused
         @Environment(\.forcedPartState) private var forced
@@ -46,12 +53,12 @@ struct KitChipStyle: ButtonStyle {
             let open = isOpen || state == .selected
             let shape = RoundedRectangle(cornerRadius: Dim.radiusButton, style: .continuous)
             configuration.label
-                .foregroundStyle(open || state == .hover || state == .pressed ? Ink.text : Ink.textMuted)
+                .foregroundStyle(open || state == .hover || state == .pressed ? Ink.text : isSet ? Ink.brassText : Ink.textMuted)
                 .padding(.leading, Space.md)
                 .padding(.trailing, Space.sm)
                 .frame(height: Dim.chipHeight)
                 .background(shape.fill(state == .pressed ? Ink.track : Color.clear))
-                .overlay(shape.strokeBorder(open ? Ink.brass : state == .hover || state == .pressed ? Ink.brassBorder : Ink.controlBorder,
+                .overlay(shape.strokeBorder(open ? Ink.brass : state == .hover || state == .pressed || isSet ? Ink.brassBorder : Ink.controlBorder,
                                             lineWidth: Dim.hairline))
                 .kitFocusRing(radius: Dim.radiusButton, visible: state == .focused)
                 .opacity(state == .disabled ? Dim.disabledOpacity : 1)
@@ -72,6 +79,8 @@ struct KitSegmented<Item: Identifiable & Hashable>: View {
     let items: [Item]
     @Binding var selection: Item
     let title: (Item) -> String
+    /// A tooltip for each segment ("Agents, one lane each"); nil for none.
+    var help: ((Item) -> String)?
     @Environment(\.forcedPartState) private var forced
 
     var body: some View {
@@ -81,6 +90,7 @@ struct KitSegmented<Item: Identifiable & Hashable>: View {
                 if index > 0 { Rectangle().fill(Ink.hairlineStrong).frame(width: Dim.hairline) }
                 Button(title(item)) { selection = item }
                     .buttonStyle(KitSegmentStyle(isSelected: item == selection, forced: index == 1 ? forced : nil))
+                    .help(help?(item) ?? "")
                     .accessibilityAddTraits(item == selection ? .isSelected : [])
             }
         }
@@ -202,6 +212,8 @@ struct KitComposer<Chips: View>: View {
     @Binding var text: String
     var placeholder = "Describe what to optimize"
     var isSending = false
+    /// False while something else blocks sending (no agent is signed in); Stop stays available while `isSending`.
+    var canSend = true
     let onSend: () -> Void
     let chips: Chips
     @FocusState private var focused: Bool
@@ -210,10 +222,11 @@ struct KitComposer<Chips: View>: View {
     @State private var hovering = false
 
     init(text: Binding<String>, placeholder: String = "Describe what to optimize", isSending: Bool = false,
-         onSend: @escaping () -> Void, @ViewBuilder chips: () -> Chips) {
+         canSend: Bool = true, onSend: @escaping () -> Void, @ViewBuilder chips: () -> Chips) {
         _text = text
         self.placeholder = placeholder
         self.isSending = isSending
+        self.canSend = canSend
         self.onSend = onSend
         self.chips = chips()
     }
@@ -242,6 +255,8 @@ struct KitComposer<Chips: View>: View {
                 .foregroundStyle(Ink.text)
                 .lineLimit(2...6)
                 .focused($focused)
+                // Return sends (a single-line composer: Shift-Return or Option-Return adds a line), as Command-Return does.
+                .onSubmit { if !isSending && canSend && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { onSend() } }
                 .frame(minHeight: Dim.composerMinHeight, alignment: .topLeading)
             HStack(spacing: Space.sm) {
                 chips
@@ -251,7 +266,7 @@ struct KitComposer<Chips: View>: View {
                 }
                 .buttonStyle(KitSendStyle())
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isSending)
+                .disabled(isSending ? false : (text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !canSend))
                 .accessibilityLabel(isSending ? "Stop" : "Send")
                 .help(isSending ? "Stop" : "Send (Command-Return)")
             }

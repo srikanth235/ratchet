@@ -8,6 +8,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(ChatHub.self) private var hub
     @Environment(ConnectorsPageState.self) private var connectors
     @Environment(DaemonController.self) private var daemon
     @Environment(AppNotifier.self) private var notifier
@@ -67,6 +68,15 @@ struct ContentView: View {
         } message: { _ in
             Text("Wins found so far are kept.")
         }
+        .confirmationDialog(
+            archivePrompt.title, isPresented: Binding(get: { router.pendingArchive != nil }, set: { if !$0 { router.pendingArchive = nil } }),
+            titleVisibility: .visible, presenting: router.pendingArchive
+        ) { id in
+            Button(archivePrompt.confirm, role: .destructive) { Task { await hub.settings(for: id).archive() } }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text(archivePrompt.message)
+        }
         .onChange(of: router.page) { _, page in storedPage = page.rawValue }
         .onChange(of: router.optimizationID) { _, id in storedOptimization = id ?? "" }
         .task {
@@ -81,13 +91,14 @@ struct ContentView: View {
         .task(id: daemon.phase.isRunning) {
             guard daemon.phase.isRunning else { return }
             await store.start()
+            await hub.refresh(store: store)
             restoreOptimization()
             await notifier.refreshAuthorization()
             guard !ran else { return }
             ran = true
-            SelfTest.runIfRequested(store: store, router: router, daemon: daemon, notifier: notifier)
+            SelfTest.runIfRequested(store: store, router: router, hub: hub, daemon: daemon, notifier: notifier)
             Snapshot.runIfRequested(
-                store: store, router: router, connectors: connectors, openSettings: openSettings, daemon: daemon,
+                store: store, router: router, hub: hub, connectors: connectors, openSettings: openSettings, daemon: daemon,
                 notifier: notifier, loginItem: loginItem)
         }
         // The live events follow the same rule, as a task of their own: they stop when the daemon goes away or the data source
@@ -95,9 +106,6 @@ struct ContentView: View {
         .task(id: "\(daemon.phase.isRunning)|\(store.isDemoData)") {
             guard daemon.phase.isRunning else { return }
             await store.followEvents()
-        }
-        .sheet(item: Binding(get: { router.templateProposal }, set: { router.templateProposal = $0 })) { flow in
-            UseTemplateSheet(flow: flow)
         }
         .onOpenURL { handle(url: $0) }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -112,14 +120,15 @@ struct ContentView: View {
 extension ContentView {
     /// The window title: the page, or the flow. Never the app's name.
     private var navigationTitle: String {
-        router.wizard != nil ? "New Optimization" : router.page.title
+        router.creationChatID != nil ? "New Optimization" : router.page.title
     }
 
     /// Every page has a subtitle: the open optimization, a count, the range.
     private var navigationSubtitle: String {
-        if let flow = router.wizard { return flow.step.caption }
         switch router.page {
-        case .home: return "Describe what to optimize"
+        case .home:
+            if let chatID = router.creationChatID { return hub.conversation(chatID, router: router).harnessLabel }
+            return "Describe what to optimize"
         case .overview: return store.range.title
         case .optimizations:
             if let id = router.optimizationID, let optimization = store.optimizationStore.optimization(id: id) { return optimization.title }
@@ -128,6 +137,11 @@ extension ContentView {
         case .benchmarks: return Plural.count(store.benchmarks.count, "run")
         case .connectors: return Plural.count(store.connectorStore.connectors.count, "connector")
         }
+    }
+
+    private var archivePrompt: (title: String, message: String, confirm: String) {
+        let title = router.pendingArchive.flatMap { store.optimizationStore.optimization(id: $0)?.title } ?? "this optimization"
+        return OptimizationSettingsModel.archivePrompt(title: title)
     }
 
     private var stopTitle: String {
@@ -145,7 +159,7 @@ extension ContentView {
     private func restoreOptimization() {
         guard !Store.isOverridden, !restoredOptimization else { return }
         restoredOptimization = true
-        guard !storedOptimization.isEmpty, router.optimizationID == nil, router.wizard == nil,
+        guard !storedOptimization.isEmpty, router.optimizationID == nil, router.creationChatID == nil,
               store.optimizationStore.optimization(id: storedOptimization) != nil else { return }
         router.open(optimization: storedOptimization)
     }
@@ -158,7 +172,8 @@ extension ContentView {
             Self.go(to: destination, store: store, router: router, openWindow: openWindow)
         }
         DebugBridge.start(
-            store: store, router: router, connectors: connectors, daemon: daemon, notifier: notifier, openSettings: openSettings)
+            store: store, router: router, hub: hub, connectors: connectors, daemon: daemon, notifier: notifier,
+            openSettings: openSettings)
     }
 
     /// Brings the window forward when it is closed or hidden (a click, a link or a command from the menu bar era).
@@ -176,7 +191,7 @@ extension ContentView {
         switch destination {
         case .optimization(let id): router.open(optimization: id)
         case .connectors: router.show(.connectors)
-        case .newOptimization: router.startWizard(client: store.client)
+        case .newOptimization: router.newOptimization()
         case .overview: router.show(.overview)
         }
     }
@@ -207,11 +222,7 @@ private struct DetailRoot: View {
 
     var body: some View {
         Group {
-            if let flow = router.wizard {
-                NewOptimizationView(flow: flow)
-            } else {
-                router.page.destination
-            }
+            router.page.destination
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .toolbar { ShellToolbar(showsConnectionBadge: showsConnectionBadge) }
