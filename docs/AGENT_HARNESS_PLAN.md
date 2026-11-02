@@ -262,7 +262,7 @@ references point to that issue's sections. A phase is done only when every #10 i
 | F5 | Test, build, OS, CLI tooling | F0 | 1 | §7 (except MCP and keep-awake, see P3 and P6) |
 | P2 | Model catalog, xAI key, auth matrix, preflight | P1 | 1 | — |
 | P3 | Ratchet MCP server (session + owner mode) | P1 | 1 | §7 MCP |
-| P4 | Chat engine + API | P1, P3 | 1–2 | — |
+| P4 | Chat engine + API (done: see [ratchet-chat.md](ratchet-chat.md)) | P1, P3 | 1–2 | — |
 | P5 | Mac app: composer, chat, steering, Agents page | P4 (API), P2, F4 | 2 | §5 chat, composer, draft card, steering, agents items |
 | P6 | Optimizations: harness list, fallback, MCP for agents, no-wait environment | P1, P2, P3 | 1 | Fix first: no "Waiting on you"; §7 local-only keep-awake |
 | P7 | Cost split + Overview | P2, P6 | 1 | §5 Overview items |

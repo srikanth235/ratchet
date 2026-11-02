@@ -12,10 +12,9 @@ use async_trait::async_trait;
 use ratchet_agents::detect::{HarnessAuth as DetectAuth, HarnessKind as DetectKind};
 use ratchet_agents::git::{Git, exec_git};
 use ratchet_agents::models::{ModelCatalog, ModelUse};
-use ratchet_agents::process::SharedSpawner;
 use ratchet_agents::workdir::{
-    AddWorktreeOptions, Identity, LocalCloneOptions, add_worktree, ensure_local_clone, git_auth_env,
-    remove_worktree,
+    AddWorktreeOptions, Identity, LocalCloneOptions, add_worktree, ensure_local_clone,
+    git_auth_env, remove_worktree,
 };
 use ratchet_agents::{LocalAdapterOptions, local_harness_for};
 use ratchet_core::ports::{LiveSession, PortError, PortResult, SessionSpec, SharedEventSink};
@@ -36,8 +35,9 @@ pub struct CliChatOptions {
     pub root: PathBuf,
     pub clone_url: Option<CloneUrl>,
     pub github_token: Option<TokenSource>,
-    /// Test seam: a fake process spawner for the CLIs.
-    pub spawner: Option<SharedSpawner>,
+    /// How the adapters are built (options per CLI, a fake process spawner in tests). Detection results and the login PATH are
+    /// filled in when a session opens.
+    pub adapters: LocalAdapterOptions,
 }
 
 pub struct CliChatEngine {
@@ -46,7 +46,7 @@ pub struct CliChatEngine {
     root: PathBuf,
     clone_url: CloneUrl,
     github_token: TokenSource,
-    spawner: Option<SharedSpawner>,
+    adapters: LocalAdapterOptions,
     /// One clone operation at a time per machine: two chats on the same repo must not clone into the same directory.
     clone_lock: tokio::sync::Mutex<()>,
 }
@@ -67,7 +67,7 @@ impl CliChatEngine {
                 .clone_url
                 .unwrap_or_else(|| Arc::new(|slug| format!("https://github.com/{slug}.git"))),
             github_token: o.github_token.unwrap_or_else(|| Arc::new(|| None)),
-            spawner: o.spawner,
+            adapters: o.adapters,
             clone_lock: tokio::sync::Mutex::new(()),
         }
     }
@@ -200,7 +200,10 @@ impl ChatEngine for CliChatEngine {
             .await
             .ok()
             .map(|p| PathBuf::from(p.trim()));
-        let clone_dir = common.as_deref().and_then(Path::parent).map(Path::to_path_buf);
+        let clone_dir = common
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf);
         match clone_dir {
             Some(c) => {
                 let clone = Git::new(&c, exec_git(), None);
@@ -225,8 +228,7 @@ impl ChatEngine for CliChatEngine {
         let opts = LocalAdapterOptions {
             harnesses: detected.harnesses,
             login_path: detected.login_path.unwrap_or_default(),
-            spawner: self.spawner.clone(),
-            ..LocalAdapterOptions::default()
+            ..self.adapters.clone()
         };
         let harness = local_harness_for(&opts, kind.agent_kind()).map_err(PortError::failed)?;
         harness.open(&spec, events).await

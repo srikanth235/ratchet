@@ -441,14 +441,16 @@ impl RealService {
             probe: opts.connection_probe.clone(),
             idle_minutes: opts.idle_minutes,
             pump: Mutex::new(None),
-            chat: Arc::new(super::chat::CliChatEngine::new(super::chat::CliChatOptions {
-                harnesses: opts.harnesses.clone(),
-                models: ModelCatalog::load(opts.models_file.as_deref()).0,
-                root: opts.state_root.join("chats"),
-                clone_url: None,
-                github_token: Some(Arc::new(move || chat_connectors.github_token(None))),
-                spawner: None,
-            })),
+            chat: Arc::new(super::chat::CliChatEngine::new(
+                super::chat::CliChatOptions {
+                    harnesses: opts.harnesses.clone(),
+                    models: ModelCatalog::load(opts.models_file.as_deref()).0,
+                    root: opts.state_root.join("chats"),
+                    clone_url: None,
+                    github_token: Some(Arc::new(move || chat_connectors.github_token(None))),
+                    adapters: Default::default(),
+                },
+            )),
             drafts: EnvDrafts::new(Arc::new(ProductDrafters(product.clone())), {
                 let tx = tx.clone();
                 Arc::new(move |e| {

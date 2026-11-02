@@ -141,7 +141,9 @@ mod tests {
         let texts: Vec<String> = batch
             .iter()
             .map(|i| match i {
-                Item::Agent(e) => format!("{:?}:{}", e.event_type, e.text.clone().unwrap_or_default()),
+                Item::Agent(e) => {
+                    format!("{:?}:{}", e.event_type, e.text.clone().unwrap_or_default())
+                }
                 Item::End(_) => "end".into(),
             })
             .collect();
@@ -160,12 +162,16 @@ mod tests {
         let bytes: usize = batch
             .iter()
             .filter_map(|i| match i {
-                Item::Agent(e) if e.event_type == AgentEventType::Delta => e.text.as_ref().map(String::len),
+                Item::Agent(e) if e.event_type == AgentEventType::Delta => {
+                    e.text.as_ref().map(String::len)
+                }
                 _ => None,
             })
             .sum();
         assert!(bytes <= TEXT_CAP_BYTES, "{bytes}");
-        assert!(matches!(batch.last(), Some(Item::Agent(e)) if e.event_type == AgentEventType::Message));
+        assert!(
+            matches!(batch.last(), Some(Item::Agent(e)) if e.event_type == AgentEventType::Message)
+        );
     }
 
     #[tokio::test]

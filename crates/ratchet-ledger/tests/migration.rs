@@ -19,7 +19,14 @@ async fn schema(pool: &SqlitePool) -> Vec<(String, String, String, Option<String
     .await
     .unwrap()
     .iter()
-    .map(|r| (r.get("type"), r.get("name"), r.get("tbl_name"), r.get("sql")))
+    .map(|r| {
+        (
+            r.get("type"),
+            r.get("name"),
+            r.get("tbl_name"),
+            r.get("sql"),
+        )
+    })
     .collect()
 }
 

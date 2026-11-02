@@ -151,11 +151,13 @@ impl Ledger {
 
     /// The oldest chat on `harness`: the one the first-use notice belongs to.
     pub async fn first_chat_of_harness(&self, harness: &str) -> Result<Option<String>> {
-        let r = sqlx::query("SELECT id FROM chats WHERE harness = ?1 ORDER BY created_at, rowid LIMIT 1")
-            .bind(harness)
-            .fetch_optional(&mut *self.conn().await?)
-            .await
-            .map_err(db)?;
+        let r = sqlx::query(
+            "SELECT id FROM chats WHERE harness = ?1 ORDER BY created_at, rowid LIMIT 1",
+        )
+        .bind(harness)
+        .fetch_optional(&mut *self.conn().await?)
+        .await
+        .map_err(db)?;
         r.map(|r| col(&r, "id")).transpose()
     }
 
@@ -245,13 +247,14 @@ impl Ledger {
         seq: i64,
         card: &Value,
     ) -> Result<bool> {
-        let done = sqlx::query("UPDATE chat_messages SET card = ?3 WHERE chat_id = ?1 AND seq = ?2")
-            .bind(chat_id)
-            .bind(seq)
-            .bind(to_text(card)?)
-            .execute(&mut *self.conn().await?)
-            .await
-            .map_err(db)?;
+        let done =
+            sqlx::query("UPDATE chat_messages SET card = ?3 WHERE chat_id = ?1 AND seq = ?2")
+                .bind(chat_id)
+                .bind(seq)
+                .bind(to_text(card)?)
+                .execute(&mut *self.conn().await?)
+                .await
+                .map_err(db)?;
         Ok(done.rows_affected() > 0)
     }
 
@@ -310,11 +313,12 @@ impl Ledger {
 
     /// The `seq` of the newest message (0 for none).
     pub async fn last_chat_seq(&self, chat_id: &str) -> Result<i64> {
-        let r = sqlx::query("SELECT COALESCE(MAX(seq), 0) AS n FROM chat_messages WHERE chat_id = ?1")
-            .bind(chat_id)
-            .fetch_one(&mut *self.conn().await?)
-            .await
-            .map_err(db)?;
+        let r =
+            sqlx::query("SELECT COALESCE(MAX(seq), 0) AS n FROM chat_messages WHERE chat_id = ?1")
+                .bind(chat_id)
+                .fetch_one(&mut *self.conn().await?)
+                .await
+                .map_err(db)?;
         col(&r, "n")
     }
 

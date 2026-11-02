@@ -111,6 +111,11 @@ pub enum Command {
     },
     /// Stream the daemon's events (server-sent events).
     Events(EventsArgs),
+    /// Talk to Ratchet's assistant: your own Claude Code, Codex or Grok, acting on Ratchet through its tools.
+    Chat {
+        #[command(subcommand)]
+        action: ChatCmd,
+    },
     /// Environments (sandboxes): what is running, end now.
     Env {
         #[command(subcommand)]
@@ -254,6 +259,48 @@ pub enum AgentCmd {
         #[arg(long)]
         after: Option<i64>,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ChatCmd {
+    /// Start a chat and print its id. With no options: a Home chat on your default harness.
+    New {
+        /// Read this repo (owner/name) and draft optimizations for it.
+        #[arg(long)]
+        repo: Option<String>,
+        /// Steer this optimization: notes you send reach its agents.
+        #[arg(long)]
+        optimization: Option<String>,
+        /// claude-code, codex or grok (default: your chat harness, else the first one signed in).
+        #[arg(long)]
+        harness: Option<String>,
+        /// A model id or alias of the harness.
+        #[arg(long)]
+        model: Option<String>,
+    },
+    /// Send a message and print the reply as it is written, until the turn is done.
+    ///
+    /// Exits 1 when the turn fails (the reason and what to do are printed). With --json every stream event is one line.
+    Send {
+        id: String,
+        text: String,
+        /// Stop waiting after this long (the chat keeps going).
+        #[arg(long, value_parser = parse_duration, value_name = "DURATION", default_value = "10m")]
+        timeout: u64,
+    },
+    /// The chat's messages, oldest first.
+    Show {
+        id: String,
+        /// Only messages after this number.
+        #[arg(long)]
+        after: Option<i64>,
+        #[arg(long, default_value_t = 200)]
+        limit: u32,
+    },
+    /// Stop the reply being written.
+    Stop { id: String },
+    /// End the chat: its session closes, its checkout and its history are removed.
+    End { id: String },
 }
 
 #[derive(Args, Debug, Clone, Default)]

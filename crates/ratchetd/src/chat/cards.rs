@@ -377,7 +377,9 @@ mod tests {
         let keys: Vec<_> = c.rows.iter().map(|r| r.key.as_str()).collect();
         assert_eq!(
             keys,
-            ["goal", "measure", "agents", "limits", "schedule", "output", "config"]
+            [
+                "goal", "measure", "agents", "limits", "schedule", "output", "config"
+            ]
         );
         let agents = &c.rows[2];
         assert_eq!(agents.value, "Claude Code → Codex · on this Mac");

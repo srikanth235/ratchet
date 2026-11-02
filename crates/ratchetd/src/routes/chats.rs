@@ -116,7 +116,10 @@ async fn send_message(
     params(("id" = String, Path, description = "Chat id")),
     responses((status = 204, description = "Asked to stop"), (status = 404, body = ApiError))
 )]
-async fn interrupt_chat(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<StatusCode> {
+async fn interrupt_chat(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<StatusCode> {
     s.chats.interrupt(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }

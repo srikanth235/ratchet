@@ -104,7 +104,10 @@ async fn a_scripted_chat_creates_an_optimization_end_to_end_with_no_human_gate()
     assert_eq!(chat["model"], "sonnet");
     assert_eq!(chat["state"], "idle");
     assert_eq!(chat["repo"], "acme/shop");
-    assert_eq!(chat["live"], false, "no CLI is started before the first message");
+    assert_eq!(
+        chat["live"], false,
+        "no CLI is started before the first message"
+    );
     let id = chat["id"].as_str().unwrap().to_owned();
     let mut sse = opened_stream(&d, &id).await;
 
@@ -162,7 +165,10 @@ async fn a_scripted_chat_creates_an_optimization_end_to_end_with_no_human_gate()
         .map(|r| (r["key"].as_str().unwrap(), r["value"].as_str().unwrap()))
         .collect();
     assert!(rows.contains(&("limits", "up to $50")), "{rows:?}");
-    assert!(rows.contains(&("schedule", "every night at 02:00")), "{rows:?}");
+    assert!(
+        rows.contains(&("schedule", "every night at 02:00")),
+        "{rows:?}"
+    );
     assert!(rows.iter().any(|(k, _)| *k == "agents"));
     let draft_id = card["id"].as_str().unwrap().to_owned();
 
@@ -186,11 +192,18 @@ async fn a_scripted_chat_creates_an_optimization_end_to_end_with_no_human_gate()
     say(&d, &id, "Looks good, create it").await;
     let second = turn(&mut sse).await;
     let updated = &of(&second, "card")[0].data["card"];
-    assert_eq!(updated["id"], draft_id.as_str(), "an update of the same card");
+    assert_eq!(
+        updated["id"],
+        draft_id.as_str(),
+        "an update of the same card"
+    );
     assert_eq!(updated["status"], "created");
     let optimization = updated["optimization"].as_str().unwrap().to_owned();
     assert_eq!(second.last().unwrap().data["outcome"], "completed");
-    let detail = d.http.get_json(&format!("/v1/optimizations/{optimization}")).await;
+    let detail = d
+        .http
+        .get_json(&format!("/v1/optimizations/{optimization}"))
+        .await;
     assert_eq!(detail["summary"]["repo"], "acme/shop");
 
     // the history has everything, in order, with the card in its final state
@@ -230,12 +243,19 @@ async fn a_new_draft_replaces_the_old_one_and_the_card_updates() {
     let mut sse = opened_stream(&d, &id).await;
     say(&d, &id, "Speed up the test suite in acme/shop").await;
     let first = turn(&mut sse).await;
-    let draft_one = of(&first, "card")[0].data["card"]["id"].as_str().unwrap().to_owned();
+    let draft_one = of(&first, "card")[0].data["card"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
 
     say(&d, &id, "use Codex too, and only weekdays").await;
     let second = turn(&mut sse).await;
     let cards = of(&second, "card");
-    assert_eq!(cards.len(), 2, "the old card is marked, the new one arrives");
+    assert_eq!(
+        cards.len(),
+        2,
+        "the old card is marked, the new one arrives"
+    );
     assert_eq!(cards[0].data["card"]["id"], draft_one.as_str());
     assert_eq!(cards[0].data["card"]["status"], "replaced");
     assert_eq!(cards[1].data["replaces"], draft_one.as_str());
@@ -270,7 +290,11 @@ async fn the_session_is_read_only_with_the_role_prompt_and_a_scoped_token() {
     assert_eq!(spec.resume, None);
     let prompt = spec.system_append.as_deref().unwrap();
     assert!(prompt.contains("only through the Ratchet tools") && prompt.contains("acme/shop"));
-    assert!(std::path::Path::new(&spec.workdir).join("README.md").exists());
+    assert!(
+        std::path::Path::new(&spec.workdir)
+            .join("README.md")
+            .exists()
+    );
     // the token is the chat's own: it opens the chat tool set for acme/shop
     let session = d
         .http
@@ -287,7 +311,10 @@ async fn the_session_is_read_only_with_the_role_prompt_and_a_scoped_token() {
 #[tokio::test]
 async fn interrupt_stops_a_slow_reply_and_keeps_what_was_written() {
     let d = daemon().await;
-    let id = create(&d, json!({})).await["id"].as_str().unwrap().to_owned();
+    let id = create(&d, json!({})).await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let mut sse = opened_stream(&d, &id).await;
     say(&d, &id, "think about it [simulate:slow]").await;
     sse.until("delta").await;
@@ -295,11 +322,17 @@ async fn interrupt_stops_a_slow_reply_and_keeps_what_was_written() {
     // a second message while replying is refused, with words for it
     let busy = d
         .http
-        .post(&format!("/v1/chats/{id}/messages"), json!({"text": "again"}))
+        .post(
+            &format!("/v1/chats/{id}/messages"),
+            json!({"text": "again"}),
+        )
         .await;
     assert_eq!(busy.status, StatusCode::CONFLICT);
     assert!(busy.json()["message"].as_str().unwrap().contains("Stop"));
-    assert_eq!(d.http.get_json(&format!("/v1/chats/{id}")).await["state"], "replying");
+    assert_eq!(
+        d.http.get_json(&format!("/v1/chats/{id}")).await["state"],
+        "replying"
+    );
     assert!(
         d.http.get_json(&format!("/v1/chats/{id}")).await["pending"]["text"]
             .as_str()
@@ -307,7 +340,10 @@ async fn interrupt_stops_a_slow_reply_and_keeps_what_was_written() {
             .contains("still working")
     );
 
-    let r = d.http.post(&format!("/v1/chats/{id}/interrupt"), json!(null)).await;
+    let r = d
+        .http
+        .post(&format!("/v1/chats/{id}/interrupt"), json!(null))
+        .await;
     assert_eq!(r.status, StatusCode::NO_CONTENT);
     let rest = turn(&mut sse).await;
     assert_eq!(rest.last().unwrap().data["outcome"], "interrupted");
@@ -320,10 +356,16 @@ async fn interrupt_stops_a_slow_reply_and_keeps_what_was_written() {
     assert!(last["text"].as_str().unwrap().contains("still working"));
 
     // interrupting again is fine, and the chat takes the next message
-    let again = d.http.post(&format!("/v1/chats/{id}/interrupt"), json!(null)).await;
+    let again = d
+        .http
+        .post(&format!("/v1/chats/{id}/interrupt"), json!(null))
+        .await;
     assert_eq!(again.status, StatusCode::NO_CONTENT);
     say(&d, &id, "never mind").await;
-    assert_eq!(turn(&mut sse).await.last().unwrap().data["outcome"], "completed");
+    assert_eq!(
+        turn(&mut sse).await.last().unwrap().data["outcome"],
+        "completed"
+    );
     d.stop().await;
 }
 
@@ -341,8 +383,14 @@ async fn a_chat_that_idles_closes_its_session_and_reopens_with_resume() {
     let mut sse = opened_stream(&d, &id).await;
     say(&d, &id, "Make acme/shop faster").await;
     let first = turn(&mut sse).await;
-    let draft = of(&first, "card")[0].data["card"]["id"].as_str().unwrap().to_owned();
-    assert_eq!(d.http.get_json(&format!("/v1/chats/{id}")).await["live"], true);
+    let draft = of(&first, "card")[0].data["card"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        d.http.get_json(&format!("/v1/chats/{id}")).await["live"],
+        true
+    );
     let old_token = token_of(&engine(&d).opened()[0].spec);
     assert_eq!(session_status(&d, &old_token).await, StatusCode::OK);
 
@@ -352,8 +400,14 @@ async fn a_chat_that_idles_closes_its_session_and_reopens_with_resume() {
     })
     .await;
     assert_eq!(engine(&d).closed(), ["scripted-1"]);
-    assert_eq!(session_status(&d, &old_token).await, StatusCode::UNAUTHORIZED);
-    assert_eq!(d.http.get_json(&format!("/v1/chats/{id}")).await["state"], "idle");
+    assert_eq!(
+        session_status(&d, &old_token).await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        d.http.get_json(&format!("/v1/chats/{id}")).await["state"],
+        "idle"
+    );
 
     // the next message opens a new session that continues the old CLI session; the conversation carried over
     say(&d, &id, "create it").await;
@@ -367,7 +421,13 @@ async fn a_chat_that_idles_closes_its_session_and_reopens_with_resume() {
     assert_ne!(new_token, old_token);
     assert_eq!(session_status(&d, &new_token).await, StatusCode::OK);
     let card = &of(&second, "card")[0].data["card"];
-    assert_eq!((card["id"].as_str().unwrap(), card["status"].as_str().unwrap()), (draft.as_str(), "created"));
+    assert_eq!(
+        (
+            card["id"].as_str().unwrap(),
+            card["status"].as_str().unwrap()
+        ),
+        (draft.as_str(), "created")
+    );
     d.stop().await;
 }
 
@@ -392,8 +452,14 @@ async fn deleting_a_chat_revokes_its_token_removes_its_checkout_and_ends_its_str
     assert_eq!(session_status(&d, &token).await, StatusCode::UNAUTHORIZED);
     assert!(!checkout.exists(), "the checkout is gone");
     assert_eq!(engine(&d).closed(), ["scripted-1"]);
-    assert_eq!(d.http.get(&format!("/v1/chats/{id}")).await.status, StatusCode::NOT_FOUND);
-    assert_eq!(d.http.delete(&format!("/v1/chats/{id}")).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        d.http.get(&format!("/v1/chats/{id}")).await.status,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        d.http.delete(&format!("/v1/chats/{id}")).await.status,
+        StatusCode::NOT_FOUND
+    );
     assert!(sse.next().await.is_none(), "the stream ends with the chat");
     d.stop().await;
 }
@@ -407,14 +473,21 @@ async fn the_pool_closes_the_session_idle_the_longest() {
     .await;
     let mut ids = Vec::new();
     for _ in 0..3 {
-        let id = create(&d, json!({})).await["id"].as_str().unwrap().to_owned();
+        let id = create(&d, json!({})).await["id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         let mut sse = opened_stream(&d, &id).await;
         say(&d, &id, "hi").await;
         turn(&mut sse).await;
         ids.push(id);
     }
     assert_eq!(engine(&d).opened().len(), 3);
-    assert_eq!(engine(&d).closed(), ["scripted-1"], "the first chat's session made room");
+    assert_eq!(
+        engine(&d).closed(),
+        ["scripted-1"],
+        "the first chat's session made room"
+    );
     let live: Vec<bool> = {
         let mut v = Vec::new();
         for id in &ids {
@@ -435,7 +508,10 @@ async fn the_harness_is_the_request_then_the_users_default_then_the_first_signed
     assert_eq!(create(&d, json!({})).await["harness"], "claude-code");
     // the request wins
     let codex = create(&d, json!({"harness": "codex", "model": "gpt-5"})).await;
-    assert_eq!((codex["harness"].as_str(), codex["model"].as_str()), (Some("codex"), Some("gpt-5")));
+    assert_eq!(
+        (codex["harness"].as_str(), codex["model"].as_str()),
+        (Some("codex"), Some("gpt-5"))
+    );
     let default_model = create(&d, json!({"harness": "codex"})).await;
     assert_eq!(default_model["model"], "gpt-5.1-codex-mini");
     // the user's default, when no request names one
@@ -461,7 +537,12 @@ async fn the_harness_is_the_request_then_the_users_default_then_the_first_signed
     engine(&d).set_harnesses(Vec::new());
     let none = d.http.post("/v1/chats", json!({})).await;
     assert_eq!(none.status, StatusCode::CONFLICT);
-    assert!(none.json()["message"].as_str().unwrap().starts_with("No agent is signed in"));
+    assert!(
+        none.json()["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("No agent is signed in")
+    );
     d.stop().await;
 }
 
@@ -470,12 +551,9 @@ async fn only_the_first_chat_with_a_harness_carries_the_data_notice() {
     let d = daemon().await;
     let first = create(&d, json!({})).await;
     assert_eq!(first["dataNotice"]["harness"], "claude-code");
-    assert!(
-        first["dataNotice"]["text"]
-            .as_str()
-            .unwrap()
-            .starts_with("First time: your messages, the repo name and the files it reads go to Claude Code")
-    );
+    assert!(first["dataNotice"]["text"].as_str().unwrap().starts_with(
+        "First time: your messages, the repo name and the files it reads go to Claude Code"
+    ));
     let second = create(&d, json!({})).await;
     assert!(second.get("dataNotice").is_none());
     let codex = create(&d, json!({"harness": "codex"})).await;
@@ -492,7 +570,10 @@ async fn only_the_first_chat_with_a_harness_carries_the_data_notice() {
 #[tokio::test]
 async fn a_rate_limit_is_told_with_when_it_lifts_and_a_way_out() {
     let d = daemon().await;
-    let id = create(&d, json!({})).await["id"].as_str().unwrap().to_owned();
+    let id = create(&d, json!({})).await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let mut sse = opened_stream(&d, &id).await;
     say(&d, &id, "hello [simulate:rate-limit]").await;
     let events = turn(&mut sse).await;
@@ -505,11 +586,19 @@ async fn a_rate_limit_is_told_with_when_it_lifts_and_a_way_out() {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_millis() as i64;
-    assert!((resets - now - 3_600_000).abs() < 60_000, "resets in about an hour");
+    assert!(
+        (resets - now - 3_600_000).abs() < 60_000,
+        "resets in about an hour"
+    );
     assert_eq!(error["retry"]["canRetryNow"], false);
     assert_eq!(error["fixes"], json!(["switch-harness"]));
     assert_eq!(error["switchTo"], "codex");
-    assert!(error["message"].as_str().unwrap().contains("continue with Codex"));
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("continue with Codex")
+    );
     let done = &events.last().unwrap().data;
     assert_eq!(done["outcome"], "failed");
     // the order: error, then done
@@ -518,7 +607,10 @@ async fn a_rate_limit_is_told_with_when_it_lifts_and_a_way_out() {
 
     // the chat is usable again (a fresh session is opened with resume)
     say(&d, &id, "try once more").await;
-    assert_eq!(turn(&mut sse).await.last().unwrap().data["outcome"], "completed");
+    assert_eq!(
+        turn(&mut sse).await.last().unwrap().data["outcome"],
+        "completed"
+    );
     assert_eq!(engine(&d).opened().len(), 2);
     d.stop().await;
 }
@@ -526,7 +618,10 @@ async fn a_rate_limit_is_told_with_when_it_lifts_and_a_way_out() {
 #[tokio::test]
 async fn an_expired_login_says_to_sign_in_and_a_crash_says_to_try_again() {
     let d = daemon().await;
-    let id = create(&d, json!({})).await["id"].as_str().unwrap().to_owned();
+    let id = create(&d, json!({})).await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let mut sse = opened_stream(&d, &id).await;
     say(&d, &id, "[simulate:auth-expired]").await;
     let auth = turn(&mut sse).await;
@@ -541,7 +636,12 @@ async fn an_expired_login_says_to_sign_in_and_a_crash_says_to_try_again() {
     let e = &of(&crash, "error")[0].data["error"];
     assert_eq!(e["code"], "failed");
     assert_eq!(e["fixes"], json!(["retry"]));
-    assert!(e["message"].as_str().unwrap().contains("exited with status 1."));
+    assert!(
+        e["message"]
+            .as_str()
+            .unwrap()
+            .contains("exited with status 1.")
+    );
     assert_eq!(e["retry"]["canRetryNow"], true);
     d.stop().await;
 }
@@ -645,7 +745,10 @@ async fn a_steering_chat_queues_a_note_and_it_turns_read_when_an_agent_takes_it_
 #[tokio::test]
 async fn a_chat_for_an_optimization_that_does_not_exist_is_refused() {
     let d = daemon().await;
-    let r = d.http.post("/v1/chats", json!({"optimization": "opt_nope"})).await;
+    let r = d
+        .http
+        .post("/v1/chats", json!({"optimization": "opt_nope"}))
+        .await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
     d.stop().await;
 }
@@ -653,16 +756,23 @@ async fn a_chat_for_an_optimization_that_does_not_exist_is_refused() {
 // ---------------------------------------------------------------- the stream
 
 #[tokio::test]
-async fn a_client_that_reconnects_gets_what_it_missed_and_one_that_is_too_far_behind_is_told_to_refetch() {
+async fn a_client_that_reconnects_gets_what_it_missed_and_one_that_is_too_far_behind_is_told_to_refetch()
+ {
     let d = daemon().await;
-    let id = create(&d, json!({})).await["id"].as_str().unwrap().to_owned();
+    let id = create(&d, json!({})).await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let mut sse = opened_stream(&d, &id).await;
     say(&d, &id, "hello there").await;
     let events = turn(&mut sse).await;
     let ids: Vec<u64> = events.iter().map(|e| e.id.unwrap()).collect();
     let cut = ids[2];
 
-    let mut again = d.http.stream(&format!("/v1/chats/{id}/stream"), Some(cut)).await;
+    let mut again = d
+        .http
+        .stream(&format!("/v1/chats/{id}/stream"), Some(cut))
+        .await;
     let ready = again.next().await.unwrap();
     assert_eq!(ready.data["resync"], false);
     assert_eq!(ready.data["lastEventId"], *ids.last().unwrap());
@@ -670,10 +780,17 @@ async fn a_client_that_reconnects_gets_what_it_missed_and_one_that_is_too_far_be
     while replayed.len() < ids.len() - 3 {
         replayed.push(again.next().await.unwrap().id.unwrap());
     }
-    assert_eq!(replayed, ids[3..], "exactly the events after the one it saw");
+    assert_eq!(
+        replayed,
+        ids[3..],
+        "exactly the events after the one it saw"
+    );
 
     // from before a restart (an id the chat never reached)
-    let mut future = d.http.stream(&format!("/v1/chats/{id}/stream"), Some(9999)).await;
+    let mut future = d
+        .http
+        .stream(&format!("/v1/chats/{id}/stream"), Some(9999))
+        .await;
     assert_eq!(future.next().await.unwrap().data["resync"], true);
     d.stop().await;
 }
@@ -681,7 +798,10 @@ async fn a_client_that_reconnects_gets_what_it_missed_and_one_that_is_too_far_be
 #[tokio::test]
 async fn a_client_that_joins_mid_reply_gets_the_partial_text_in_ready() {
     let d = daemon().await;
-    let id = create(&d, json!({})).await["id"].as_str().unwrap().to_owned();
+    let id = create(&d, json!({})).await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let mut first = opened_stream(&d, &id).await;
     say(&d, &id, "go [simulate:slow]").await;
     first.until("delta").await;
@@ -690,8 +810,15 @@ async fn a_client_that_joins_mid_reply_gets_the_partial_text_in_ready() {
     let mut late = d.http.stream(&format!("/v1/chats/{id}/stream"), None).await;
     let ready = late.next().await.unwrap();
     assert_eq!(ready.data["state"], "replying");
-    assert!(ready.data["pending"]["text"].as_str().unwrap().starts_with("still working"));
-    d.http.post(&format!("/v1/chats/{id}/interrupt"), json!(null)).await;
+    assert!(
+        ready.data["pending"]["text"]
+            .as_str()
+            .unwrap()
+            .starts_with("still working")
+    );
+    d.http
+        .post(&format!("/v1/chats/{id}/interrupt"), json!(null))
+        .await;
     turn(&mut first).await;
     d.stop().await;
 }
@@ -701,7 +828,10 @@ async fn a_client_that_joins_mid_reply_gets_the_partial_text_in_ready() {
 #[tokio::test]
 async fn bad_input_is_refused_with_a_reason() {
     let d = daemon().await;
-    let id = create(&d, json!({})).await["id"].as_str().unwrap().to_owned();
+    let id = create(&d, json!({})).await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let path = format!("/v1/chats/{id}/messages");
     for text in ["", "   "] {
         let r = d.http.post(&path, json!({"text": text})).await;
@@ -709,26 +839,47 @@ async fn bad_input_is_refused_with_a_reason() {
         assert_eq!(r.json()["fields"][0]["path"], "text");
     }
     let long = "x".repeat(8001);
-    assert_eq!(d.http.post(&path, json!({"text": long})).await.status, StatusCode::BAD_REQUEST);
-    assert_eq!(d.http.post(&path, json!({})).await.status, StatusCode::BAD_REQUEST);
-    let nowhere = d.http.post("/v1/chats/chat_nope/messages", json!({"text": "hi"})).await;
+    assert_eq!(
+        d.http.post(&path, json!({"text": long})).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        d.http.post(&path, json!({})).await.status,
+        StatusCode::BAD_REQUEST
+    );
+    let nowhere = d
+        .http
+        .post("/v1/chats/chat_nope/messages", json!({"text": "hi"}))
+        .await;
     assert_eq!(nowhere.status, StatusCode::NOT_FOUND);
-    let bad = d.http.post("/v1/chats", json!({"repo": "not a repo"})).await;
+    let bad = d
+        .http
+        .post("/v1/chats", json!({"repo": "not a repo"}))
+        .await;
     assert_eq!(bad.status, StatusCode::BAD_REQUEST);
     assert_eq!(
         d.http.get("/v1/chats/chat_nope/stream").await.status,
         StatusCode::NOT_FOUND
     );
     // nothing has been sent without the owner's token
-    let no_auth = Http { token: None, ..d.http.clone() };
-    assert_eq!(no_auth.post("/v1/chats", json!({})).await.status, StatusCode::UNAUTHORIZED);
+    let no_auth = Http {
+        token: None,
+        ..d.http.clone()
+    };
+    assert_eq!(
+        no_auth.post("/v1/chats", json!({})).await.status,
+        StatusCode::UNAUTHORIZED
+    );
     d.stop().await;
 }
 
 #[tokio::test]
 async fn history_pages_by_seq() {
     let d = daemon().await;
-    let id = create(&d, json!({})).await["id"].as_str().unwrap().to_owned();
+    let id = create(&d, json!({})).await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
     let mut sse = opened_stream(&d, &id).await;
     for t in ["one", "two"] {
         say(&d, &id, t).await;
@@ -737,11 +888,17 @@ async fn history_pages_by_seq() {
     let all = d.http.get_json(&format!("/v1/chats/{id}")).await;
     let total = all["messages"].as_array().unwrap().len();
     assert!(total >= 4);
-    let page = d.http.get_json(&format!("/v1/chats/{id}?after=1&limit=2")).await;
+    let page = d
+        .http
+        .get_json(&format!("/v1/chats/{id}?after=1&limit=2"))
+        .await;
     assert_eq!(page["messages"].as_array().unwrap().len(), 2);
     assert_eq!(page["messages"][0]["seq"], 2);
     assert_eq!(page["hasMore"], true);
-    let rest = d.http.get_json(&format!("/v1/chats/{id}?after=1&limit=1000")).await;
+    let rest = d
+        .http
+        .get_json(&format!("/v1/chats/{id}?after=1&limit=1000"))
+        .await;
     assert_eq!(rest["hasMore"], false);
     d.stop().await;
 }
@@ -754,7 +911,10 @@ async fn wait_idle(svc: &Arc<ratchetd::chat::ChatService>, id: &str) -> Value {
         if chat["state"] == "idle" && chat["messages"].as_array().unwrap().len() >= 2 {
             return chat;
         }
-        assert!(tokio::time::Instant::now() < end, "the chat never went idle");
+        assert!(
+            tokio::time::Instant::now() < end,
+            "the chat never went idle"
+        );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
@@ -786,7 +946,11 @@ async fn a_new_service_on_the_same_ledger_continues_the_chat_with_resume() {
         .unwrap();
     wait_idle(&first, &chat.id).await;
     first.shutdown().await;
-    assert_eq!(engine.closed(), ["scripted-1"], "shutting down closes the session");
+    assert_eq!(
+        engine.closed(),
+        ["scripted-1"],
+        "shutting down closes the session"
+    );
 
     let second = make();
     let seen = wait_idle(&second, &chat.id).await;

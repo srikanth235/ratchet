@@ -146,7 +146,16 @@ impl Daemon {
         let hub = EventHub::new(cfg.event_window);
         let bridge = hub.bridge(service.subscribe());
         let (shutdown, down) = watch::channel(false);
-        let mcp = cfg.mcp.unwrap_or_default();
+        // the simulation drafts into an in-memory git host, so a chat can create an optimization with nothing configured
+        let mcp = cfg.mcp.unwrap_or_else(|| {
+            if service.engine().kind == crate::api::EngineKind::Sim {
+                Arc::new(crate::mcp::McpHub::with_hosts(Arc::new(
+                    crate::mcp::MockHosts::new(),
+                )))
+            } else {
+                Arc::default()
+            }
+        });
         let chats = match cfg.chats {
             Some(c) => c,
             None => {

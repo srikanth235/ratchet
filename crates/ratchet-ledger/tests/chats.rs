@@ -31,7 +31,10 @@ async fn a_chat_keeps_its_messages_in_order_with_their_own_numbers() {
     assert_eq!(c.cli_session_id, None);
     l.create_chat(chat("c2")).await.unwrap();
 
-    let a = l.append_chat_message("c1", msg("user", "hi")).await.unwrap();
+    let a = l
+        .append_chat_message("c1", msg("user", "hi"))
+        .await
+        .unwrap();
     let b = l
         .append_chat_message(
             "c1",
@@ -101,11 +104,7 @@ async fn cards_are_found_by_their_id_and_replaced_in_place() {
     );
     let again = l.find_chat_card("c", "draft_1").await.unwrap().unwrap();
     assert_eq!(again.card.unwrap()["status"], "created");
-    assert!(
-        !l.set_chat_message_card("c", 99, &json!({}))
-            .await
-            .unwrap()
-    );
+    assert!(!l.set_chat_message_card("c", 99, &json!({})).await.unwrap());
 }
 
 #[tokio::test]
@@ -115,7 +114,12 @@ async fn the_cli_session_is_remembered_and_deleting_a_chat_removes_its_messages(
     l.append_chat_message("c", msg("user", "hi")).await.unwrap();
     l.set_chat_cli_session("c", Some("sess-1")).await.unwrap();
     assert_eq!(
-        l.get_chat("c").await.unwrap().unwrap().cli_session_id.as_deref(),
+        l.get_chat("c")
+            .await
+            .unwrap()
+            .unwrap()
+            .cli_session_id
+            .as_deref(),
         Some("sess-1")
     );
     assert!(l.delete_chat("c").await.unwrap());
@@ -127,9 +131,17 @@ async fn the_cli_session_is_remembered_and_deleting_a_chat_removes_its_messages(
 #[tokio::test]
 async fn a_message_needs_a_chat_and_a_known_role() {
     let l = common::ledger().await;
-    assert!(l.append_chat_message("ghost", msg("user", "x")).await.is_err());
+    assert!(
+        l.append_chat_message("ghost", msg("user", "x"))
+            .await
+            .is_err()
+    );
     l.create_chat(chat("c")).await.unwrap();
-    assert!(l.append_chat_message("c", msg("wizard", "x")).await.is_err());
+    assert!(
+        l.append_chat_message("c", msg("wizard", "x"))
+            .await
+            .is_err()
+    );
     assert!(l.create_chat(chat("c")).await.is_err(), "ids are unique");
 }
 
@@ -142,14 +154,23 @@ async fn the_first_chat_of_a_harness_is_the_oldest_one() {
     other.harness = "codex".into();
     l.create_chat(other).await.unwrap();
     assert_eq!(
-        l.first_chat_of_harness("claude-code").await.unwrap().as_deref(),
+        l.first_chat_of_harness("claude-code")
+            .await
+            .unwrap()
+            .as_deref(),
         Some("a")
     );
-    assert_eq!(l.first_chat_of_harness("codex").await.unwrap().as_deref(), Some("c"));
+    assert_eq!(
+        l.first_chat_of_harness("codex").await.unwrap().as_deref(),
+        Some("c")
+    );
     assert_eq!(l.first_chat_of_harness("grok").await.unwrap(), None);
     l.delete_chat("a").await.unwrap();
     assert_eq!(
-        l.first_chat_of_harness("claude-code").await.unwrap().as_deref(),
+        l.first_chat_of_harness("claude-code")
+            .await
+            .unwrap()
+            .as_deref(),
         Some("b")
     );
 }

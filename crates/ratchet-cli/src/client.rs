@@ -7,7 +7,7 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
 use hyper::{Method, Request, StatusCode};
 use hyper_util::rt::TokioIo;
-use ratchetd::api::{ApiError, ApiEvent, ErrorCode};
+use ratchetd::api::{ApiError, ApiEvent, ChatStreamEvent, ErrorCode};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::net::UnixStream;
@@ -207,6 +207,12 @@ impl Client {
         Self::decode(&b, path)
     }
 
+    /// `DELETE path` that answers `204 No Content`.
+    pub async fn delete_unit(&self, path: &str) -> Result<(), ClientError> {
+        self.send(Method::DELETE, path, None).await?;
+        Ok(())
+    }
+
     /// `POST path` that answers `204 No Content`.
     pub async fn post_unit<B: Serialize>(
         &self,
@@ -220,8 +226,39 @@ impl Client {
 
     /// Open the event stream, resuming after `last_event_id`.
     pub async fn events(&self, last_event_id: Option<u64>) -> Result<EventStream, ClientError> {
+        let (body, sender) = self.open_sse("/v1/events", last_event_id).await?;
+        Ok(EventStream {
+            body,
+            buf: String::new(),
+            _sender: sender,
+        })
+    }
+
+    /// Follow one chat's stream (`GET /v1/chats/{id}/stream`).
+    pub async fn chat_stream(&self, id: &str) -> Result<ChatEventStream, ClientError> {
+        let (body, sender) = self
+            .open_sse(&format!("/v1/chats/{id}/stream"), None)
+            .await?;
+        Ok(ChatEventStream {
+            body,
+            buf: String::new(),
+            _sender: sender,
+        })
+    }
+
+    async fn open_sse(
+        &self,
+        path: &str,
+        last_event_id: Option<u64>,
+    ) -> Result<
+        (
+            Incoming,
+            hyper::client::conn::http1::SendRequest<Full<Bytes>>,
+        ),
+        ClientError,
+    > {
         let mut sender = self.connect().await?;
-        let mut req = self.request(Method::GET, "/v1/events", None)?;
+        let mut req = self.request(Method::GET, path, None)?;
         req.headers_mut().insert(
             "accept",
             "text/event-stream".parse().expect("static header"),
@@ -251,11 +288,7 @@ impl Client {
                 Err(_) => ClientError::Protocol(format!("HTTP {}", parts.status)),
             });
         }
-        Ok(EventStream {
-            body: resp.into_body(),
-            buf: String::new(),
-            _sender: sender,
-        })
+        Ok((resp.into_body(), sender))
     }
 }
 
@@ -298,6 +331,57 @@ impl EventStream {
             }
         }
     }
+}
+
+/// A chat's stream: the same framing, `ChatStreamEvent`s inside.
+pub struct ChatEventStream {
+    body: Incoming,
+    buf: String,
+    _sender: hyper::client::conn::http1::SendRequest<Full<Bytes>>,
+}
+
+impl ChatEventStream {
+    /// The next event; `None` when the daemon closed the stream.
+    pub async fn next(&mut self) -> Option<Result<ChatStreamEvent, ClientError>> {
+        loop {
+            if let Some(i) = self.buf.find("\n\n") {
+                let block: String = self.buf.drain(..i + 2).collect();
+                if let Some(data) = block_data(&block) {
+                    return Some(
+                        serde_json::from_str::<ChatStreamEvent>(&data)
+                            .map_err(|e| ClientError::Protocol(format!("unknown chat event: {e}"))),
+                    );
+                }
+                continue;
+            }
+            match self.body.frame().await? {
+                Ok(f) => {
+                    if let Ok(d) = f.into_data() {
+                        self.buf.push_str(&String::from_utf8_lossy(&d));
+                    }
+                }
+                Err(e) => return Some(Err(ClientError::Protocol(e.to_string()))),
+            }
+        }
+    }
+}
+
+/// The `data:` of one SSE block; `None` for a keep-alive comment.
+fn block_data(block: &str) -> Option<String> {
+    let mut data = String::new();
+    for line in block.lines() {
+        if line.starts_with(':') {
+            continue;
+        }
+        let (k, v) = line.split_once(':').unwrap_or((line, ""));
+        if k == "data" {
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(v.strip_prefix(' ').unwrap_or(v));
+        }
+    }
+    (!data.is_empty()).then_some(data)
 }
 
 fn parse_block(block: &str) -> Option<Result<ServerEvent, ClientError>> {

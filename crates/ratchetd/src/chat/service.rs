@@ -196,7 +196,7 @@ impl ChatService {
         service: Option<Arc<dyn AppService>>,
         opts: ChatOptions,
     ) -> Arc<Self> {
-        let svc = Arc::new_cyclic(|me: &Weak<ChatService>| {
+        Arc::new_cyclic(|me: &Weak<ChatService>| {
             engine.attach_tools(Arc::new(DaemonTools(me.clone())));
             Self {
                 shared: Arc::new(Shared {
@@ -214,8 +214,7 @@ impl ChatService {
                 tools: Mutex::new(None),
                 watcher: Mutex::new(None),
             }
-        });
-        svc
+        })
     }
 
     /// Connect the service to the running daemon: tool calls of scripted harnesses go through its router state, and agent
@@ -247,13 +246,20 @@ impl ChatService {
     // ---- create, read, delete ------------------------------------------------------------------------------------
 
     pub async fn create_chat(self: &Arc<Self>, input: CreateChatInput) -> ServiceResult<ChatVm> {
-        let mut repo = match input.repo.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
-            Some(r) => Some(ratchet_github::slug_of(r).ok_or_else(|| {
-                ServiceError::InvalidFields {
-                    message: format!("{r} is not a GitHub repository (owner/name)"),
-                    fields: vec![FieldError::new("repo", "use owner/name")],
-                }
-            })?),
+        let mut repo = match input
+            .repo
+            .as_deref()
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+        {
+            Some(r) => {
+                Some(
+                    ratchet_github::slug_of(r).ok_or_else(|| ServiceError::InvalidFields {
+                        message: format!("{r} is not a GitHub repository (owner/name)"),
+                        fields: vec![FieldError::new("repo", "use owner/name")],
+                    })?,
+                )
+            }
             None => None,
         };
         let optimization = input
@@ -333,11 +339,7 @@ impl ChatService {
         self.view(&chat, None, 0, false).await
     }
 
-    pub async fn get_chat(
-        self: &Arc<Self>,
-        id: &str,
-        query: &ChatQuery,
-    ) -> ServiceResult<ChatVm> {
+    pub async fn get_chat(self: &Arc<Self>, id: &str, query: &ChatQuery) -> ServiceResult<ChatVm> {
         let chat = self.chat(id).await?;
         let limit = query.limit.unwrap_or(200).clamp(1, 1000);
         self.view(&chat, Some(limit), query.after.unwrap_or(0).max(0), true)
@@ -916,7 +918,10 @@ impl Chat {
             prompt: String::new(),
             model: self.model.clone(),
             access: ratchet_core::ports::Access::ReadOnly,
-            system_append: Some(role_prompt(self.repo.as_deref(), self.optimization.as_deref())),
+            system_append: Some(role_prompt(
+                self.repo.as_deref(),
+                self.optimization.as_deref(),
+            )),
             resume: self.lock().cli_session.clone(),
             ..SessionSpec::default()
         };
@@ -1151,7 +1156,13 @@ impl Chat {
                 let mut s = self.lock();
                 if s.failure.is_none() {
                     s.failure = Some(Failure::Failed(
-                        ev.text.as_deref().unwrap_or("").lines().next().unwrap_or("").to_owned(),
+                        ev.text
+                            .as_deref()
+                            .unwrap_or("")
+                            .lines()
+                            .next()
+                            .unwrap_or("")
+                            .to_owned(),
                     ));
                 }
             }
@@ -1161,7 +1172,11 @@ impl Chat {
 
     /// A finished reply: stored once, named with its harness and model.
     async fn reply(self: &Arc<Self>, text: &str) {
-        let model = self.lock().model_seen.clone().or_else(|| self.model.clone());
+        let model = self
+            .lock()
+            .model_seen
+            .clone()
+            .or_else(|| self.model.clone());
         let row = self
             .append(NewChatMessage {
                 role: "assistant".into(),
@@ -1367,7 +1382,10 @@ impl Chat {
                 .await;
             }
             ("create_optimization", Err(e)) => {
-                let draft = arguments["draft_id"].as_str().unwrap_or_default().to_owned();
+                let draft = arguments["draft_id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
                 let message = e.to_string();
                 self.update_draft(&draft, |c| {
                     c.status = ChatCardStatus::Failed;
@@ -1397,10 +1415,7 @@ impl Chat {
                         note: note_id,
                         optimization: optimization.to_owned(),
                     });
-                    self.publish(ChatStreamEvent::Note {
-                        seq: row.seq,
-                        card,
-                    });
+                    self.publish(ChatStreamEvent::Note { seq: row.seq, card });
                 }
             }
             _ => {}
@@ -1505,9 +1520,9 @@ fn message_vm(row: &ChatMessageRow) -> ChatMessageVm {
         harness: row.harness.as_deref().and_then(HarnessKind::from_id),
         model: row.model.clone(),
         card: match role {
-            ChatRole::Card | ChatRole::Note => payload
-                .clone()
-                .and_then(|c| serde_json::from_value(c).ok()),
+            ChatRole::Card | ChatRole::Note => {
+                payload.clone().and_then(|c| serde_json::from_value(c).ok())
+            }
             _ => None,
         },
         tool: match role {

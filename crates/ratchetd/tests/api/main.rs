@@ -9,6 +9,7 @@ mod electron_api;
 mod mcp;
 mod openapi;
 mod overview;
+mod real_chat;
 mod real_service;
 mod sim;
 mod sse;

@@ -105,7 +105,8 @@ impl ScriptedChatEngine {
         let root = opts.root.clone().unwrap_or_else(|| {
             std::env::temp_dir().join(format!("ratchet-sim-chats-{}", std::process::id()))
         });
-        Arc::new_cyclic(|me| Self {
+        Arc::new_cyclic(|me| {
+            Self {
             me: me.clone(),
             opts,
             caller: OnceLock::new(),
@@ -126,6 +127,7 @@ impl ScriptedChatEngine {
             closed: Mutex::new(Vec::new()),
             next: AtomicU64::new(1),
             root,
+        }
         })
     }
 
@@ -274,7 +276,9 @@ impl ScriptedSession {
         while let Some(w) = words.next() {
             chunk.push_str(w);
             if chunk.len() >= 12 || words.peek().is_none() {
-                self.emit(AgentEvent::new(now_ms(), AgentEventType::Delta).with_text(chunk.clone()));
+                self.emit(
+                    AgentEvent::new(now_ms(), AgentEventType::Delta).with_text(chunk.clone()),
+                );
                 chunk.clear();
                 if self.engine.opts.chunk_delay.is_zero() {
                     tokio::task::yield_now().await;
@@ -317,9 +321,8 @@ impl ScriptedSession {
             _ => Err("this session has no Ratchet tools".to_owned()),
         };
         self.emit(
-            AgentEvent::new(now_ms(), AgentEventType::Tool).with_data(
-                json!({"phase": "result", "id": id, "isError": result.is_err()}),
-            ),
+            AgentEvent::new(now_ms(), AgentEventType::Tool)
+                .with_data(json!({"phase": "result", "id": id, "isError": result.is_err()})),
         );
         result
     }
@@ -356,11 +359,12 @@ impl ScriptedSession {
             ));
         }
         if lower.contains("[simulate:slow]") {
-            let reply = "Working on it, reading the repository and thinking about what to measure. ".repeat(40);
+            let reply =
+                "Working on it, reading the repository and thinking about what to measure. "
+                    .repeat(40);
             for _ in 0..1500 {
                 self.emit(
-                    AgentEvent::new(now_ms(), AgentEventType::Delta)
-                        .with_text("still working, "),
+                    AgentEvent::new(now_ms(), AgentEventType::Delta).with_text("still working, "),
                 );
                 self.nap(Duration::from_millis(20)).await;
                 if self.stopped() {
@@ -382,7 +386,11 @@ impl ScriptedSession {
         if let Some(opt) = &scope.optimization {
             let note = text.trim().to_owned();
             match self
-                .tool(1, "add_steering_note", json!({"optimization": opt, "text": note}))
+                .tool(
+                    1,
+                    "add_steering_note",
+                    json!({"optimization": opt, "text": note}),
+                )
                 .await
             {
                 Ok(_) => {
@@ -400,9 +408,14 @@ impl ScriptedSession {
         }
 
         // create
-        let wants_create = ["create it", "go ahead", "create the optimization", "looks good"]
-            .iter()
-            .any(|k| lower.contains(k))
+        let wants_create = [
+            "create it",
+            "go ahead",
+            "create the optimization",
+            "looks good",
+        ]
+        .iter()
+        .any(|k| lower.contains(k))
             || lower.trim_start().starts_with("yes");
         if wants_create && let Some(draft) = mem.draft_id.clone() {
             match self
@@ -516,7 +529,9 @@ impl LiveSession for ScriptedSession {
             self.emit(
                 AgentEvent::new(now_ms(), AgentEventType::Status)
                     .with_text("scripted session started")
-                    .with_data(json!({"sessionId": self.id, "model": self.model, "liveSession": true})),
+                    .with_data(
+                        json!({"sessionId": self.id, "model": self.model, "liveSession": true}),
+                    ),
             );
         }
         self.script(text).await
