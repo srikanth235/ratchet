@@ -34,6 +34,8 @@ public final class AppStore {
     public private(set) var sectionErrors: [LoadSection: String] = [:]
     /// Whether the live connection to the daemon is up. Not part of the cache.
     public private(set) var streamState: StreamState = .connecting
+    /// Whether the daemon is keeping this Mac awake for a run on it (the menu bar says so). Not part of the cache.
+    public private(set) var power = PowerState()
     public var range: TimeRange = .days90
     /// True when the data is the sample or the simulation (demo mode): the sidebar says so, quietly.
     public private(set) var isDemoData: Bool
@@ -201,6 +203,7 @@ public final class AppStore {
         write(result)
         if let agentID = result.logAppended { insight.agentLogChanged(agentID) }
         if let state = result.streamState { streamState = state }
+        if let power = result.power, power != self.power { self.power = power }
         if result.resync { requestResync() }
         if let onNotification {
             for request in result.notifications { onNotification(request) }

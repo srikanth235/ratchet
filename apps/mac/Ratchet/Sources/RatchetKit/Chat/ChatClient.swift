@@ -11,7 +11,8 @@ public protocol ChatClient: Sendable {
     /// Says something. Returns at once; the reply arrives on the stream. Throws `RatchetClientError.invalid` while replying.
     func send(chatID: String, text: String) async throws -> ChatReceipt
     /// The chat's live stream. The first event is `.ready`. `lastEventID` continues a stream that dropped: events after it are
-    /// replayed, or `.ready` says `resync` when they are gone. A failed turn arrives as `.failed` followed by `.done`.
+    /// replayed, or `.ready` says `resync` when they are gone. Pass the `lastEventID` the chat was fetched with (0 for a new chat): a
+    /// connection is made after this returns, so a nil position sees only what is written from then on. A failed turn arrives as `.failed` followed by `.done`.
     func stream(chatID: String, lastEventID: Int64?) async -> AsyncThrowingStream<ChatFrame, any Error>
     /// Stops the reply being written. What was written stays.
     func interrupt(chatID: String) async throws

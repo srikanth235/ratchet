@@ -24,11 +24,27 @@ public struct ComposerOptions: Equatable, Sendable {
     public var repos: [String]
     public var cloudAccounts: [String]
     public var catalog: HarnessCatalog
+    /// The Agents page's choices: the harness chats start on, and the order optimizations try harnesses in.
+    public var chatDefault: Harness?
+    public var preferredOrder: [Harness]
 
-    public init(repos: [String] = [], cloudAccounts: [String] = [], catalog: HarnessCatalog = .empty) {
+    public init(
+        repos: [String] = [], cloudAccounts: [String] = [], catalog: HarnessCatalog = .empty, chatDefault: Harness? = nil,
+        preferredOrder: [Harness] = []
+    ) {
         self.repos = repos
         self.cloudAccounts = cloudAccounts
         self.catalog = catalog
+        self.chatDefault = chatDefault
+        self.preferredOrder = preferredOrder
+    }
+
+    /// The agents a new optimization starts with: the preferred order while those are ready, then the other ready ones.
+    var startingOrder: [Harness] {
+        let ready = catalog.ready
+        var order = preferredOrder.filter { ready.contains($0) }
+        for harness in ready where !order.contains(harness) { order.append(harness) }
+        return order
     }
 }
 
@@ -54,8 +70,9 @@ public final class ComposerModel {
     public init(store: ChatStore, options: ComposerOptions = ComposerOptions()) {
         self.store = store
         self.options = options
-        let ready = options.catalog.ready
-        self.agents = AgentOrderEditor(order: ready.isEmpty ? [.claudeCode] : ready, placement: .local, available: ready.isEmpty ? Harness.allCases : ready)
+        let order = options.startingOrder
+        self.agents = AgentOrderEditor(
+            order: order.isEmpty ? [.claudeCode] : order, placement: .local, available: order.isEmpty ? Harness.allCases : options.catalog.ready)
     }
 
     /// Refreshes what the chips offer (the catalog changed after a sign-in) and keeps the person's choices that still exist.
@@ -131,7 +148,8 @@ public final class ComposerModel {
         guard canSend else { return nil }
         isSending = true
         defer { isSending = false }
-        let harness = agents.order.first
+        // Chats start on the person's default harness while it is ready, else on the first agent of the list.
+        let harness = options.chatDefault.flatMap { options.catalog.isReady($0) ? $0 : nil } ?? agents.order.first
         let choice = harness.map { options.catalog.choice(for: $0) }
         guard let id = await store.start(NewChat(repo: repo, harness: harness, model: choice?.model?.id)) else {
             failure = store.startError

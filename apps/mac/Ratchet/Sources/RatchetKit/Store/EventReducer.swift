@@ -50,6 +50,7 @@ public struct EventReduction: Sendable {
     /// The stream lost its place: reload what is shown.
     public var resync = false
     public var streamState: StreamState?
+    public var power: PowerState?
 
     public init(state: LiveState) {
         self.state = state
@@ -125,6 +126,8 @@ public enum EventReducer {
             result.resync = true
         case .streamStateChanged(let streamState):
             result.streamState = streamState
+        case .powerChanged(let power):
+            result.power = power
         }
         if isLoaded { result.notifications = notifications(for: event, from: state, to: result.state, enabled: enabled) }
         return result

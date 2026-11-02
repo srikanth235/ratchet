@@ -144,6 +144,8 @@ public enum RatchetEvent: Sendable, Equatable {
     case resync
     /// The live connection came up, dropped or is being retried.
     case streamStateChanged(StreamState)
+    /// The daemon took or released the prevent-sleep assertion: a run's agents are (or are no longer) running on this Mac.
+    case powerChanged(PowerState)
 }
 
 public enum RatchetClientError: Error, Sendable, Equatable, LocalizedError {

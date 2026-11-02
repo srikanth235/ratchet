@@ -186,6 +186,9 @@ extension DaemonRatchetClient {
         var auth: String
         var defaultModel: String?
         var models: [ModelPayload]?
+        var billing: String?
+        var hint: String?
+        var path: String?
 
         struct ModelPayload: Decodable {
             var id: String
@@ -207,7 +210,9 @@ extension DaemonRatchetClient {
                 let models = (found.models ?? []).map { HarnessModel(id: $0.id, title: $0.label, harness: harness) }
                 return DetectedHarness(
                     harness: harness, installed: found.installed, version: found.version, auth: auth,
-                    models: models, defaultModel: found.defaultModel)
+                    models: models, defaultModel: found.defaultModel,
+                    billing: found.billing == "subscription" ? .subscription : found.billing == "api-key" ? .apiKey : nil,
+                    hint: found.hint, path: found.path)
             }
         }
     }

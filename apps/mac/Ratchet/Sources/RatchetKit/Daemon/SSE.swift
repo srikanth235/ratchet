@@ -124,7 +124,7 @@ enum DaemonEvent: Sendable, Equatable {
     case ratchet(optimizationID: String, from: Double, to: Double)
     case spend(optimizationID: String, totalUSD: Double)
     case notice(optimizationID: String, level: String, text: String)
-    case runActive(active: Bool, optimizationIDs: [String])
+    case runActive(active: Bool, optimizationIDs: [String], keepingAwake: Bool = false)
     case sandbox(sandboxID: String, phase: String, text: String)
     case environmentDraft(draftID: String, status: String)
     case connector(connectorID: String)
@@ -148,6 +148,7 @@ enum DaemonEvent: Sendable, Equatable {
         var text: String?
         var active: Bool?
         var optimizationIds: [String]?
+        var keepingAwake: Bool?
         var sandboxId: String?
         var phase: String?
         var draftId: String?
@@ -186,7 +187,8 @@ enum DaemonEvent: Sendable, Equatable {
             guard let id = payload.optimizationId else { return .unknown(type: type) }
             return .notice(optimizationID: id, level: payload.level ?? "info", text: payload.text ?? "")
         case "run-active":
-            return .runActive(active: payload.active ?? false, optimizationIDs: payload.optimizationIds ?? [])
+            return .runActive(
+                active: payload.active ?? false, optimizationIDs: payload.optimizationIds ?? [], keepingAwake: payload.keepingAwake ?? false)
         case "sandbox":
             guard let id = payload.sandboxId else { return .unknown(type: type) }
             return .sandbox(sandboxID: id, phase: payload.phase ?? "", text: payload.text ?? "")
