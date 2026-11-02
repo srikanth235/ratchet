@@ -1,0 +1,27 @@
+name: Regenerate Swift API (temporary)
+# Temporary: regenerates apps/mac/Ratchet/Sources/RatchetAPI on macOS and commits it back. Removed once the client is current.
+on:
+  push:
+    branches: [claude/harness-f2]
+    paths: [".github/regen-api.trigger"]
+permissions:
+  contents: write
+jobs:
+  regen:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - name: Generate
+        working-directory: apps/mac/Ratchet
+        run: tools/generate-api.sh
+      - name: Commit
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add apps/mac/Ratchet/Sources/RatchetAPI
+          git diff --cached --stat | tail -5
+          git commit -m "mac: regenerate Sources/RatchetAPI from api/openapi.yaml (CI)" || echo "nothing to commit"
+          git push origin HEAD:${{ github.ref_name }}
