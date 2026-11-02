@@ -855,12 +855,18 @@ extension Components {
             }
             /// - Remark: Generated from `#/components/schemas/ApiEvent/case8`.
             case case8(Components.Schemas.ApiEvent.Case8Payload)
-            /// True while any run is active (the app turns it into "prevent system sleep").
+            /// True while a run whose agents run on this Mac is live: the daemon holds its prevent-sleep assertion exactly then
+            /// (`keepingAwake`), and the menu bar shows "Keeping your Mac awake". A run in the cloud does not count; the Mac may
+            /// sleep under it. `optimizationIds` are the local runs.
             ///
             /// - Remark: Generated from `#/components/schemas/ApiEvent/case9`.
             public struct Case9Payload: Codable, Hashable, Sendable {
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case9/active`.
                 public var active: Swift.Bool
+                /// The daemon is holding the power assertion (always `active` on a Mac; never on hosts without the assertion).
+                ///
+                /// - Remark: Generated from `#/components/schemas/ApiEvent/case9/keepingAwake`.
+                public var keepingAwake: Swift.Bool?
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case9/optimizationIds`.
                 public var optimizationIds: [Swift.String]
                 /// - Remark: Generated from `#/components/schemas/ApiEvent/case9/type`.
@@ -873,24 +879,30 @@ extension Components {
                 ///
                 /// - Parameters:
                 ///   - active:
+                ///   - keepingAwake: The daemon is holding the power assertion (always `active` on a Mac; never on hosts without the assertion).
                 ///   - optimizationIds:
                 ///   - _type:
                 public init(
                     active: Swift.Bool,
+                    keepingAwake: Swift.Bool? = nil,
                     optimizationIds: [Swift.String],
                     _type: Components.Schemas.ApiEvent.Case9Payload._TypePayload
                 ) {
                     self.active = active
+                    self.keepingAwake = keepingAwake
                     self.optimizationIds = optimizationIds
                     self._type = _type
                 }
                 public enum CodingKeys: String, CodingKey {
                     case active
+                    case keepingAwake
                     case optimizationIds
                     case _type = "type"
                 }
             }
-            /// True while any run is active (the app turns it into "prevent system sleep").
+            /// True while a run whose agents run on this Mac is live: the daemon holds its prevent-sleep assertion exactly then
+            /// (`keepingAwake`), and the menu bar shows "Keeping your Mac awake". A run in the cloud does not count; the Mac may
+            /// sleep under it. `optimizationIds` are the local runs.
             ///
             /// - Remark: Generated from `#/components/schemas/ApiEvent/case9`.
             case case9(Components.Schemas.ApiEvent.Case9Payload)
@@ -2342,6 +2354,11 @@ extension Components {
         ///
         /// - Remark: Generated from `#/components/schemas/EngineInfo`.
         public struct EngineInfo: Codable, Hashable, Sendable {
+            /// The daemon is holding the prevent-sleep assertion because a run's agents are running on this Mac (the menu bar
+            /// shows "Keeping your Mac awake"). Never true for a run in the cloud.
+            ///
+            /// - Remark: Generated from `#/components/schemas/EngineInfo/keepingAwake`.
+            public var keepingAwake: Swift.Bool?
             /// - Remark: Generated from `#/components/schemas/EngineInfo/kind`.
             public var kind: Components.Schemas.EngineKind
             /// - Remark: Generated from `#/components/schemas/EngineInfo/mode`.
@@ -2349,16 +2366,20 @@ extension Components {
             /// Creates a new `EngineInfo`.
             ///
             /// - Parameters:
+            ///   - keepingAwake: The daemon is holding the prevent-sleep assertion because a run's agents are running on this Mac (the menu bar
             ///   - kind:
             ///   - mode:
             public init(
+                keepingAwake: Swift.Bool? = nil,
                 kind: Components.Schemas.EngineKind,
                 mode: Components.Schemas.Mode
             ) {
+                self.keepingAwake = keepingAwake
                 self.kind = kind
                 self.mode = mode
             }
             public enum CodingKeys: String, CodingKey {
+                case keepingAwake
                 case kind
                 case mode
             }
@@ -3739,12 +3760,167 @@ extension Components {
                 case range
             }
         }
+        /// One point of the spend line and the value staircase: cumulative real dollars and the yearly value counted by then.
+        ///
+        /// - Remark: Generated from `#/components/schemas/OverviewChartPoint`.
+        public struct OverviewChartPoint: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OverviewChartPoint/at`.
+            public var at: Swift.Int64
+            /// Yearly value of merged wins up to `at`.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewChartPoint/deliveredUsdPerYear`.
+            public var deliveredUsdPerYear: Swift.Double
+            /// Yearly value of wins in open pull requests up to `at` (the dashed step).
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewChartPoint/pendingUsdPerYear`.
+            public var pendingUsdPerYear: Swift.Double
+            /// Yearly value of wins with no pull request yet up to `at`.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewChartPoint/readyUsdPerYear`.
+            public var readyUsdPerYear: Swift.Double
+            /// Real dollars spent from the start of the window up to `at`.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewChartPoint/spentUsd`.
+            public var spentUsd: Swift.Double
+            /// Creates a new `OverviewChartPoint`.
+            ///
+            /// - Parameters:
+            ///   - at:
+            ///   - deliveredUsdPerYear: Yearly value of merged wins up to `at`.
+            ///   - pendingUsdPerYear: Yearly value of wins in open pull requests up to `at` (the dashed step).
+            ///   - readyUsdPerYear: Yearly value of wins with no pull request yet up to `at`.
+            ///   - spentUsd: Real dollars spent from the start of the window up to `at`.
+            public init(
+                at: Swift.Int64,
+                deliveredUsdPerYear: Swift.Double,
+                pendingUsdPerYear: Swift.Double,
+                readyUsdPerYear: Swift.Double,
+                spentUsd: Swift.Double
+            ) {
+                self.at = at
+                self.deliveredUsdPerYear = deliveredUsdPerYear
+                self.pendingUsdPerYear = pendingUsdPerYear
+                self.readyUsdPerYear = readyUsdPerYear
+                self.spentUsd = spentUsd
+            }
+            public enum CodingKeys: String, CodingKey {
+                case at
+                case deliveredUsdPerYear
+                case pendingUsdPerYear
+                case readyUsdPerYear
+                case spentUsd
+            }
+        }
         /// `lower` = a smaller metric is better.
         ///
         /// - Remark: Generated from `#/components/schemas/OverviewDirection`.
         @frozen public enum OverviewDirection: String, Codable, Hashable, Sendable, CaseIterable {
             case lower = "lower"
             case higher = "higher"
+        }
+        /// The calm empty state: a title and one sentence. Present only when `phase` is not `wins`.
+        ///
+        /// - Remark: Generated from `#/components/schemas/OverviewEmptyState`.
+        public struct OverviewEmptyState: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OverviewEmptyState/body`.
+            public var body: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OverviewEmptyState/title`.
+            public var title: Swift.String
+            /// Creates a new `OverviewEmptyState`.
+            ///
+            /// - Parameters:
+            ///   - body:
+            ///   - title:
+            public init(
+                body: Swift.String,
+                title: Swift.String
+            ) {
+                self.body = body
+                self.title = title
+            }
+            public enum CodingKeys: String, CodingKey {
+                case body
+                case title
+            }
+        }
+        /// "Next 30 days": what the schedules will start and what that will cost, from what each scheduled optimization's last run cost.
+        ///
+        /// - Remark: Generated from `#/components/schemas/OverviewForecast`.
+        public struct OverviewForecast: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OverviewForecast/days`.
+            public var days: Swift.Int64
+            /// - Remark: Generated from `#/components/schemas/OverviewForecast/expectedAgentsApiUsd`.
+            public var expectedAgentsApiUsd: Swift.Double
+            /// - Remark: Generated from `#/components/schemas/OverviewForecast/expectedAwsUsd`.
+            public var expectedAwsUsd: Swift.Double
+            /// Tokens the plan will cover ("included in your plan").
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewForecast/expectedIncludedTokens`.
+            public var expectedIncludedTokens: Swift.Int64
+            /// Expected real dollars: `expectedAwsUsd` + `expectedAgentsApiUsd`.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewForecast/expectedUsd`.
+            public var expectedUsd: Swift.Double
+            /// The ceiling: the budgets of the optimizations that run (`spent.budgetUsd`). Spend stops at it.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewForecast/hardCapUsd`.
+            public var hardCapUsd: Swift.Double?
+            /// "62 runs · ~$140 · cap $500".
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewForecast/line`.
+            public var line: Swift.String
+            /// Runs the schedules start in the window.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewForecast/scheduledRuns`.
+            public var scheduledRuns: Swift.Int64
+            /// Scheduled optimizations whose runs cannot be counted ahead ("on every push").
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewForecast/unforecast`.
+            public var unforecast: Swift.Int64
+            /// Creates a new `OverviewForecast`.
+            ///
+            /// - Parameters:
+            ///   - days:
+            ///   - expectedAgentsApiUsd:
+            ///   - expectedAwsUsd:
+            ///   - expectedIncludedTokens: Tokens the plan will cover ("included in your plan").
+            ///   - expectedUsd: Expected real dollars: `expectedAwsUsd` + `expectedAgentsApiUsd`.
+            ///   - hardCapUsd: The ceiling: the budgets of the optimizations that run (`spent.budgetUsd`). Spend stops at it.
+            ///   - line: "62 runs · ~$140 · cap $500".
+            ///   - scheduledRuns: Runs the schedules start in the window.
+            ///   - unforecast: Scheduled optimizations whose runs cannot be counted ahead ("on every push").
+            public init(
+                days: Swift.Int64,
+                expectedAgentsApiUsd: Swift.Double,
+                expectedAwsUsd: Swift.Double,
+                expectedIncludedTokens: Swift.Int64,
+                expectedUsd: Swift.Double,
+                hardCapUsd: Swift.Double? = nil,
+                line: Swift.String,
+                scheduledRuns: Swift.Int64,
+                unforecast: Swift.Int64
+            ) {
+                self.days = days
+                self.expectedAgentsApiUsd = expectedAgentsApiUsd
+                self.expectedAwsUsd = expectedAwsUsd
+                self.expectedIncludedTokens = expectedIncludedTokens
+                self.expectedUsd = expectedUsd
+                self.hardCapUsd = hardCapUsd
+                self.line = line
+                self.scheduledRuns = scheduledRuns
+                self.unforecast = unforecast
+            }
+            public enum CodingKeys: String, CodingKey {
+                case days
+                case expectedAgentsApiUsd
+                case expectedAwsUsd
+                case expectedIncludedTokens
+                case expectedUsd
+                case hardCapUsd
+                case line
+                case scheduledRuns
+                case unforecast
+            }
         }
         /// - Remark: Generated from `#/components/schemas/OverviewNeed`.
         public struct OverviewNeed: Codable, Hashable, Sendable {
@@ -3799,6 +3975,38 @@ extension Components {
         @frozen public enum OverviewNeedKind: String, Codable, Hashable, Sendable, CaseIterable {
             case ship = "ship"
             case failed = "failed"
+            case connector = "connector"
+        }
+        /// What the screen should say when there is nothing to show.
+        ///
+        /// - Remark: Generated from `#/components/schemas/OverviewPhase`.
+        @frozen public enum OverviewPhase: String, Codable, Hashable, Sendable, CaseIterable {
+            case empty = "empty"
+            case noWins = "no-wins"
+            case wins = "wins"
+        }
+        /// - Remark: Generated from `#/components/schemas/OverviewPullRequest`.
+        public struct OverviewPullRequest: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/OverviewPullRequest/merged`.
+            public var merged: Swift.Bool
+            /// - Remark: Generated from `#/components/schemas/OverviewPullRequest/url`.
+            public var url: Swift.String
+            /// Creates a new `OverviewPullRequest`.
+            ///
+            /// - Parameters:
+            ///   - merged:
+            ///   - url:
+            public init(
+                merged: Swift.Bool,
+                url: Swift.String
+            ) {
+                self.merged = merged
+                self.url = url
+            }
+            public enum CodingKeys: String, CodingKey {
+                case merged
+                case url
+            }
         }
         /// Window the Overview covers. `all` = everything in the ledger.
         ///
@@ -3855,12 +4063,23 @@ extension Components {
             public var metric: Swift.String
             /// - Remark: Generated from `#/components/schemas/OverviewRow/name`.
             public var name: Swift.String
+            /// True while the value only counts once a pull request merges (`value_state` is `pending` or `ready`): the row shows
+            /// its return dimmed with "pending".
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/pending`.
+            public var pending: Swift.Bool
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/pullRequest`.
+            public var pullRequest: Components.Schemas.OverviewPullRequest?
             /// Seconds left of the time limit while running, else `null`.
             ///
             /// - Remark: Generated from `#/components/schemas/OverviewRow/remainingS`.
             public var remainingS: Swift.Int64?
             /// - Remark: Generated from `#/components/schemas/OverviewRow/repo`.
             public var repo: Swift.String
+            /// Yearly value per $1 spent on this optimization in the range; `null` without value or spend.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/return`.
+            public var _return: Swift.Double?
             /// Spend in the range (lifetime when the range is `all`).
             ///
             /// - Remark: Generated from `#/components/schemas/OverviewRow/spentUsd`.
@@ -3869,7 +4088,7 @@ extension Components {
             ///
             /// - Remark: Generated from `#/components/schemas/OverviewRow/status`.
             public var status: Components.Schemas.UiStatus
-            /// The status word shown next to the dot ("Running", "Waiting on you", "No win").
+            /// The status word shown next to the dot ("Running", "Ready to ship", "No win").
             ///
             /// - Remark: Generated from `#/components/schemas/OverviewRow/statusLabel`.
             public var statusLabel: Swift.String
@@ -3877,6 +4096,12 @@ extension Components {
             public var tone: Components.Schemas.StatusTone
             /// - Remark: Generated from `#/components/schemas/OverviewRow/unit`.
             public var unit: Swift.String
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/valueModel`.
+            public var valueModel: Components.Schemas.ValueModelVm?
+            /// Delivered (merged), pending (open pull request), ready (no pull request yet) or none.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewRow/valueState`.
+            public var valueState: Components.Schemas.OverviewValueState
             /// Value of the wins in the range, USD per year; `null` without a value model.
             ///
             /// - Remark: Generated from `#/components/schemas/OverviewRow/valueUsdPerYear`.
@@ -3895,13 +4120,18 @@ extension Components {
             ///   - live:
             ///   - metric:
             ///   - name:
+            ///   - pending: True while the value only counts once a pull request merges (`value_state` is `pending` or `ready`): the row shows
+            ///   - pullRequest:
             ///   - remainingS: Seconds left of the time limit while running, else `null`.
             ///   - repo:
+            ///   - _return: Yearly value per $1 spent on this optimization in the range; `null` without value or spend.
             ///   - spentUsd: Spend in the range (lifetime when the range is `all`).
             ///   - status: Ledger status as the pills use it (`pr-open` once a pull request exists).
-            ///   - statusLabel: The status word shown next to the dot ("Running", "Waiting on you", "No win").
+            ///   - statusLabel: The status word shown next to the dot ("Running", "Ready to ship", "No win").
             ///   - tone:
             ///   - unit:
+            ///   - valueModel:
+            ///   - valueState: Delivered (merged), pending (open pull request), ready (no pull request yet) or none.
             ///   - valueUsdPerYear: Value of the wins in the range, USD per year; `null` without a value model.
             ///   - verifiedWins:
             public init(
@@ -3914,13 +4144,18 @@ extension Components {
                 live: Swift.Bool,
                 metric: Swift.String,
                 name: Swift.String,
+                pending: Swift.Bool,
+                pullRequest: Components.Schemas.OverviewPullRequest? = nil,
                 remainingS: Swift.Int64? = nil,
                 repo: Swift.String,
+                _return: Swift.Double? = nil,
                 spentUsd: Swift.Double,
                 status: Components.Schemas.UiStatus,
                 statusLabel: Swift.String,
                 tone: Components.Schemas.StatusTone,
                 unit: Swift.String,
+                valueModel: Components.Schemas.ValueModelVm? = nil,
+                valueState: Components.Schemas.OverviewValueState,
                 valueUsdPerYear: Swift.Double? = nil,
                 verifiedWins: Swift.Int64
             ) {
@@ -3933,13 +4168,18 @@ extension Components {
                 self.live = live
                 self.metric = metric
                 self.name = name
+                self.pending = pending
+                self.pullRequest = pullRequest
                 self.remainingS = remainingS
                 self.repo = repo
+                self._return = _return
                 self.spentUsd = spentUsd
                 self.status = status
                 self.statusLabel = statusLabel
                 self.tone = tone
                 self.unit = unit
+                self.valueModel = valueModel
+                self.valueState = valueState
                 self.valueUsdPerYear = valueUsdPerYear
                 self.verifiedWins = verifiedWins
             }
@@ -3953,44 +4193,83 @@ extension Components {
                 case live
                 case metric
                 case name
+                case pending
+                case pullRequest
                 case remainingS
                 case repo
+                case _return = "return"
                 case spentUsd
                 case status
                 case statusLabel
                 case tone
                 case unit
+                case valueModel
+                case valueState
                 case valueUsdPerYear
                 case verifiedWins
             }
         }
         /// - Remark: Generated from `#/components/schemas/OverviewSpent`.
         public struct OverviewSpent: Codable, Hashable, Sendable {
+            /// Model tokens billed per token through a key.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewSpent/agentsApiUsd`.
+            public var agentsApiUsd: Swift.Double
+            /// Environments, runners and storage on AWS.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewSpent/awsUsd`.
+            public var awsUsd: Swift.Double
             /// Budget of the optimizations listed in `rows`.
             ///
             /// - Remark: Generated from `#/components/schemas/OverviewSpent/budgetUsd`.
             public var budgetUsd: Swift.Double
+            /// "AWS $121 · agents $63", or "AWS $121 · agents included in your plan (2.4M tokens)".
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewSpent/detail`.
+            public var detail: Swift.String
+            /// Tokens used on the user's own plan ("included in your plan"): counted, never in `usd`.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewSpent/includedTokens`.
+            public var includedTokens: Swift.Int64
             /// - Remark: Generated from `#/components/schemas/OverviewSpent/optimizations`.
             public var optimizations: Swift.Int64
+            /// Real dollars in the range: `awsUsd` + `agentsApiUsd`. Agents on the user's own plan cost nothing extra and are not in it.
+            ///
             /// - Remark: Generated from `#/components/schemas/OverviewSpent/usd`.
             public var usd: Swift.Double
             /// Creates a new `OverviewSpent`.
             ///
             /// - Parameters:
+            ///   - agentsApiUsd: Model tokens billed per token through a key.
+            ///   - awsUsd: Environments, runners and storage on AWS.
             ///   - budgetUsd: Budget of the optimizations listed in `rows`.
+            ///   - detail: "AWS $121 · agents $63", or "AWS $121 · agents included in your plan (2.4M tokens)".
+            ///   - includedTokens: Tokens used on the user's own plan ("included in your plan"): counted, never in `usd`.
             ///   - optimizations:
-            ///   - usd:
+            ///   - usd: Real dollars in the range: `awsUsd` + `agentsApiUsd`. Agents on the user's own plan cost nothing extra and are not in it.
             public init(
+                agentsApiUsd: Swift.Double,
+                awsUsd: Swift.Double,
                 budgetUsd: Swift.Double,
+                detail: Swift.String,
+                includedTokens: Swift.Int64,
                 optimizations: Swift.Int64,
                 usd: Swift.Double
             ) {
+                self.agentsApiUsd = agentsApiUsd
+                self.awsUsd = awsUsd
                 self.budgetUsd = budgetUsd
+                self.detail = detail
+                self.includedTokens = includedTokens
                 self.optimizations = optimizations
                 self.usd = usd
             }
             public enum CodingKeys: String, CodingKey {
+                case agentsApiUsd
+                case awsUsd
                 case budgetUsd
+                case detail
+                case includedTokens
                 case optimizations
                 case usd
             }
@@ -4024,18 +4303,39 @@ extension Components {
                 case wins
             }
         }
+        /// Whether the value of an optimization's wins counts as delivered yet. Only a merged pull request delivers it.
+        ///
+        /// - Remark: Generated from `#/components/schemas/OverviewValueState`.
+        @frozen public enum OverviewValueState: String, Codable, Hashable, Sendable, CaseIterable {
+            case delivered = "delivered"
+            case pending = "pending"
+            case ready = "ready"
+            case none = "none"
+        }
         /// - Remark: Generated from `#/components/schemas/OverviewVm`.
         public struct OverviewVm: Codable, Hashable, Sendable {
+            /// Points of the "Value delivered vs spend" chart, oldest first, from the start of the window to now.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewVm/chart`.
+            public var chart: [Components.Schemas.OverviewChartPoint]
             /// The ledger has no optimization at all (the Overview shows one calm empty state).
             ///
             /// - Remark: Generated from `#/components/schemas/OverviewVm/empty`.
             public var empty: Swift.Bool
+            /// - Remark: Generated from `#/components/schemas/OverviewVm/emptyState`.
+            public var emptyState: Components.Schemas.OverviewEmptyState?
+            /// - Remark: Generated from `#/components/schemas/OverviewVm/forecast`.
+            public var forecast: Components.Schemas.OverviewForecast
             /// The window, epoch ms. `from` is the first activity for `all`.
             ///
             /// - Remark: Generated from `#/components/schemas/OverviewVm/from`.
             public var from: Swift.Int64
             /// - Remark: Generated from `#/components/schemas/OverviewVm/needsYou`.
             public var needsYou: [Components.Schemas.OverviewNeed]
+            /// `empty` (no optimization), `no-wins` (some, none proven yet) or `wins`.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewVm/phase`.
+            public var phase: Components.Schemas.OverviewPhase
             /// - Remark: Generated from `#/components/schemas/OverviewVm/range`.
             public var range: Components.Schemas.OverviewRange
             /// - Remark: Generated from `#/components/schemas/OverviewVm/returnOnSpend`.
@@ -4046,6 +4346,10 @@ extension Components {
             public var rows: [Components.Schemas.OverviewRow]
             /// - Remark: Generated from `#/components/schemas/OverviewVm/spent`.
             public var spent: Components.Schemas.OverviewSpent
+            /// The value story, the same object `GET /v1/home` returns.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewVm/story`.
+            public var story: Components.Schemas.ValueStory
             /// - Remark: Generated from `#/components/schemas/OverviewVm/to`.
             public var to: Swift.Int64
             /// - Remark: Generated from `#/components/schemas/OverviewVm/value`.
@@ -4057,47 +4361,67 @@ extension Components {
             /// Creates a new `OverviewVm`.
             ///
             /// - Parameters:
+            ///   - chart: Points of the "Value delivered vs spend" chart, oldest first, from the start of the window to now.
             ///   - empty: The ledger has no optimization at all (the Overview shows one calm empty state).
+            ///   - emptyState:
+            ///   - forecast:
             ///   - from: The window, epoch ms. `from` is the first activity for `all`.
             ///   - needsYou:
+            ///   - phase: `empty` (no optimization), `no-wins` (some, none proven yet) or `wins`.
             ///   - range:
             ///   - returnOnSpend:
             ///   - rows: Optimizations with activity in the range (drafts created in it included), newest first.
             ///   - spent:
+            ///   - story: The value story, the same object `GET /v1/home` returns.
             ///   - to:
             ///   - value:
             ///   - wins: Staircase of cumulative value, oldest first; empty without a value model or wins in the range.
             public init(
+                chart: [Components.Schemas.OverviewChartPoint],
                 empty: Swift.Bool,
+                emptyState: Components.Schemas.OverviewEmptyState? = nil,
+                forecast: Components.Schemas.OverviewForecast,
                 from: Swift.Int64,
                 needsYou: [Components.Schemas.OverviewNeed],
+                phase: Components.Schemas.OverviewPhase,
                 range: Components.Schemas.OverviewRange,
                 returnOnSpend: Components.Schemas.OverviewReturn? = nil,
                 rows: [Components.Schemas.OverviewRow],
                 spent: Components.Schemas.OverviewSpent,
+                story: Components.Schemas.ValueStory,
                 to: Swift.Int64,
                 value: Components.Schemas.OverviewValue? = nil,
                 wins: [Components.Schemas.OverviewWin]
             ) {
+                self.chart = chart
                 self.empty = empty
+                self.emptyState = emptyState
+                self.forecast = forecast
                 self.from = from
                 self.needsYou = needsYou
+                self.phase = phase
                 self.range = range
                 self.returnOnSpend = returnOnSpend
                 self.rows = rows
                 self.spent = spent
+                self.story = story
                 self.to = to
                 self.value = value
                 self.wins = wins
             }
             public enum CodingKeys: String, CodingKey {
+                case chart
                 case empty
+                case emptyState
+                case forecast
                 case from
                 case needsYou
+                case phase
                 case range
                 case returnOnSpend
                 case rows
                 case spent
+                case story
                 case to
                 case value
                 case wins
@@ -4119,6 +4443,10 @@ extension Components {
             public var optimization: Swift.String
             /// - Remark: Generated from `#/components/schemas/OverviewWin/optimizationId`.
             public var optimizationId: Swift.String
+            /// Where the win stands: merged (delivered), in an open pull request (pending) or not shipped yet.
+            ///
+            /// - Remark: Generated from `#/components/schemas/OverviewWin/state`.
+            public var state: Components.Schemas.OverviewValueState
             /// What this win added, USD per year.
             ///
             /// - Remark: Generated from `#/components/schemas/OverviewWin/usdPerYear`.
@@ -4130,18 +4458,21 @@ extension Components {
             ///   - cumulativeUsdPerYear: Cumulative value locked in after this win, USD per year.
             ///   - optimization:
             ///   - optimizationId:
+            ///   - state: Where the win stands: merged (delivered), in an open pull request (pending) or not shipped yet.
             ///   - usdPerYear: What this win added, USD per year.
             public init(
                 at: Swift.Int64,
                 cumulativeUsdPerYear: Swift.Double,
                 optimization: Swift.String,
                 optimizationId: Swift.String,
+                state: Components.Schemas.OverviewValueState,
                 usdPerYear: Swift.Double
             ) {
                 self.at = at
                 self.cumulativeUsdPerYear = cumulativeUsdPerYear
                 self.optimization = optimization
                 self.optimizationId = optimizationId
+                self.state = state
                 self.usdPerYear = usdPerYear
             }
             public enum CodingKeys: String, CodingKey {
@@ -4149,7 +4480,41 @@ extension Components {
                 case cumulativeUsdPerYear
                 case optimization
                 case optimizationId
+                case state
                 case usdPerYear
+            }
+        }
+        /// Wins whose pull request is open.
+        ///
+        /// - Remark: Generated from `#/components/schemas/PendingAmount`.
+        public struct PendingAmount: Codable, Hashable, Sendable {
+            /// Open pull requests these wins are in ("$2.9k pending in 1 PR").
+            ///
+            /// - Remark: Generated from `#/components/schemas/PendingAmount/pullRequests`.
+            public var pullRequests: Swift.Int64
+            /// - Remark: Generated from `#/components/schemas/PendingAmount/usdPerYear`.
+            public var usdPerYear: Swift.Double
+            /// - Remark: Generated from `#/components/schemas/PendingAmount/wins`.
+            public var wins: Swift.Int64
+            /// Creates a new `PendingAmount`.
+            ///
+            /// - Parameters:
+            ///   - pullRequests: Open pull requests these wins are in ("$2.9k pending in 1 PR").
+            ///   - usdPerYear:
+            ///   - wins:
+            public init(
+                pullRequests: Swift.Int64,
+                usdPerYear: Swift.Double,
+                wins: Swift.Int64
+            ) {
+                self.pullRequests = pullRequests
+                self.usdPerYear = usdPerYear
+                self.wins = wins
+            }
+            public enum CodingKeys: String, CodingKey {
+                case pullRequests
+                case usdPerYear
+                case wins
             }
         }
         /// - Remark: Generated from `#/components/schemas/PipelineCandidate`.
@@ -4818,7 +5183,7 @@ extension Components {
                 case connectorId
             }
         }
-        /// Dot colour of a status word: brass (running), amber (waiting on you), mint (done), grey (nothing), rose (failed).
+        /// Dot colour of a status word: brass (running), amber (a person has something to do: ready to ship), mint (done), grey (nothing), rose (failed).
         ///
         /// - Remark: Generated from `#/components/schemas/StatusTone`.
         @frozen public enum StatusTone: String, Codable, Hashable, Sendable, CaseIterable {
@@ -5162,6 +5527,31 @@ extension Components {
                 case region
             }
         }
+        /// Wins counted in dollars per year.
+        ///
+        /// - Remark: Generated from `#/components/schemas/ValueAmount`.
+        public struct ValueAmount: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ValueAmount/usdPerYear`.
+            public var usdPerYear: Swift.Double
+            /// - Remark: Generated from `#/components/schemas/ValueAmount/wins`.
+            public var wins: Swift.Int64
+            /// Creates a new `ValueAmount`.
+            ///
+            /// - Parameters:
+            ///   - usdPerYear:
+            ///   - wins:
+            public init(
+                usdPerYear: Swift.Double,
+                wins: Swift.Int64
+            ) {
+                self.usdPerYear = usdPerYear
+                self.wins = wins
+            }
+            public enum CodingKeys: String, CodingKey {
+                case usdPerYear
+                case wins
+            }
+        }
         /// `estimated` until the value has been measured in production.
         ///
         /// - Remark: Generated from `#/components/schemas/ValueBasis`.
@@ -5169,12 +5559,168 @@ extension Components {
             case estimated = "estimated"
             case measured = "measured"
         }
+        /// `GET /v1/optimizations/{id}/value`.
+        ///
+        /// - Remark: Generated from `#/components/schemas/ValueModelVm`.
+        public struct ValueModelVm: Codable, Hashable, Sendable {
+            /// - Remark: Generated from `#/components/schemas/ValueModelVm/basis`.
+            public var basis: Components.Schemas.ValueBasis?
+            /// Which way the metric improves.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ValueModelVm/direction`.
+            public var direction: Components.Schemas.Direction
+            /// The metric the model prices, as the optimization measures it.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ValueModelVm/metric`.
+            public var metric: Swift.String
+            /// The model in plain words, e.g. "ms saved x checkout volume".
+            ///
+            /// - Remark: Generated from `#/components/schemas/ValueModelVm/note`.
+            public var note: Swift.String?
+            /// - Remark: Generated from `#/components/schemas/ValueModelVm/period`.
+            public var period: Components.Schemas.ValuePeriod?
+            /// False until a model is set: the optimization's wins then have no dollar value ("Set a value").
+            ///
+            /// - Remark: Generated from `#/components/schemas/ValueModelVm/set`.
+            public var set: Swift.Bool
+            /// One line for the row: "$1,200 per ms a year · estimated · ms saved x checkout volume", or "Not set".
+            ///
+            /// - Remark: Generated from `#/components/schemas/ValueModelVm/summary`.
+            public var summary: Swift.String
+            /// What one unit is called ("ms", "k/s").
+            ///
+            /// - Remark: Generated from `#/components/schemas/ValueModelVm/unit`.
+            public var unit: Swift.String?
+            /// Dollars per one unit of improvement per `period`; `null` while `set` is false.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ValueModelVm/usdPerUnit`.
+            public var usdPerUnit: Swift.Double?
+            /// Creates a new `ValueModelVm`.
+            ///
+            /// - Parameters:
+            ///   - basis:
+            ///   - direction: Which way the metric improves.
+            ///   - metric: The metric the model prices, as the optimization measures it.
+            ///   - note: The model in plain words, e.g. "ms saved x checkout volume".
+            ///   - period:
+            ///   - set: False until a model is set: the optimization's wins then have no dollar value ("Set a value").
+            ///   - summary: One line for the row: "$1,200 per ms a year · estimated · ms saved x checkout volume", or "Not set".
+            ///   - unit: What one unit is called ("ms", "k/s").
+            ///   - usdPerUnit: Dollars per one unit of improvement per `period`; `null` while `set` is false.
+            public init(
+                basis: Components.Schemas.ValueBasis? = nil,
+                direction: Components.Schemas.Direction,
+                metric: Swift.String,
+                note: Swift.String? = nil,
+                period: Components.Schemas.ValuePeriod? = nil,
+                set: Swift.Bool,
+                summary: Swift.String,
+                unit: Swift.String? = nil,
+                usdPerUnit: Swift.Double? = nil
+            ) {
+                self.basis = basis
+                self.direction = direction
+                self.metric = metric
+                self.note = note
+                self.period = period
+                self.set = set
+                self.summary = summary
+                self.unit = unit
+                self.usdPerUnit = usdPerUnit
+            }
+            public enum CodingKeys: String, CodingKey {
+                case basis
+                case direction
+                case metric
+                case note
+                case period
+                case set
+                case summary
+                case unit
+                case usdPerUnit
+            }
+        }
         /// The period a value-model amount is quoted for.
         ///
         /// - Remark: Generated from `#/components/schemas/ValuePeriod`.
         @frozen public enum ValuePeriod: String, Codable, Hashable, Sendable, CaseIterable {
             case month = "month"
             case year = "year"
+        }
+        /// The one value story Home and Overview both tell: what was spent, what is delivered, what is pending, what it returned.
+        ///
+        /// `delivered` counts only wins in merged pull requests; `pending` those in open ones; `readyToShip` verified wins with no pull
+        /// request yet. `return` is `delivered` divided by `spentUsd` (real dollars only), `paybackDays` how long the spend takes to earn
+        /// back at that rate. Both are `null` until something is delivered and something was spent.
+        ///
+        /// - Remark: Generated from `#/components/schemas/ValueStory`.
+        public struct ValueStory: Codable, Hashable, Sendable {
+            /// `measured` only when every counted win has a measured value model.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ValueStory/basis`.
+            public var basis: Components.Schemas.ValueBasis
+            /// - Remark: Generated from `#/components/schemas/ValueStory/delivered`.
+            public var delivered: Components.Schemas.ValueAmount
+            /// The sentence both screens show: "$12.5k delivered + $2.9k pending · 68×". Empty without a value model.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ValueStory/line`.
+            public var line: Swift.String
+            /// Days until the spend is earned back at the delivered rate.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ValueStory/paybackDays`.
+            public var paybackDays: Swift.Double?
+            /// - Remark: Generated from `#/components/schemas/ValueStory/pending`.
+            public var pending: Components.Schemas.PendingAmount
+            /// - Remark: Generated from `#/components/schemas/ValueStory/readyToShip`.
+            public var readyToShip: Components.Schemas.ValueAmount
+            /// Yearly value delivered per $1 spent ("68×"); `null` without delivered value or spend.
+            ///
+            /// - Remark: Generated from `#/components/schemas/ValueStory/return`.
+            public var _return: Swift.Double?
+            /// Real dollars in the range (the same number as `spent.usd`).
+            ///
+            /// - Remark: Generated from `#/components/schemas/ValueStory/spentUsd`.
+            public var spentUsd: Swift.Double
+            /// Creates a new `ValueStory`.
+            ///
+            /// - Parameters:
+            ///   - basis: `measured` only when every counted win has a measured value model.
+            ///   - delivered:
+            ///   - line: The sentence both screens show: "$12.5k delivered + $2.9k pending · 68×". Empty without a value model.
+            ///   - paybackDays: Days until the spend is earned back at the delivered rate.
+            ///   - pending:
+            ///   - readyToShip:
+            ///   - _return: Yearly value delivered per $1 spent ("68×"); `null` without delivered value or spend.
+            ///   - spentUsd: Real dollars in the range (the same number as `spent.usd`).
+            public init(
+                basis: Components.Schemas.ValueBasis,
+                delivered: Components.Schemas.ValueAmount,
+                line: Swift.String,
+                paybackDays: Swift.Double? = nil,
+                pending: Components.Schemas.PendingAmount,
+                readyToShip: Components.Schemas.ValueAmount,
+                _return: Swift.Double? = nil,
+                spentUsd: Swift.Double
+            ) {
+                self.basis = basis
+                self.delivered = delivered
+                self.line = line
+                self.paybackDays = paybackDays
+                self.pending = pending
+                self.readyToShip = readyToShip
+                self._return = _return
+                self.spentUsd = spentUsd
+            }
+            public enum CodingKeys: String, CodingKey {
+                case basis
+                case delivered
+                case line
+                case paybackDays
+                case pending
+                case readyToShip
+                case _return = "return"
+                case spentUsd
+            }
         }
         /// - Remark: Generated from `#/components/schemas/ValueSummary`.
         public struct ValueSummary: Codable, Hashable, Sendable {

@@ -34,7 +34,7 @@ public enum DaemonVersionCheck: Equatable, Sendable {
 extension DaemonRatchetClient {
     /// The version `GET /v1/status` reports (the crate version of the running `ratchetd`).
     public func daemonVersion() async throws -> String {
-        let data = try await jsonCall(.get, "/v1/status", operationID: "getStatus")
+        let data = try await wire.jsonCall(.get, "/v1/status", operationID: "getStatus")
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let version = object["version"] as? String
         else { throw RatchetClientError.unavailable("ratchetd answered with something the app cannot read.") }

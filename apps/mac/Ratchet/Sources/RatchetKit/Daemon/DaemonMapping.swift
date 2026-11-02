@@ -154,10 +154,16 @@ enum DaemonMapping {
     }
 
     static func needsYou(_ item: VM.OverviewNeed) -> NeedsYouItem {
-        // `ship`: verified wins waiting for a pull request; `failed`: the run failed.
-        NeedsYouItem(
-            id: item.id, kind: item.kind == .ship ? .mergeWins : .runFailed, title: item.title, detail: item.sub,
-            actionTitle: item.action, optimizationID: item.optimizationId)
+        // `ship`: verified wins waiting for a pull request; `failed`: the run failed; `connector`: a sign-in that expired.
+        let kind: NeedsYouKind
+        switch item.kind {
+        case .ship: kind = .mergeWins
+        case .failed: kind = .runFailed
+        case .connector: kind = .signIn
+        }
+        return NeedsYouItem(
+            id: item.id, kind: kind, title: item.title, detail: item.sub, actionTitle: item.action,
+            optimizationID: item.optimizationId)
     }
 
     /// The staircase starts at nothing: the value locked in over a range is the sum of the wins inside it.

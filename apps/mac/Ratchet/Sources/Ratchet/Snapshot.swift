@@ -442,7 +442,7 @@ struct SnapshotPower {
 enum MenuBarCapture {
     static func show(store: AppStore, router: AppRouter) -> NSWindow {
         let host = NSHostingView(rootView: MenuBarView().environment(store).environment(router))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 240), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: Layout.popoverWidth, height: 240), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         // Closing must not free it a second time.
         window.isReleasedWhenClosed = false
         window.title = "Menu bar"

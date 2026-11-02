@@ -115,7 +115,7 @@ struct DaemonClientTests {
         let daemon = daemonWithData()
         let overview = try await make(daemon).overview(range: .days90)
         #expect(overview.budgetUSD == 280)
-        #expect(overview.needsYou.count == 2)
+        #expect(overview.needsYou.count == 3)
         #expect(daemon.requests.first { $0.key == "GET /v1/overview" } != nil)
     }
 
@@ -194,7 +194,7 @@ struct DaemonClientTests {
         #expect(store.lastError == nil)
         #expect(store.isLoaded)
         #expect(store.optimizationStore.optimizations.count == 4)
-        #expect(store.needsYouCount == 2)
+        #expect(store.needsYouCount == 3)
         #expect(store.connectorStore.connectors.count == 7)
         #expect(store.sandboxStore.sandbox.isOn)
         #expect(store.benchmarks.count == 3)
@@ -402,7 +402,7 @@ struct DaemonClientTests {
             if case .optimizationUpdated = event { updates += 1 }
             if updates == 2 { break }
         }
-        #expect(events.contains { if case .needsYouChanged(let items) = $0 { items.count == 2 } else { false } })
+        #expect(events.contains { if case .needsYouChanged(let items) = $0 { items.count == 3 } else { false } })
         #expect(events.contains { if case .agentUpdated(let id, _) = $0 { id == "opt_demo_search" } else { false } })
         let connections = daemon.requests.filter { $0.key == "GET /v1/events" }
         #expect(connections.count >= 2)

@@ -110,10 +110,11 @@ struct DaemonMappingTests {
         #expect(overview.series.first?.valuePerYearUSD == 0)
         #expect(overview.series.last?.valuePerYearUSD == vm.wins.last?.cumulativeUsdPerYear)
         #expect(overview.series.last?.valuePerYearUSD == vm.value?.usdPerYear)
-        #expect(overview.needsYou.map(\.kind) == [.mergeWins, .mergeWins])
+        #expect(overview.needsYou.map(\.kind) == [.mergeWins, .mergeWins, .signIn])
         #expect(overview.needsYou[0].optimizationID == "opt_demo_ingest")
         #expect(overview.needsYou[0].title == "Open a pull request for 2 verified wins")
         #expect(overview.needsYou[0].actionTitle == "Review")
+        #expect(overview.needsYou[2].optimizationID.isEmpty && overview.needsYou[2].actionTitle == "Sign In")
         #expect(overview.returnMultiple != nil)
     }
 
