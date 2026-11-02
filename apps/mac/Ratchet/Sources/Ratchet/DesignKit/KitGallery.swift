@@ -36,8 +36,10 @@ final class KitGalleryState {
 struct KitGallery: View {
     static let enabled = ProcessInfo.processInfo.environment["APP_KIT_GALLERY"] == "1"
 
-    /// One cell per state: 160 pt, with the label column (128) in front, inside a 24 pt page margin.
-    private static let cell: CGFloat = Space.section * 5
+    /// One cell per state: 136 pt, with a 112 pt label column in front and 12 pt gaps, inside a 24 pt page margin. That is
+    /// 1000 pt, so the gallery fits the smallest window (1080) without clipping.
+    private static let cell: CGFloat = Space.section * 4 + Space.sm
+    private static let labelColumn: CGFloat = Space.xxl * 4 + Space.lg
 
     private struct DemoItem: Identifiable, Hashable {
         let id: String
@@ -89,7 +91,7 @@ struct KitGallery: View {
 
     private var actions: some View {
         stateGrid {
-            stateRow("Primary") { _ in Button("Create and Run") {}.buttonStyle(.kit(.primary)) }
+            stateRow("Primary") { _ in Button("Create") {}.buttonStyle(.kit(.primary)) }
             stateRow("Primary, small") { _ in Button("Approve") {}.buttonStyle(.kit(.primary, small: true)) }
             stateRow("Quiet") { _ in Button("Add…") {}.buttonStyle(.kit(.quiet)) }
             stateRow("Quiet, small") { _ in Button("Edit") {}.buttonStyle(.kit(.quiet, small: true)) }
@@ -105,7 +107,7 @@ struct KitGallery: View {
         stateGrid {
             stateRow("Choice, radio") { _ in
                 ChoiceCard(mark: .radio, isSelected: false, action: {}) {
-                    Text("Claude Code").kitType(.bodyStrong).foregroundStyle(Ink.text)
+                    Text("Claude").kitType(.bodyStrong).foregroundStyle(Ink.text)
                     Text("2 logins").kitType(.meta).foregroundStyle(Ink.textFaint)
                 }
             }
@@ -122,14 +124,14 @@ struct KitGallery: View {
                 Toggle("Notify", isOn: $toggleOn).toggleStyle(.kit).frame(width: Self.cell - Space.lg)
             }
             stateRow("Segmented", note: "state on the 2nd segment") { _ in
-                KitSegmented(items: [DemoItem(id: "Yours"), DemoItem(id: "Discover")], selection: $segment,
+                KitSegmented(items: [DemoItem(id: "Yours"), DemoItem(id: "All")], selection: $segment,
                              title: { $0.id })
             }
             stateRow("Range switch") { _ in
                 KitSwitch(items: [DemoItem(id: "7d"), DemoItem(id: "30d")], selection: range, title: { $0.id },
                           onSelect: { range = $0 })
             }
-            stateRow("Popover chip") { _ in KitChip(title: "Claude Code (2)") {} }
+            stateRow("Popover chip") { _ in KitChip(title: "Claude (2)") {} }
         }
     }
 
@@ -140,7 +142,7 @@ struct KitGallery: View {
                 stateRow("Table row") { _ in
                     Button {} label: {
                         HStack {
-                            Text("Checkout p95").kitType(.bodyStrong).foregroundStyle(Ink.text)
+                            Text("Checkout").kitType(.bodyStrong).foregroundStyle(Ink.text)
                             Spacer(minLength: 0)
                         }
                         .padding(.vertical, Dim.rowPadding)
@@ -268,7 +270,7 @@ struct KitGallery: View {
             ("scrim", Ink.scrim), ("markGlass", Ink.markGlass), ("markHi", Ink.markHi), ("markMid", Ink.markMid),
             ("markLo", Ink.markLo),
         ]
-        return LazyVGrid(columns: Array(repeating: GridItem(.fixed(Space.section * 4), alignment: .leading), count: 8),
+        return LazyVGrid(columns: Array(repeating: GridItem(.fixed(Space.section * 5), alignment: .leading), count: 6),
                          alignment: .leading, spacing: Space.lg) {
             ForEach(list, id: \.0) { item in
                 VStack(alignment: .leading, spacing: Space.xs) {
@@ -320,9 +322,9 @@ struct KitGallery: View {
 
     /// The header row (state names) and the rows given by `rows`.
     private func stateGrid<Rows: View>(@ViewBuilder _ rows: () -> Rows) -> some View {
-        Grid(alignment: .topLeading, horizontalSpacing: Space.lg, verticalSpacing: Space.lg) {
+        Grid(alignment: .topLeading, horizontalSpacing: Space.md, verticalSpacing: Space.lg) {
             GridRow {
-                Color.clear.frame(width: Layout.labelColumnCompact, height: 1)
+                Color.clear.frame(width: Self.labelColumn, height: 1)
                 ForEach(PartState.allCases) { part in
                     caption(part.rawValue).frame(width: Self.cell, alignment: .leading)
                 }
@@ -341,7 +343,7 @@ struct KitGallery: View {
                 Text(name).kitType(.meta).foregroundStyle(Ink.textMuted)
                 if let note { Text(note).kitType(.micro).foregroundStyle(Ink.textFaint) }
             }
-            .frame(width: Layout.labelColumnCompact, alignment: .leading)
+            .frame(width: Self.labelColumn, alignment: .leading)
             ForEach(PartState.allCases) { shown in
                 if states.contains(shown) {
                     part(shown)
