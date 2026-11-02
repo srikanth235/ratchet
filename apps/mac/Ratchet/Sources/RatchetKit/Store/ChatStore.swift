@@ -93,7 +93,8 @@ public final class ChatStore {
     public func follow(_ id: String) async {
         var pace = Duration.milliseconds(500)
         while !Task.isCancelled, let known = conversations[id] {
-            let position: Int64? = known.chat.lastEventID > 0 ? known.chat.lastEventID : nil
+            // Always resume from what the conversation holds, even from nothing: events sent before this connected are replayed.
+            let position: Int64? = known.chat.lastEventID
             let frames = await client.stream(chatID: id, lastEventID: position)
             do {
                 for try await frame in frames {
