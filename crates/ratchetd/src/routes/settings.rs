@@ -74,7 +74,7 @@ fn secret(name: &str) -> ApiResult<SecretName> {
     path = "/v1/settings/secrets/{name}",
     tag = "settings",
     operation_id = "setSecret",
-    params(("name" = SecretName, Path, description = "anthropicApiKey, openaiApiKey or githubToken")),
+    params(("name" = SecretName, Path, description = "anthropicApiKey, openaiApiKey, xaiApiKey or githubToken")),
     request_body = SetSecretInput,
     responses((status = 200, body = SettingsVm))
 )]
@@ -94,7 +94,7 @@ async fn set_secret(
     path = "/v1/settings/secrets/{name}",
     tag = "settings",
     operation_id = "clearSecret",
-    params(("name" = SecretName, Path, description = "anthropicApiKey, openaiApiKey or githubToken")),
+    params(("name" = SecretName, Path, description = "anthropicApiKey, openaiApiKey, xaiApiKey or githubToken")),
     responses((status = 200, body = SettingsVm))
 )]
 async fn clear_secret(

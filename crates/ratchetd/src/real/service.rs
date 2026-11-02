@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use ratchet_agents::detect::{HarnessAuth as DetectAuth, HarnessInfo, HarnessKind as DetectKind};
+use ratchet_agents::models::{ModelCatalog, ModelUse};
 use ratchet_connectors::{
     AwsProfile, AwsProfileLister as ConnectorProfiles, ConnectorAgent, ConnectorDeps,
     ConnectorError, ConnectorKind, ConnectorProbe, ConnectorStore, GITHUB_ENV_ID, GithubStored,
@@ -147,6 +148,8 @@ pub struct RealServiceOptions {
     /// Open a URL in the system browser (the device-flow verification page).
     pub open_external: Option<OpenExternal>,
     pub harnesses: Arc<HarnessCache>,
+    /// A model catalog file that replaces the bundled one (missing or broken: the bundled one is used).
+    pub models_file: Option<PathBuf>,
     /// The AWS profiles on this machine; default: parse `~/.aws`.
     pub aws_profiles: Option<AwsProfileLister>,
     /// Where the connectors' metadata lives; default `connectors.json` next to the settings file (memory only without one).
@@ -181,6 +184,7 @@ impl RealServiceOptions {
             github: None,
             open_external: None,
             harnesses: Arc::new(HarnessCache::default()),
+            models_file: None,
             aws_profiles: None,
             connectors_file: None,
             connection_probe: None,
@@ -219,6 +223,7 @@ impl LiveSettingsSource for SettingsSource {
             "githubToken" => ConnectorSecret::GithubToken,
             "anthropicApiKey" => ConnectorSecret::AnthropicApiKey,
             "openaiApiKey" => ConnectorSecret::OpenaiApiKey,
+            "xaiApiKey" => ConnectorSecret::XaiApiKey,
             _ => return None,
         };
         self.connectors.secret_value(name)
@@ -261,6 +266,7 @@ struct Inner {
     phases: Mutex<HashMap<String, Phase>>,
     live_defaults: LivePaths,
     harnesses: Arc<HarnessCache>,
+    models: ModelCatalog,
     aws_profiles: AwsProfileLister,
     probe: Option<Arc<dyn ConnectionProbe>>,
     idle_minutes: u32,
@@ -421,6 +427,13 @@ impl RealService {
             phases: Mutex::default(),
             live_defaults: opts.live_defaults.clone(),
             harnesses: opts.harnesses.clone(),
+            models: {
+                let (catalog, problem) = ModelCatalog::load(opts.models_file.as_deref());
+                if let Some(p) = problem {
+                    tracing::warn!("{p}");
+                }
+                catalog
+            },
             aws_profiles,
             probe: opts.connection_probe.clone(),
             idle_minutes: opts.idle_minutes,
@@ -538,6 +551,7 @@ impl Inner {
         SecretsPresent {
             anthropic_api_key: self.connectors.has_secret(ConnectorSecret::AnthropicApiKey),
             openai_api_key: self.connectors.has_secret(ConnectorSecret::OpenaiApiKey),
+            xai_api_key: self.connectors.has_secret(ConnectorSecret::XaiApiKey),
             github_token: self.connectors.has_secret(ConnectorSecret::GithubToken),
         }
     }
@@ -822,7 +836,10 @@ impl Inner {
         } else {
             self.harnesses.get().await
         };
-        d.harnesses.iter().map(harness_vm).collect()
+        d.harnesses
+            .iter()
+            .map(|h| harness_vm(h, &self.models))
+            .collect()
     }
 
     async fn test_connection(&self, target: ConnectionTarget) -> ConnectionResultVm {
@@ -862,6 +879,12 @@ impl Inner {
                             None => need("Store an OpenAI API key first."),
                         }
                     }
+                    ConnectionTarget::Xai => {
+                        match self.connectors.secret_value(ConnectorSecret::XaiApiKey) {
+                            Some(k) => p.xai(&k).await,
+                            None => need("Store an xAI API key first."),
+                        }
+                    }
                     ConnectionTarget::Github => unreachable!("handled above"),
                 },
             },
@@ -870,6 +893,7 @@ impl Inner {
         for name in [
             ConnectorSecret::AnthropicApiKey,
             ConnectorSecret::OpenaiApiKey,
+            ConnectorSecret::XaiApiKey,
             ConnectorSecret::GithubToken,
         ] {
             if let Some(v) = self.connectors.secret_value(name)
@@ -1019,7 +1043,7 @@ impl Inner {
                     AgentKind::Codex => {
                         self.settings.env_secret(SecretName::OpenaiApiKey).is_some()
                     }
-                    _ => std::env::var("XAI_API_KEY").is_ok_and(|k| !k.is_empty()),
+                    _ => self.settings.env_secret(SecretName::XaiApiKey).is_some(),
                 };
                 let has_key = chosen.cloud_keys.contains_key(&agent) || in_env;
                 items.push(if has_key {
@@ -1038,8 +1062,50 @@ impl Inner {
     }
 }
 
-fn harness_vm(h: &HarnessInfo) -> HarnessVm {
+/// The agent a model-key secret belongs to.
+fn agent_of_secret(name: SecretName) -> ConnectorAgent {
+    match name {
+        SecretName::AnthropicApiKey => ConnectorAgent::ClaudeCode,
+        SecretName::OpenaiApiKey => ConnectorAgent::Codex,
+        SecretName::XaiApiKey => ConnectorAgent::Grok,
+        SecretName::GithubToken => unreachable!("GitHub tokens are not agent keys"),
+    }
+}
+
+fn harness_vm(h: &HarnessInfo, catalog: &ModelCatalog) -> HarnessVm {
+    let models: Vec<ModelVm> = catalog
+        .for_harness(h.kind)
+        .into_iter()
+        .map(|m| ModelVm {
+            id: m.id.clone(),
+            label: m.label.clone(),
+            aliases: m.aliases.clone(),
+            default_for: m
+                .default_for
+                .iter()
+                .map(|u| match u {
+                    ModelUse::Chat => ModelUseVm::Chat,
+                    ModelUse::Optimization => ModelUseVm::Optimization,
+                })
+                .collect(),
+            price: m.price.map(|p| TokenPriceVm {
+                input_per_m: p.input_per_m,
+                cached_input_per_m: p.cached_input_per_m,
+                output_per_m: p.output_per_m,
+            }),
+            context_window: m.context_window,
+        })
+        .collect();
     HarnessVm {
+        default_model: catalog
+            .default_for(h.kind, ModelUse::Optimization)
+            .map(|m| m.id.clone()),
+        billing: match h.auth {
+            DetectAuth::SignedIn => Some(HarnessBilling::Subscription),
+            DetectAuth::ApiKey => Some(HarnessBilling::ApiKey),
+            DetectAuth::SignedOut => None,
+        },
+        models,
         kind: match h.kind {
             DetectKind::ClaudeCode => HarnessKind::ClaudeCode,
             DetectKind::Codex => HarnessKind::Codex,
@@ -1435,11 +1501,7 @@ impl AppService for RealService {
             *lock(&self.0.env_login) = None;
         } else {
             // The single key of the first Settings: replaces the agent's stored key connector (or adds one).
-            let agent = if name == SecretName::AnthropicApiKey {
-                ConnectorAgent::ClaudeCode
-            } else {
-                ConnectorAgent::Codex
-            };
+            let agent = agent_of_secret(name);
             self.0.remove_keys_of(agent)?;
             self.0
                 .connectors
@@ -1468,11 +1530,7 @@ impl AppService for RealService {
                 self.0.connectors.remove(&rec.id)?;
             }
         } else {
-            let agent = if name == SecretName::AnthropicApiKey {
-                ConnectorAgent::ClaudeCode
-            } else {
-                ConnectorAgent::Codex
-            };
+            let agent = agent_of_secret(name);
             self.0.remove_keys_of(agent)?;
         }
         self.0.product.invalidate();

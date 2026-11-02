@@ -11,7 +11,9 @@ use crate::classify::{FailureKind, FailureOnce, classify_text};
 use crate::claude_code::PromptVia;
 use crate::cli_agent::{CliAgent, CliAgentOptions, as_record, num, str_of, truncate};
 use crate::codex_app_server::CodexLiveSession;
+use crate::detect::HarnessKind;
 use crate::harness::{Scratch, TurnRunner, open_with_fallback};
+use crate::models::{ModelCatalog, ModelUse, TokenPrice, resolve_model};
 use crate::process::LineSplitter;
 use ratchet_core::enums::AgentKind;
 use ratchet_core::ports::{
@@ -26,6 +28,23 @@ pub struct CodexPricing {
     pub input_per_m: f64,
     pub cached_input_per_m: Option<f64>,
     pub output_per_m: f64,
+}
+
+impl CodexPricing {
+    /// The catalog's list price for a Codex model (by id or alias).
+    pub fn for_model(catalog: &ModelCatalog, model: &str) -> Option<Self> {
+        catalog.price_for(HarnessKind::Codex, model).map(Self::from)
+    }
+}
+
+impl From<TokenPrice> for CodexPricing {
+    fn from(p: TokenPrice) -> Self {
+        Self {
+            input_per_m: p.input_per_m,
+            cached_input_per_m: p.cached_input_per_m,
+            output_per_m: p.output_per_m,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -469,6 +488,25 @@ impl CodexAdapter {
         out
     }
 
+    /// What a turn costs per token: the configured price, else the catalog's list price for the session's model (the default
+    /// optimization model when none was named).
+    pub fn pricing_for(&self, spec: &SessionSpec) -> Option<CodexPricing> {
+        if self.options.pricing.is_some() {
+            return self.options.pricing;
+        }
+        let catalog = ModelCatalog::bundled();
+        let model = spec
+            .model
+            .as_deref()
+            .filter(|m| !m.is_empty())
+            .or_else(|| {
+                catalog
+                    .default_for(HarnessKind::Codex, ModelUse::Optimization)
+                    .map(|m| m.id.as_str())
+            })?;
+        CodexPricing::for_model(catalog, model)
+    }
+
     /// Argument list of a one-shot turn for `spec` (prompt excluded): [`CodexAdapter::build_args`] plus access, MCP servers and
     /// the system prompt add-on.
     pub fn build_session_args(&self, spec: &SessionSpec, resume_id: Option<&str>) -> Vec<String> {
@@ -478,6 +516,7 @@ impl CodexAdapter {
         }
         args.extend(["--json".to_string(), "--skip-git-repo-check".to_string()]);
         if let Some(model) = spec.model.as_ref().filter(|m| !m.is_empty()) {
+            let model = &resolve_model(HarnessKind::Codex, model).id;
             args.extend(["--model".to_string(), model.clone()]);
         }
         // Config overrides rather than --sandbox/--cd: they are accepted by `exec` and `exec resume` alike.
@@ -626,7 +665,7 @@ impl CodexAdapter {
         let overlay = self.write_overlay(spec, &scratch)?;
         let args = self.build_session_args(spec, resume_id);
         let clock = self.cli.clock.clone();
-        let mut parser = CodexStreamParser::new(move || clock.now(), self.options.pricing);
+        let mut parser = CodexStreamParser::new(move || clock.now(), self.pricing_for(spec));
         let via_arg = self.options.prompt_via == PromptVia::Arg;
         let mut final_args = args;
         if via_arg {

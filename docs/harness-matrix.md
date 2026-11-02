@@ -190,3 +190,22 @@ the app-server may answer `Unauthorized`, which classifies as `AuthExpired` (con
 
 Tool names for Grok's read-only lists (`GROK_READ_ONLY_TOOLS`, `GROK_WRITE_TOOLS`) are fixtures plus guesses; they are options
 (`GrokOptions::read_only_tools`, `write_tools`) so real-world testing can correct them without a code change.
+
+## P2 notes (catalog, keys, preflight)
+
+- **Catalog.** `ratchet-agents/src/models.rs` reads `data/models.json` (bundled). A file named `models.json` in the daemon's support
+  directory replaces it; a missing or broken file falls back to the bundled one with a warning in the log. Ids and aliases are
+  per harness. An id the catalog does not know goes to the CLI unchanged, with a `tracing` warning. Claude Code and Grok report
+  their own dollars, so only Codex entries carry prices today (they feed `CodexPricing::for_model`, and the Codex adapter uses
+  the price of the session's model, else the default optimization model). The Codex and Grok ids and the prices are list values
+  from public docs and need confirming against the real CLIs (◐).
+- **`GET /v1/harnesses`** adds `models`, `defaultModel` (the default for optimizations; the chat default is the model whose
+  `defaultFor` has `chat`) and `billing` (`subscription` for a login, `api-key` for a key, absent when signed out). The simulated
+  daemon returns no models.
+- **`xaiApiKey`.** A new secret next to `anthropicApiKey` / `openaiApiKey`: `PUT/DELETE /v1/settings/secrets/xaiApiKey`,
+  `secrets.xaiApiKey` in settings, `ConnectionTarget::Xai`. The runner receives it as `XAI_API_KEY` (the engine already named it
+  in `default_secret_names`; the runner puts every fetched secret except `GITHUB_TOKEN` in the agent environment, so
+  `AGENT_ENV_PASSTHROUGH` is unchanged). The Grok adapter sets `XAI_API_KEY` and `GROK_CODE_XAI_API_KEY` from it.
+- **Preflight.** `desktop/preflight.rs` checks the harness list against `AgentsWhere` when an optimization is created and again
+  when it is started: local needs the CLI installed and signed in (or a key in the environment); cloud needs the vendor key the
+  runner would receive. The error is `NotConfigured`: "Needs sign-in: Codex is signed out. Run `codex login` ...".

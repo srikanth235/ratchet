@@ -586,6 +586,28 @@ mod real_runs {
         );
     }
 
+    /// P2 preflight: a signed-out harness on the list is refused with its reason, before anything is created or started
+    #[tokio::test]
+    async fn a_signed_out_harness_on_the_list_is_refused_with_its_reason() {
+        let b = build(BuildOpts::default()).await;
+        let mut i = input("acme/api");
+        i.agents = vec![AgentKind::ClaudeCode, AgentKind::Codex];
+        let e = err_of(b.product.create_optimization(&i).await);
+        assert_eq!(e.code, EngineErrorCode::NotConfigured);
+        assert_eq!(e.message, "Needs sign-in: Codex is signed out. ok");
+        // a harness that is not installed at all says so
+        i.agents = vec![AgentKind::Grok];
+        let e = err_of(b.product.create_optimization(&i).await);
+        assert!(
+            e.message.contains("Grok is not installed on this machine"),
+            "{}",
+            e.message
+        );
+        // the ready harness alone is fine
+        i.agents = vec![AgentKind::ClaudeCode];
+        b.product.create_optimization(&i).await.unwrap();
+    }
+
     /// engine.ts › live: a cloud agent falls back to the environment's key only when no connector holds one
     #[tokio::test]
     async fn a_cloud_agent_falls_back_to_the_environment_key_when_no_connector_holds_one() {

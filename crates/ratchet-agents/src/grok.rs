@@ -9,8 +9,10 @@ use serde_json::{Value, json};
 
 use crate::classify::{FailureKind, FailureOnce, classify_text};
 use crate::cli_agent::{CliAgent, CliAgentOptions, as_record, num, str_of, truncate};
+use crate::detect::HarnessKind;
 use crate::grok_acp::GrokLiveSession;
 use crate::harness::{Scratch, TurnRunner, open_with_fallback};
+use crate::models::resolve_model;
 use crate::process::LineSplitter;
 use ratchet_core::enums::AgentKind;
 use ratchet_core::ports::{
@@ -442,6 +444,7 @@ impl GrokAdapter {
             args.extend(["--resume".to_string(), id.to_string()]);
         }
         if let Some(model) = spec.model.as_ref().filter(|m| !m.is_empty()) {
+            let model = &resolve_model(HarnessKind::Grok, model).id;
             args.extend(["--model".to_string(), model.clone()]);
         }
         if read_only {

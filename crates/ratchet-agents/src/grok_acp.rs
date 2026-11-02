@@ -18,9 +18,11 @@ use serde_json::{Map, Value, json};
 
 use crate::classify::{FailureKind, FailureOnce, classify_status, classify_text};
 use crate::cli_agent::{as_record, build_env, num, pointer, str_of, truncate};
+use crate::detect::HarnessKind;
 use crate::grok::GrokAdapter;
 use crate::harness::{CLOSE_GRACE, HANDSHAKE_TIMEOUT, Scratch};
 use crate::live::{RpcClient, RpcError, RpcMessage, parse_rpc, rpc_reply};
+use crate::models::resolve_model;
 use crate::process::SpawnOptions;
 
 /// Maps ACP `session/update` notifications and the `session/prompt` response to `AgentEvent`s. Assistant text is reported as
@@ -442,6 +444,7 @@ impl GrokLiveSession {
                     RpcError::Rpc(json!({"message": "no session id in the answer"})),
                 ))?;
             if let Some(model) = spec.model.as_ref().filter(|m| !m.is_empty()) {
+                let model = &resolve_model(HarnessKind::Grok, model).id;
                 // best effort: a CLI that does not know the option keeps its default model
                 let _ = rpc
                     .request(

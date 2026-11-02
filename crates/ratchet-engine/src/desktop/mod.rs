@@ -5,6 +5,7 @@
 pub mod harnesses;
 pub mod live_config;
 pub mod power;
+pub mod preflight;
 pub mod product;
 pub mod secrets;
 #[cfg(feature = "testing")]
@@ -16,6 +17,7 @@ pub use live_config::{
     setting_for_secret_env,
 };
 pub use power::{NoPowerBlocker, PowerSaveBlocker, PowerSaveHook};
+pub use preflight::{AgentProblem, agent_problems};
 pub use product::{
     ImageLookupFailure, ImageQuery, ImageResolver, LiveAppConfig, LiveFactory, LiveHandle,
     LiveSettingsSource, LiveSnapshot, ProductEngine, ProductOptions, RuntimeEngine, SimFactory,

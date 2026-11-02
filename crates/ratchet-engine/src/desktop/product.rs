@@ -39,6 +39,7 @@ use tokio::task::JoinHandle;
 use super::harnesses::HarnessCache;
 use super::live_config::secret_source;
 use super::live_config::{LivePaths, effective_paths};
+use super::preflight::{agent_problems, describe as describe_problems};
 use crate::engine::Engine;
 use crate::errors::{EngineError, EngineErrorCode, EngineResult};
 use crate::runtime::{
@@ -46,6 +47,7 @@ use crate::runtime::{
     create_simulation_runtime,
 };
 use crate::settings::EngineSettings;
+use crate::settings::default_secret_names;
 use ratchet_connectors::{ConnectorAgent, ResolvedAws, ResolvedConnections, ResolvedGithub};
 
 type BoxFut<T> = Pin<Box<dyn Future<Output = T> + Send>>;
@@ -125,9 +127,9 @@ pub type ImageResolver =
 #[async_trait]
 pub trait LiveSettingsSource: Send + Sync {
     fn live(&self) -> LiveSnapshot;
-    /// A secret by setting name (`githubToken`, `anthropicApiKey`, `openaiApiKey`): the store or the environment.
+    /// A secret by setting name (`githubToken`, `anthropicApiKey`, `openaiApiKey`, `xaiApiKey`): the store or the environment.
     fn secret(&self, name: &str) -> Option<String>;
-    /// A secret from the process environment only (`anthropicApiKey`, `openaiApiKey`): what a cloud runner falls back to when
+    /// A secret from the process environment only (`anthropicApiKey`, `openaiApiKey`, `xaiApiKey`): what a cloud runner falls back to when
     /// no connector holds a key. Default: none.
     fn env_secret(&self, name: &str) -> Option<String> {
         let _ = name;
@@ -144,6 +146,9 @@ pub trait LiveSettingsSource: Send + Sync {
         }
         if let Some(k) = self.secret("openaiApiKey") {
             cloud_keys.insert(ConnectorAgent::Codex, k);
+        }
+        if let Some(k) = self.secret("xaiApiKey") {
+            cloud_keys.insert(ConnectorAgent::Grok, k);
         }
         ResolvedConnections {
             github: self.secret("githubToken").map(|token| ResolvedGithub {
@@ -821,6 +826,10 @@ impl ProductEngine {
                 format!("Not ready: {}", missing.join("; ")),
             ));
         }
+        // Every harness on the list must be able to run where this optimization runs: refuse now, never start and stall.
+        let where_ = input.agents_where.unwrap_or(rt.agents_where);
+        self.require_agents_ready(&input.agents, where_, &slug)
+            .await?;
         // The runtime is scoped to this repo; its remote is what the ledger records.
         let mut i = input.clone();
         i.repo_url = rt
@@ -852,7 +861,68 @@ impl ProductEngine {
         rt.engine.create_optimization(&i).await.map_err(port)
     }
 
+    /// Refuses with the reason when a harness in `agents` cannot run `where_` (signed out, not installed, no cloud key).
+    async fn require_agents_ready(
+        &self,
+        agents: &[ratchet_core::enums::AgentKind],
+        where_: AgentsWhere,
+        slug: &str,
+    ) -> EngineResult<()> {
+        let Some(cfg) = self.0.opts.live.clone() else {
+            return Ok(());
+        };
+        let harnesses = cfg.harnesses.get().await.harnesses;
+        let chosen = cfg.settings.connections(Some(slug)).await;
+        let settings = cfg.settings.clone();
+        let source = secret_source(&chosen, move |name| settings.env_secret(name));
+        let has_key = |a: ratchet_core::enums::AgentKind| {
+            default_secret_names(a)
+                .first()
+                .is_some_and(|name| source(a, name).is_some())
+        };
+        let problems = agent_problems(agents, where_, &harnesses, has_key);
+        if problems.is_empty() {
+            return Ok(());
+        }
+        Err(err(
+            EngineErrorCode::NotConfigured,
+            format!("Needs sign-in: {}", describe_problems(&problems)),
+        ))
+    }
+
     pub async fn start(&self, id: &str) -> EngineResult<()> {
+        // A real optimization is checked again at start: a login may have expired since it was created.
+        if self.0.opts.live.is_some()
+            && let Some(opt) = self
+                .ledger()
+                .get_optimization(&OptimizationId::new(id))
+                .await?
+            && !lock(&self.0.sim_roots).contains_key(&opt.repo)
+        {
+            let agents: Vec<_> = self
+                .ledger()
+                .list_agents(&opt.id)
+                .await?
+                .into_iter()
+                .map(|a| a.kind)
+                .collect();
+            // The engine records where the agents run when it creates the optimization; without a record there is nothing
+            // to check against (the creation-time check already ran).
+            let where_ = match self
+                .ledger()
+                .kv_get(&crate::kv::k::agents_where(id))
+                .await?
+                .as_deref()
+            {
+                Some("local") => Some(AgentsWhere::Local),
+                Some(_) => Some(AgentsWhere::Cloud),
+                None => None,
+            };
+            let slug = slug_of(&opt.repo).unwrap_or_else(|| opt.repo.clone());
+            if let Some(where_) = where_ {
+                self.require_agents_ready(&agents, where_, &slug).await?;
+            }
+        }
         let e = self.engine_for_optimization(id).await?;
         e.start(&OptimizationId::new(id)).await.map_err(port)
     }

@@ -45,6 +45,7 @@ impl SettingsState {
             secrets: SecretsPresent {
                 anthropic_api_key: true,
                 openai_api_key: false,
+                xai_api_key: false,
                 github_token: true,
             },
             github: GithubSim {
@@ -266,6 +267,7 @@ impl Inner {
                 secret_probe(s.secrets.anthropic_api_key, "an Anthropic")
             }
             ConnectionTarget::Openai => secret_probe(s.secrets.openai_api_key, "an OpenAI"),
+            ConnectionTarget::Xai => secret_probe(s.secrets.xai_api_key, "an xAI"),
         };
         ConnectionResultVm { target, ok, detail }
     }
@@ -477,6 +479,9 @@ impl Inner {
                 path: Some("/usr/local/bin/claude".into()),
                 auth: HarnessAuth::SignedIn,
                 hint: "signed in".into(),
+                models: Vec::new(),
+                default_model: None,
+                billing: Some(HarnessBilling::Subscription),
             },
             HarnessVm {
                 kind: HarnessKind::Codex,
@@ -485,6 +490,9 @@ impl Inner {
                 path: Some("/usr/local/bin/codex".into()),
                 auth: HarnessAuth::SignedOut,
                 hint: "run `codex login` in a terminal".into(),
+                models: Vec::new(),
+                default_model: None,
+                billing: None,
             },
         ]
     }
@@ -613,7 +621,8 @@ impl Inner {
                 let (present, vendor) = match a {
                     AgentKind::ClaudeCode => (secrets.anthropic_api_key, "Anthropic"),
                     AgentKind::Codex => (secrets.openai_api_key, "OpenAI"),
-                    AgentKind::Grok | AgentKind::Mock => continue,
+                    AgentKind::Grok => (secrets.xai_api_key, "xAI"),
+                    AgentKind::Mock => continue,
                 };
                 items.push(if present {
                     item(

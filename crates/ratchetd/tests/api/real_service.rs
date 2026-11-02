@@ -31,6 +31,7 @@ use ratchetd::service::{AppService, ServiceError};
 const GH_TOKEN: &str = "ghp_TOPSECRETTOKENVALUE1234567890abcd";
 const ANTHROPIC_KEY: &str = "sk-ant-api03-TOPSECRETANTHROPICKEY";
 const OPENAI_KEY: &str = "sk-proj-TOPSECRETOPENAIKEYVALUE";
+const XAI_KEY: &str = "xai-TOPSECRETXAIKEYVALUE1234";
 const DEVICE_TOKEN: &str = "gho_DEVICETOPSECRETTOKEN1234567";
 const SECRETS: [&str; 4] = [GH_TOKEN, ANTHROPIC_KEY, OPENAI_KEY, DEVICE_TOKEN];
 
@@ -909,8 +910,28 @@ mod creating {
         let mut i = common();
         i.repo_url = "https://github.com/acme/api.git".into();
         i.agents_where = Some(AgentsWhere::Cloud);
+        // a cloud runner needs the vendor key: without it the run is refused before anything is created
+        let e = s.service.create_optimization(i.clone()).await.unwrap_err();
+        assert!(
+            e.to_string()
+                .contains("cannot run in the cloud without an Anthropic API key"),
+            "{e}"
+        );
+        s.service
+            .set_secret(SecretName::AnthropicApiKey, ANTHROPIC_KEY)
+            .await
+            .unwrap();
         assert_eq!(s.service.create_optimization(i).await.unwrap().id, "opt_x");
-        let seen = s.live.lock().unwrap()[0].created.lock().unwrap()[0].clone();
+        let seen = s
+            .live
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .created
+            .lock()
+            .unwrap()[0]
+            .clone();
         // the runtime is scoped to the repo; its remote is what the ledger records
         assert_eq!(seen.repo_url, "https://github.com/acme/api.git");
         assert_eq!(
@@ -1270,6 +1291,52 @@ mod aws_and_agents {
             s.service.product().invalidations() > before,
             "a re-detect rebuilds idle runtimes"
         );
+    }
+
+    /// P2: harnesses carry their catalog models, the default optimization model and how they are billed
+    #[tokio::test]
+    async fn harnesses_list_models_a_default_model_and_billing() {
+        let s = setup(Opts::default()).await;
+        let list = s.service.harnesses(false).await.unwrap();
+        let claude = list
+            .iter()
+            .find(|h| h.kind == HarnessKind::ClaudeCode)
+            .unwrap();
+        assert_eq!(claude.default_model.as_deref(), Some("opus"));
+        let ids: Vec<&str> = claude.models.iter().map(|m| m.id.as_str()).collect();
+        assert!(
+            ["opus", "sonnet", "haiku"].iter().all(|a| ids.contains(a)),
+            "{ids:?}"
+        );
+        let sonnet = claude.models.iter().find(|m| m.id == "sonnet").unwrap();
+        assert_eq!(sonnet.default_for, [ModelUseVm::Chat]);
+        // a login is the user's plan; a signed-out CLI has no billing yet
+        assert_eq!(claude.billing, Some(HarnessBilling::Subscription));
+        let codex = list.iter().find(|h| h.kind == HarnessKind::Codex).unwrap();
+        assert_eq!(codex.billing, None);
+        assert_eq!(codex.default_model.as_deref(), Some("gpt-5-codex"));
+        assert!(codex.models.iter().all(|m| m.price.is_some()));
+    }
+
+    /// P2: an xAI key is stored, listed, tested and cleared like the other keys, and never leaks
+    #[tokio::test]
+    async fn an_xai_api_key_is_stored_and_cleared() {
+        let s = setup(Opts::default()).await;
+        let e = s
+            .service
+            .set_secret(SecretName::XaiApiKey, "sk-ant-wrong")
+            .await
+            .unwrap_err();
+        assert_eq!(err_fields(&e), ["value"]);
+        let st = s
+            .service
+            .set_secret(SecretName::XaiApiKey, XAI_KEY)
+            .await
+            .unwrap();
+        assert!(st.secrets.xai_api_key && !st.secrets.openai_api_key);
+        assert!(!serde_json::to_string(&st).unwrap().contains(XAI_KEY));
+        let st = s.service.clear_secret(SecretName::XaiApiKey).await.unwrap();
+        assert!(!st.secrets.xai_api_key);
     }
 
     /// the developer overrides are validated and kept apart
@@ -1664,6 +1731,7 @@ mod secrets_never_leave {
             SecretsPresent {
                 anthropic_api_key: true,
                 openai_api_key: true,
+                xai_api_key: false,
                 github_token: true
             }
         );

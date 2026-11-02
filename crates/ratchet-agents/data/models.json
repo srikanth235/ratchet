@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "models": [
+    { "harness": "claude-code", "id": "opus", "label": "Opus", "aliases": ["claude-opus-5-5"], "defaultFor": ["optimization"], "contextWindow": 200000 },
+    { "harness": "claude-code", "id": "sonnet", "label": "Sonnet", "aliases": ["claude-sonnet-5-5"], "defaultFor": ["chat"], "contextWindow": 200000 },
+    { "harness": "claude-code", "id": "haiku", "label": "Haiku", "aliases": ["claude-haiku-5-5"], "defaultFor": [], "contextWindow": 200000 },
+    { "harness": "claude-code", "id": "claude-fable-5-1", "label": "Fable 5.1", "aliases": [], "defaultFor": [], "contextWindow": 200000 },
+    { "harness": "claude-code", "id": "claude-opus-4-1", "label": "Opus 4.1", "aliases": [], "defaultFor": [], "contextWindow": 200000 },
+    { "harness": "claude-code", "id": "claude-sonnet-4-5", "label": "Sonnet 4.5", "aliases": [], "defaultFor": [], "contextWindow": 200000 },
+    { "harness": "claude-code", "id": "claude-haiku-4-5", "label": "Haiku 4.5", "aliases": [], "defaultFor": [], "contextWindow": 200000 },
+
+    { "harness": "codex", "id": "gpt-5-codex", "label": "GPT-5 Codex", "aliases": [], "defaultFor": ["optimization"],
+      "price": { "inputPerM": 1.25, "cachedInputPerM": 0.125, "outputPerM": 10.0 }, "contextWindow": 400000 },
+    { "harness": "codex", "id": "gpt-5.1-codex", "label": "GPT-5.1 Codex", "aliases": [], "defaultFor": [],
+      "price": { "inputPerM": 1.25, "cachedInputPerM": 0.125, "outputPerM": 10.0 }, "contextWindow": 400000 },
+    { "harness": "codex", "id": "gpt-5.1-codex-mini", "label": "GPT-5.1 Codex mini", "aliases": [], "defaultFor": ["chat"],
+      "price": { "inputPerM": 0.25, "cachedInputPerM": 0.025, "outputPerM": 2.0 }, "contextWindow": 400000 },
+    { "harness": "codex", "id": "gpt-5", "label": "GPT-5", "aliases": [], "defaultFor": [],
+      "price": { "inputPerM": 1.25, "cachedInputPerM": 0.125, "outputPerM": 10.0 }, "contextWindow": 400000 },
+    { "harness": "codex", "id": "codex-mini-latest", "label": "Codex mini", "aliases": [], "defaultFor": [],
+      "price": { "inputPerM": 1.5, "cachedInputPerM": 0.375, "outputPerM": 6.0 }, "contextWindow": 200000 },
+
+    { "harness": "grok", "id": "grok-4", "label": "Grok 4", "aliases": [], "defaultFor": ["optimization"],
+      "price": { "inputPerM": 3.0, "cachedInputPerM": 0.75, "outputPerM": 15.0 }, "contextWindow": 256000 },
+    { "harness": "grok", "id": "grok-code-fast-1", "label": "Grok Code Fast", "aliases": [], "defaultFor": ["chat"],
+      "price": { "inputPerM": 0.2, "cachedInputPerM": 0.02, "outputPerM": 1.5 }, "contextWindow": 256000 },
+    { "harness": "grok", "id": "grok-4-fast-reasoning", "label": "Grok 4 Fast (reasoning)", "aliases": [], "defaultFor": [],
+      "price": { "inputPerM": 0.2, "cachedInputPerM": 0.05, "outputPerM": 0.5 }, "contextWindow": 2000000 },
+    { "harness": "grok", "id": "grok-4-fast-non-reasoning", "label": "Grok 4 Fast", "aliases": [], "defaultFor": [],
+      "price": { "inputPerM": 0.2, "cachedInputPerM": 0.05, "outputPerM": 0.5 }, "contextWindow": 2000000 }
+  ]
+}

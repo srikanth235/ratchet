@@ -90,6 +90,7 @@ expression: names
 - GithubSource
 - GithubStatusVm
 - HarnessAuth
+- HarnessBilling
 - HarnessKind
 - HarnessVm
 - InspectRepoInput
@@ -102,6 +103,8 @@ expression: names
 - MessageAgentInput
 - MetricOption
 - Mode
+- ModelUseVm
+- ModelVm
 - NoticeLevel
 - OptimizationDetail
 - OptimizationId
@@ -168,6 +171,7 @@ expression: names
 - TemplateObjective
 - TestConnectionInput
 - TimeWindow
+- TokenPriceVm
 - Tone
 - UiStatus
 - UpdateConnectorInput

@@ -175,6 +175,10 @@ pub fn validate_secret_format(name: SecretName, value: &str) -> Option<String> {
         .then(|| {
             "OpenAI keys start with sk- (not sk-ant-) and are at least 20 characters".to_owned()
         }),
+        SecretName::XaiApiKey => value
+            .strip_prefix("xai-")
+            .is_none_or(|r| !key_chars(r, 16))
+            .then(|| "xAI keys start with xai-".to_owned()),
         SecretName::GithubToken => (!github_token_ok(value))
             .then(|| "GitHub tokens start with ghp_, gho_, ghu_, ghs_ or github_pat_".to_owned()),
     }

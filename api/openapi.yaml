@@ -1519,7 +1519,7 @@ paths:
       parameters:
       - name: name
         in: path
-        description: anthropicApiKey, openaiApiKey or githubToken
+        description: anthropicApiKey, openaiApiKey, xaiApiKey or githubToken
         required: true
         schema:
           $ref: '#/components/schemas/SecretName'
@@ -1552,7 +1552,7 @@ paths:
       parameters:
       - name: name
         in: path
-        description: anthropicApiKey, openaiApiKey or githubToken
+        description: anthropicApiKey, openaiApiKey, xaiApiKey or githubToken
         required: true
         schema:
           $ref: '#/components/schemas/SecretName'
@@ -2609,6 +2609,7 @@ components:
       - github
       - anthropic
       - openai
+      - xai
     ConnectorAgent:
       type: string
       description: The agent CLIs Ratchet drives.
@@ -3701,6 +3702,12 @@ components:
       - signed-in
       - api-key
       - signed-out
+    HarnessBilling:
+      type: string
+      description: How a harness is paid for on this machine.
+      enum:
+      - subscription
+      - api-key
     HarnessKind:
       type: string
       enum:
@@ -3717,9 +3724,21 @@ components:
       - path
       - auth
       - hint
+      - defaultModel
+      - billing
       properties:
         auth:
           $ref: '#/components/schemas/HarnessAuth'
+        billing:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/HarnessBilling'
+            description: Subscription (the user's login) or API key; absent while signed out.
+        defaultModel:
+          type:
+          - string
+          - 'null'
+          description: The model optimizations use unless one is chosen (the catalog's default for optimizations).
         hint:
           type: string
           description: What to do next, or what was found. Never contains a credential.
@@ -3727,6 +3746,11 @@ components:
           type: boolean
         kind:
           $ref: '#/components/schemas/HarnessKind'
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelVm'
+          description: The models this harness accepts, from the catalog.
         path:
           type:
           - string
@@ -3905,6 +3929,49 @@ components:
       enum:
       - live
       - simulation
+    ModelUseVm:
+      type: string
+      description: What a model is picked for.
+      enum:
+      - chat
+      - optimization
+    ModelVm:
+      type: object
+      description: One model a harness accepts (`--model`).
+      required:
+      - id
+      - label
+      - aliases
+      - defaultFor
+      - price
+      - contextWindow
+      properties:
+        aliases:
+          type: array
+          items:
+            type: string
+          description: Other names the CLI accepts for the same model.
+        contextWindow:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        defaultFor:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelUseVm'
+          description: The uses this model is the harness's default for.
+        id:
+          type: string
+          description: What is passed to the CLI.
+        label:
+          type: string
+        price:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/TokenPriceVm'
+            description: Absent when the CLI reports dollars itself.
     NoticeLevel:
       type: string
       enum:
@@ -4864,6 +4931,7 @@ components:
       enum:
       - anthropicApiKey
       - openaiApiKey
+      - xaiApiKey
       - githubToken
     SecretsPresent:
       type: object
@@ -4879,6 +4947,9 @@ components:
           type: boolean
         openaiApiKey:
           type: boolean
+        xaiApiKey:
+          type: boolean
+          description: 'Absent in a response from an older daemon: no key.'
     SetAwsProfileInput:
       type: object
       required:
@@ -5235,6 +5306,25 @@ components:
         startMs:
           type: integer
           format: int64
+    TokenPriceVm:
+      type: object
+      description: USD per million tokens at list price.
+      required:
+      - inputPerM
+      - cachedInputPerM
+      - outputPerM
+      properties:
+        cachedInputPerM:
+          type:
+          - number
+          - 'null'
+          format: double
+        inputPerM:
+          type: number
+          format: double
+        outputPerM:
+          type: number
+          format: double
     Tone:
       type: string
       enum:

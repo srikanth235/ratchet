@@ -12,8 +12,10 @@ use tokio::sync::mpsc;
 
 use crate::classify::{FailureKind, FailureOnce, classify_status, classify_text};
 use crate::cli_agent::{CliAgent, CliAgentOptions, as_record, build_env, num, str_of, truncate};
+use crate::detect::HarnessKind;
 use crate::harness::{CLOSE_GRACE, Scratch, TurnRunner, open_with_fallback};
 use crate::live::LiveProcess;
+use crate::models::resolve_model;
 use crate::process::{LineSplitter, ProcessExit, SpawnOptions};
 use ratchet_core::enums::AgentKind;
 use ratchet_core::ports::{
@@ -526,6 +528,7 @@ impl ClaudeCodeAdapter {
             args.extend(["--disallowedTools".to_string(), disallowed.join(",")]);
         }
         if let Some(model) = spec.model.as_ref().filter(|m| !m.is_empty()) {
+            let model = &resolve_model(HarnessKind::ClaudeCode, model).id;
             args.extend(["--model".to_string(), model.clone()]);
         }
         if let Some(turns) = spec.max_turns.filter(|t| *t > 0) {

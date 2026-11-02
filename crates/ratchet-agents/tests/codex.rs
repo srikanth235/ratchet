@@ -403,3 +403,49 @@ async fn preflight_checks_key_and_binary() {
         .unwrap();
     assert_eq!(bad.problems.len(), 2);
 }
+
+#[tokio::test]
+async fn cost_comes_from_the_catalog_price_of_the_chosen_model_and_an_unknown_model_passes_through()
+{
+    // catalog price: 1.25 in / 0.125 cached / 10 out per million tokens for gpt-5-codex
+    let (_, adapter) = adapter_for(
+        FakeProcessSpec::stdout(fixture("codex-success.jsonl")),
+        &KEYED,
+    );
+    let (events, on_event) = collect();
+    let mut s = spec();
+    s.model = Some("gpt-5-codex".into());
+    adapter
+        .start(&s, &on_event, Some(&CancellationToken::new()))
+        .await
+        .unwrap();
+    let usage = events.lock().unwrap().last().unwrap().usage.unwrap();
+    let expected = usage.cost_usd.expect("a catalog price gives a cost");
+    assert!(expected > 0.0);
+
+    // an id the catalog does not know goes to the CLI untouched, and has no price
+    let (fake, adapter) = adapter_for(
+        FakeProcessSpec::stdout(fixture("codex-success.jsonl")),
+        &KEYED,
+    );
+    let (events, on_event) = collect();
+    let mut s = spec();
+    s.model = Some("gpt-9-ultra".into());
+    adapter
+        .start(&s, &on_event, Some(&CancellationToken::new()))
+        .await
+        .unwrap();
+    let args = fake.call(0).args;
+    assert!(args.windows(2).any(|w| w == ["--model", "gpt-9-ultra"]));
+    assert_eq!(
+        events
+            .lock()
+            .unwrap()
+            .last()
+            .unwrap()
+            .usage
+            .unwrap()
+            .cost_usd,
+        None
+    );
+}
