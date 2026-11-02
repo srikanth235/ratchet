@@ -54,7 +54,7 @@ struct ChatTests {
         let chat = try await client.startChat(NewChat(repo: "acme/shop"))
         let stream = await client.stream(chatID: chat.id, lastEventID: 0)
         let events = try await read(stream, until: { if case .tool = $0 { return true } else { return false } })
-        #expect(events.first == .ready(ChatReady(state: .idle, lastSeq: 0, lastEventID: 1)))
+        #expect(events.first == ChatEvent.ready(ChatReady(state: .idle, lastSeq: 0, lastEventID: 1)))
         if case .tool(let step)? = events.last { #expect(step.summary == "Reading acme/shop") } else { Issue.record("no checkout step") }
     }
 
