@@ -352,6 +352,8 @@ async fn real_service(args: &ServeArgs, ledger_path: Option<PathBuf>) -> Result<
     opts.repo_root = repo_root;
     opts.work_root = support.join("sim").join(std::process::id().to_string());
     opts.app_version = Some(ratchetd::VERSION.to_owned());
+    // local agents reach this daemon through `ratchetd mcp` on the same socket
+    opts.mcp_socket = Some(args.socket.clone().unwrap_or_else(paths::socket_path));
     opts.github = Some(Arc::new(HttpGithubApi::new(GithubApiOptions::from_env())));
     opts.connection_probe = Some(Arc::new(create_connection_tester(
         ConnectionTesterDeps::default(),

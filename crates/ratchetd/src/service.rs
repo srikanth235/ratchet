@@ -167,6 +167,27 @@ pub trait AppService: Send + Sync + 'static {
     async fn pause_agent(&self, agent_id: &str) -> ServiceResult<()>;
     async fn resume_agent(&self, agent_id: &str) -> ServiceResult<()>;
     async fn message_agent(&self, agent_id: &str, text: &str) -> ServiceResult<()>;
+    /// The agent's `submit_candidate` tool call: it names the commit it wants judged. Only agents on this machine call it.
+    async fn submit_candidate(
+        &self,
+        _agent_id: &str,
+        _sha: &str,
+        _note: Option<String>,
+    ) -> ServiceResult<()> {
+        unsupported("naming a candidate")
+    }
+
+    // ---- the optimization's agents (order and fallback rules) --------------------------------------------
+    async fn get_agents_policy(&self, _id: &str) -> ServiceResult<AgentsPolicyVm> {
+        unsupported("an agents list")
+    }
+    async fn set_agents_policy(
+        &self,
+        _id: &str,
+        _input: SetAgentsPolicyInput,
+    ) -> ServiceResult<AgentsPolicyVm> {
+        unsupported("an agents list")
+    }
 
     // ---- config and preflight ----------------------------------------------------------------------------
     /// Parse ratchet.yaml text (read-only; the repo owns the file).

@@ -63,6 +63,38 @@ pub trait RuntimeEngine: EngineApi {
     fn environment_drafter(&self) -> Option<Arc<dyn ratchet_env::EnvironmentDrafter>> {
         None
     }
+
+    /// The optimization's harness list and fallback rules; `None` for an engine that keeps none.
+    async fn agents_policy(
+        &self,
+        _id: &str,
+    ) -> EngineResult<Option<crate::agents::EffectiveAgents>> {
+        Ok(None)
+    }
+
+    async fn set_agents_policy(
+        &self,
+        _id: &str,
+        _policy: ratchet_core::AgentsPolicy,
+    ) -> EngineResult<()> {
+        Err(err(
+            EngineErrorCode::Unavailable,
+            "this engine does not keep an agents list",
+        ))
+    }
+
+    /// The agent's `submit_candidate` tool call.
+    async fn submit_candidate(
+        &self,
+        _agent_id: &str,
+        _sha: &str,
+        _note: Option<&str>,
+    ) -> EngineResult<()> {
+        Err(err(
+            EngineErrorCode::Unavailable,
+            "this engine cannot take a named candidate",
+        ))
+    }
 }
 
 #[async_trait]
@@ -73,6 +105,30 @@ impl RuntimeEngine for Engine {
 
     fn environment_drafter(&self) -> Option<Arc<dyn ratchet_env::EnvironmentDrafter>> {
         self.ports.environment.clone()
+    }
+
+    async fn agents_policy(
+        &self,
+        id: &str,
+    ) -> EngineResult<Option<crate::agents::EffectiveAgents>> {
+        Engine::agents_policy(self, id).await.map(Some)
+    }
+
+    async fn set_agents_policy(
+        &self,
+        id: &str,
+        policy: ratchet_core::AgentsPolicy,
+    ) -> EngineResult<()> {
+        Engine::set_agents_policy(self, id, policy).await
+    }
+
+    async fn submit_candidate(
+        &self,
+        agent_id: &str,
+        sha: &str,
+        note: Option<&str>,
+    ) -> EngineResult<()> {
+        Engine::submit_candidate(self, agent_id, sha, note).await
     }
 }
 
@@ -201,6 +257,9 @@ pub struct LiveAppConfig {
     /// Test seams.
     pub create_runtime: Option<LiveFactory>,
     pub resolve_images: Option<ImageResolver>,
+    /// The Ratchet optimization tools for the turns of local agents (the daemon issues and revokes the session tokens).
+    pub mcp_for: Option<ratchet_agents::McpFor>,
+    pub mcp_done: Option<ratchet_agents::McpDone>,
 }
 
 #[derive(Clone)]
@@ -230,6 +289,8 @@ struct Inner {
     events: broadcast::Sender<EngineEvent>,
     attached: Mutex<HashSet<String>>,
     active_by: Mutex<HashMap<String, Vec<OptimizationId>>>,
+    /// Per runtime, the live optimizations whose agents run on this machine.
+    local_by: Mutex<HashMap<String, Vec<OptimizationId>>>,
     last_active: Mutex<(bool, String)>,
     /// Serializes runtime construction (a build takes seconds and must not run twice for one key).
     build: tokio::sync::Mutex<()>,
@@ -336,6 +397,7 @@ impl ProductEngine {
             events,
             attached: Mutex::default(),
             active_by: Mutex::default(),
+            local_by: Mutex::default(),
             last_active: Mutex::new((false, String::new())),
             build: tokio::sync::Mutex::new(()),
             sims: Mutex::default(),
@@ -383,6 +445,11 @@ impl ProductEngine {
     /// True while any runtime has a run active.
     pub fn run_active(&self) -> bool {
         lock(&self.0.last_active).0
+    }
+
+    /// True while a run whose agents run on this machine is live: the only time the Mac has to stay awake.
+    pub fn keeping_awake(&self) -> bool {
+        lock(&self.0.local_by).values().any(|v| !v.is_empty())
     }
 
     /// Every runtime's events, with `run-active` merged across runtimes.
@@ -621,6 +688,8 @@ impl ProductEngine {
         live.aws_profile = Some(aws_profile.clone()).filter(|p| !p.is_empty());
         live.clock = self.0.opts.clock.clone();
         let mut options = HybridOptions::new(live);
+        options.local_agents.mcp_for = cfg.mcp_for.clone();
+        options.local_agents.mcp_done = cfg.mcp_done.clone();
         options.harnesses = Some(detected.harnesses);
         options.login_path = detected.login_path;
         // An API key chosen for a local agent is handed to that agent's adapter; a login runs with no key at all.
@@ -696,21 +765,35 @@ impl ProductEngine {
                     Ok(EngineEvent::RunActive {
                         active,
                         optimization_ids,
+                        local_ids,
                     }) => {
                         lock(&me.0.active_by).insert(
                             key.clone(),
                             if active { optimization_ids } else { Vec::new() },
                         );
-                        let mut ids: Vec<OptimizationId> =
-                            lock(&me.0.active_by).values().flatten().cloned().collect();
-                        ids.sort();
-                        ids.dedup();
+                        lock(&me.0.local_by).insert(key.clone(), local_ids);
+                        let merge = |m: &Mutex<HashMap<String, Vec<OptimizationId>>>| {
+                            let mut ids: Vec<OptimizationId> =
+                                lock(m).values().flatten().cloned().collect();
+                            ids.sort();
+                            ids.dedup();
+                            ids
+                        };
+                        let ids = merge(&me.0.active_by);
+                        let local = merge(&me.0.local_by);
                         let is_active = !ids.is_empty();
-                        let sig = ids
-                            .iter()
-                            .map(OptimizationId::as_str)
-                            .collect::<Vec<_>>()
-                            .join(",");
+                        let sig = format!(
+                            "{}|{}",
+                            ids.iter()
+                                .map(OptimizationId::as_str)
+                                .collect::<Vec<_>>()
+                                .join(","),
+                            local
+                                .iter()
+                                .map(OptimizationId::as_str)
+                                .collect::<Vec<_>>()
+                                .join(",")
+                        );
                         {
                             let mut last = lock(&me.0.last_active);
                             if last.0 == is_active && last.1 == sig {
@@ -721,6 +804,7 @@ impl ProductEngine {
                         let _ = me.0.events.send(EngineEvent::RunActive {
                             active: is_active,
                             optimization_ids: ids,
+                            local_ids: local,
                         });
                     }
                     Ok(e) => {
@@ -947,6 +1031,34 @@ impl ProductEngine {
         e.message_agent(&AgentId::new(agent_id), text)
             .await
             .map_err(port)
+    }
+
+    /// The harness order and fallback rules in force for an optimization.
+    pub async fn agents_policy(
+        &self,
+        id: &str,
+    ) -> EngineResult<Option<crate::agents::EffectiveAgents>> {
+        let e = self.engine_for_optimization(id).await?;
+        e.agents_policy(id).await
+    }
+
+    pub async fn set_agents_policy(
+        &self,
+        id: &str,
+        policy: ratchet_core::AgentsPolicy,
+    ) -> EngineResult<()> {
+        let e = self.engine_for_optimization(id).await?;
+        e.set_agents_policy(id, policy).await
+    }
+
+    pub async fn submit_candidate(
+        &self,
+        agent_id: &str,
+        sha: &str,
+        note: Option<&str>,
+    ) -> EngineResult<()> {
+        let e = self.by_agent(agent_id).await?;
+        e.submit_candidate(agent_id, sha, note).await
     }
 
     pub async fn open_pull_request(&self, id: &str) -> EngineResult<PullRequestRef> {

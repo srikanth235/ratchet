@@ -40,6 +40,8 @@ pub const MARKS: &[(&str, Mark)] = &[
     ("agent resume", Mark::Write),
     ("agent message", Mark::Write),
     ("agent log", Mark::ReadOnly),
+    ("agents show", Mark::ReadOnly),
+    ("agents set", Mark::Write),
     ("events", Mark::ReadOnly),
     ("env list", Mark::ReadOnly),
     ("env end", Mark::Destructive),

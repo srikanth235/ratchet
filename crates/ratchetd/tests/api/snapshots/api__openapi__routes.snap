@@ -42,6 +42,8 @@ POST /v1/harnesses/detections detectHarnesses
 GET /v1/optimizations listOptimizations
 POST /v1/optimizations createOptimization
 GET /v1/optimizations/{id} getOptimization
+GET /v1/optimizations/{id}/agents getAgentsPolicy
+PUT /v1/optimizations/{id}/agents setAgentsPolicy
 GET /v1/optimizations/{id}/calibration getCalibration
 GET /v1/optimizations/{id}/candidates listCandidates
 GET /v1/optimizations/{id}/protected-paths getProtectedPaths

@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use ratchet_core::enums::CandidateVerdict;
+use ratchet_core::enums::{AgentKind, CandidateVerdict};
 use ratchet_core::ports::{
     AgentAdapter, AgentEvent, AgentEventType, AgentSession, AgentSpec, AgentUsage,
-    CancellationToken, Clock, PortError, PortResult, Preflight, RunnerConfig, RunnerInbox,
-    RunnerMessage, SharedEventSink,
+    CancellationToken, Clock, McpServer, PortError, PortResult, Preflight, RunnerConfig,
+    RunnerInbox, RunnerMessage, SharedEventSink,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -23,6 +23,10 @@ use tokio::sync::watch;
 use crate::context::{
     ContextInput, HistoryEntry, ResumeInput, build_context, build_initial_prompt,
     build_resume_message,
+};
+use crate::fallback::{
+    AvailabilityProbe, Cause, Failure, FallbackPlan, FallbackState, HarnessSlot, Next, label,
+    minutes_text,
 };
 use crate::git::{Git, SharedGit, exec_git, has_candidate_trailer, with_candidate_trailer};
 
@@ -96,6 +100,12 @@ pub struct LoopTuning {
     pub model: Option<String>,
     pub max_turns: Option<u32>,
     pub agent_env: Option<BTreeMap<String, String>>,
+    /// The harnesses this slot may use and the rules for moving between them (`chain[0]` is the loop's own `adapter`).
+    /// Without it the slot has only its own adapter: rate limits are still waited out or paused on, and a lone harness that
+    /// crashes `max_consecutive_failures` times in a row still fails the agent.
+    pub fallback: Option<FallbackPlan>,
+    /// MCP servers handed to every agent turn (the Ratchet optimization tool set).
+    pub mcp: Vec<McpServer>,
 }
 
 /// What [`run_runner_loop`] needs: the wiring of the TypeScript `RunnerLoopOptions` plus the loop's tuning (the TS
@@ -134,6 +144,32 @@ struct VerdictMsg {
 }
 
 #[derive(Debug, Clone)]
+struct Note {
+    seq: u64,
+    text: String,
+    queued_at: i64,
+}
+
+/// What the adapter reported during one turn, read when the turn ends.
+#[derive(Debug, Default, Clone, Copy)]
+struct TurnSignals {
+    /// Set by a `rate_limited` event; the inner value is the reset time in epoch ms when the CLI gave one.
+    rate_limited: Option<Option<i64>>,
+    auth_expired: bool,
+}
+
+impl TurnSignals {
+    fn failure(&self) -> Option<Failure> {
+        if self.auth_expired {
+            Some(Failure::AuthExpired)
+        } else {
+            self.rate_limited
+                .map(|resets_at_ms| Failure::RateLimited { resets_at_ms })
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct LatestBest {
     sha: String,
     branch: String,
@@ -142,7 +178,12 @@ struct LatestBest {
 #[derive(Default)]
 struct MailboxState {
     verdicts: HashMap<String, VerdictMsg>,
-    user_messages: Vec<String>,
+    /// Steering notes queued by the user and not yet read by an agent turn.
+    user_messages: Vec<Note>,
+    /// How many steering notes this loop has queued so far (the next note's `seq` is this + 1).
+    note_seq: u64,
+    /// Commits the agent named with `submit_candidate` that the next commit step has not looked at.
+    submits: Vec<(String, Option<String>)>,
     paused: bool,
     /// Latest shared best announced by the engine (`ratchet` message) or won by this agent.
     latest_best: Option<LatestBest>,
@@ -198,6 +239,7 @@ struct Core {
     reason: Mutex<Option<RunnerStopReason>>,
     mailbox: Arc<Mailbox>,
     shared: Mutex<Shared>,
+    signals: Mutex<TurnSignals>,
     tuning: LoopTuning,
     remote: String,
     best_branch: String,
@@ -300,6 +342,20 @@ impl Core {
     }
 
     fn on_agent_event(&self, e: AgentEvent) {
+        match e.event_type {
+            AgentEventType::RateLimited => {
+                // `data.resetsAt` is epoch seconds
+                let at = e
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.get("resetsAt"))
+                    .and_then(Value::as_i64)
+                    .map(|s| s.saturating_mul(1000));
+                self.signals.lock().unwrap().rate_limited = Some(at);
+            }
+            AgentEventType::AuthExpired => self.signals.lock().unwrap().auth_expired = true,
+            _ => {}
+        }
         {
             let mut shared = self.shared.lock().unwrap();
             if e.event_type == AgentEventType::Message
@@ -320,17 +376,55 @@ impl Core {
         (self.emit_fn)(e);
     }
 
+    /// The turn's candidate, if the agent changed anything. A commit named with `submit_candidate` that is not the branch head
+    /// is reported in the log: the loop always submits the head.
     async fn commit_if_changed(
         &self,
         turn: u32,
         known: &HashSet<String>,
+    ) -> Result<Option<Candidate>, String> {
+        let submits = std::mem::take(&mut self.mailbox.state.lock().unwrap().submits);
+        let note = submits
+            .iter()
+            .rev()
+            .find_map(|(_, n)| n.clone().filter(|n| !n.trim().is_empty()));
+        let candidate = self.commit_inner(turn, known, note).await?;
+        for (sha, _) in &submits {
+            match &candidate {
+                Some(c) if !sha.is_empty() && c.sha.starts_with(sha.as_str()) => {}
+                Some(c) => self.status(
+                    format!(
+                        "submit_candidate named {} but the branch head is {}; submitting the head",
+                        sha.chars().take(10).collect::<String>(),
+                        c.sha.chars().take(10).collect::<String>()
+                    ),
+                    Some(json!({"submit": {"sha": sha, "head": c.sha}})),
+                ),
+                None => self.status(
+                    format!(
+                        "submit_candidate named {} but there is nothing new to submit",
+                        sha.chars().take(10).collect::<String>()
+                    ),
+                    Some(json!({"submit": {"sha": sha}})),
+                ),
+            }
+        }
+        Ok(candidate)
+    }
+
+    async fn commit_inner(
+        &self,
+        turn: u32,
+        known: &HashSet<String>,
+        note: Option<String>,
     ) -> Result<Option<Candidate>, String> {
         let git = &self.git;
         let g = |e: crate::git::GitError| e.to_string();
         git.run(&["add", "-A"]).await.map_err(g)?;
         let staged = git.try_run(&["diff", "--cached", "--quiet"]).await.code != 0;
         if staged {
-            let last_message = self.shared.lock().unwrap().last_message.clone();
+            let last_message =
+                note.unwrap_or_else(|| self.shared.lock().unwrap().last_message.clone());
             let subject = Some(first_line(&last_message, 72))
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| format!("candidate {turn}"));
@@ -524,9 +618,30 @@ impl Core {
                 }
             }
             RunnerMessage::User { text } => {
-                st.user_messages.push(text.clone());
+                st.note_seq += 1;
+                let note = Note {
+                    seq: st.note_seq,
+                    text: text.clone(),
+                    queued_at: self.clock.now(),
+                };
+                st.user_messages.push(note.clone());
                 drop(st);
-                self.status("user message received", Some(json!({"text": text})));
+                // `steering.event = queued`: the read receipt (`steering note read`) follows when a turn takes it.
+                self.status(
+                    "user message received",
+                    Some(json!({
+                        "text": text,
+                        "steering": {"event": "queued", "seq": note.seq, "at": note.queued_at},
+                    })),
+                );
+            }
+            RunnerMessage::Submit { sha, note } => {
+                st.submits.push((sha.clone(), note.clone()));
+                drop(st);
+                self.status(
+                    "candidate named with submit_candidate",
+                    Some(json!({"submit": {"sha": sha, "note": note}})),
+                );
             }
             RunnerMessage::Pause => st.paused = true,
             RunnerMessage::Resume => st.paused = false,
@@ -648,6 +763,7 @@ pub async fn run_runner_loop(opts: RunnerLoopOptions) -> RunnerLoopResult {
         reason: Mutex::new(None),
         mailbox,
         shared: Mutex::new(Shared::default()),
+        signals: Mutex::new(TurnSignals::default()),
         tuning,
         remote,
         best_branch,
@@ -689,7 +805,7 @@ pub async fn run_runner_loop(opts: RunnerLoopOptions) -> RunnerLoopResult {
     }
     tokio::spawn(pump(core.clone(), inbox));
 
-    if let Err(err) = body(&core, &mut local, adapter.as_ref()).await {
+    if let Err(err) = body(&core, &mut local, adapter).await {
         core.emit(
             AgentEventType::Error,
             Some(format!("runner crashed: {err}")),
@@ -725,20 +841,232 @@ fn result_of(core: &Core, local: &Local) -> RunnerLoopResult {
     }
 }
 
+/// Where a failed turn's harness change ended.
+enum Moved {
+    /// Another harness (or the same one, once it is back) is active.
+    Switched,
+    /// The loop was stopped while it waited for a harness.
+    Stopped,
+}
+
+/// The chain and probe the loop runs against.
+struct Plan {
+    chain: Vec<HarnessSlot>,
+    probe: Option<Arc<dyn AvailabilityProbe>>,
+}
+
+impl Core {
+    /// Is harness `idx` usable now? The injected probe (detection) when there is one, else the adapter's own preflight.
+    async fn probe(&self, plan: &Plan, idx: usize) -> Result<(), String> {
+        if let Some(p) = &plan.probe {
+            return p.check(plan.chain[idx].kind).await;
+        }
+        match plan.chain[idx].adapter.preflight().await {
+            Ok(p) if p.ok => Ok(()),
+            Ok(p) => Err(p.problems.join("; ")),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// One run-log entry about harnesses: `data.harness.event` is `wait | switch | paused | resumed`. `notify` makes the engine
+    /// tell the user (once, because this event is written once).
+    fn harness_event(
+        &self,
+        text: impl Into<String>,
+        event: &str,
+        mut harness: Value,
+        notify: Option<String>,
+        state: Option<&str>,
+    ) {
+        harness["event"] = json!(event);
+        let mut data = json!({ "harness": harness });
+        if let Some(n) = notify {
+            data["notify"] = json!(n);
+        }
+        if let Some(s) = state {
+            data["state"] = json!(s);
+        }
+        self.status(text, Some(data));
+    }
+
+    /// A short rate limit: sleep until it lifts. False when the loop was stopped meanwhile.
+    async fn wait_out(&self, kind: AgentKind, until_ms: i64) -> bool {
+        let now = self.clock.now();
+        let ms = (until_ms - now).max(0);
+        if ms > 0 {
+            self.harness_event(
+                format!(
+                    "{} is rate limited; waiting {} for it to lift",
+                    label(kind),
+                    minutes_text(ms / 1000)
+                ),
+                "wait",
+                json!({"harness": kind.as_str(), "resumesAt": until_ms}),
+                None,
+                None,
+            );
+            if self.clock.sleep(ms as u64, Some(&self.ctl)).await.is_err() {
+                return false;
+            }
+        }
+        !self.ctl.is_cancelled()
+    }
+
+    /// Leave the active harness (already set aside in `state`) for the next one that works at the next turn. When none does,
+    /// pause with the reason and look again every `recheck_s`; the first harness that is back carries on.
+    async fn move_on(
+        &self,
+        plan: &Plan,
+        state: &mut FallbackState,
+        cause: Cause,
+        why: &str,
+    ) -> Moved {
+        let from = state.active_kind();
+        let now = self.clock.now();
+        for idx in state.candidates(now, true) {
+            match self.probe(plan, idx).await {
+                Ok(()) => {
+                    state.activate(idx);
+                    self.announce_switch(from, state.kind(idx), cause, why);
+                    return Moved::Switched;
+                }
+                Err(e) => state.cool(idx, Cause::Unavailable, None, &e),
+            }
+        }
+        // every harness is unavailable: pause and look again
+        let reason = format!("no agent is available. {}", state.describe(now));
+        let every = Duration::from_secs(state.policy().recheck_s.max(1));
+        self.harness_event(
+            format!(
+                "paused: {reason}; checking again in {}",
+                minutes_text(every.as_secs() as i64)
+            ),
+            "paused",
+            json!({"reason": reason, "recheckSeconds": every.as_secs()}),
+            Some(format!(
+                "Optimization paused: {reason}. It resumes by itself when an agent is back."
+            )),
+            Some("paused"),
+        );
+        loop {
+            if self
+                .clock
+                .sleep(every.as_millis() as u64, Some(&self.ctl))
+                .await
+                .is_err()
+                || self.ctl.is_cancelled()
+            {
+                return Moved::Stopped;
+            }
+            let now = self.clock.now();
+            for idx in state.candidates(now, false) {
+                match self.probe(plan, idx).await {
+                    Ok(()) => {
+                        state.activate(idx);
+                        if state.kind(idx) != from {
+                            self.announce_switch(from, state.kind(idx), cause, why);
+                        }
+                        self.harness_event(
+                            format!("resumed with {}", label(state.kind(idx))),
+                            "resumed",
+                            json!({"harness": state.kind(idx).as_str()}),
+                            None,
+                            Some("running"),
+                        );
+                        return Moved::Switched;
+                    }
+                    Err(e) => state.cool(idx, Cause::Unavailable, None, &e),
+                }
+            }
+        }
+    }
+
+    fn announce_switch(&self, from: AgentKind, to: AgentKind, cause: Cause, why: &str) {
+        let (cause_word, notify) = match cause {
+            Cause::AuthExpired => (
+                "auth-expired",
+                Some(format!(
+                    "{} sign-in expired; continuing with {}",
+                    label(from),
+                    label(to)
+                )),
+            ),
+            Cause::RateLimited => ("rate-limited", None),
+            Cause::Crashing => ("crashing", None),
+            Cause::Unavailable => ("unavailable", None),
+        };
+        let reason = match cause {
+            Cause::AuthExpired => format!("{} sign-in expired", label(from)),
+            Cause::RateLimited => format!("{} is rate limited", label(from)),
+            Cause::Crashing => format!("{} kept failing", label(from)),
+            Cause::Unavailable => format!("{} is not available", label(from)),
+        };
+        self.harness_event(
+            format!("switching from {} to {}: {reason}", label(from), label(to)),
+            "switch",
+            json!({
+                "from": from.as_str(),
+                "to": to.as_str(),
+                "cause": cause_word,
+                "reason": reason,
+                "detail": first_line(why, 200),
+            }),
+            notify,
+            None,
+        );
+    }
+
+    /// Hands the steering notes to a turn: one `steering note read` entry per note, naming the harness and the turn.
+    fn read_notes(&self, notes: &[Note], harness: AgentKind, turn: u32) {
+        let read_at = self.clock.now();
+        for n in notes {
+            self.status(
+                "steering note read",
+                Some(json!({
+                    "text": n.text,
+                    "steering": {
+                        "event": "read",
+                        "seq": n.seq,
+                        "queuedAt": n.queued_at,
+                        "readAt": read_at,
+                        "harness": harness.as_str(),
+                        "turn": turn,
+                    },
+                })),
+            );
+        }
+    }
+}
+
 async fn body(
     core: &Arc<Core>,
     local: &mut Local,
-    adapter: &dyn AgentAdapter,
+    adapter: Arc<dyn AgentAdapter>,
 ) -> Result<(), String> {
     let git = &core.git;
     let config = &core.config;
     let g = |e: crate::git::GitError| e.to_string();
     let max_idle = core.tuning.max_idle_turns.unwrap_or(2);
-    let max_failures = core.tuning.max_consecutive_failures.unwrap_or(3);
     let retry_delay = core
         .tuning
         .retry_delay
         .unwrap_or(Duration::from_millis(5000));
+
+    // ---- the harness chain: this slot's own adapter first, then whatever the optimization's list adds
+    let (chain, policy, probe) = match core.tuning.fallback.clone() {
+        Some(p) if !p.chain.is_empty() => (p.chain, p.policy, p.probe),
+        other => (
+            vec![HarnessSlot::new(adapter.kind(), adapter.clone())],
+            other.map(|p| p.policy).unwrap_or_default(),
+            None,
+        ),
+    };
+    let plan = Plan { chain, probe };
+    let mut state = FallbackState::new(
+        plan.chain.iter().map(|s| s.kind).collect(),
+        policy,
+        core.tuning.max_consecutive_failures,
+    );
 
     // ---- setup
     core.status(
@@ -782,16 +1110,38 @@ async fn body(
         problems: vec![e.to_string()],
     });
     if !preflight.ok {
-        core.emit(
-            AgentEventType::Error,
-            Some(format!(
-                "agent preflight failed: {}",
-                preflight.problems.join("; ")
-            )),
-            Some(json!({"problems": preflight.problems})),
-        );
-        core.set_reason(RunnerStopReason::AgentUnavailable);
-        return Ok(());
+        // The slot's own harness is out. Start on the first other harness of the chain that works; with none, there is
+        // nothing to run.
+        let mut started = false;
+        for idx in 1..plan.chain.len() {
+            match core.probe(&plan, idx).await {
+                Ok(()) => {
+                    state.cool(0, Cause::Unavailable, None, &preflight.problems.join("; "));
+                    state.activate(idx);
+                    core.announce_switch(
+                        plan.chain[0].kind,
+                        plan.chain[idx].kind,
+                        Cause::Unavailable,
+                        &preflight.problems.join("; "),
+                    );
+                    started = true;
+                    break;
+                }
+                Err(e) => state.cool(idx, Cause::Unavailable, None, &e),
+            }
+        }
+        if !started {
+            core.emit(
+                AgentEventType::Error,
+                Some(format!(
+                    "agent preflight failed: {}",
+                    preflight.problems.join("; ")
+                )),
+                Some(json!({"problems": preflight.problems})),
+            );
+            core.set_reason(RunnerStopReason::AgentUnavailable);
+            return Ok(());
+        }
     }
 
     let callback = {
@@ -802,10 +1152,11 @@ async fn body(
     // ---- the loop
     let mut session: Option<AgentSession> = None;
     let mut idle_turns = 0u32;
-    let mut failures = 0u32;
     let mut notes: Vec<String> = Vec::new();
     let mut entry: Option<HistoryEntry> = None;
     let mut no_change = false;
+    // Steering notes a failed turn took but may not have acted on: the next turn (maybe on another harness) repeats them.
+    let mut carried: Vec<String> = Vec::new();
 
     while !core.ctl.is_cancelled() {
         core.wait_unpaused().await;
@@ -814,46 +1165,76 @@ async fn body(
         }
         local.turns += 1;
         let context_text = core.write_context(local, local.turns).await?;
+        let slot = &plan.chain[state.active()];
+        let active_kind = slot.kind;
+        // The steering notes this turn carries. They are marked read as the turn starts, by this harness.
+        let taken: Vec<Note> =
+            std::mem::take(&mut core.mailbox.state.lock().unwrap().user_messages);
+        let user_messages: Vec<String> = std::mem::take(&mut carried)
+            .into_iter()
+            .chain(taken.iter().map(|n| n.text.clone()))
+            .collect();
+        core.read_notes(&taken, active_kind, local.turns);
+        *core.signals.lock().unwrap() = TurnSignals::default();
         let spec = AgentSpec {
             workdir: core.workdir.to_string_lossy().into_owned(),
             prompt: String::new(),
-            model: core.tuning.model.clone().filter(|m| !m.is_empty()),
+            model: core
+                .tuning
+                .model
+                .clone()
+                .filter(|m| !m.is_empty())
+                .filter(|_| state.active() == 0)
+                .or_else(|| slot.model.clone()),
             max_turns: core.tuning.max_turns.filter(|t| *t > 0),
             env: core.tuning.agent_env.clone(),
+            mcp: core.tuning.mcp.clone(),
+        };
+        let spend = core.shared.lock().unwrap().spend_usd;
+        let message = |entry: &Option<HistoryEntry>, notes: &[String], no_change: bool| {
+            build_resume_message(&ResumeInput {
+                entry: entry.as_ref(),
+                best_value: local.best,
+                config,
+                now: core.clock.now(),
+                spend_usd: spend,
+                notes,
+                user_messages: &user_messages,
+                no_change,
+            })
         };
 
         // -- agent turn
         let turn_result: PortResult<()> = if let Some(s) = session.as_mut() {
             core.status(
                 "agent turn started",
-                Some(json!({"turn": local.turns, "resumed": true})),
+                Some(
+                    json!({"turn": local.turns, "resumed": true, "harness": active_kind.as_str()}),
+                ),
             );
-            let spend = core.shared.lock().unwrap().spend_usd;
-            let user_messages: Vec<String> =
-                std::mem::take(&mut core.mailbox.state.lock().unwrap().user_messages);
-            let message = build_resume_message(&ResumeInput {
-                entry: entry.as_ref(),
-                best_value: local.best,
-                config,
-                now: core.clock.now(),
-                spend_usd: spend,
-                notes: &notes,
-                user_messages: &user_messages,
-                no_change,
-            });
-            adapter
+            let message = message(&entry, &notes, no_change);
+            slot.adapter
                 .resume(s, &spec, &message, &callback, Some(&core.ctl))
                 .await
         } else {
             core.status(
                 "agent turn started",
-                Some(json!({"turn": local.turns, "resumed": false})),
+                Some(
+                    json!({"turn": local.turns, "resumed": false, "harness": active_kind.as_str()}),
+                ),
             );
-            let start_spec = AgentSpec {
-                prompt: build_initial_prompt(config, &context_text),
-                ..spec
-            };
-            match adapter.start(&start_spec, &callback, Some(&core.ctl)).await {
+            let mut prompt = build_initial_prompt(config, &context_text);
+            // A new CLI session (the first turn, a restart, a different harness) starts from the brief and the history. What
+            // the previous session would have been told rides along.
+            if !notes.is_empty() || !user_messages.is_empty() || entry.is_some() || no_change {
+                prompt = format!("{prompt}\n---\n\n{}\n", message(&entry, &notes, no_change));
+            }
+            let start_spec = AgentSpec { prompt, ..spec };
+            match slot
+                .adapter
+                .start(&start_spec, &callback, Some(&core.ctl))
+                .await
+            {
                 Ok(s) => {
                     session = Some(s);
                     Ok(())
@@ -861,42 +1242,101 @@ async fn body(
                 Err(e) => Err(e),
             }
         };
-        match turn_result {
-            Ok(()) => failures = 0,
-            Err(err) => {
-                if err.is_cancelled() || core.ctl.is_cancelled() {
-                    break;
-                }
-                failures += 1;
-                let text = describe(&err);
+        let signal = *core.signals.lock().unwrap();
+
+        // -- did the turn fail?
+        let mut failure: Option<(Failure, String)> = None;
+        let mut candidate: Option<Candidate> = None;
+        if let Err(err) = turn_result {
+            if err.is_cancelled() || core.ctl.is_cancelled() {
+                break;
+            }
+            failure = Some((signal.failure().unwrap_or(Failure::Crash), describe(&err)));
+        } else {
+            candidate = core.commit_if_changed(local.turns, &known).await?;
+            // A rate limit or an expired login that left nothing behind is a failed turn, not an idle one.
+            if candidate.is_none()
+                && let Some(f) = signal.failure()
+            {
+                failure = Some((
+                    f,
+                    match f {
+                        Failure::AuthExpired => "the login was rejected".to_owned(),
+                        _ => "the provider refused for lack of quota".to_owned(),
+                    },
+                ));
+            }
+        }
+        if let Some((failure, text)) = failure {
+            if matches!(failure, Failure::Crash) {
                 core.emit(
                     AgentEventType::Error,
                     Some(format!("agent turn failed: {text}")),
-                    Some(json!({"failures": failures})),
+                    Some(json!({"failures": state.strikes() + 1})),
                 );
-                if failures >= max_failures {
+            }
+            carried.clone_from(&user_messages);
+            let now = core.clock.now();
+            let resets_at_ms = match failure {
+                Failure::RateLimited { resets_at_ms } => resets_at_ms,
+                _ => None,
+            };
+            let next = state.on_failure(failure, now);
+            if session.is_none() {
+                local.turns -= 1;
+            }
+            match next {
+                Next::GiveUp => {
                     core.set_reason(RunnerStopReason::Failed);
                     break;
                 }
-                let _ = core
-                    .clock
-                    .sleep(retry_delay.as_millis() as u64, Some(&core.ctl))
-                    .await;
-                // retry as a resume if we have a session, else restart; tell the agent what happened
-                notes = vec![format!(
-                    "Your previous turn crashed ({text}). Check the tree for half-finished edits and continue."
-                )];
-                entry = None;
-                no_change = false;
-                if session.is_none() {
-                    local.turns -= 1;
+                Next::Retry => {
+                    let _ = core
+                        .clock
+                        .sleep(retry_delay.as_millis() as u64, Some(&core.ctl))
+                        .await;
+                    // retry as a resume if we have a session, else restart; tell the agent what happened
+                    notes = vec![format!(
+                        "Your previous turn crashed ({text}). Check the tree for half-finished edits and continue."
+                    )];
+                    entry = None;
+                    no_change = false;
                 }
-                continue;
+                Next::Wait { until_ms } => {
+                    if !core.wait_out(active_kind, until_ms).await {
+                        break;
+                    }
+                    notes = vec![
+                        "Your previous turn was cut short by a rate limit that has lifted. Check the tree for half-finished edits and continue."
+                            .to_owned(),
+                    ];
+                }
+                Next::Leave { cause } => {
+                    state.leave(cause, resets_at_ms, now, &text);
+                    match core.move_on(&plan, &mut state, cause, &text).await {
+                        Moved::Stopped => break,
+                        Moved::Switched => {
+                            // CLI sessions do not cross CLIs: the next turn starts a new one from the brief and the history.
+                            session = None;
+                            notes = vec![format!(
+                                "You are taking over from {} on this branch ({}). Its commits are in your tree, and the history table above lists every verdict so far. Check the tree for half-finished edits, then continue.",
+                                label(active_kind),
+                                match cause {
+                                    Cause::AuthExpired => "its sign-in expired",
+                                    Cause::RateLimited => "it is rate limited",
+                                    Cause::Crashing => "it kept failing",
+                                    Cause::Unavailable => "it is not available",
+                                }
+                            )];
+                        }
+                    }
+                }
             }
+            continue;
         }
+        state.on_success();
 
         // -- submit
-        let candidate = core.commit_if_changed(local.turns, &known).await?;
         entry = None;
         no_change = false;
         let Some(candidate) = candidate else {
@@ -916,6 +1356,7 @@ async fn body(
             continue;
         };
         idle_turns = 0;
+        notes.clear();
         if !core.push().await {
             core.reason
                 .lock()

@@ -365,14 +365,53 @@ async fn optimization(
                 .collect();
             Ok(json!({ "notes": notes }))
         }
-        "connector_query" => Err(ServiceError::Unsupported(
-            "no connector is attached to this optimization".into(),
-        )),
-        "submit_candidate" => Err(ServiceError::Unsupported(
-            "local agents submit by committing with the Ratchet-Candidate trailer".into(),
-        )),
+        "connector_query" => {
+            let a: ConnectorQueryArgs = args(arguments)?;
+            let connector = a.connector.trim();
+            let query = a.query.trim();
+            if connector.is_empty() || query.is_empty() || query.chars().count() > 2000 {
+                return Err(ServiceError::Invalid(
+                    "name a connector and a query of up to 2000 characters".into(),
+                ));
+            }
+            let Some(querier) = state.mcp.connector_querier() else {
+                return Err(ServiceError::Unsupported(
+                    "no connector can be asked from this daemon".into(),
+                ));
+            };
+            let answer = querier.query(connector, query).await?;
+            Ok(cap_answer(answer))
+        }
+        "submit_candidate" => {
+            let Some(agent) = session.scope.agent.as_deref() else {
+                return Err(ServiceError::Invalid("this session has no agent".into()));
+            };
+            let a: SubmitCandidateArgs = args(arguments)?;
+            state
+                .service
+                .submit_candidate(agent, &a.sha, a.note)
+                .await?;
+            Ok(json!({
+                "submitted": a.sha.trim(),
+                "note": "queued: the runner submits your branch head when your turn ends",
+            }))
+        }
         other => Err(ServiceError::Invalid(format!("unknown tool \"{other}\""))),
     }
+}
+
+/// A connector's answer stays small enough to read in one tool result.
+fn cap_answer(answer: Value) -> Value {
+    const MAX: usize = 20_000;
+    let text = answer.to_string();
+    if text.len() <= MAX {
+        return answer;
+    }
+    let mut end = MAX;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    json!({"truncated": true, "text": &text[..end]})
 }
 
 fn one_line(s: &str) -> String {

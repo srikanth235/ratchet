@@ -827,6 +827,9 @@ pub struct AgentSpec {
     pub env: Option<BTreeMap<String, String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_turns: Option<u32>,
+    /// MCP servers handed to this turn (the Ratchet optimization tool set). Empty for callers that need none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp: Vec<McpServer>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -900,6 +903,7 @@ impl From<&AgentSpec> for SessionSpec {
             model: spec.model.clone(),
             env: spec.env.clone(),
             max_turns: spec.max_turns,
+            mcp: spec.mcp.clone(),
             ..Self::default()
         }
     }
@@ -920,6 +924,7 @@ impl SessionSpec {
             model: self.model.clone(),
             env: self.env.clone(),
             max_turns: self.max_turns,
+            mcp: self.mcp.clone(),
         }
     }
 }
@@ -1027,6 +1032,13 @@ pub enum RunnerMessage {
     User {
         text: String,
     },
+    /// The agent's `submit_candidate` tool call: it names the commit it wants judged. The runner loop checks it against its
+    /// branch and uses `note` as the candidate's description.
+    Submit {
+        sha: String,
+        #[serde(default)]
+        note: Option<String>,
+    },
     Pause,
     Resume,
     Stop,
@@ -1055,6 +1067,10 @@ pub struct RunnerConfig {
     pub min_gain: Option<f64>,
     pub budget_usd: f64,
     pub deadline_at: i64,
+    /// The optimization's harness order and fallback rules, as the engine resolved them at launch (`ratchet.yaml` over the
+    /// ledger's settings). `None`: this agent has only its own harness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agents: Option<crate::agents_policy::AgentsPolicy>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1299,11 +1315,14 @@ pub enum EngineEvent {
         level: NoticeLevel,
         text: String,
     },
-    /// True while any optimization is starting, baselining, running or stopping (false again once none is). The
-    /// app turns this into a "prevent system sleep" assertion so the machine does not sleep under a live run.
+    /// True while any optimization is starting, baselining, running or stopping (false again once none is).
+    /// `local_ids` are the live optimizations whose agents run on this machine: only those need the Mac awake (a cloud
+    /// run goes on without it), so the daemon holds its "prevent system sleep" assertion while `local_ids` is not empty.
     RunActive {
         active: bool,
         optimization_ids: Vec<OptimizationId>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        local_ids: Vec<OptimizationId>,
     },
     /// The automatic sandbox changing phase (docs/SIMPLIFIED_MODEL.md, "Sandbox lifecycle: invisible").
     Sandbox {
@@ -1912,6 +1931,7 @@ mod tests {
         let e = EngineEvent::RunActive {
             active: true,
             optimization_ids: vec!["o".into()],
+            local_ids: vec![],
         };
         let v = serde_json::to_value(&e).unwrap();
         assert_eq!(
@@ -1990,6 +2010,7 @@ mod tests {
             model: Some("m".into()),
             env: None,
             max_turns: Some(3),
+            mcp: vec![],
         };
         let spec = SessionSpec::from(&agent);
         assert_eq!(spec.access, Access::Edit { network: true });

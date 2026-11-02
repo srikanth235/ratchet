@@ -1026,6 +1026,65 @@ paths:
           $ref: '#/components/responses/NotFound'
         default:
           $ref: '#/components/responses/Failure'
+  /v1/optimizations/{id}/agents:
+    get:
+      tags:
+      - agents
+      summary: Which agents the optimization may use, in which order, and when it moves from one to the next.
+      operationId: getAgentsPolicy
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentsPolicyVm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
+    put:
+      tags:
+      - agents
+      summary: Set the agents list. It applies to agents launched from now on; 409 while `ratchet.yaml` has an `agents:` section.
+      operationId: setAgentsPolicy
+      parameters:
+      - name: id
+        in: path
+        description: Optimization id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetAgentsPolicyInput'
+        required: true
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentsPolicyVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        default:
+          $ref: '#/components/responses/Failure'
   /v1/optimizations/{id}/calibration:
     get:
       tags:
@@ -1940,6 +1999,48 @@ components:
           $ref: '#/components/schemas/AgentStats'
         status:
           $ref: '#/components/schemas/AgentStatus'
+    AgentsPolicySource:
+      type: string
+      description: Where the policy in force comes from.
+      enum:
+      - settings
+      - config
+    AgentsPolicyVm:
+      type: object
+      description: '`GET /v1/optimizations/{id}/agents`.'
+      required:
+      - harnesses
+      - waitLimitS
+      - crashStrikes
+      - recheckS
+      - source
+      - summary
+      properties:
+        crashStrikes:
+          type: integer
+          format: int32
+          description: Consecutive crashed or malformed turns on one agent before switching.
+          minimum: 0
+        harnesses:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentKind'
+          description: Ordered, most preferred first.
+        recheckS:
+          type: integer
+          format: int64
+          description: While every agent is unavailable, how often to look again, in seconds.
+          minimum: 0
+        source:
+          $ref: '#/components/schemas/AgentsPolicySource'
+        summary:
+          type: string
+          description: '"Claude Code → Codex → Grok", the order the row shows.'
+        waitLimitS:
+          type: integer
+          format: int64
+          description: A rate limit that lifts within this many seconds is waited out; a longer or unknown one switches agent.
+          minimum: 0
     AgentsWhere:
       type: string
       description: 'Where an optimization''s agents run: this machine, or cloud runners.'
@@ -2107,7 +2208,10 @@ components:
             enum:
             - notice
       - type: object
-        description: True while any run is active (the app turns it into "prevent system sleep").
+        description: |-
+          True while a run whose agents run on this Mac is live: the daemon holds its prevent-sleep assertion exactly then
+          (`keepingAwake`), and the menu bar shows "Keeping your Mac awake". A run in the cloud does not count; the Mac may
+          sleep under it. `optimizationIds` are the local runs.
         required:
         - active
         - optimizationIds
@@ -2115,6 +2219,9 @@ components:
         properties:
           active:
             type: boolean
+          keepingAwake:
+            type: boolean
+            description: The daemon is holding the power assertion (always `active` on a Mac; never on hosts without the assertion).
           optimizationIds:
             type: array
             items:
@@ -3149,6 +3256,11 @@ components:
       - kind
       - mode
       properties:
+        keepingAwake:
+          type: boolean
+          description: |-
+            The daemon is holding the prevent-sleep assertion because a run's agents are running on this Mac (the menu bar
+            shows "Keeping your Mac awake"). Never true for a run in the cloud.
         kind:
           $ref: '#/components/schemas/EngineKind'
         mode:
@@ -4254,6 +4366,7 @@ components:
       enum:
       - ship
       - failed
+      - connector
     OverviewRange:
       type: string
       description: Window the Overview covers. `all` = everything in the ledger.
@@ -4342,7 +4455,7 @@ components:
           description: Ledger status as the pills use it (`pr-open` once a pull request exists).
         statusLabel:
           type: string
-          description: The status word shown next to the dot ("Running", "Waiting on you", "No win").
+          description: The status word shown next to the dot ("Running", "Ready to ship", "No win").
         tone:
           $ref: '#/components/schemas/StatusTone'
         unit:
@@ -4950,6 +5063,34 @@ components:
         xaiApiKey:
           type: boolean
           description: 'Absent in a response from an older daemon: no key.'
+    SetAgentsPolicyInput:
+      type: object
+      description: '`PUT /v1/optimizations/{id}/agents`. A rule left out keeps its default (30 minutes, 3 strikes, 5 minutes).'
+      required:
+      - harnesses
+      properties:
+        crashStrikes:
+          type:
+          - integer
+          - 'null'
+          format: int32
+          minimum: 0
+        harnesses:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentKind'
+        recheckS:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+        waitLimitS:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
     SetAwsProfileInput:
       type: object
       required:
@@ -5123,7 +5264,7 @@ components:
           description: 'Re-sign-in: store the new token on this connector (default: a new one, or the one with the same login).'
     StatusTone:
       type: string
-      description: 'Dot colour of a status word: brass (running), amber (waiting on you), mint (done), grey (nothing), rose (failed).'
+      description: 'Dot colour of a status word: brass (running), amber (a person has something to do: ready to ship), mint (done), grey (nothing), rose (failed).'
       enum:
       - run
       - wait

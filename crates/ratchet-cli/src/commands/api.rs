@@ -10,7 +10,7 @@ use serde_json::json;
 
 use super::{emit_json, table, urlencode};
 use crate::cli::{
-    AgentArg, AgentCmd, Command, CostCmd, DemoArg, EnvCmd, EventsArgs, RunArgs, WhereArg,
+    AgentArg, AgentCmd, AgentsCmd, Command, CostCmd, DemoArg, EnvCmd, EventsArgs, RunArgs, WhereArg,
 };
 use crate::client::{Client, ClientError};
 use crate::io::Io;
@@ -80,6 +80,7 @@ pub async fn run(c: &Client, cmd: Command, json: bool, io: &dyn Io) -> R {
             limit,
         } => activity(c, optimization, limit, json, io).await,
         Command::Agent { action } => agent(c, action, json, io).await,
+        Command::Agents { action } => agents(c, action, json, io).await,
         Command::Events(args) => events(c, args, json, io).await,
         Command::Env { action } => env(c, action, json, io).await,
         Command::Cost {
@@ -633,6 +634,47 @@ async fn connectors(c: &Client, json: bool, io: &dyn Io) -> R {
 }
 
 // ---- agents, events, environments ---------------------------------------------------------------------------------
+
+async fn agents(c: &Client, action: AgentsCmd, json: bool, io: &dyn Io) -> R {
+    let (id, put) = match action {
+        AgentsCmd::Show { optimization } => (optimization, None),
+        AgentsCmd::Set {
+            optimization,
+            order,
+            wait_limit_minutes,
+            crash_strikes,
+            recheck_minutes,
+        } => (
+            optimization,
+            Some(SetAgentsPolicyInput {
+                harnesses: order.into_iter().map(agent_kind).collect(),
+                wait_limit_s: wait_limit_minutes.map(|m| m * 60),
+                crash_strikes: crash_strikes.map(|n| n.min(u32::MAX as u64) as u32),
+                recheck_s: recheck_minutes.map(|m| m * 60),
+            }),
+        ),
+    };
+    let path = format!("/v1/optimizations/{id}/agents");
+    let vm: AgentsPolicyVm = match put {
+        Some(body) => c.put(&path, &body).await?,
+        None => c.get(&path).await?,
+    };
+    if json {
+        emit_json(io, &vm);
+    } else {
+        io.out(&format!(
+            "{}\n  switch after {} crashed turns in a row; wait out a rate limit up to {} min; look again every {} min when none works\n",
+            vm.summary,
+            vm.crash_strikes,
+            vm.wait_limit_s / 60,
+            vm.recheck_s / 60
+        ));
+        if vm.source == AgentsPolicySource::Config {
+            io.out("  set by `agents:` in ratchet.yaml; change it there\n");
+        }
+    }
+    Ok(0)
+}
 
 async fn agent(c: &Client, action: AgentCmd, json: bool, io: &dyn Io) -> R {
     match action {

@@ -140,4 +140,12 @@ pub mod k {
     pub fn agents_where(opt: &str) -> String {
         format!("opt:{opt}:agents_where")
     }
+    /// Set when the drafted environment could not be created and a smaller setup was used: the notice's text.
+    pub fn environment_fallback(opt: &str) -> String {
+        format!("opt:{opt}:environment_fallback")
+    }
+    /// The harness list and fallback rules (JSON `AgentsPolicy`).
+    pub fn agents_policy(opt: &str) -> String {
+        format!("opt:{opt}:agents_policy")
+    }
 }

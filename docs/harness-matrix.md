@@ -209,3 +209,88 @@ Tool names for Grok's read-only lists (`GROK_READ_ONLY_TOOLS`, `GROK_WRITE_TOOLS
 - **Preflight.** `desktop/preflight.rs` checks the harness list against `AgentsWhere` when an optimization is created and again
   when it is started: local needs the CLI installed and signed in (or a key in the environment); cloud needs the vendor key the
   runner would receive. The error is `NotConfigured`: "Needs sign-in: Codex is signed out. Run `codex login` ...".
+
+## P6 notes (optimizations: agents list, fallback, tools, no human gate, keep-awake)
+
+Code: `ratchet-core/src/agents_policy.rs` (the policy), `ratchet-agents/src/fallback.rs` (the rules) and `runner_loop.rs` (the loop),
+`ratchet-agents/src/control/local.rs` + `local_agents.rs` (the local chain and tool hooks), `ratchet-engine/src/agents.rs` (policy in
+the engine), `ratchet-engine/src/sandbox_auto.rs` (environment fallback), `ratchetd/src/power.rs` + `host.rs` (power assertion),
+`ratchetd/src/real/service.rs` + `mcp/tools.rs` (daemon side). Tests: `ratchet-agents/tests/fallback.rs`,
+`ratchet-engine/tests/engine/{environment_apply,sandbox_auto}.rs`, `ratchetd/tests/api/mcp.rs`, `ratchetd/src/{power,host}.rs`.
+
+### The agents list
+
+`agents:` is an ordered list of harnesses plus three rules (wait limit 30 min, crash strikes 3, re-check 5 min). Two places set it,
+`ratchet.yaml` winning:
+
+- the optimization's settings, `opt:<id>:agents_policy` in the engine's key-value store; without it the list is the optimization's own
+  agents in creation order, so older optimizations behave as before;
+- an optional section in `ratchet.yaml`, either `agents: [claude-code, codex]` or
+  `agents: {order: [...], wait_limit_minutes: 30, crash_strikes: 3, recheck_minutes: 5}`.
+
+API: `GET /v1/optimizations/{id}/agents` → `{harnesses, waitLimitS, crashStrikes, recheckS, source: settings|config, summary}`
+(`summary` is "Claude Code → Codex → Grok", the order the Agents row shows); `PUT` takes `{harnesses, waitLimitS?, crashStrikes?,
+recheckS?}`, answers 400 for an empty list, `mock` or a zero rule, and 409 while `ratchet.yaml` has the section. CLI:
+`ratchet agents show <id>`, `ratchet agents set <id> --order claude-code,codex [--wait-limit-minutes N --crash-strikes N
+--recheck-minutes N]`. A new list applies to agents launched from then on; a runner keeps the chain it started with.
+
+Each slot's chain is its own harness first, then the rest of the list in order (`AgentsPolicy::chain_from`). Racing keeps working:
+two slots on `claude-code` and `codex` each fall back to the other.
+
+### Fallback (plan 4.6), as the runner loop does it
+
+| What the turn did | What happens | Run log |
+|---|---|---|
+| `rate_limited`, reset time under 30 min | sleeps until the reset, runs the turn again on the same harness | `harness.event = wait`, `resumesAt` |
+| `rate_limited`, longer or no reset time | the harness is set aside (until its reset, else 1 h); the next harness starts at the next turn from the brief and the history (CLI sessions do not cross CLIs); the resume message the old session would have got rides along | `harness.event = switch`, `cause = rate-limited` |
+| `auth_expired` | switch now | `switch`, `cause = auth-expired`, **`notify`** |
+| 3 crashes or malformed streams in a row | switch (a slot with no other harness keeps the old rule: the agent fails) | `switch`, `cause = crashing` |
+| every harness unavailable | the agent pauses; every `recheckSeconds` the chain is looked at again (detection, via each adapter's `preflight` or the injected probe); the first harness that is back carries on | `paused` (`data.state = paused`, **`notify`**), then `resumed` (`data.state = running`) and a `switch` if the harness changed |
+| the slot's own harness fails preflight at the start | starts on the first harness of the chain that works | `switch`, `cause = unavailable` |
+
+Every entry is a `status` event, so it is a ledger event and shows in the run log: `data.harness = {event, from, to, cause, reason,
+detail}` (`wait` carries `harness`, `resumesAt`; `paused` carries `reason`, `recheckSeconds`). `data.notify` is a sentence for the user;
+the engine turns each one into a single `notice` event (warning) while the entry stays in the log. A turn that reports a rate limit or
+an expired login and made no change is a failed turn, not an idle one.
+
+### Steering notes
+
+`RunnerMessage::User` is queued when it arrives (`status` "user message received", `data.steering = {event: queued, seq, at}`), and
+read when a turn starts: one `status` "steering note read" per note, `data.steering = {event: read, seq, queuedAt, readAt, harness,
+turn}`. The note rides in the first prompt too (not only in resumes). A note taken by a turn that then failed is repeated to the next
+turn, so it is never lost to a switch; its read entry is not written twice.
+
+### The optimization tool set, locally
+
+Every local agent turn gets `mcp__ratchet__*`: the daemon issues the agent a session token for the optimization set, bound to its
+optimization and agent, when its loop starts (`LocalRunnerControlOptions::mcp_for`) and revokes it when the loop ends (`mcp_done`).
+`AgentSpec` gained `mcp` so the harness adapters' existing flags (`--mcp-config`, `-c mcp_servers.*`, `session/new`) apply to the
+runner loop's turns. On the daemon:
+
+- `submit_candidate {sha, note}` → `RunnerMessage::Submit` to the agent's own loop. The loop still submits the branch head with the
+  trailer; the note becomes the candidate's description, and a sha that is not the head is reported in the log.
+- `connector_query {connector, query}` → `ConnectorQuery` (the connectors the user signed in). Read-only, 2000-character query,
+  20 000-character answer. A signed-out or expired connector answers `409 Needs you: ... this optimization carries on without it`:
+  the one thing a person has to fix. The only connector that answers today is GitHub (`repo:<owner>/<name>`); other kinds say they do
+  not answer queries yet (no metrics connector exists in this codebase).
+
+### No human gate
+
+- `POST /v1/optimizations` with `environmentDraftId` no longer needs an approved draft. `EnvDrafts::settle` runs when it is
+  created: a ready draft whose checks all passed is committed (onto its base ref; create the draft with `baseRef: ratchet/config` to
+  keep `main` untouched), a failing one is revised once into a smaller setup, and one that still fails is dropped with a `notice`
+  ("The environment was not used: ... runs with the standard setup"). Nothing is approved by a person; the approval endpoints stay
+  for callers that use them.
+- Starting: if the drafted environment cannot be created, the engine tries the standard sandbox (a `notice` says so, kv
+  `opt:<id>:environment_fallback`). Only when that fails too does the run fail: status `failed`, stop reason "could not create the
+  environment in <region>, even with a smaller setup: ...", plus a `notice` (error). It no longer stays a draft.
+- The Overview status word for a finished run with unshipped wins is "Ready to ship" (was "Waiting on you"); `needsYou` keeps only what
+  a person must do: open a pull request, look at a failed run, and the new `kind: connector` entry ("Sign in to X again") for a
+  signed-out or expired connector.
+
+### Keep-awake
+
+`run-active.optimizationIds` and `active` now mean "a run whose agents run on this Mac is live" (engine: `RunActive.local_ids`); a
+cloud-only run no longer holds the Mac. The daemon's hook takes an `IOPMAssertion` (`PreventUserIdleSystemSleep`, FFI in
+`ratchetd/src/power.rs`; `caffeinate -i -w <pid>` only if the OS refuses) exactly while `active`. The held state is published as
+`keepingAwake` on `run-active` events and `engine.keepingAwake` on every snapshot, settings and health answer.

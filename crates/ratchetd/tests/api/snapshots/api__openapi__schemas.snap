@@ -1,5 +1,6 @@
 ---
 source: crates/ratchetd/tests/api/openapi.rs
+assertion_line: 45
 expression: names
 ---
 - ActivityTone
@@ -18,6 +19,8 @@ expression: names
 - AgentStats
 - AgentStatus
 - AgentVm
+- AgentsPolicySource
+- AgentsPolicyVm
 - AgentsWhere
 - ApiError
 - ApiEvent
@@ -149,6 +152,7 @@ expression: names
 - SaveRepoConnectionsInput
 - SecretName
 - SecretsPresent
+- SetAgentsPolicyInput
 - SetAwsProfileInput
 - SetSecretInput
 - SettingsVm

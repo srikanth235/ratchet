@@ -293,7 +293,7 @@ async fn is_reused_while_runs_are_active_concurrent_first_starts_apply_once() {
 }
 
 #[tokio::test]
-async fn a_failed_creation_leaves_the_optimization_a_draft_with_a_clear_error_and_a_retry_works() {
+async fn a_failed_creation_fails_the_run_with_a_clear_reason_and_nobody_is_asked_to_retry() {
     let mut h = live().await;
     *h.sandbox.fail_apply.lock().unwrap() = Some(PortError::failed("tofu apply failed (exit 1)"));
     h.bench.set(
@@ -315,15 +315,17 @@ async fn a_failed_creation_leaves_the_optimization_a_draft_with_a_clear_error_an
         "{}",
         err.message
     );
-    assert_eq!(h.status(&id).await, OptimizationStatus::Draft);
+    // no waiting state: the run failed, and says why
+    assert_eq!(h.status(&id).await, OptimizationStatus::Failed);
+    assert_eq!(
+        h.engine.stop_reason(&id).await.unwrap().as_deref(),
+        Some(err.message.as_str())
+    );
     assert!(!h.engine.run_active());
     assert_eq!(
         sandbox_phases(&mut h),
         [SandboxPhase::Creating, SandboxPhase::Failed]
     );
-    *h.sandbox.fail_apply.lock().unwrap() = None;
-    h.engine.start(&id).await.unwrap();
-    assert_eq!(h.status(&id).await, OptimizationStatus::Running);
 }
 
 #[tokio::test]
@@ -732,6 +734,7 @@ fn flips(h: &mut Harness) -> Vec<(bool, Vec<String>)> {
             E::RunActive {
                 active,
                 optimization_ids,
+                ..
             } => Some((
                 active,
                 optimization_ids.iter().map(ToString::to_string).collect(),
@@ -762,6 +765,52 @@ async fn flips_true_when_a_run_starts_even_while_its_environment_is_still_being_
     assert!(!h.engine.run_active());
     let actives: Vec<_> = flips(&mut h).into_iter().map(|(a, _)| a).collect();
     assert_eq!(actives, [true, false]);
+}
+
+/// The latest `run-active`: (any run live, the runs that need this Mac awake).
+fn awake(h: &mut Harness) -> (bool, Vec<String>) {
+    h.events()
+        .into_iter()
+        .filter_map(|e| match e {
+            E::RunActive {
+                active, local_ids, ..
+            } => Some((active, local_ids.iter().map(ToString::to_string).collect())),
+            _ => None,
+        })
+        .next_back()
+        .expect("a run-active event")
+}
+
+// P6, keep-awake: only a run whose agents run on this Mac holds it awake; a cloud run goes on without it.
+#[tokio::test]
+async fn only_runs_with_agents_on_this_machine_need_the_mac_awake() {
+    let mut h = Harness::new(live_with(
+        auto(),
+        HarnessOptions {
+            local_runners: true,
+            ..Default::default()
+        },
+    ))
+    .await;
+    run(&h, "run-cloud", &[Codex], Some(AgentsWhere::Cloud)).await;
+    assert!(h.engine.run_active());
+    assert_eq!(
+        awake(&mut h),
+        (true, vec![]),
+        "a cloud-only run: the Mac may sleep"
+    );
+
+    run(&h, "run-local", &[Codex], Some(AgentsWhere::Local)).await;
+    assert_eq!(awake(&mut h), (true, vec!["run-local".to_owned()]));
+
+    h.engine.stop("run-local", None).await.unwrap();
+    assert_eq!(
+        awake(&mut h),
+        (true, vec![]),
+        "the cloud run goes on, the Mac may sleep again"
+    );
+    h.engine.stop("run-cloud", None).await.unwrap();
+    assert_eq!(awake(&mut h), (false, vec![]));
 }
 
 #[tokio::test]

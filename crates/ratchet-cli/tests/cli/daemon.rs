@@ -554,7 +554,7 @@ async fn repos_inspect_overview_and_connectors() {
             && ov
                 .stdout
                 .contains("Open a pull request for 2 verified wins")
-            && ov.stdout.contains("Waiting on you"),
+            && ov.stdout.contains("Ready to ship"),
         "{}",
         ov.stdout
     );

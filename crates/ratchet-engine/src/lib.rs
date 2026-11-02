@@ -17,6 +17,7 @@
 // Callback settings (`Arc<dyn Fn(..) -> ..>`) mirror the TypeScript option bags; aliases would hide the shapes.
 #![allow(clippy::type_complexity)]
 
+pub mod agents;
 pub mod bench_stats;
 pub mod cost;
 pub mod deps;

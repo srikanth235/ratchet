@@ -138,6 +138,10 @@ pub struct RatchetConfig {
     #[serde(default)]
     pub protected: Vec<String>,
     pub agent: AgentConfig,
+    /// Optional override of the optimization's harness order and fallback rules (`agents:`). The settings in the ledger apply
+    /// when this is absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agents: Option<crate::agents_policy::AgentsPolicy>,
 }
 
 impl RatchetConfig {

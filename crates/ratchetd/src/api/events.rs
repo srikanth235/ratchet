@@ -71,11 +71,16 @@ pub enum ApiEvent {
         level: NoticeLevel,
         text: String,
     },
-    /// True while any run is active (the app turns it into "prevent system sleep").
+    /// True while a run whose agents run on this Mac is live: the daemon holds its prevent-sleep assertion exactly then
+    /// (`keepingAwake`), and the menu bar shows "Keeping your Mac awake". A run in the cloud does not count; the Mac may
+    /// sleep under it. `optimizationIds` are the local runs.
     #[serde(rename_all = "camelCase")]
     RunActive {
         active: bool,
         optimization_ids: Vec<String>,
+        /// The daemon is holding the power assertion (always `active` on a Mac; never on hosts without the assertion).
+        #[serde(default)]
+        keeping_awake: bool,
     },
     /// The automatic environment changing phase.
     #[serde(rename_all = "camelCase")]
@@ -196,15 +201,10 @@ impl From<ratchet_core::ports::EngineEvent> for ApiEvent {
                 level,
                 text,
             },
-            E::RunActive {
-                active,
-                optimization_ids,
-            } => ApiEvent::RunActive {
-                active,
-                optimization_ids: optimization_ids
-                    .into_iter()
-                    .map(|i| i.into_string())
-                    .collect(),
+            E::RunActive { local_ids, .. } => ApiEvent::RunActive {
+                active: !local_ids.is_empty(),
+                keeping_awake: !local_ids.is_empty() && crate::power::KEEP_AWAKE_SUPPORTED,
+                optimization_ids: local_ids.into_iter().map(|i| i.into_string()).collect(),
             },
             E::Sandbox {
                 sandbox_id,

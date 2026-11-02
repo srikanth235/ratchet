@@ -17,6 +17,7 @@
 //!
 //! This is the Rust port of `packages/core`; the TypeScript stays as the executable spec. See `PARITY.md`.
 
+pub mod agents_policy;
 pub mod bench;
 pub mod config;
 pub mod cost;
@@ -33,6 +34,7 @@ pub mod sandbox;
 pub mod templates;
 pub mod value;
 
+pub use agents_policy::AgentsPolicy;
 pub use bench::{
     Calibration, CalibrationInput, CalibrationSource, NoiseFloorOptions, StatsError, Summary,
     calibrate_baseline, coefficient_of_variation, explain_calibration, extract_last_json_object,

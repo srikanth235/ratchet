@@ -296,6 +296,7 @@ impl AgentEnvironmentDrafter {
             model: self.o.model.clone(),
             env: None,
             max_turns: self.o.max_turns,
+            mcp: Vec::new(),
         };
         let timeout = self.o.agent_timeout.unwrap_or(Duration::from_secs(15 * 60));
         let cancel = CancellationToken::new();

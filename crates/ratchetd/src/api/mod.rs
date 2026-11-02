@@ -8,6 +8,7 @@
 //! AWS, agent CLIs), [`repos`] (repos, environments), [`commands`] (bodies and queries), [`events`] (the SSE
 //! union), and the provisional [`connectors`], [`overview`] and [`env_drafts`].
 
+pub mod agents;
 pub mod commands;
 pub mod common;
 pub mod connectors;
@@ -20,6 +21,7 @@ pub mod summary;
 pub mod validate;
 pub mod vm;
 
+pub use agents::*;
 pub use commands::*;
 pub use common::*;
 pub use connectors::*;

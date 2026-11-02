@@ -29,6 +29,7 @@ pub mod mcp;
 #[cfg(feature = "server")]
 pub mod openapi;
 pub mod paths;
+pub mod power;
 #[cfg(feature = "engine")]
 pub mod real;
 #[cfg(feature = "server")]

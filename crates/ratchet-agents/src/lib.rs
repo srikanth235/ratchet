@@ -22,6 +22,7 @@ pub mod context;
 pub mod control;
 pub mod demo_scripts;
 pub mod detect;
+pub mod fallback;
 pub mod git;
 pub mod grok;
 pub mod grok_acp;
@@ -59,6 +60,7 @@ pub use context::{
 pub use control::{
     LocalRunnerControl, LocalRunnerControlOptions, SsmRunnerControl, SsmRunnerControlOptions,
     WorkdirMode,
+    local::{ChainFor, McpDone, McpFor},
 };
 pub use demo_scripts::{
     DemoVariant, load_demo_cli_script, load_demo_forecast_script, load_demo_search_script,
@@ -69,6 +71,7 @@ pub use detect::{
     Platform, detect_harnesses, fallback_path_dirs, local_agent_env, parse_version,
     resolve_login_path,
 };
+pub use fallback::{AvailabilityProbe, FallbackPlan, FallbackState, HarnessSlot};
 pub use git::{
     CANDIDATE_TRAILER, ExecGit, Git, GitCall, GitError, GitResult, GitRunner, exec_git,
     has_candidate_trailer, with_candidate_trailer,
@@ -79,7 +82,7 @@ pub use harness::{Scratch, SpawnPerTurnSession, TurnRunner};
 pub use inbox::MemoryInbox;
 pub use live::{LiveProcess, RpcClient, RpcError, RpcMessage};
 pub use local_agents::{
-    LocalAdapterOptions, LocalAgentControlOptions, create_local_agent_control,
+    LocalAdapterOptions, LocalAgentControlOptions, RedetectingAdapter, create_local_agent_control,
     local_adapter_factory, local_adapter_for, local_agent_problem,
 };
 pub use models::{ModelCatalog, ModelInfo, ModelUse, ResolvedModel, TokenPrice, resolve_model};

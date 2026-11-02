@@ -893,6 +893,8 @@ pub struct FakeSandbox {
     pub applied: Mutex<BTreeMap<String, SandboxOutputs>>,
     /// Make the next apply / destroy fail.
     pub fail_apply: Mutex<Option<PortError>>,
+    /// Make every apply that carries a drafted environment fail (the standard sandbox still applies).
+    pub fail_apply_with_environment: Mutex<Option<PortError>>,
     pub fail_destroy: Mutex<Option<PortError>>,
     /// Called at the start of apply (tests observe state there).
     pub on_apply: Mutex<Option<Arc<dyn Fn(&SandboxInput) + Send + Sync>>>,
@@ -910,6 +912,7 @@ impl FakeSandbox {
             log,
             applied: Mutex::new(BTreeMap::new()),
             fail_apply: Mutex::new(None),
+            fail_apply_with_environment: Mutex::new(None),
             fail_destroy: Mutex::new(None),
             on_apply: Mutex::new(None),
             applies: Mutex::new(Vec::new()),
@@ -958,6 +961,11 @@ impl SandboxProvider for FakeSandbox {
             h(i);
         }
         if let Some(e) = lock(&self.fail_apply).clone() {
+            return Err(e);
+        }
+        if i.environment.is_some()
+            && let Some(e) = lock(&self.fail_apply_with_environment).clone()
+        {
             return Err(e);
         }
         let out = ratchet_core::ports::mock::sample_sandbox_outputs(&i.sandbox_id);

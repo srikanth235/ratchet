@@ -29,7 +29,7 @@ pub struct OverviewQuery {
     pub range: Option<OverviewRange>,
 }
 
-/// Dot colour of a status word: brass (running), amber (waiting on you), mint (done), grey (nothing), rose (failed).
+/// Dot colour of a status word: brass (running), amber (a person has something to do: ready to ship), mint (done), grey (nothing), rose (failed).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum StatusTone {
@@ -61,6 +61,8 @@ pub enum OverviewNeedKind {
     Ship,
     /// The run failed.
     Failed,
+    /// A connector is signed out or its sign-in expired. Only a person can sign in again; runs carry on without it.
+    Connector,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -91,7 +93,7 @@ pub struct OverviewRow {
     pub repo: String,
     /// Ledger status as the pills use it (`pr-open` once a pull request exists).
     pub status: UiStatus,
-    /// The status word shown next to the dot ("Running", "Waiting on you", "No win").
+    /// The status word shown next to the dot ("Running", "Ready to ship", "No win").
     pub status_label: String,
     pub tone: StatusTone,
     /// Seconds left of the time limit while running, else `null`.

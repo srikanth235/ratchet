@@ -19,7 +19,8 @@ All four are newline-delimited JSON-RPC 2.0 on stdio. `initialize` answers with 
 ## Session tokens
 
 `McpHub::sessions.issue(set, scope)` (in `ratchetd::mcp`) returns `{id, token, set}`; `revoke(id)` ends it. The chat engine (P4) issues
-one when a chat opens and revokes it on close; P6 does the same for local optimization agents. A token
+one when a chat opens and revokes it on close; P6 does the same for local optimization agents (`ratchetd::real::local_agent_mcp`: one
+token per agent, bound to its optimization and agent, issued when its loop starts and revoked when it ends). A token
 
 - opens `/v1/mcp/session` and `/v1/mcp/call` and nothing else (every other route answers 401), and the owner's bearer token does
   not open those two;
@@ -55,8 +56,8 @@ an overlay `config.toml`, Grok `session/new` or a per-session `config.toml`). `r
 |---|---|---|
 | `steering_notes` | the agent's `You: ...` log entries | `User` messages in `inbox/` since the last call |
 | `history` | candidates and the ratchet series | verdict events from `events/` |
-| `submit_candidate` | not yet (commit with the trailer) | writes `candidates/NNNNNNNN.json` |
-| `connector_query` | not yet (no connector attached) | refused: runners never hold connector credentials |
+| `submit_candidate` | `RunnerMessage::Submit` to the agent's own runner loop (P6): the note describes the candidate | writes `candidates/NNNNNNNN.json` |
+| `connector_query` | `ConnectorQuery` over the connectors the user signed in (P6); a signed-out connector answers `Needs you` | refused: runners never hold connector credentials |
 
 Nothing in either set writes the evaluator, the protected set, budgets or other optimizations.
 

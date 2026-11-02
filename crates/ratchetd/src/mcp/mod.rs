@@ -23,10 +23,28 @@ use crate::service::{ServiceError, ServiceResult};
 
 pub use sessions::{IssuedSession, Scope, SessionInfo, Sessions};
 
+/// A read-only question to one of the user's connectors (`connector_query`). The real daemon answers from the connectors the
+/// user signed in; a connector that is signed out is the one thing a person has to fix, and the error says which.
+#[async_trait]
+pub trait ConnectorQuery: Send + Sync {
+    async fn query(&self, connector: &str, query: &str) -> ServiceResult<serde_json::Value>;
+}
+
 /// Git hosts by repo, for committing a draft's config. The real daemon resolves them from the GitHub sign-in.
 #[async_trait]
 pub trait ConfigHosts: Send + Sync {
     async fn host_for(&self, repo: &str) -> ServiceResult<Arc<dyn GitHost>>;
+
+    /// The session store the daemon's own agent launcher issues tokens from; the hub shares it, so a token the launcher
+    /// issues opens `/v1/mcp/*`. `None`: the hub keeps its own.
+    fn sessions(&self) -> Option<Arc<Sessions>> {
+        None
+    }
+
+    /// Who answers `connector_query`. `None`: no connector can be asked.
+    fn connector_query(&self) -> Option<Arc<dyn ConnectorQuery>> {
+        None
+    }
 }
 
 /// An in-memory git host per daemon, for the simulation and tests: nothing leaves the process.
@@ -82,9 +100,10 @@ pub struct OptimizationDraft {
 /// Everything the MCP side of the daemon keeps.
 #[derive(Default)]
 pub struct McpHub {
-    pub sessions: Sessions,
+    pub sessions: Arc<Sessions>,
     drafts: Mutex<HashMap<String, OptimizationDraft>>,
     hosts: RwLock<Option<Arc<dyn ConfigHosts>>>,
+    connector_query: RwLock<Option<Arc<dyn ConnectorQuery>>>,
 }
 
 impl McpHub {
@@ -94,13 +113,33 @@ impl McpHub {
 
     /// With the git hosts drafts are committed through.
     pub fn with_hosts(hosts: Arc<dyn ConfigHosts>) -> Self {
-        let hub = Self::default();
+        let hub = Self {
+            sessions: hosts.sessions().unwrap_or_default(),
+            ..Self::default()
+        };
         hub.set_hosts(hosts);
         hub
     }
 
     pub fn set_hosts(&self, hosts: Arc<dyn ConfigHosts>) {
+        if let Some(q) = hosts.connector_query() {
+            self.set_connector_query(q);
+        }
         *self.hosts.write().unwrap_or_else(PoisonError::into_inner) = Some(hosts);
+    }
+
+    pub fn set_connector_query(&self, q: Arc<dyn ConnectorQuery>) {
+        *self
+            .connector_query
+            .write()
+            .unwrap_or_else(PoisonError::into_inner) = Some(q);
+    }
+
+    pub(crate) fn connector_querier(&self) -> Option<Arc<dyn ConnectorQuery>> {
+        self.connector_query
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     pub(crate) async fn host_for(&self, repo: &str) -> ServiceResult<Arc<dyn GitHost>> {
