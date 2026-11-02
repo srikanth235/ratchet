@@ -77,7 +77,7 @@ struct OptimizationSettingsView: View {
     private func agentsRow(_ model: OptimizationSettingsModel, _ row: SettingsRow?) -> some View {
         let placement = detail?.agents.first?.placement.phrase
         SettingRowView(
-            title: "Agents", value: (row?.value ?? "…") + (placement.map { " · on " + $0 } ?? ""), tag: row?.tag, isSaved: row?.isSaved ?? false,
+            title: "Agents", value: (row?.value ?? "…") + (placement.map { " · " + $0 } ?? ""), tag: row?.tag, isSaved: row?.isSaved ?? false,
             note: row?.lockedNote ?? row?.error, noteIsError: row?.lockedNote == nil && row?.error != nil,
             editEnabled: (row?.isEditable ?? false) && actionsEnabled && model.agentsEditor != nil
         ) { close in

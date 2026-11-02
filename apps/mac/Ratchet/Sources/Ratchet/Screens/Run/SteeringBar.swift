@@ -48,7 +48,7 @@ private struct SteeringField: View {
                         .foregroundStyle(Ink.text)
                         .scrollContentBackground(.hidden)
                         .focused(focused)
-                        .frame(minHeight: Space.section + Space.md, maxHeight: Space.section * 4)
+                        .frame(height: Space.section * 2)
                         .accessibilityLabel("Note for the agents")
                         .accessibilityHint(model.hint)
                 }
