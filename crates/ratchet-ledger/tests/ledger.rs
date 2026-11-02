@@ -51,6 +51,8 @@ async fn applies_migrations_and_enables_foreign_keys() {
             "baselines",
             "bench_results",
             "candidates",
+            "chat_messages",
+            "chats",
             "engine_kv",
             "optimizations",
             "ratchet_moves",

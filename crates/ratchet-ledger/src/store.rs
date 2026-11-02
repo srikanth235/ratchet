@@ -256,8 +256,8 @@ fn status_list(statuses: &[OptimizationStatus]) -> sqlx::AssertSqlSafe<String> {
 /// The ledger handle: cheap to clone (it shares the connection pool).
 #[derive(Clone)]
 pub struct Ledger {
-    pool: SqlitePool,
-    clock: Arc<dyn Clock>,
+    pub(crate) pool: SqlitePool,
+    pub(crate) clock: Arc<dyn Clock>,
 }
 
 impl Ledger {
@@ -316,11 +316,11 @@ impl Ledger {
         self.pool.close().await;
     }
 
-    fn now(&self) -> i64 {
+    pub(crate) fn now(&self) -> i64 {
         self.clock.now()
     }
 
-    async fn conn(&self) -> Result<sqlx::pool::PoolConnection<sqlx::Sqlite>> {
+    pub(crate) async fn conn(&self) -> Result<sqlx::pool::PoolConnection<sqlx::Sqlite>> {
         self.pool.acquire().await.map_err(db)
     }
 

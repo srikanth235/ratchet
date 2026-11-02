@@ -7,7 +7,7 @@ that are written against the ledger, so their TS tests are ported here: the sand
 
 | What | How it is held to the TS |
 |---|---|
-| Schema | `migrations/0001_init.sql` is the drizzle `0000_init.sql` minus the `--> statement-breakpoint` markers. `tests/migration.rs` applies the original drizzle file to a second database and requires **identical DDL for all 24 objects** (10 tables, 10 indexes, 4 triggers) from `sqlite_master`. |
+| Schema | `migrations/0001_init.sql` is the drizzle `0000_init.sql` minus the `--> statement-breakpoint` markers. `tests/migration.rs` applies the original drizzle file to a second database and requires **identical DDL for all 24 objects** (10 tables, 10 indexes, 4 triggers) from `sqlite_master`. `migrations/0002_chats.sql` (P4: `chats`, `chat_messages`) has no drizzle original; the parity test leaves its two tables out and `tests/chats.rs` covers them. |
 | Append-only | The same triggers; `tests/ledger.rs` and `tests/properties.rs` try UPDATE/DELETE on `ratchet_moves` and `spend_events`. |
 | Row shapes | `ratchet_core::rows` (camelCase JSON, as drizzle's `$inferSelect`), asserted in `listOptimizations` ("exact table shape") and the JSON round trip test. |
 | Money, JSON columns | USD `REAL`, JSON `TEXT`; `serde_json` runs with `float_roundtrip` so stored samples read back bit for bit. |
