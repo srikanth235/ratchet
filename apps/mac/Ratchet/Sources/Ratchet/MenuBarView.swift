@@ -5,10 +5,12 @@ import SwiftUI
 /// The menu bar icon, with the number of things that need you next to it.
 struct MenuBarLabel: View {
     @Environment(AppStore.self) private var store
+    /// Drawn once: the label is evaluated again whenever the count changes, and the image never does.
+    private static let image = RatchetMarkImage.menuBar()
 
     var body: some View {
         HStack(spacing: Space.xs) {
-            Image(nsImage: RatchetMarkImage.menuBar())
+            Image(nsImage: Self.image)
             if store.needsYouCount > 0 {
                 Text("\(store.needsYouCount)")
             }

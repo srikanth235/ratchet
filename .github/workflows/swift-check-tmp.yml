@@ -4,6 +4,9 @@ on:
   push:
     branches: [claude/harness-f2]
     paths: ["apps/mac/**"]
+concurrency:
+  group: swift-check-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   swift:
     runs-on: macos-26

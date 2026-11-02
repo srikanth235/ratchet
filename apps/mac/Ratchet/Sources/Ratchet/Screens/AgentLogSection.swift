@@ -35,6 +35,8 @@ struct AgentLogView: View {
     let agentID: String
     let state: AgentState
     @Environment(AppStore.self) private var store
+    /// True while the reader is at the bottom: a new line scrolls into view then, and never pulls a reader who scrolled up back down.
+    @State private var followsNewest = true
 
     private var log: AgentLog { store.insight.logModel(agentID).log }
 
@@ -59,10 +61,17 @@ struct AgentLogView: View {
             .frame(height: Space.section * 6)
             .background(shape.fill(Ink.raised.opacity(0.4)))
             .overlay(shape.strokeBorder(Ink.hairline, lineWidth: Dim.hairline))
+            // Where the reader is when scrolling stops decides whether new lines are followed.
+            .onScrollPhaseChange { _, phase, context in
+                guard phase == .idle else { return }
+                let geometry = context.geometry
+                followsNewest = geometry.contentOffset.y + geometry.containerSize.height >= geometry.contentSize.height - Space.lg
+            }
             .onChange(of: log.lines.last?.id) { _, newest in
-                if let newest { proxy.scrollTo(newest, anchor: .bottom) }
+                if followsNewest, let newest { proxy.scrollTo(newest, anchor: .bottom) }
             }
             .task(id: agentID) {
+                followsNewest = true
                 await store.insight.loadAgentLog(agentID)
                 if let newest = log.lines.last?.id { proxy.scrollTo(newest, anchor: .bottom) }
             }

@@ -9,6 +9,7 @@ struct BenchmarkRunSection: View {
     @State private var chosen: String?
     @State private var metric: String?
     @State private var filter: CandidateFilter = .all
+    @State private var cap = RowCap()
     @State private var points: PointsMode = .all
     @State private var focus = SnapshotFocus.shared
 
@@ -182,7 +183,7 @@ struct BenchmarkRunSection: View {
                 Spacer(minLength: Space.sm)
                 KitSwitch(items: CandidateFilter.allCases, selection: filter, title: { $0.title }) { filter = $0 }
             }
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: Space.md) {
                     head("Commit").frame(width: Space.section * 3, alignment: .leading)
                     head("Change").frame(maxWidth: .infinity, alignment: .leading)
@@ -194,8 +195,13 @@ struct BenchmarkRunSection: View {
                 }
                 .padding(.bottom, Space.sm + 2)
                 .overlay(alignment: .bottom) { Hairline() }
-                ForEach(rows) { row in
+                ForEach(cap.shown(rows)) { row in
                     CandidateResultRow(row: row, unit: series.unit)
+                }
+                if let title = cap.buttonTitle(count: rows.count, noun: "candidates") {
+                    Button(title) { cap.showsAll = true }
+                        .buttonStyle(.kit(.quiet, small: true))
+                        .padding(.top, Space.md)
                 }
                 if rows.isEmpty {
                     Text("No candidates match.").kitType(.body).foregroundStyle(Ink.textMuted).padding(.vertical, Space.md)

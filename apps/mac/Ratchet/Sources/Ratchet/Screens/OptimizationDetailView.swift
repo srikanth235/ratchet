@@ -10,6 +10,7 @@ struct OptimizationDetailView: View {
     @Environment(AppRouter.self) private var router
     @Environment(\.openURL) private var openURL
     @State private var confirmingStop = false
+    @State private var cap = RowCap()
 
     private var detail: OptimizationDetail? { store.optimizationStore.details[id] }
     private var optimization: Optimization? { store.optimizationStore.optimization(id: id) ?? detail?.optimization }
@@ -308,7 +309,7 @@ struct OptimizationDetailView: View {
 
     private func candidateTable(_ optimization: Optimization) -> some View {
         let candidates = detail?.candidates ?? []
-        return VStack(alignment: .leading, spacing: 0) {
+        return LazyVStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Space.lg) {
                 columnTitle("Commit").frame(width: 76, alignment: .leading)
                 columnTitle("Candidate").frame(maxWidth: .infinity, alignment: .leading)
@@ -317,7 +318,7 @@ struct OptimizationDetailView: View {
             }
             .padding(.bottom, Space.sm + 2)
             .overlay(alignment: .bottom) { Hairline() }
-            ForEach(candidates) { candidate in
+            ForEach(cap.shown(candidates)) { candidate in
                 HStack(spacing: Space.lg) {
                     Text(candidate.id).kitType(.mono).foregroundStyle(Ink.textFaint)
                         .frame(width: 76, alignment: .leading)
@@ -331,6 +332,11 @@ struct OptimizationDetailView: View {
                 }
                 .padding(.vertical, Dim.rowPadding - 2)
                 .overlay(alignment: .bottom) { Hairline() }
+            }
+            if let title = cap.buttonTitle(count: candidates.count, noun: "candidates") {
+                Button(title) { cap.showsAll = true }
+                    .buttonStyle(.kit(.quiet, small: true))
+                    .padding(.top, Space.md)
             }
         }
     }

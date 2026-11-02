@@ -37,8 +37,14 @@ struct StaircaseChart: View {
     @State private var selectedDate: Date?
 
     var body: some View {
+        // Hovering re-evaluates this body for every pointer move, so what comes only from `points` is worked out once here and
+        // not again for each mark, scale and axis below.
         let domain = yDomain ?? fittedDomain
         let floor = domain.lowerBound
+        let wins = self.wins
+        let xDomain = self.xDomain
+        let ticks = xTicks(in: xDomain)
+        let shown = highlighted(among: wins)
         Chart {
             ForEach(points) { point in
                 AreaMark(x: .value("Date", point.date), yStart: .value("Floor", floor), yEnd: .value("Value", point.value))
@@ -62,7 +68,7 @@ struct StaircaseChart: View {
                     .foregroundStyle(Ink.hairlineStrong)
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
             }
-            if let shown = highlighted {
+            if let shown {
                 RuleMark(x: .value("Selected", shown.date))
                     .foregroundStyle(Ink.hairlineStrong)
                     .lineStyle(StrokeStyle(lineWidth: 1))
@@ -86,7 +92,7 @@ struct StaircaseChart: View {
         }
         .chartXAxis {
             // Ticks sit inside the plot, so the last label is never cut off at the right edge.
-            AxisMarks(values: xTicks) { value in
+            AxisMarks(values: ticks) { value in
                 AxisValueLabel {
                     if let date = value.as(Date.self) {
                         Text(xLabel(date)).kitType(compact ? .axis : .caption).foregroundStyle(Ink.textFaint).lineLimit(1)
@@ -97,11 +103,10 @@ struct StaircaseChart: View {
         .padding(.top, compact ? Space.lg : Space.xxl)
         .frame(height: compact ? Dim.chartHeight : Dim.chartHeightDetail)
         .accessibilityLabel("Chart")
-        .accessibilityValue(summary)
+        .accessibilityValue(summary(wins: wins.count))
     }
 
-    private var xTicks: [Date] {
-        let domain = xDomain
+    private func xTicks(in domain: ClosedRange<Date>) -> [Date] {
         let span = domain.upperBound.timeIntervalSince(domain.lowerBound)
         switch xAxis {
         case .dates:
@@ -139,16 +144,16 @@ struct StaircaseChart: View {
     }
 
     /// The win nearest the pointer, or the last win when previewing.
-    private var highlighted: StairPoint? {
+    private func highlighted(among wins: [StairPoint]) -> StairPoint? {
         if let selectedDate {
             return wins.min { abs($0.date.timeIntervalSince(selectedDate)) < abs($1.date.timeIntervalSince(selectedDate)) }
         }
         return previewLast ? wins.last : nil
     }
 
-    private var summary: String {
+    private func summary(wins count: Int) -> String {
         guard let last = points.last else { return "No data" }
-        return "\(wins.count) steps, now \(yFormat(last.value))"
+        return "\(count) steps, now \(yFormat(last.value))"
     }
 }
 
