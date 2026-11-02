@@ -121,24 +121,24 @@ struct GridOverlay: View {
             Canvas { context, size in
                 var grid = Path()
                 for x in stride(from: 0, through: size.width, by: 8) {
-                    grid.addRect(CGRect(x: x, y: 0, width: 0.5, height: size.height))
+                    grid.addRect(CGRect(x: x, y: 0, width: Dim.hairline / 2, height: size.height))
                 }
                 for y in stride(from: 0, through: size.height, by: 8) {
-                    grid.addRect(CGRect(x: 0, y: y, width: size.width, height: 0.5))
+                    grid.addRect(CGRect(x: 0, y: y, width: size.width, height: Dim.hairline / 2))
                 }
-                context.fill(grid, with: .color(.cyan.opacity(0.12)))
+                context.fill(grid, with: .color(Ink.textFaint.opacity(0.2)))
 
                 for probe in probes {
                     let rect = CGRect(x: probe.x - origin.x, y: probe.y - origin.y,
                                       width: probe.width, height: probe.height)
                     if probe.kind == .area {
-                        context.stroke(Path(rect), with: .color(.blue.opacity(0.6)), lineWidth: 1)
+                        context.stroke(Path(rect), with: .color(Ink.brass.opacity(0.8)), lineWidth: 1)
                         let inner = rect.insetBy(dx: probe.inset, dy: probe.inset)
-                        context.stroke(Path(inner), with: .color(.blue.opacity(0.35)),
+                        context.stroke(Path(inner), with: .color(Ink.brass.opacity(0.5)),
                                        style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
                     } else {
-                        context.stroke(Path(rect), with: .color(.pink.opacity(0.8)), lineWidth: 1)
-                        context.draw(Text(probe.name).font(.system(size: 9, weight: .medium)).foregroundStyle(.pink),
+                        context.stroke(Path(rect), with: .color(Ink.bad.opacity(0.9)), lineWidth: 1)
+                        context.draw(Text(probe.name).font(KitType.micro.font).foregroundStyle(Ink.bad),
                                      at: CGPoint(x: rect.minX + 2, y: rect.minY - 6), anchor: .leading)
                     }
                 }

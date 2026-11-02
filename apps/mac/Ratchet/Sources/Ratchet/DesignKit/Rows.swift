@@ -122,7 +122,7 @@ struct HairlineRow<Content: View>: View {
     }
 }
 
-/// A tappable table row: hover tint, a hairline underneath.
+/// A tappable table row: hover tint, a hairline underneath, a focus ring inside the row.
 struct TableRowButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         TableRowBody(configuration: configuration)
@@ -130,15 +130,23 @@ struct TableRowButtonStyle: ButtonStyle {
 
     private struct TableRowBody: View {
         let configuration: ButtonStyleConfiguration
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.isFocused) private var isFocused
+        @Environment(\.forcedPartState) private var forced
         @State private var hovering = false
 
         var body: some View {
+            let state = PartState.resolve(forced: forced, isEnabled: isEnabled, pressed: configuration.isPressed,
+                                          hovering: hovering, focused: isFocused)
             configuration.label
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(configuration.isPressed || hovering ? Ink.hover : Color.clear)
+                .background(state == .pressed ? Ink.track : state == .hover || state == .selected ? Ink.hover : Color.clear)
                 .overlay(alignment: .bottom) { Hairline() }
+                .kitFocusRing(radius: Dim.radiusXS, visible: state == .focused, outside: false)
+                .opacity(state == .disabled ? Dim.disabledOpacity : 1)
                 .contentShape(.rect)
                 .onHover { hovering = $0 }
+                .focusEffectDisabled()
                 .animation(Motion.hover, value: hovering)
         }
     }
@@ -150,19 +158,22 @@ struct SidebarRow: View {
     let icon: KitIcon
     let isSelected: Bool
     let action: () -> Void
+    @Environment(\.forcedPartState) private var forced
 
     var body: some View {
+        // A forced `selected` (the gallery) draws the selected row too.
+        let selected = isSelected || forced == .selected
         Button(action: action) {
             HStack(spacing: Space.md) {
                 KitIconView(icon: icon)
-                    .foregroundStyle(isSelected ? Ink.brass : Ink.textFaint)
+                    .foregroundStyle(selected ? Ink.brass : Ink.textFaint)
                 Text(title)
                     .kitType(.body)
-                    .foregroundStyle(isSelected ? Ink.text : Ink.textFaint)
+                    .foregroundStyle(selected ? Ink.text : Ink.textMuted)
                 Spacer(minLength: 0)
             }
         }
-        .buttonStyle(SidebarRowStyle(isSelected: isSelected))
+        .buttonStyle(SidebarRowStyle(isSelected: selected))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
@@ -179,21 +190,33 @@ private struct SidebarRowStyle: ButtonStyle {
         let isSelected: Bool
         @State private var hovering = false
         @Environment(\.appearsActive) private var appearsActive
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.isFocused) private var isFocused
+        @Environment(\.forcedPartState) private var forced
 
         var body: some View {
+            let state = PartState.resolve(forced: forced, isEnabled: isEnabled, pressed: configuration.isPressed,
+                                          hovering: hovering, focused: isFocused, selected: isSelected)
             let shape = RoundedRectangle(cornerRadius: Dim.radiusRow, style: .continuous)
             configuration.label
                 .padding(.horizontal, Space.md)
                 .frame(maxWidth: .infinity, minHeight: Dim.sidebarRow, alignment: .leading)
-                .background(shape.fill(fill))
+                .background(shape.fill(fill(state)))
+                .kitFocusRing(radius: Dim.radiusRow, visible: state == .focused, outside: false)
+                .opacity(state == .disabled ? Dim.disabledOpacity : 1)
                 .contentShape(shape)
                 .onHover { hovering = $0 }
+                .focusEffectDisabled()
                 .animation(Motion.hover, value: hovering)
         }
 
-        private var fill: Color {
-            if isSelected { return Ink.hover.opacity(appearsActive ? 1 : 0.6) }
-            return configuration.isPressed || hovering ? Ink.hover.opacity(0.6) : .clear
+        private func fill(_ state: PartState) -> Color {
+            switch state {
+            case .selected: Ink.hover.opacity(appearsActive ? 1 : 0.6)
+            case .pressed: Ink.track
+            case .hover: Ink.hover.opacity(0.6)
+            default: .clear
+            }
         }
     }
 }

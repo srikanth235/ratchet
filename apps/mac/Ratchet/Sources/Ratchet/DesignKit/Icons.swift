@@ -2,8 +2,9 @@ import SwiftUI
 
 /// The icon set. Views name a `KitIcon`; the drawing lives here. One 16 x 16 box, one round stroke.
 /// Shapes follow the SVGs of design/v02.html.
-nonisolated enum KitIcon {
-    case overview, optimizations, benchmarks, connectors, check, back, plus, close, alert
+nonisolated enum KitIcon: CaseIterable {
+    case overview, optimizations, benchmarks, connectors, check, back, plus, alert
+    case chevronDown, arrowUp, close, sliders, bell, terminal
 }
 
 private nonisolated struct KitGlyph: Shape {
@@ -47,6 +48,12 @@ private nonisolated struct KitGlyph: Shape {
             path.addLine(to: CGPoint(x: 8, y: 13))
             path.move(to: CGPoint(x: 3, y: 8))
             path.addLine(to: CGPoint(x: 13, y: 8))
+        case .chevronDown:
+            path.addLines([CGPoint(x: 3.5, y: 6), CGPoint(x: 8, y: 10.5), CGPoint(x: 12.5, y: 6)])
+        case .arrowUp:
+            path.move(to: CGPoint(x: 8, y: 13))
+            path.addLine(to: CGPoint(x: 8, y: 3))
+            path.addLines([CGPoint(x: 3.5, y: 7.5), CGPoint(x: 8, y: 3), CGPoint(x: 12.5, y: 7.5)])
         case .close:
             path.move(to: CGPoint(x: 4, y: 4))
             path.addLine(to: CGPoint(x: 12, y: 12))
@@ -62,6 +69,30 @@ private nonisolated struct KitGlyph: Shape {
             path.addLine(to: CGPoint(x: 8, y: 9.5))
             path.move(to: CGPoint(x: 8, y: 11.2))
             path.addLine(to: CGPoint(x: 8, y: 11.3))
+        case .sliders:
+            path.move(to: CGPoint(x: 2.5, y: 5))
+            path.addLine(to: CGPoint(x: 6, y: 5))
+            path.move(to: CGPoint(x: 10, y: 5))
+            path.addLine(to: CGPoint(x: 13.5, y: 5))
+            path.addEllipse(in: CGRect(x: 6, y: 3, width: 4, height: 4))
+            path.move(to: CGPoint(x: 2.5, y: 11))
+            path.addLine(to: CGPoint(x: 4, y: 11))
+            path.move(to: CGPoint(x: 8, y: 11))
+            path.addLine(to: CGPoint(x: 13.5, y: 11))
+            path.addEllipse(in: CGRect(x: 4, y: 9, width: 4, height: 4))
+        case .bell:
+            path.move(to: CGPoint(x: 4.5, y: 11.5))
+            path.addLine(to: CGPoint(x: 4.5, y: 7))
+            path.addCurve(to: CGPoint(x: 11.5, y: 7), control1: CGPoint(x: 4.5, y: 2.5), control2: CGPoint(x: 11.5, y: 2.5))
+            path.addLine(to: CGPoint(x: 11.5, y: 11.5))
+            path.move(to: CGPoint(x: 3, y: 11.5))
+            path.addLine(to: CGPoint(x: 13, y: 11.5))
+            path.move(to: CGPoint(x: 7, y: 13.5))
+            path.addLine(to: CGPoint(x: 9, y: 13.5))
+        case .terminal:
+            path.addLines([CGPoint(x: 3, y: 4.5), CGPoint(x: 7, y: 8), CGPoint(x: 3, y: 11.5)])
+            path.move(to: CGPoint(x: 8.5, y: 11.5))
+            path.addLine(to: CGPoint(x: 13, y: 11.5))
         }
         let scale = rect.width / 16
         return path.applying(CGAffineTransform(scaleX: scale, y: scale))

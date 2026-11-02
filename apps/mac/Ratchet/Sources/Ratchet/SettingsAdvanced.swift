@@ -25,22 +25,22 @@ struct AdvancedSettingsSection: View {
         Section {
             DisclosureGroup("Advanced (development)", isExpanded: $router.advancedExpanded) {
                 Text("Overrides for working on Ratchet itself. Normally the machine images are found by tag for this app version and the OpenTofu module ships inside the app.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .kitType(.caption).foregroundStyle(Ink.textFaint)
                 ForEach(AdvancedField.allCases) { field in
                     VStack(alignment: .leading, spacing: 2) {
                         TextField(field.label, text: binding(field), prompt: Text(draft.placeholder(for: field)))
-                            .font(.body.monospaced())
+                            .kitType(.mono)
                             .autocorrectionDisabled()
                         Text(problems[field] ?? field.hint)
-                            .font(.caption)
-                            .foregroundStyle(problems[field] == nil ? Color.secondary : Color.red)
+                            .kitType(.caption)
+                            .foregroundStyle(problems[field] == nil ? Ink.textFaint : Ink.bad)
                     }
                 }
-                if let failure { Text(failure).font(.caption).foregroundStyle(.red) }
+                if let failure { Text(failure).kitType(.caption).foregroundStyle(Ink.bad) }
                 HStack {
                     Button("Save") { save() }
                         .disabled(!isDirty || !problems.isEmpty || busy)
-                    if isDirty && problems.isEmpty { Text("Unsaved changes").font(.caption).foregroundStyle(.secondary) }
+                    if isDirty && problems.isEmpty { Text("Unsaved changes").kitType(.caption).foregroundStyle(Ink.textFaint) }
                 }
             }
         }

@@ -80,12 +80,12 @@ private nonisolated struct ChamberShape: Shape {
 struct RatchetMarkView: View {
     var height: CGFloat = 20
 
-    private static let glass = Color(red: 0x8E / 255, green: 0x9B / 255, blue: 0xB2 / 255)
+    private static let glass = Ink.markGlass
     private static let brass = LinearGradient(
         stops: [
-            .init(color: Color(red: 0xF8 / 255, green: 0xE4 / 255, blue: 0xB8 / 255), location: 0),
-            .init(color: Color(red: 0xE2 / 255, green: 0xBE / 255, blue: 0x7C / 255), location: 0.6),
-            .init(color: Color(red: 0xBE / 255, green: 0x8F / 255, blue: 0x49 / 255), location: 1),
+            .init(color: Ink.markHi, location: 0),
+            .init(color: Ink.markMid, location: 0.6),
+            .init(color: Ink.markLo, location: 1),
         ],
         startPoint: .topLeading, endPoint: .bottomTrailing)
 

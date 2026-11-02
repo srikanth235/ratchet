@@ -53,7 +53,7 @@ struct UseTemplateSheet: View {
             }
         }
         .padding(Space.xxl)
-        .frame(width: 520)
+        .frame(width: Layout.sheetWidth)
         .background(Ink.canvas)
         .task { await flow.load() }
     }

@@ -198,27 +198,42 @@ private struct RangeSegmentStyle: ButtonStyle {
     private struct RangeSegmentBody: View {
         let configuration: ButtonStyleConfiguration
         let isSelected: Bool
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.isFocused) private var isFocused
+        @Environment(\.forcedPartState) private var forced
         @State private var hovering = false
 
         var body: some View {
+            let state = PartState.resolve(forced: forced, isEnabled: isEnabled, pressed: configuration.isPressed,
+                                          hovering: hovering, focused: isFocused, selected: isSelected)
+            let selected = isSelected || state == .selected
             configuration.label
                 .kitType(.caption)
-                .foregroundStyle(isSelected ? Ink.text : Ink.textFaint)
-                .padding(.horizontal, Space.md - 2)
-                .padding(.vertical, Space.xs + 1)
-                .background(RoundedRectangle(cornerRadius: Dim.radiusRow - 1, style: .continuous)
-                    .fill(isSelected || hovering ? Ink.hover : Color.clear))
+                .foregroundStyle(selected ? Ink.text : Ink.textMuted)
+                .padding(.horizontal, Space.md)
+                .padding(.vertical, Space.xs)
+                .background(RoundedRectangle(cornerRadius: Dim.radiusRow, style: .continuous)
+                    .fill(selected || state == .hover || state == .pressed ? Ink.hover : Color.clear))
+                .kitFocusRing(radius: Dim.radiusRow, visible: state == .focused)
+                .opacity(state == .disabled ? Dim.disabledOpacity : 1)
                 .contentShape(.rect)
                 .onHover { hovering = $0 }
+                .focusEffectDisabled()
+                .animation(Motion.hover, value: hovering)
         }
     }
 }
 
-/// A single-line field in the design's look.
+/// A single-line field in the design's look: control border, brass edge and focus ring while editing.
 struct KitField: ViewModifier {
     @FocusState private var focused: Bool
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.forcedPartState) private var forced
+    @State private var hovering = false
 
     func body(content: Content) -> some View {
+        let state = PartState.resolve(forced: forced, isEnabled: isEnabled, pressed: false, hovering: hovering,
+                                      focused: focused)
         let shape = RoundedRectangle(cornerRadius: Dim.radiusField, style: .continuous)
         content
             .textFieldStyle(.plain)
@@ -227,7 +242,12 @@ struct KitField: ViewModifier {
             .padding(.horizontal, Space.md)
             .frame(height: Dim.fieldHeight)
             .background(shape.fill(Ink.raised.opacity(0.5)))
-            .overlay(shape.strokeBorder(focused ? Ink.brassFill.opacity(0.7) : Ink.hairlineStrong, lineWidth: Dim.hairline))
+            .overlay(shape.strokeBorder(state == .focused || state == .hover ? Ink.brassBorder : Ink.controlBorder,
+                                        lineWidth: Dim.hairline))
+            .kitFocusRing(radius: Dim.radiusField, visible: state == .focused)
+            .opacity(state == .disabled ? Dim.disabledOpacity : 1)
+            .onHover { hovering = $0 }
+            .animation(Motion.hover, value: hovering)
     }
 }
 
