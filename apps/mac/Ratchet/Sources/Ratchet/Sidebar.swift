@@ -96,13 +96,14 @@ struct RunRow: View {
             StatusShape(tone: optimization.status.tone, size: Dim.icon)
                 .frame(height: Dim.textLine)
             VStack(alignment: .leading, spacing: 0) {
+                // On the selected row the system paints its own fill (the accent) and its own text colours; ours would not read on it.
                 Text(optimization.title)
                     .kitType(isSelected ? .bodyStrong : .body)
-                    .foregroundStyle(Ink.text)
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(Ink.text))
                     .lineLimit(1)
                 Text(statusLine)
                     .kitType(.caption)
-                    .foregroundStyle(Ink.textFaint)
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.secondary) : AnyShapeStyle(Ink.textFaint))
                     .lineLimit(1)
             }
         }
