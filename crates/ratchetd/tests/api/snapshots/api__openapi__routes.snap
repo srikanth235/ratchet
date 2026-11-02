@@ -44,6 +44,7 @@ POST /v1/github/sign-in startGithubSignIn
 GET /v1/github/status getGithubStatus
 GET /v1/harnesses listHarnesses
 POST /v1/harnesses/detections detectHarnesses
+GET /v1/home getHome
 GET /v1/optimizations listOptimizations
 POST /v1/optimizations createOptimization
 GET /v1/optimizations/{id} getOptimization
@@ -53,13 +54,19 @@ GET /v1/optimizations/{id}/calibration getCalibration
 GET /v1/optimizations/{id}/candidates listCandidates
 GET /v1/optimizations/{id}/protected-paths getProtectedPaths
 POST /v1/optimizations/{id}/pull-request openPullRequest
+POST /v1/optimizations/{id}/pull-request/merged markPullRequestMerged
 GET /v1/optimizations/{id}/ratchet getRatchetHistory
 GET /v1/optimizations/{id}/receipt getReceipt
 GET /v1/optimizations/{id}/report getReport
+GET /v1/optimizations/{id}/schedule getSchedule
+PUT /v1/optimizations/{id}/schedule setSchedule
 GET /v1/optimizations/{id}/spend getSpend
 POST /v1/optimizations/{id}/spend/reconciliations reconcileSpend
 POST /v1/optimizations/{id}/start startOptimization
 POST /v1/optimizations/{id}/stop stopOptimization
+GET /v1/optimizations/{id}/value getValueModel
+PUT /v1/optimizations/{id}/value setValueModel
+DELETE /v1/optimizations/{id}/value clearValueModel
 GET /v1/optimizations/{id}/winning-change getWinningChange
 GET /v1/overview getOverview
 POST /v1/preflight runPreflight

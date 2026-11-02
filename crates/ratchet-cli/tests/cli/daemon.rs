@@ -565,7 +565,7 @@ async fn repos_inspect_overview_and_connectors() {
     let ov = env.ratchet(&["overview"]).await;
     assert_eq!(ov.code, 0, "{}", ov.stderr);
     assert!(
-        ov.stdout.contains("value locked in")
+        ov.stdout.contains("value per year")
             && ov.stdout.contains("Needs you")
             && ov
                 .stdout

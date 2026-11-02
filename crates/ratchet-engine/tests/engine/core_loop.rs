@@ -1020,6 +1020,7 @@ async fn api_usage_beside_subscription_usage_is_split_and_only_the_dollars_trip_
         })],
     );
     h.cycle(1).await;
+    h.cycle(1).await;
     assert_eq!(h.status(&b.id).await, OptimizationStatus::Stopped);
 }
 

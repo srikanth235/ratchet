@@ -183,7 +183,7 @@ async fn runs_a_claude_code_agent_in_a_worktree_verifies_its_commit_then_removes
         installed: true,
         version: Some("2.1.4".into()),
         path: Some(bin.join("claude").display().to_string()),
-        auth: HarnessAuth::SignedIn,
+        auth: HarnessAuth::ApiKey, // a key: the run is billed per token (a login is a subscription, no dollars)
         hint: String::new(),
     };
     let agents_root = root.join("agents");
