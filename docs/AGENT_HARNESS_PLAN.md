@@ -263,12 +263,13 @@ references point to that issue's sections. A phase is done only when every #10 i
 | P2 | Model catalog, xAI key, auth matrix, preflight | P1 | 1 | — |
 | P3 | Ratchet MCP server (session + owner mode) | P1 | 1 | §7 MCP |
 | P4 | Chat engine + API (done: see [ratchet-chat.md](ratchet-chat.md)) | P1, P3 | 1–2 | — |
-| P5 | Mac app: composer, chat, steering, Agents page | P4 (API), P2, F4 | 2 | §5 chat, composer, draft card, steering, agents items |
+| P5a | Mac app logic: `ChatClient` (SSE), `ChatStore`, composer/draft-card/steering/agents view models, mocks, tests | P4, P2, F2 | 1 | §1 chat errors; logic for §5 chat items |
+| P5b | Mac app screens: composer, chat, draft card, steering, Agents page, settings rows | P5a, F4 | 1 | §5 chat, composer, draft card, steering, agents items |
 | P6 | Optimizations: harness list, fallback, MCP for agents, no-wait environment | P1, P2, P3 | 1 | Fix first: no "Waiting on you"; §7 local-only keep-awake |
 | P7 | Cost split + Overview | P2, P6 | 1 | §5 Overview items |
 | P8 | Conformance suite, fixture recorder, canary definition | P1–P6 | 1 | — |
 
-**Parallel tracks.** Rust: P1 → (P2 ∥ P3) → (P4 ∥ P6) → P7 → P8. App: F0 → (F1 ∥ F2 ∥ F5) → F3 → F4 → P5. The tracks meet at P5, which
+**Parallel tracks.** Rust: P1 → (P2 ∥ P3) → (P4 ∥ P6) → P7 → P8. App: F0 → (F1 ∥ F2 ∥ F5) → F3 → (F4 ∥ P5a) → P5b. P5a (no UI) overlaps F4. The tracks meet at P5a, which
 starts on mocks once the P4 API is fixed. Parallel sessions push to their own branches (`claude/harness-<phase>`). The orchestrator
 merges each into `claude/peaceful-lamport-leak6p` and re-runs the checks before dependants start.
 
