@@ -36,7 +36,7 @@ struct OptimizationSettingsView: View {
                     title: "Notify", value: notifyText, tag: .usingDefault, editTitle: "Edit",
                     onEdit: { router.settingsTab = .notifications; openSettings() })
             }
-            .gridProbe("settings-rows", area: "detail")
+            .gridProbe("settings-rows", area: "detail", edge: nil)
             HStack(alignment: .center, spacing: Space.lg) {
                 VStack(alignment: .leading, spacing: Space.xs) {
                     Text("Archive optimization").kitType(.bodyStrong).foregroundStyle(Ink.text)

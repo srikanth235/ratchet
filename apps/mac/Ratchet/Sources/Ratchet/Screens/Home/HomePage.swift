@@ -48,7 +48,7 @@ private struct HomeContent: View {
                     HomeChips(composer: composer)
                 }
                 .frame(maxWidth: Layout.composerWidth)
-                .gridProbe("composer", area: "home")
+                .gridProbe("composer", area: "home", edge: nil)
                 composerNote(composer)
                     .frame(maxWidth: Layout.composerWidth, alignment: .leading)
                 suggestionRow(composer)
@@ -58,7 +58,7 @@ private struct HomeContent: View {
                     NoticeLine(text: Self.notice(first), closeLabel: "Dismiss the first-use notice") { hub.closeHomeNotice() }
                         .frame(maxWidth: Layout.composerWidth)
                         .padding(.top, Space.sm)
-                        .gridProbe("notice", area: "home")
+                        .gridProbe("notice", area: "home", edge: nil)
                 }
             }
             .frame(maxWidth: .infinity)

@@ -94,10 +94,11 @@ private struct ConversationBody: View {
                 Text(ComposerModel.hint).kitType(.caption).foregroundStyle(Ink.textFaint)
             }
             .frame(maxWidth: Layout.contentWidth)
+            // The floating bar spans its own width, centred: it is measured on its own, not against the column's leading edge.
+            .gridProbe("composer", area: "conversation", edge: nil)
             .padding(.horizontal, Space.pageX)
             .padding(.bottom, Space.lg)
             .frame(maxWidth: .infinity)
-            .gridProbe("composer", area: "conversation")
         }
     }
 

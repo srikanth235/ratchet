@@ -14,6 +14,8 @@ struct SteeringBar: View {
         let model = hub.steering(for: optimizationID)
         SteeringField(model: model, focused: $focused, enabled: actionsEnabled)
             .frame(maxWidth: Layout.contentWidth)
+            // Measured on its own (a floating bar, centred), not against the page's leading edge.
+            .gridProbe("steering", area: "detail", edge: nil)
             .padding(.horizontal, Space.pageX)
             .padding(.bottom, Space.lg)
             .frame(maxWidth: .infinity)
@@ -21,7 +23,6 @@ struct SteeringBar: View {
             .task(id: model.chatID) {
                 if let chatID = model.chatID { await hub.chats.follow(chatID) }
             }
-            .gridProbe("steering", area: "detail")
     }
 }
 
