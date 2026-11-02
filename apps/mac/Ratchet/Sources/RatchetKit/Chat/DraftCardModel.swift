@@ -81,7 +81,8 @@ public final class DraftCardModel {
     /// every draft says where it reads from and where it runs (the same two as the Home chips).
     public var allRows: [ChatCardRow] {
         var list = card?.rows ?? []
-        var at = list.firstIndex { $0.key == "agents" }.map { $0 + 1 } ?? list.count
+        var at: Int = list.count
+        if let agentsAt = list.firstIndex(where: { $0.key == "agents" }) { at = agentsAt + 1 }
         if !list.contains(where: { $0.key == "repo" }) {
             let repo = card?.repo ?? session?.core.chat.repo
             list.insert(ChatCardRow(key: "repo", label: "Repository", value: repo ?? "Not chosen"), at: at)

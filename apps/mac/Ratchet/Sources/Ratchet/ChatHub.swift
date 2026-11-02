@@ -179,10 +179,11 @@ final class ChatHub {
         updateComposerOptions(store: store)
         if askChats[optimizationID] == nil {
             let catalog = agents.catalog
-            let harness = agents.chatDefault ?? catalog.ready.first
-            guard let id = await chats.start(NewChat(
-                optimization: optimizationID, harness: harness, model: harness.flatMap { catalog.choice(for: $0).model?.id }))
-            else {
+            let harness: Harness? = agents.chatDefault ?? catalog.ready.first
+            var model: String?
+            if let harness { model = catalog.choice(for: harness).model?.id }
+            let new = NewChat(optimization: optimizationID, harness: harness, model: model)
+            guard let id = await chats.start(new) else {
                 store.errors.report("Couldn't start the conversation. " + (chats.startError ?? "No agent is signed in."))
                 return
             }

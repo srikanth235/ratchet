@@ -195,7 +195,9 @@ enum SnapScene: String, CaseIterable {
                 model.draft = "Why was the last candidate blocked?"
                 await model.send()
                 for _ in 0..<300 {
-                    if !model.isReplying, model.items.contains(where: { if case .reply = $0 { true } else { false } }) { break }
+                    var replied = false
+                    for item in model.items { if case .reply = item { replied = true } }
+                    if !model.isReplying && replied { break }
                     try? await Task.sleep(for: .milliseconds(10))
                 }
             }
@@ -489,8 +491,12 @@ enum Snapshot {
     static func makeActive(_ window: NSWindow) -> Bool {
         // A sheet or a popover on the window is the key window then; the window itself still counts as the one in use.
         func inUse() -> Bool {
-            NSApp.isActive
-                && (window.isKeyWindow || window.attachedSheet?.isKeyWindow == true || window.childWindows?.contains { $0.isKeyWindow } == true)
+            if !NSApp.isActive { return false }
+            if window.isKeyWindow { return true }
+            if let sheet = window.attachedSheet, sheet.isKeyWindow { return true }
+            let children: [NSWindow] = window.childWindows ?? []
+            for child in children where child.isKeyWindow { return true }
+            return false
         }
         for attempt in 0..<12 {
             if inUse() { return true }

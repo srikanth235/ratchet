@@ -51,7 +51,11 @@ public enum RunTimeline {
         for agent in agents {
             for line in agent.lines where overviewKinds.contains(line.kind) { raws.append(Raw(agent: agent.name, line: line)) }
         }
-        raws.sort { ($0.line.at, $0.agent, $0.line.id) < ($1.line.at, $1.agent, $1.line.id) }
+        raws.sort { (a: Raw, b: Raw) -> Bool in
+            if a.line.at != b.line.at { return a.line.at < b.line.at }
+            if a.agent != b.agent { return a.agent < b.agent }
+            return a.line.id < b.line.id
+        }
 
         // The same event, read once: later copies of a line already seen within the window are dropped.
         var kept: [Raw] = []
@@ -68,27 +72,43 @@ public enum RunTimeline {
         }
 
         let several = agents.count > 1
-        return kept.map { raw in
+        var entries: [RunTimelineEntry] = []
+        for raw in kept {
             let line = raw.line
             let key = line.kind + "|" + line.text
             // An event every agent reported belongs to the run, not to one agent.
-            let owner: String? = several && (sharedBy[key] ?? 1) < agents.count ? raw.agent : nil
-            let id = raw.agent + "-" + String(line.id)
-            if let event = line.harnessEvent { return .harness(id: id, at: line.at, event: event) }
-            let text = line.text
-            let lower = text.lowercased()
-            switch line.kind {
-            case "verdict":
-                if lower.hasPrefix("verified") { return .verified(id: id, at: line.at, agent: owner, text: detail(of: text)) }
-                if lower.hasPrefix("blocked") { return .blocked(id: id, at: line.at, agent: owner, text: detail(of: text)) }
-                return .noise(id: id, at: line.at, agent: owner, text: text)
-            case "error":
-                return lower.hasPrefix("blocked") ? .blocked(id: id, at: line.at, agent: owner, text: detail(of: text))
-                    : .failure(id: id, at: line.at, agent: owner, text: text)
-            default:
-                return .line(id: id, at: line.at, agent: owner, text: text, isMessage: line.kind == "message")
+            var owner: String?
+            if several {
+                let reporters: Int = sharedBy[key] ?? 1
+                if reporters < agents.count { owner = raw.agent }
             }
+            let id: String = raw.agent + "-" + String(line.id)
+            let text: String = line.text
+            let lower: String = text.lowercased()
+            let at: Date = line.at
+            var entry: RunTimelineEntry
+            if let event = line.harnessEvent {
+                entry = RunTimelineEntry.harness(id: id, at: at, event: event)
+            } else if line.kind == "verdict" {
+                if lower.hasPrefix("verified") {
+                    entry = RunTimelineEntry.verified(id: id, at: at, agent: owner, text: detail(of: text))
+                } else if lower.hasPrefix("blocked") {
+                    entry = RunTimelineEntry.blocked(id: id, at: at, agent: owner, text: detail(of: text))
+                } else {
+                    entry = RunTimelineEntry.noise(id: id, at: at, agent: owner, text: text)
+                }
+            } else if line.kind == "error" {
+                if lower.hasPrefix("blocked") {
+                    entry = RunTimelineEntry.blocked(id: id, at: at, agent: owner, text: detail(of: text))
+                } else {
+                    entry = RunTimelineEntry.failure(id: id, at: at, agent: owner, text: text)
+                }
+            } else {
+                entry = RunTimelineEntry.line(id: id, at: at, agent: owner, text: text, isMessage: line.kind == "message")
+            }
+            entries.append(entry)
         }
+        return entries
     }
 
     /// "verified: 7c02e9d at 351 ms" becomes "7c02e9d at 351 ms"; a line with no colon stays as it is.

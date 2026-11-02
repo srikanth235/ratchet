@@ -115,6 +115,8 @@ jobs:
       # build-and-verify skill, step 1: release build, installed to ~/Applications/<AppName>.app (ad-hoc signed), with
       # Contents/Helpers/{ratchetd,ratchet} and the LaunchAgent plists inside.
       - name: Build
+        # A normal build is about 12 minutes; a type-checker hang should fail fast, not run for an hour.
+        timeout-minutes: 30
         env:
           RATCHET_REQUIRE_DAEMON: "1"
         run: ./build.sh --universal

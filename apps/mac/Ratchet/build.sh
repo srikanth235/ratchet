@@ -29,7 +29,9 @@ fi
 [[ -n "$identity" ]] || identity=-
 
 log=$(mktemp)
-if swift build -c $config --package-path "$here" --scratch-path "$scratch" >"$log" 2>&1; then
+# The slow type-checks are named in the log (warnings), so a build that gets slow says where.
+slow=(-Xswiftc -Xfrontend -Xswiftc -warn-long-function-bodies=1500 -Xswiftc -Xfrontend -Xswiftc -warn-long-expression-type-checking=500)
+if swift build -c $config --package-path "$here" --scratch-path "$scratch" "${slow[@]}" >"$log" 2>&1; then
   grep -E "error|warning|Build complete" "$log" | grep -v "^\[" || true
 else
   # Full compiler output with context, so a CI log shows every error and where it is.
