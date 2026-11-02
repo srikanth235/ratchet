@@ -433,12 +433,14 @@ describe("runner image", () => {
   it("installs the ratchet-runner bin the SSM launcher starts, from a verified prebuilt static binary", () => {
     const cargo = readRepo("crates", "ratchet-agents", "Cargo.toml");
     const bins = [...cargo.matchAll(/\[\[bin\]\]\s*name\s*=\s*"([^"]+)"/g)].map((m) => m[1]);
-    expect(bins).toEqual(["ratchet-runner"]);
+    // ratchet-fake-cli is the harness tests' stand-in for an agent CLI: it is built for tests, never shipped in the image.
+    expect(bins.filter((b) => b !== "ratchet-fake-cli")).toEqual(["ratchet-runner"]);
     const ssm = readRepo("crates", "ratchet-agents", "src", "control", "ssm.rs");
     expect(ssm).toContain('"ratchet-runner"');
     const s = stripComments(read("scripts", "60-ratchet-runner.sh"));
     expect(s).toContain("sha256sum --check --strict SHA256SUMS");
     expect(s).toContain('install -m 0755 "$dist/ratchet-runner" "$app/ratchet-runner"');
+    expect(s).not.toContain("ratchet-fake-cli");
     expect(s).toContain('"$PREFIX/bin/ratchet-runner"');
     expect(s).not.toMatch(/\bnpm\b|\bpnpm\b|node_modules|tarball/);
     const pack = stripComments(read("pack-runner.sh"));
