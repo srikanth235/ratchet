@@ -4,8 +4,8 @@
 //! `real` means the real CLI emitted it; `mock` means it was written from docs or source. A recorded transcript is dropped into
 //! `tests/fixtures/` and checked here with no further test code.
 
-use ratchet_core::ports::AgentEventType;
-use std::path::Path;
+use ratchet_core::ports::{AgentEvent, AgentEventType};
+use std::path::{Path, PathBuf};
 
 use ratchet_agents::{ClaudeStreamParser, CodexStreamParser, GrokStreamParser};
 
@@ -51,8 +51,16 @@ fn parse_name(file: &str) -> Option<Name<'_>> {
     }
 }
 
+/// The fixtures directory. `RATCHET_FIXTURES_DIR` points the real-transcript checks at fresh recordings instead
+/// (`scripts/record-fixtures.sh --out DIR`): the nightly canary does that, and a failure there is CLI drift.
+fn fixtures_dir() -> PathBuf {
+    std::env::var_os("RATCHET_FIXTURES_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures"))
+}
+
 fn fixture_files() -> Vec<String> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let dir = fixtures_dir();
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .unwrap()
         .flatten()
@@ -63,12 +71,7 @@ fn fixture_files() -> Vec<String> {
 }
 
 fn read(file: &str) -> String {
-    std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures")
-            .join(file),
-    )
-    .unwrap()
+    std::fs::read_to_string(fixtures_dir().join(file)).unwrap()
 }
 
 #[test]
@@ -154,55 +157,149 @@ fn real_fixtures_hold_no_secret() {
     assert!(secret_in("{\"text\":\"hello\"}").is_none());
 }
 
+/// What the parser of `cli` made of a transcript.
+struct Parsed {
+    events: Vec<AgentEvent>,
+    /// The CLI named its session / thread.
+    has_session: bool,
+    /// The transcript ended the way a finished turn does (a `result` line, `turn.completed` / `turn.failed`).
+    finished: bool,
+    unknown: std::collections::BTreeSet<String>,
+}
+
+fn parse(cli: &str, text: &str, behaviour: &str) -> Parsed {
+    match cli {
+        "claude" => {
+            let mut p = ClaudeStreamParser::new(|| 0);
+            let mut events = p.push(text);
+            events.extend(p.end());
+            Parsed {
+                events,
+                has_session: p.session_id.is_some(),
+                finished: p.result.is_some(),
+                unknown: p.unknown_types,
+            }
+        }
+        "codex" => {
+            let mut p = CodexStreamParser::new(|| 0, None);
+            let mut events = p.push(text);
+            events.extend(p.end());
+            Parsed {
+                events,
+                has_session: p.thread_id.is_some(),
+                finished: p.turn.completed || p.turn.failed,
+                unknown: p.unknown_types,
+            }
+        }
+        "grok" => {
+            let mut p = GrokStreamParser::new(|| 0);
+            p.emit_deltas = behaviour == "deltas";
+            let mut events = p.push(text);
+            events.extend(p.end());
+            Parsed {
+                events,
+                has_session: p.session_id.is_some(),
+                finished: true,
+                unknown: p.unknown_types,
+            }
+        }
+        other => panic!("no parser for {other}"),
+    }
+}
+
+fn count(events: &[AgentEvent], t: AgentEventType) -> usize {
+    events.iter().filter(|e| e.event_type == t).count()
+}
+
+/// The shared contract, checked on what a real CLI printed. `behaviour` is the last part of the file name.
+fn check_real(file: &str, cli: &str, behaviour: &str, text: &str) {
+    let p = parse(cli, text, behaviour);
+    assert!(!p.events.is_empty(), "{file}: events");
+    assert!(
+        unexpected(&p.unknown).is_empty(),
+        "{file}: unknown event types: review them: {:?}",
+        p.unknown
+    );
+    if behaviour == "auth-expired" {
+        // a rejected key is one `auth_expired` event and nothing that would make the fallback layer wait
+        assert_eq!(
+            count(&p.events, AgentEventType::AuthExpired),
+            1,
+            "{file}: auth_expired"
+        );
+        assert_eq!(
+            count(&p.events, AgentEventType::RateLimited),
+            0,
+            "{file}: rate_limited"
+        );
+        return;
+    }
+    assert!(p.has_session, "{file}: session id");
+    assert!(p.finished, "{file}: turn outcome");
+    assert!(
+        count(&p.events, AgentEventType::Message) >= 1,
+        "{file}: a message"
+    );
+    assert!(
+        count(&p.events, AgentEventType::Usage) >= 1,
+        "{file}: usage"
+    );
+    assert_eq!(
+        count(&p.events, AgentEventType::Error),
+        0,
+        "{file}: error events"
+    );
+    if behaviour == "deltas" {
+        let deltas: Vec<&AgentEvent> = p
+            .events
+            .iter()
+            .filter(|e| e.event_type == AgentEventType::Delta)
+            .collect();
+        assert!(!deltas.is_empty(), "{file}: deltas");
+        let message = p
+            .events
+            .iter()
+            .find(|e| e.event_type == AgentEventType::Message)
+            .and_then(|e| e.text.clone())
+            .unwrap_or_default();
+        let joined: String = deltas.iter().filter_map(|e| e.text.clone()).collect();
+        assert!(
+            message.starts_with(&joined) || joined == message,
+            "{file}: deltas add up to the message"
+        );
+    }
+}
+
 #[test]
-fn transcripts_recorded_from_the_real_clis_parse_completely() {
+fn transcripts_recorded_from_the_real_clis_parse_completely_and_keep_the_contract() {
     for file in fixture_files() {
         let Some(name) = parse_name(&file).filter(|n| n.real) else {
             continue;
         };
-        let text = read(&file);
-        match name.cli {
-            "claude" => {
-                let mut p = ClaudeStreamParser::new(|| 0);
-                let mut events = p.push(&text);
-                events.extend(p.end());
-                assert!(p.session_id.is_some(), "{file}: session id");
-                assert!(p.result.is_some(), "{file}: result line");
-                assert!(
-                    events.iter().any(|e| e.event_type == AgentEventType::Usage),
-                    "{file}: usage"
-                );
-                assert!(
-                    unexpected(&p.unknown_types).is_empty(),
-                    "{file}: unknown event types: review them: {:?}",
-                    p.unknown_types
-                );
-            }
-            "codex" => {
-                let mut p = CodexStreamParser::new(|| 0, None);
-                let mut events = p.push(&text);
-                events.extend(p.end());
-                assert!(p.thread_id.is_some(), "{file}: thread id");
-                assert!(p.turn.completed || p.turn.failed, "{file}: turn outcome");
-                assert!(!events.is_empty(), "{file}: events");
-                assert!(
-                    unexpected(&p.unknown_types).is_empty(),
-                    "{file}: unknown event types: review them: {:?}",
-                    p.unknown_types
-                );
-            }
-            "grok" => {
-                let mut p = GrokStreamParser::new(|| 0);
-                let mut events = p.push(&text);
-                events.extend(p.end());
-                assert!(!events.is_empty(), "{file}: events");
-                assert!(
-                    unexpected(&p.unknown_types).is_empty(),
-                    "{file}: unknown event types: review them: {:?}",
-                    p.unknown_types
-                );
-            }
-            other => panic!("{file}: no parser for {other}"),
-        }
+        let stem = file.trim_end_matches(".jsonl");
+        // <cli>-<version>-real-<behaviour>
+        let behaviour = stem
+            .splitn(4, '-')
+            .nth(3)
+            .unwrap_or_else(|| panic!("{file}: behaviour"));
+        check_real(&file, name.cli, behaviour, &read(&file));
     }
+}
+
+#[test]
+fn the_real_transcript_check_catches_drift() {
+    // a new event type from a CLI update is drift
+    let drifted = "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s\"}\n{\"type\":\"brand_new_kind\"}\n";
+    let p = parse("claude", drifted, "success");
+    assert_eq!(unexpected(&p.unknown), ["brand_new_kind"]);
+    // an auth failure with no classified event is drift
+    let result = std::panic::catch_unwind(|| {
+        check_real(
+            "x",
+            "claude",
+            "auth-expired",
+            "{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s\"}\n",
+        )
+    });
+    assert!(result.is_err());
 }

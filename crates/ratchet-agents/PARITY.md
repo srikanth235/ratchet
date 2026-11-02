@@ -130,8 +130,8 @@ Added: `multibyte_output_split_across_reads_is_not_corrupted` (the Rust spawner 
 
 ## real-fixtures.test.ts -> tests/real_fixtures.rs
 
-`transcripts_captured_from_the_real_clis_parse_completely` (ported; like the TS suite it checks nothing until `real-claude-*.jsonl` /
-`real-codex-*.jsonl` files are dropped into `tests/fixtures/`).
+`transcripts_recorded_from_the_real_clis_parse_completely_and_keep_the_contract` (ported and widened in P8: it checks every
+`<cli>-<version>-real-<behaviour>.jsonl` in `tests/fixtures/`, or in `RATCHET_FIXTURES_DIR`, for Claude Code, Codex and Grok).
 
 ## runner-loop.test.ts -> tests/runner_loop.rs (+ unit tests in src/git.rs)
 

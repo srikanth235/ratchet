@@ -1,0 +1,150 @@
+name: harness canary
+# Nightly drift check for the agent harnesses (docs/AGENT_HARNESS_PLAN.md, section 4.10 and phase P8).
+#
+# What it does: installs the latest Claude Code, Codex and Grok CLIs, records fresh `real` transcripts from them with test keys
+# (scripts/record-fixtures.sh), runs the conformance suite and then checks the fresh transcripts against the same contract
+# (tests/real_fixtures.rs with RATCHET_FIXTURES_DIR). A red run means a CLI changed shape under us; it opens or updates one issue
+# labelled `harness-canary`. It never touches any other issue.
+#
+# DISABLED ON PURPOSE. The schedule below is commented out until real-world testing is approved (plan section 8): the job spends
+# provider credit and needs the test keys as repository secrets. Until then it only runs by hand (`workflow_dispatch`).
+# To switch the nightly run on, remove the comment marks on the `schedule` block.
+on:
+  workflow_dispatch:
+    inputs:
+      clis:
+        description: "CLIs to check: all, or a space-separated subset of claude codex grok"
+        required: false
+        default: all
+  # schedule:
+  #   - cron: "17 3 * * *"
+permissions:
+  contents: read
+  issues: write
+concurrency:
+  group: harness-canary
+  cancel-in-progress: false
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_TERM_COLOR: always
+jobs:
+  canary:
+    name: latest CLIs against the conformance suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # test keys: dedicated, low-limit keys stored as repository secrets, never a personal login
+      ANTHROPIC_API_KEY: ${{ secrets.CANARY_ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.CANARY_OPENAI_API_KEY }}
+      CODEX_API_KEY: ${{ secrets.CANARY_OPENAI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.CANARY_XAI_API_KEY }}
+      FRESH: ${{ github.workspace }}/.canary/fixtures
+      LOG: ${{ github.workspace }}/.canary/canary.log
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: harness-canary
+
+      - name: Choose the CLIs that have a test key
+        id: pick
+        run: |
+          want="${{ github.event.inputs.clis || 'all' }}"
+          [ "$want" = all ] && want="claude codex grok"
+          picked=""
+          for cli in $want; do
+            case "$cli" in
+              claude) key="$ANTHROPIC_API_KEY" ;;
+              codex) key="$OPENAI_API_KEY" ;;
+              grok) key="$XAI_API_KEY" ;;
+              *) echo "unknown CLI '$cli'"; exit 2 ;;
+            esac
+            if [ -n "$key" ]; then picked="$picked $cli"; else echo "::warning::no test key for $cli, skipped"; fi
+          done
+          picked="${picked# }"
+          if [ -z "$picked" ]; then
+            echo "::error::no CANARY_* test key is set, nothing to check"; exit 1
+          fi
+          echo "clis=$picked" >> "$GITHUB_OUTPUT"
+
+      - name: Install the latest CLIs
+        run: |
+          mkdir -p .canary
+          for cli in ${{ steps.pick.outputs.clis }}; do
+            case "$cli" in
+              claude) npm install -g @anthropic-ai/claude-code@latest ;;
+              codex) npm install -g @openai/codex@latest ;;
+              grok) curl -fsSL https://x.ai/cli/install.sh | bash; echo "$HOME/.local/bin" >> "$GITHUB_PATH" ;;
+            esac
+          done
+
+      - name: Versions
+        run: |
+          {
+            echo "| CLI | installed | newest committed fixture |"
+            echo "| --- | --- | --- |"
+            for cli in ${{ steps.pick.outputs.clis }}; do
+              installed="$(PATH="$HOME/.local/bin:$PATH" "$cli" --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n 1)"
+              committed="$(ls crates/ratchet-agents/tests/fixtures | sed -nE "s/^$cli-([0-9.]+)-.*/\1/p" | sort -V | tail -n 1)"
+              echo "| $cli | ${installed:-?} | ${committed:-none} |"
+            done
+          } | tee .canary/versions.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Record fresh transcripts
+        run: |
+          mkdir -p "$FRESH"
+          status=0
+          for cli in ${{ steps.pick.outputs.clis }}; do
+            scripts/record-fixtures.sh --cli "$cli" --yes --out "$FRESH" 2>&1 | tee -a "$LOG" || status=1
+          done
+          ls -l "$FRESH" | tee -a "$LOG"
+          exit "$status"
+
+      - name: Conformance suite
+        run: cargo test -p ratchet-agents --test conformance --test real_fixtures --test record_fixtures_script 2>&1 | tee -a "$LOG"
+
+      - name: Fresh transcripts against the contract
+        run: RATCHET_FIXTURES_DIR="$FRESH" cargo test -p ratchet-agents --test real_fixtures 2>&1 | tee -a "$LOG"
+
+      - name: Open or update the drift issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          {
+            echo "The harness canary found drift between the latest agent CLIs and the conformance suite."
+            echo
+            echo "Run: $run_url"
+            echo
+            [ -f .canary/versions.md ] && cat .canary/versions.md
+            echo
+            echo "Last lines of the log:"
+            echo
+            echo '```'
+            [ -f "$LOG" ] && tail -n 60 "$LOG"
+            echo '```'
+            echo
+            echo "What to do: read docs/harness-matrix.md for the CLI named in the log, update the parser or the fixtures, and re-record with scripts/record-fixtures.sh."
+          } > .canary/issue.md
+          gh label create harness-canary --color B60205 --description "Nightly harness canary found drift" 2>/dev/null || true
+          number="$(gh issue list --label harness-canary --state open --json number --jq '.[0].number // empty')"
+          # only ever the canary's own issue
+          if [ -n "$number" ] && [ "$number" != "10" ]; then
+            gh issue comment "$number" --body-file .canary/issue.md
+          else
+            gh issue create --label harness-canary --title "Harness canary: a CLI drifted from the conformance suite" --body-file .canary/issue.md
+          fi
+
+      - name: Keep the fresh transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-fixtures
+          path: .canary
+          if-no-files-found: ignore
