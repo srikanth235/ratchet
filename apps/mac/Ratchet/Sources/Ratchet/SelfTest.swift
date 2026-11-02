@@ -62,7 +62,7 @@ enum SelfTest {
         check("an optimization opens in place", router.page == .optimizations && router.optimizationID == "opt-checkout")
         router.show(.optimizations)
         check("choosing Optimizations again goes back to the list", router.optimizationID == nil)
-        check("every page has its own Command-number", Set(Page.allCases.map { String($0.shortcutKey.character) }).count == Page.allCases.count)
+        check("every page in the sidebar has its own Command-number", Set(Page.sidebar.compactMap(\.shortcutNumber)).count == Page.sidebar.count)
 
         // Live events through the store.
         await store.optimizationStore.loadDetail(id: "opt-checkout")

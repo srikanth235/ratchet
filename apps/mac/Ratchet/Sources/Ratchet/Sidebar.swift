@@ -16,12 +16,12 @@ struct SidebarView: View {
             .accessibilityElement(children: .combine)
 
             VStack(spacing: Space.xs / 2) {
-                ForEach(Page.allCases) { page in
+                ForEach(Page.sidebar) { page in
                     SidebarRow(title: page.title, icon: page.icon, isSelected: router.page == page && router.wizard == nil
                                || (page == .optimizations && router.wizard != nil)) {
                         router.show(page)
                     }
-                    .help("\(page.title) (Command-\(page.shortcutKey.character))")
+                    .help(page.shortcutNumber.map { "\(page.title) (Command-\($0))" } ?? page.title)
                 }
             }
 

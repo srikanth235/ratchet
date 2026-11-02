@@ -7,6 +7,7 @@ struct ConnectorsPage: View {
     var embedded = false
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(ConnectorsPageState.self) private var connectorsState
     @State private var sheet: ConnectorSheetRequest?
     @State private var refreshing = false
 
@@ -61,10 +62,10 @@ struct ConnectorsPage: View {
         }
         .gridArea(areaName)
         .sheet(item: $sheet) { AddConnectorSheet(request: $0) }
-        .onChange(of: router.connectorSheet) { _, request in
+        .onChange(of: connectorsState.sheet) { _, request in
             guard !embedded, let request else { return }
             sheet = request
-            router.connectorSheet = nil
+            connectorsState.sheet = nil
         }
     }
 
@@ -83,13 +84,14 @@ private struct ConnectorRow: View {
     let connector: Connector
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(ConnectorsPageState.self) private var connectorsState
     @State private var hovering = false
     @State private var confirmingRemove = false
     @State private var draftName = ""
 
-    private var mode: ConnectorRowMode? { router.rowModes[connector.id] }
+    private var mode: ConnectorRowMode? { connectorsState.rowModes[connector.id] }
 
-    private func setMode(_ new: ConnectorRowMode?) { router.rowModes[connector.id] = new }
+    private func setMode(_ new: ConnectorRowMode?) { connectorsState.rowModes[connector.id] = new }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.md) {
@@ -165,7 +167,7 @@ private struct ConnectorRow: View {
                 try await store.connectorStore.updateConnector(connector.id, ConnectorUpdate(name: name))
                 setMode(nil)
             } catch {
-                router.rowNotes[connector.id] = ConnectorNote(ok: false, text: error.localizedDescription)
+                connectorsState.rowNotes[connector.id] = ConnectorNote(ok: false, text: error.localizedDescription)
             }
         }
     }
@@ -222,9 +224,9 @@ private struct ConnectorRow: View {
         Task {
             do {
                 let result = try await store.connectorStore.checkConnector(connector.id)
-                router.rowNotes[connector.id] = ConnectorNote(ok: result.ok, text: result.detail)
+                connectorsState.rowNotes[connector.id] = ConnectorNote(ok: result.ok, text: result.detail)
             } catch {
-                router.rowNotes[connector.id] = ConnectorNote(ok: false, text: error.localizedDescription)
+                connectorsState.rowNotes[connector.id] = ConnectorNote(ok: false, text: error.localizedDescription)
             }
         }
     }
@@ -243,7 +245,7 @@ private struct ConnectorRow: View {
         if mode == .edit {
             AwsEditForm(connector: connector)
         }
-        if let note = router.rowNotes[connector.id] {
+        if let note = connectorsState.rowNotes[connector.id] {
             NoteLine(tone: note.ok ? .ok : .bad, text: note.text)
         }
     }
@@ -268,6 +270,7 @@ private struct AwsEditForm: View {
     let connector: Connector
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(ConnectorsPageState.self) private var connectorsState
     @State private var region: String
     @State private var cap: String
     @State private var failure: String?
@@ -301,7 +304,7 @@ private struct AwsEditForm: View {
                         Button("Save") { save() }
                             .buttonStyle(.kit(.primary, small: true))
                             .disabled(!canSave)
-                        Button("Cancel") { router.rowModes[connector.id] = nil }
+                        Button("Cancel") { connectorsState.rowModes[connector.id] = nil }
                             .buttonStyle(.kit(.link, small: true))
                     }
                     .frame(height: Dim.fieldHeight)
@@ -317,7 +320,7 @@ private struct AwsEditForm: View {
         Task {
             do {
                 try await store.connectorStore.updateConnector(connector.id, update)
-                router.rowModes[connector.id] = nil
+                connectorsState.rowModes[connector.id] = nil
             } catch {
                 failure = error.localizedDescription
             }

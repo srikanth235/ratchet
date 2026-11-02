@@ -7,6 +7,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(ConnectorsPageState.self) private var connectors
     @Environment(DaemonController.self) private var daemon
     @Environment(AppNotifier.self) private var notifier
     @Environment(LoginItem.self) private var loginItem
@@ -57,8 +58,8 @@ struct ContentView: View {
             ran = true
             SelfTest.runIfRequested(store: store, router: router, daemon: daemon)
             Snapshot.runIfRequested(
-                store: store, router: router, openSettings: openSettings, daemon: daemon, notifier: notifier,
-                loginItem: loginItem)
+                store: store, router: router, connectors: connectors, openSettings: openSettings, daemon: daemon,
+                notifier: notifier, loginItem: loginItem)
         }
         // The live events follow the same rule, as a task of their own: they stop when the daemon goes away or the data source
         // changes (demo mode), and start again with them. Nothing else holds on to the stream.
@@ -98,18 +99,14 @@ extension ContentView {
 
 private struct DetailRoot: View {
     @Environment(AppRouter.self) private var router
+    @Environment(ConnectorsPageState.self) private var connectors
 
     var body: some View {
         Group {
             if let flow = router.wizard {
                 NewOptimizationView(flow: flow)
             } else {
-                switch router.page {
-                case .overview: OverviewPage()
-                case .optimizations: OptimizationsPage()
-                case .benchmarks: BenchmarksPage()
-                case .connectors: ConnectorsPage()
-                }
+                router.page.destination
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -23,6 +23,7 @@ struct RatchetApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var store = Store.makeStore()
     @State private var router = AppRouter()
+    @State private var connectorsState = ConnectorsPageState()
     @State private var daemon = DaemonController.make()
     @State private var notifier = AppNotifier(enabled: !Store.isOverridden)
     @State private var loginItem = LoginItem(touchesSystem: !Store.isOverridden && ProcessInfo.processInfo.environment["APP_DEMO"] != "1")
@@ -33,6 +34,7 @@ struct RatchetApp: App {
             ContentView()
                 .environment(store)
                 .environment(router)
+                .environment(connectorsState)
                 .environment(daemon)
                 .environment(notifier)
                 .environment(loginItem)
@@ -48,9 +50,9 @@ struct RatchetApp: App {
                     .keyboardShortcut("n")
             }
             CommandMenu("Go") {
-                ForEach(Page.allCases) { page in
+                ForEach(Page.sidebar) { page in
                     Button(page.title) { router.show(page) }
-                        .keyboardShortcut(page.shortcutKey, modifiers: .command)
+                        .keyboardShortcut(page.shortcut)
                 }
                 Divider()
                 Button("Refresh") { Task { await store.refresh() } }
@@ -62,6 +64,7 @@ struct RatchetApp: App {
             SettingsView()
                 .environment(store)
                 .environment(router)
+                .environment(connectorsState)
                 .environment(daemon)
                 .environment(notifier)
                 .environment(loginItem)
