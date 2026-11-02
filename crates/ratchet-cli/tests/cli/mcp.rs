@@ -298,7 +298,15 @@ async fn destructive_tools_only_preview_until_confirm_is_true() {
     assert_eq!(out.structured.unwrap(), json!({"stopped": true}));
     assert_eq!(
         spy.seen.lock().unwrap().as_slice(),
-        [["ratchet", "--json", "stop", "--reason=enough", "--", "o1"]]
+        [[
+            "ratchet",
+            "--json",
+            "--yes",
+            "stop",
+            "--reason=enough",
+            "--",
+            "o1"
+        ]]
     );
 }
 

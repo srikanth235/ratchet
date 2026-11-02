@@ -206,7 +206,6 @@ impl ToolProvider for OwnerTools {
         };
         let mut argv = vec!["ratchet".to_owned(), "--json".to_owned()];
         argv.extend(self.globals.iter().cloned());
-        argv.extend(args.iter().cloned());
         if spec.mark == Mark::Destructive {
             if arguments.get("confirm") != Some(&Value::Bool(true)) {
                 let mut out = ToolOutput::json(json!({
@@ -218,10 +217,11 @@ impl ToolProvider for OwnerTools {
                 out.is_error = false;
                 return Ok(out);
             }
-            if spec.has_yes {
-                argv.push("--yes".into());
-            }
+            // `--yes` is a global flag, so every command accepts it; it goes before the command's own arguments (which
+            // may end with `--`), so a confirmed call doesn't stop at the CLI's preview.
+            argv.push("--yes".into());
         }
+        argv.extend(args.iter().cloned());
         let (code, stdout, stderr) = self.runner.run(argv).await;
         Ok(finish(code, &stdout, &stderr))
     }

@@ -90,9 +90,6 @@ pub struct CommandSpec {
     pub summary: String,
     pub args: Vec<ArgSpec>,
     pub mark: Mark,
-    /// The clap command takes `--yes` (a destructive command that previews without it). Once the CLI has the flag, MCP
-    /// forwards `confirm: true` as `--yes`.
-    pub has_yes: bool,
 }
 
 impl CommandSpec {
@@ -145,7 +142,6 @@ fn collect(cmd: &Command, prefix: &mut Vec<String>, out: &mut Vec<CommandSpec>) 
 fn spec_of(cmd: &Command, path: &[String]) -> CommandSpec {
     let key = path.join(" ");
     let mark = mark_of(&key).unwrap_or(Mark::Destructive); // unmarked = most careful
-    let has_yes = cmd.get_arguments().any(|a| a.get_id() == "yes");
     let mut positional: Vec<&Arg> = cmd
         .get_arguments()
         .filter(|a| a.is_positional() && !a.is_hide_set())
@@ -165,7 +161,6 @@ fn spec_of(cmd: &Command, path: &[String]) -> CommandSpec {
         summary: cmd.get_about().map(ToString::to_string).unwrap_or_default(),
         args,
         mark,
-        has_yes,
     }
 }
 
