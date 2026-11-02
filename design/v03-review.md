@@ -35,3 +35,18 @@ criteria by hand plus `design/tools/audit.js` (computed styles in a browser) and
 | 🟡 | Light palette | `mint700` and `ink500` were 4.1 and 4.4:1 as text; the mockup uses `#187250` and `#5C6676`. F3 must change `Tokens.swift` |
 | 🟡 | Increase Contrast, Reduce Motion | Reduce Motion is honoured in CSS; no Increase Contrast render |
 | 🟡 | Keyboard checklist (Tab order, ⌘↩, Esc, ⌘,) | The prototype handles ⌘,, Esc, Enter and Space; the app must repeat it |
+
+## v0.3.2 refresh (F7)
+
+Prototype brought back in line with the Mac app (CI run 41507523902 snapshots) and kept as the reference where it is better. 25 screens. `test-prototype.js`: 577 clicks, no failures.
+`audit.js` (dark and light): text contrast, control borders, targets, labels and status shapes all pass. The `design:*` skills are not installed here; the critique and accessibility
+passes ran their criteria by hand plus the audit.
+
+| | Finding | State |
+|---|---|---|
+| 🔴 | Prototype sidebar, toolbar, Settings, Agents, Connectors had drifted from the app | Fixed: app pages, native toolbar, 4 Settings tabs, as shipped |
+| 🔴 | Run: steering composer covered the log | Fixed: composer docked under the scrolling log; last note fully visible |
+| 🟡 | Two sidebar selection styles | Fixed in the prototype: one system pill; a run is told apart by its status shape. The app still paints runs with a brass wash |
+| 🟡 | Draft card: bordered Change buttons, wrapping footer | Fixed: quiet Change, note above the footer, one-line footer |
+| 🟡 | Toolbar crowded | Fixed: period picker and filter on the page, gap between New and page actions |
+| 🟡 | Notifications tab lists "Environment waiting for approval" in the app | Not copied; optimizations never wait on a human. The app should drop it |
