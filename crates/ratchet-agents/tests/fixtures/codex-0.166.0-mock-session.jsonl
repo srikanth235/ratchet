@@ -1,0 +1,19 @@
+{"id":"$ID","result":{"userAgent":"codex-cli/0.166.0"}}
+{"id":"$ID","result":{"thread":{"id":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","cliVersion":"0.166.0"},"model":"gpt-5","cwd":"/work/chat-1","approvalPolicy":"never","sandbox":{"type":"read-only","networkAccess":false}}}
+{"method":"thread/started","params":{"thread":{"id":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e"}}}
+{"id":"$ID","result":{"turn":{"id":"turn_1","status":"inProgress","items":[]}}}
+{"method":"turn/started","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turn":{"id":"turn_1","status":"inProgress","items":[]}}}
+{"method":"item/started","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_1","item":{"type":"agentMessage","id":"item_1","text":""}}}
+{"method":"item/agentMessage/delta","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_1","itemId":"item_1","delta":"Hello. "}}
+{"method":"item/agentMessage/delta","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_1","itemId":"item_1","delta":"Ask me about your optimizations."}}
+{"method":"item/completed","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_1","item":{"type":"agentMessage","id":"item_1","text":"Hello. Ask me about your optimizations."}}}
+{"method":"thread/tokenUsage/updated","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_1","tokenUsage":{"total":{"inputTokens":5200,"cachedInputTokens":4096,"outputTokens":240,"reasoningOutputTokens":64,"totalTokens":5440}}}}
+{"method":"turn/completed","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turn":{"id":"turn_1","status":"completed","items":[]}}}
+{"id":"$ID","result":{"turn":{"id":"turn_2","status":"inProgress","items":[]}}}
+{"method":"turn/started","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turn":{"id":"turn_2","status":"inProgress","items":[]}}}
+{"method":"item/started","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_2","item":{"type":"agentMessage","id":"item_2","text":""}}}
+{"method":"item/agentMessage/delta","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_2","itemId":"item_2","delta":"The newest one "}}
+{"method":"item/agentMessage/delta","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_2","itemId":"item_2","delta":"is paused."}}
+{"method":"item/completed","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_2","item":{"type":"agentMessage","id":"item_2","text":"The newest one is paused."}}}
+{"method":"thread/tokenUsage/updated","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_2","tokenUsage":{"total":{"inputTokens":5200,"cachedInputTokens":4096,"outputTokens":240,"reasoningOutputTokens":64,"totalTokens":5440}}}}
+{"method":"turn/completed","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turn":{"id":"turn_2","status":"completed","items":[]}}}

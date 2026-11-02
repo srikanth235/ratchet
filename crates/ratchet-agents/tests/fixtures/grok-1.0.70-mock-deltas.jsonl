@@ -1,0 +1,7 @@
+{"type":"available_commands","tools":["read_file","run_terminal_command"],"commands":["compact"]}
+{"type":"thought","data":"Counting runs."}
+{"type":"text","data":"Three "}
+{"type":"text","data":"optimizations "}
+{"type":"text","data":"are running."}
+{"type":"usage","messageId":"resp_1","stopReason":"end_turn","usage":{"input_tokens":812,"output_tokens":45},"signature":"mock"}
+{"type":"end","stopReason":"end_turn","sessionId":"01a2b3c4-d5e6-7f80-9a1b-2c3d4e5f6a7b","requestId":"req-mock-1","cwd":"/work/chat-1","num_turns":1,"usage":{"input_tokens":812,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":45,"reasoning_tokens":10},"total_cost_usd":0.004}

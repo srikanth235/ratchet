@@ -85,23 +85,25 @@ New event types (additive to `AgentEventType`):
 | `RateLimited { resets_at? }` | classified from each CLI's error shape | fallback (4.6) |
 | `AuthExpired` | login or key rejected | fallback, Agents settings |
 
-**Per-CLI mapping.** ✓ = verified against the CLI here (`claude 2.1.316`) or already in code. ? = S0 fills it from docs and source,
-with mock fixtures (no Codex / Grok installs).
+**Per-CLI mapping.** ✓ = verified against the CLI here (`claude 2.1.316`) or already in code. ◐ = from docs and source, with a mock
+fixture; confirmed in real-world testing. ✗ = missing, fallback below. S0 resolved every former `?`; flags, protocols and source links
+are in [harness-matrix.md](harness-matrix.md) (section 1 for these rows, section 3 for rate-limit and auth-expired shapes, section 4
+for provider terms).
 
 | Capability | Claude Code | Codex | Grok |
 |---|---|---|---|
 | One-shot headless | ✓ `-p --output-format stream-json` | ✓ `exec --json` | ✓ `-p - --output-format streaming-json` |
 | Resume | ✓ `--resume <id>` (`--fork-session` to branch) | ✓ `exec resume <id>` | ✓ `--resume <id>` |
-| Text deltas | ✓ `--include-partial-messages` | ? `item.updated` on `agent_message`, else app-server | ✓ `text` deltas (already parsed) |
-| Long-lived session | ✓ `--input-format stream-json` on stdin | ? `codex app-server` (JSON-RPC) | ? ACP over stdio (stream already ACP-shaped) |
-| Inject MCP servers | ✓ `--mcp-config` + `--strict-mcp-config` | ? `-c mcp_servers.<name>.command=…` | ? flag or settings file |
-| Read-only access | ✓ `--allowedTools` without Edit/Write/Bash + `--disallowedTools` | ✓ `sandbox_mode="read-only"` | ? `--sandbox` profile / `--permission-mode` |
-| System prompt add-on | ✓ `--append-system-prompt` | ? `-c instructions` / `AGENTS.md` in a temp overlay | ? |
+| Text deltas | ✓ `--include-partial-messages` | ◐ app-server `item/agentMessage/delta` only; `exec --json` sends whole messages (✗ there) ([matrix §1](harness-matrix.md#1-the--cells-of-section-41)) | ✓ `text` deltas (already parsed) |
+| Long-lived session | ✓ `--input-format stream-json` on stdin | ◐ `codex app-server` (JSONL JSON-RPC over stdio) ([matrix §1](harness-matrix.md#1-the--cells-of-section-41)) | ◐ `grok agent stdio` (ACP, JSON-RPC 2.0) ([matrix §1](harness-matrix.md#1-the--cells-of-section-41)) |
+| Inject MCP servers | ✓ `--mcp-config` + `--strict-mcp-config` | ◐ `-c mcp_servers.<name>.command=…` (inferred from `-c` + config schema) | ◐ ACP `session/new {mcpServers}`; no flag on one-shot `grok -p`, use a per-session `.grok/config.toml` ([matrix §1](harness-matrix.md#1-the--cells-of-section-41)) |
+| Read-only access | ✓ `--allowedTools` without Edit/Write/Bash + `--disallowedTools` | ✓ `sandbox_mode="read-only"` | ◐ `--sandbox read-only` + `--tools` / `--disallowed-tools`; in ACP mode the sandbox is refused, so tools only ([matrix §1](harness-matrix.md#1-the--cells-of-section-41)) |
+| System prompt add-on | ✓ `--append-system-prompt` | ◐ `-c developer_instructions=…`, else `AGENTS.md` in a temp overlay (`model_instructions_file` replaces, not appends) | ◐ `--rules <TEXT>` (alias `--append-system-prompt`) |
 | Cost | USD in `result` | tokens → price table | USD in `end` |
 | Login status | ✓ `claude auth status` | ✓ `codex login status` | none → files + `XAI_API_KEY` |
-| Built-in model fallback | ✓ `--fallback-model` | ? | ? |
+| Built-in model fallback | ✓ `--fallback-model` | ✗ none documented; Ratchet's harness fallback (4.6) | ✗ none documented; Ratchet's harness fallback (4.6) |
 
-Fallbacks when a `?` turns out to be missing: no live session → per-turn spawn + resume (works today, slower first token);
+Fallbacks when a ◐ cell turns out wrong or a ✗ cell applies: no live session → per-turn spawn + resume (works today, slower first token);
 no deltas → whole messages; no MCP flag → write a per-session config into a temp `HOME`/`CODEX_HOME` overlay.
 
 ### 4.2 Ratchet MCP server
