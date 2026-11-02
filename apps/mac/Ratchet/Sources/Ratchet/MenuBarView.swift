@@ -5,10 +5,12 @@ import SwiftUI
 /// The menu bar icon, with the number of things that need you next to it.
 struct MenuBarLabel: View {
     @Environment(AppStore.self) private var store
+    /// Drawn once: the label is evaluated again whenever the count changes, and the image never does.
+    private static let image = RatchetMarkImage.menuBar()
 
     var body: some View {
         HStack(spacing: Space.xs) {
-            Image(nsImage: RatchetMarkImage.menuBar())
+            Image(nsImage: Self.image)
             if store.needsYouCount > 0 {
                 Text("\(store.needsYouCount)")
             }
@@ -35,10 +37,10 @@ struct MenuBarView: View {
                 }
             }
             Hairline()
-            if store.runningOptimizations.isEmpty {
+            if store.optimizationStore.runningOptimizations.isEmpty {
                 Text("No optimizations running").kitType(.meta).foregroundStyle(Ink.textFaint)
             } else {
-                ForEach(store.runningOptimizations) { optimization in
+                ForEach(store.optimizationStore.runningOptimizations) { optimization in
                     Button { show { router.open(optimization: optimization.id) } } label: { runRow(optimization) }
                         .buttonStyle(.plain)
                 }
@@ -58,8 +60,8 @@ struct MenuBarView: View {
             }
             Hairline()
             HStack(alignment: .top, spacing: Space.xs) {
-                StatusDot(tone: store.sandbox.isOn ? .ok : .off)
-                Text(sandboxLine).kitType(.caption).foregroundStyle(Ink.textMuted)
+                StatusDot(tone: store.sandboxStore.sandbox.isOn ? .ok : .off)
+                Text(MenuBarRules.sandboxLine(store.sandboxStore.sandbox)).kitType(.caption).foregroundStyle(Ink.textMuted)
             }
             HStack(spacing: Space.sm) {
                 Button("Open Ratchet") { show {} }.buttonStyle(.kit(.quiet, small: true))
@@ -75,13 +77,6 @@ struct MenuBarView: View {
         .tint(Ink.brass)
     }
 
-    private var sandboxLine: String {
-        guard store.sandbox.isOn else { return "Sandbox off" }
-        var line = "Sandbox on · " + (store.sandbox.account ?? "AWS") + " · " + Money.exact(store.sandbox.costSoFarUSD) + " so far"
-        if let offAt = store.sandbox.offAt { line += " · off at " + Elapsed.timeOfDay(offAt) }
-        return line
-    }
-
     private func runRow(_ optimization: Optimization) -> some View {
         VStack(alignment: .leading, spacing: Space.xs) {
             HStack {
@@ -91,23 +86,10 @@ struct MenuBarView: View {
                     Text(Percent.signed(change)).kitType(.mono).foregroundStyle(Ink.ok)
                 }
             }
-            ThinBar(fraction: timeFraction(optimization))
-            Text(runNote(optimization)).kitType(.caption).foregroundStyle(Ink.textFaint)
+            ThinBar(fraction: MenuBarRules.timeFraction(optimization))
+            Text(MenuBarRules.runNote(optimization)).kitType(.caption).foregroundStyle(Ink.textFaint)
         }
         .contentShape(.rect)
-    }
-
-    private func timeFraction(_ optimization: Optimization) -> Double {
-        let total = optimization.timeLimitHours * 3600
-        guard total > 0, let left = optimization.secondsLeft else { return 0 }
-        return 1 - left / total
-    }
-
-    private func runNote(_ optimization: Optimization) -> String {
-        var parts: [String] = []
-        if let left = optimization.secondsLeft { parts.append(Elapsed.hm(left) + " left") }
-        parts.append(Money.short(optimization.spentUSD) + " spent")
-        return parts.joined(separator: " · ")
     }
 
     /// Brings the window forward, then runs `action`.

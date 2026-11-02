@@ -7,6 +7,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(AppStore.self) private var store
     @Environment(AppRouter.self) private var router
+    @Environment(ConnectorsPageState.self) private var connectors
     @Environment(DaemonController.self) private var daemon
     @Environment(AppNotifier.self) private var notifier
     @Environment(LoginItem.self) private var loginItem
@@ -55,15 +56,23 @@ struct ContentView: View {
             await notifier.refreshAuthorization()
             guard !ran else { return }
             ran = true
-            SelfTest.runIfRequested(store: store, router: router, daemon: daemon)
+            SelfTest.runIfRequested(store: store, router: router, daemon: daemon, notifier: notifier)
             Snapshot.runIfRequested(
-                store: store, router: router, openSettings: openSettings, daemon: daemon, notifier: notifier,
-                loginItem: loginItem)
+                store: store, router: router, connectors: connectors, openSettings: openSettings, daemon: daemon,
+                notifier: notifier, loginItem: loginItem)
+        }
+        // The live events follow the same rule, as a task of their own: they stop when the daemon goes away or the data source
+        // changes (demo mode), and start again with them. Nothing else holds on to the stream.
+        .task(id: "\(daemon.phase.isRunning)|\(store.isDemoData)") {
+            guard daemon.phase.isRunning else { return }
+            await store.followEvents()
         }
         .sheet(item: Binding(get: { router.templateProposal }, set: { router.templateProposal = $0 })) { flow in
             UseTemplateSheet(flow: flow)
         }
+        .onOpenURL { handle(url: $0) }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            // Back from System Settings or the shell: the permissions and the daemon may have changed.
             daemon.recheck()
             loginItem.refresh()
             Task { await notifier.refreshAuthorization() }
@@ -76,34 +85,58 @@ extension ContentView {
     private func wire() {
         store.enabledNotifications = { NotificationPreferences.enabled }
         store.onNotification = { [notifier] request in notifier.post(request) }
-        notifier.onOpen = { [store, router] destination in
-            if !NSApp.windows.contains(where: { $0.canBecomeMain && $0.isVisible }) {
-                LaunchContext.revealWindow { openWindow(id: "main") }
-            }
-            switch destination {
-            case .optimization(let id): router.open(optimization: id)
-            case .connectors: router.show(.connectors)
-            case .newOptimization: router.startWizard(client: store.client)
-            case .overview: router.show(.overview)
-            }
+        notifier.onOpen = { [store, router, openWindow] destination in
+            Self.go(to: destination, store: store, router: router, openWindow: openWindow)
+        }
+        DebugBridge.start(
+            store: store, router: router, connectors: connectors, daemon: daemon, notifier: notifier, openSettings: openSettings)
+    }
+
+    /// Brings the window forward when it is closed or hidden (a click, a link or a command from the menu bar era).
+    @MainActor
+    static func revealWindowIfNeeded(openWindow: OpenWindowAction) {
+        if !NSApp.windows.contains(where: { $0.canBecomeMain && $0.isVisible }) {
+            LaunchContext.revealWindow { openWindow(id: "main") }
+        }
+    }
+
+    /// A place a notification click or a `ratchet://` link opens.
+    @MainActor
+    static func go(to destination: NotificationDestination, store: AppStore, router: AppRouter, openWindow: OpenWindowAction) {
+        revealWindowIfNeeded(openWindow: openWindow)
+        switch destination {
+        case .optimization(let id): router.open(optimization: id)
+        case .connectors: router.show(.connectors)
+        case .newOptimization: router.startWizard(client: store.client)
+        case .overview: router.show(.overview)
+        }
+    }
+
+    /// `ratchet://...` (`.onOpenURL`): a page by name, or the same places a notification click opens.
+    private func handle(url: URL) {
+        guard let link = AppLink(url: url) else { return }
+        switch link.resolve(pages: Page.sidebar.map(\.rawValue)) {
+        case .page(let name):
+            guard let page = Page(rawValue: name) else { return }
+            Self.revealWindowIfNeeded(openWindow: openWindow)
+            router.show(page)
+        case .destination(let destination):
+            // The same path as a click: it waits when the window is not ready yet.
+            notifier.open(destination)
         }
     }
 }
 
 private struct DetailRoot: View {
     @Environment(AppRouter.self) private var router
+    @Environment(ConnectorsPageState.self) private var connectors
 
     var body: some View {
         Group {
             if let flow = router.wizard {
                 NewOptimizationView(flow: flow)
             } else {
-                switch router.page {
-                case .overview: OverviewPage()
-                case .optimizations: OptimizationsPage()
-                case .benchmarks: BenchmarksPage()
-                case .connectors: ConnectorsPage()
-                }
+                router.page.destination
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -16,12 +16,12 @@ struct SidebarView: View {
             .accessibilityElement(children: .combine)
 
             VStack(spacing: Space.xs / 2) {
-                ForEach(Page.allCases) { page in
+                ForEach(Page.sidebar) { page in
                     SidebarRow(title: page.title, icon: page.icon, isSelected: router.page == page && router.wizard == nil
                                || (page == .optimizations && router.wizard != nil)) {
                         router.show(page)
                     }
-                    .help("\(page.title) (Command-\(page.shortcutKey.character))")
+                    .help(page.shortcutNumber.map { "\(page.title) (Command-\($0))" } ?? page.title)
                 }
             }
 
@@ -32,6 +32,11 @@ struct SidebarView: View {
                         .kitType(.caption).foregroundStyle(Ink.textFaint)
                         .padding(.horizontal, Space.md)
                         .help("The background service is starting. What you see is from the last time.")
+                } else if case .reconnecting = store.streamState {
+                    Text("Reconnecting…")
+                        .kitType(.caption).foregroundStyle(Ink.textFaint)
+                        .padding(.horizontal, Space.md)
+                        .help("The live connection to the background service dropped and is being retried. What you see may be a little old.")
                 } else if store.isDemoData {
                     Text("Demo data")
                         .kitType(.caption).foregroundStyle(Ink.textFaint)
@@ -63,7 +68,7 @@ struct SandboxStatusLine: View {
             showing.toggle()
         } label: {
             HStack(alignment: .top, spacing: Space.xs) {
-                StatusDot(tone: store.sandbox.isOn ? .ok : .off).frame(height: Dim.textLine)
+                StatusDot(tone: store.sandboxStore.sandbox.isOn ? .ok : .off).frame(height: Dim.textLine)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(headline).kitType(.caption).foregroundStyle(Ink.textMuted)
                     Text(detail).kitType(.caption).foregroundStyle(Ink.textFaint)
@@ -85,13 +90,13 @@ struct SandboxStatusLine: View {
     }
 
     private var headline: String {
-        let sandbox = store.sandbox
+        let sandbox = store.sandboxStore.sandbox
         guard sandbox.isOn else { return "Sandbox off" }
         return "Sandbox on · " + (sandbox.account ?? "AWS")
     }
 
     private var detail: String {
-        let sandbox = store.sandbox
+        let sandbox = store.sandboxStore.sandbox
         guard sandbox.isOn else { return "Nothing running in the cloud" }
         var line = Money.exact(sandbox.costSoFarUSD) + " so far"
         if let offAt = sandbox.offAt { line += " · off at " + Elapsed.timeOfDay(offAt) }
@@ -106,14 +111,14 @@ struct SandboxPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.lg) {
             HStack(spacing: Space.sm) {
-                StatusDot(tone: store.sandbox.isOn ? .ok : .off)
-                Text(store.sandbox.isOn ? "Sandbox on" : "Sandbox off").kitType(.bodyStrong).foregroundStyle(Ink.text)
+                StatusDot(tone: store.sandboxStore.sandbox.isOn ? .ok : .off)
+                Text(store.sandboxStore.sandbox.isOn ? "Sandbox on" : "Sandbox off").kitType(.bodyStrong).foregroundStyle(Ink.text)
             }
-            if store.sandbox.isOn {
+            if store.sandboxStore.sandbox.isOn {
                 VStack(alignment: .leading, spacing: Space.xs) {
-                    detailLine("Account", store.sandbox.account ?? "AWS")
-                    detailLine("Cost so far", Money.exact(store.sandbox.costSoFarUSD))
-                    if let offAt = store.sandbox.offAt { detailLine("Switches off at", Elapsed.timeOfDay(offAt)) }
+                    detailLine("Account", store.sandboxStore.sandbox.account ?? "AWS")
+                    detailLine("Cost so far", Money.exact(store.sandboxStore.sandbox.costSoFarUSD))
+                    if let offAt = store.sandboxStore.sandbox.offAt { detailLine("Switches off at", Elapsed.timeOfDay(offAt)) }
                 }
                 if confirming {
                     Text("Running agents stop and everything in the sandbox is torn down.")
@@ -122,7 +127,7 @@ struct SandboxPopover: View {
                         Button("Cancel") { confirming = false }.buttonStyle(.kit(.quiet, small: true))
                         Button("End now") {
                             confirming = false
-                            Task { await store.endSandbox() }
+                            Task { await store.sandboxStore.endSandbox() }
                         }
                         .buttonStyle(.kit(.primary, small: true))
                     }
@@ -133,7 +138,7 @@ struct SandboxPopover: View {
             } else {
                 Text("Nothing is running in your AWS account.").kitType(.meta).foregroundStyle(Ink.textMuted)
             }
-            if let receipt = store.receipt {
+            if let receipt = store.sandboxStore.receipt {
                 Hairline()
                 VStack(alignment: .leading, spacing: Space.sm) {
                     Text("Last teardown").kitType(.section).foregroundStyle(Ink.textMuted)

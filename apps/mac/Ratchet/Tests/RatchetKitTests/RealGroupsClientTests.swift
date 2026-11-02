@@ -143,7 +143,7 @@ struct StoreNotificationTests {
         await store.refresh()
         store.apply(.githubFlowChanged(GithubSignInFlow(
             state: .pending, userCode: "ABCD-EFGH", verificationURL: "https://github.com/login/device", expiresAt: Date())))
-        #expect(store.githubFlow?.userCode == "ABCD-EFGH")
+        #expect(store.connectorStore.githubFlow?.userCode == "ABCD-EFGH")
         store.apply(.environmentDraftReady(draftID: "d1", repoID: "acme/shop"))
         #expect(posted.map(\.id) == ["draft-d1"])
         // A switched-off category posts nothing.
@@ -169,7 +169,7 @@ struct StoreNotificationTests {
     @Test func useSourceForgetsOneSourcesDataBeforeLoadingTheNext() async {
         let store = AppStore(client: MockRatchetClient(now: testNow))
         await store.refresh()
-        #expect(!store.optimizations.isEmpty)
+        #expect(!store.optimizationStore.optimizations.isEmpty)
         await store.useSource(isDemoData: true, cacheURL: nil)
         #expect(store.isDemoData)
         #expect(store.isLoaded)

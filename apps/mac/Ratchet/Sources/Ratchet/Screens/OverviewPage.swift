@@ -18,7 +18,7 @@ struct OverviewPage: View {
             }
             .gridProbe("header", area: "overview")
 
-            if notifier.shouldOfferPrompt && !store.optimizations.isEmpty {
+            if notifier.shouldOfferPrompt && !store.optimizationStore.optimizations.isEmpty {
                 NotificationPrompt()
                     .gridProbe("notification-prompt", area: "overview")
             }
@@ -33,7 +33,7 @@ struct OverviewPage: View {
             .gridProbe("chart-and-needs", area: "overview")
 
             KitSection("Optimizations") {
-                OptimizationTable(optimizations: store.optimizations) { router.open(optimization: $0.id) }
+                OptimizationTable(optimizations: store.optimizationStore.optimizations) { router.open(optimization: $0.id) }
             }
             .gridProbe("table", area: "overview")
         }
@@ -90,7 +90,7 @@ struct OverviewPage: View {
     private func act(on item: NeedsYouItem) {
         if item.kind == .signIn {
             router.show(.connectors)
-        } else if item.kind == .approveEnvironment, let optimization = store.optimization(id: item.optimizationID) {
+        } else if item.kind == .approveEnvironment, let optimization = store.optimizationStore.optimization(id: item.optimizationID) {
             router.reviewEnvironment(of: optimization, client: store.client)
         } else if !item.optimizationID.isEmpty {
             router.open(optimization: item.optimizationID)

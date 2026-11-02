@@ -170,11 +170,25 @@ pub enum Command {
     PrMerged { id: String },
     /// Saved GitHub / AWS / agent connectors (provisional).
     Connectors,
+    /// Show a page or an optimization in the Mac app (it starts the app if it is closed).
+    ///
+    /// TARGET is a page (overview, optimizations, benchmarks, connectors, new) or an optimization id: `ratchet open opt-3f9a`.
+    /// It opens the ratchet:// link the app registers, so it needs the Mac app and does not need the daemon.
+    Open(OpenArgs),
     /// Serve every command above as an MCP tool on stdio, for clients with no shell.
     ///
     /// Register it in one line: `claude mcp add ratchet -- ratchet mcp`. Reads the daemon's token from ratchetd.token on every
     /// call. Destructive tools (run, stop, pr, env end) only preview until the call has `confirm: true`, like `--yes`.
     Mcp,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct OpenArgs {
+    /// A page (overview, optimizations, benchmarks, connectors, new) or an optimization id.
+    pub target: String,
+    /// Print the ratchet:// link and do not open it.
+    #[arg(long)]
+    pub print: bool,
 }
 
 #[derive(Args, Debug, Default, Clone)]

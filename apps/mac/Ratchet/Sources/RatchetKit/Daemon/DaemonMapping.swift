@@ -154,10 +154,16 @@ enum DaemonMapping {
     }
 
     static func needsYou(_ item: VM.OverviewNeed) -> NeedsYouItem {
-        // `ship`: verified wins waiting for a pull request; `failed`: the run failed.
-        NeedsYouItem(
-            id: item.id, kind: item.kind == .ship ? .mergeWins : .runFailed, title: item.title, detail: item.sub,
-            actionTitle: item.action, optimizationID: item.optimizationId)
+        // `ship`: verified wins waiting for a pull request; `failed`: the run failed; `connector`: a sign-in that expired.
+        let kind: NeedsYouKind
+        switch item.kind {
+        case .ship: kind = .mergeWins
+        case .failed: kind = .runFailed
+        case .connector: kind = .signIn
+        }
+        return NeedsYouItem(
+            id: item.id, kind: kind, title: item.title, detail: item.sub, actionTitle: item.action,
+            optimizationID: item.optimizationId)
     }
 
     /// The staircase starts at nothing: the value locked in over a range is the sum of the wins inside it.
@@ -189,16 +195,16 @@ enum DaemonMapping {
         return Repo(id: vm.fullName, defaultBranch: vm.defaultBranch, account: account)
     }
 
-    static func harness(repoID: String, _ vm: VM.RepoInspectVm) -> HarnessDetection {
+    static func benchmarkDetection(repoID: String, _ vm: VM.RepoInspectVm) -> BenchmarkDetection {
         if let config = vm.config {
             let summary = "Found ratchet.yaml: " + metricName(config.metric) + ", "
                 + (config.direction == .minimize ? "lower" : "higher") + " is better."
-            return HarnessDetection(repoID: repoID, found: true, summary: summary)
+            return BenchmarkDetection(repoID: repoID, found: true, summary: summary)
         }
         if let problem = vm.problem, !problem.isEmpty {
-            return HarnessDetection(repoID: repoID, found: false, summary: problem, suggestedTemplateID: vm.templates.first?.id)
+            return BenchmarkDetection(repoID: repoID, found: false, summary: problem, suggestedTemplateID: vm.templates.first?.id)
         }
-        return HarnessDetection(
+        return BenchmarkDetection(
             repoID: repoID, found: false, summary: "No benchmark found in this repo. Start from a template.",
             suggestedTemplateID: vm.templates.first?.id)
     }
@@ -244,7 +250,7 @@ enum DaemonMapping {
                 id: agent.id, kind: .agent, name: agent.name, detail: agent.detail,
                 state: state(agent.status, kind: .agent), isDefault: agent.isDefault,
                 canRunInCloud: agent.runsOn.contains(.cloud), origin: agent.source == .apiKey ? .apiKey : .login,
-                cli: AgentCLI(rawValue: agent.agent.rawValue))
+                harness: Harness(rawValue: agent.agent.rawValue))
         }
     }
 

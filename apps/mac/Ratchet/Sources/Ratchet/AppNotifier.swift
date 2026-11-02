@@ -12,7 +12,12 @@ final class AppNotifier: NSObject, UNUserNotificationCenterDelegate {
     enum Authorization: Equatable { case unknown, notDetermined, denied, allowed }
 
     private(set) var authorization: Authorization = .unknown
-    @ObservationIgnored var onOpen: ((NotificationDestination) -> Void)?
+    /// Where a click goes. A click that arrives before this is set (a cold launch: the system starts the app because of
+    /// the click) waits, and is delivered the moment the window sets it.
+    @ObservationIgnored var onOpen: ((NotificationDestination) -> Void)? {
+        didSet { deliverPending() }
+    }
+    @ObservationIgnored private var pending = PendingDestination()
     private let enabled: Bool
     private static let askedKey = "notifications.asked"
     /// The user answered the in-app card (Turn on, or Not now); it does not come back.
@@ -69,17 +74,43 @@ final class AppNotifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    /// Posts one notification when the app is in the background and the user allowed them.
-    func post(_ request: NotificationRequest) {
-        guard enabled, isAllowed, !NSApp.isActive else { return }
+    /// The content of a notification: what the system shows, and the token a click brings back.
+    static func content(for request: NotificationRequest) -> UNMutableNotificationContent {
         let content = UNMutableNotificationContent()
         content.title = request.title
         content.body = request.body
         content.sound = .default
         content.threadIdentifier = request.category.rawValue
-        content.userInfo = ["destination": request.destination.token]
-        let note = UNNotificationRequest(identifier: request.id, content: content, trigger: nil)
+        content.userInfo = [Self.destinationKey: request.destination.token]
+        return content
+    }
+
+    nonisolated static let destinationKey = "destination"
+
+    /// Where a click on a notification with this content goes (nil for content that is not ours).
+    static func destination(of content: UNNotificationContent) -> NotificationDestination? {
+        (content.userInfo[destinationKey] as? String).flatMap { NotificationDestination(token: $0) }
+    }
+
+    /// Posts one notification when the app is in the background and the user allowed them.
+    func post(_ request: NotificationRequest) {
+        guard enabled, isAllowed, !NSApp.isActive else { return }
+        let note = UNNotificationRequest(identifier: request.id, content: Self.content(for: request), trigger: nil)
         UNUserNotificationCenter.current().add(note)
+    }
+
+    /// A click on a notification (or a link): to the window's handler, or held until the window has one.
+    func open(_ destination: NotificationDestination) {
+        if let onOpen {
+            onOpen(destination)
+        } else {
+            pending.hold(destination)
+        }
+    }
+
+    private func deliverPending() {
+        guard let onOpen, let destination = pending.take() else { return }
+        onOpen(destination)
     }
 
     // MARK: UNUserNotificationCenterDelegate
@@ -87,10 +118,10 @@ final class AppNotifier: NSObject, UNUserNotificationCenterDelegate {
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
     ) async {
-        let token = response.notification.request.content.userInfo["destination"] as? String
+        let token = response.notification.request.content.userInfo[Self.destinationKey] as? String
         await MainActor.run {
             NSApp.activate()
-            if let token, let destination = NotificationDestination(token: token) { onOpen?(destination) }
+            if let token, let destination = NotificationDestination(token: token) { open(destination) }
         }
     }
 

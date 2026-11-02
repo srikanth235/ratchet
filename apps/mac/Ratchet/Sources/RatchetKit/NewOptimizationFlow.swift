@@ -29,7 +29,7 @@ public final class NewOptimizationFlow {
     public private(set) var repoID: String?
     public var branch = "main"
     public private(set) var templateID: String?
-    public private(set) var harness: HarnessDetection?
+    public private(set) var detection: BenchmarkDetection?
     public private(set) var repos: [Repo] = []
     public private(set) var connectors: [Connector] = []
     public private(set) var templates: [Template] = []
@@ -176,11 +176,11 @@ public final class NewOptimizationFlow {
         do {
             let read = try await client.inspectRepo(source)
             inspection = read
-            harness = read.harness
+            detection = read.detection
         } catch {
             inspection = nil
             inspectionError = error.localizedDescription
-            harness = HarnessDetection(repoID: repoID ?? "", found: false, summary: error.localizedDescription)
+            detection = BenchmarkDetection(repoID: repoID ?? "", found: false, summary: error.localizedDescription)
         }
     }
 

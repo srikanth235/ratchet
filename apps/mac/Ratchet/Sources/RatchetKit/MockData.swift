@@ -198,11 +198,11 @@ public struct MockWorld: Sendable {
             Connector(id: "aws-acme-staging", kind: .aws, name: "acme-staging", detail: "SSO · eu-west-1", state: .expired,
                       profile: "acme-staging", region: "eu-west-1"),
             Connector(id: "agent-claude-login", kind: .agent, name: "Claude Code · your login", detail: "Found on this Mac · v2.1.314",
-                      state: .signedIn, isDefault: true, origin: .login, cli: .claudeCode),
+                      state: .signedIn, isDefault: true, origin: .login, harness: .claudeCode),
             Connector(id: "agent-claude-team", kind: .agent, name: "Claude Code · team key", detail: "API key ····4f2a · also runs in the cloud",
-                      state: .valid, canRunInCloud: true, origin: .apiKey, cli: .claudeCode),
+                      state: .valid, canRunInCloud: true, origin: .apiKey, harness: .claudeCode),
             Connector(id: "agent-codex-login", kind: .agent, name: "Codex · your login", detail: "Found on this Mac · v0.166 · run codex login",
-                      state: .signedOut, origin: .login, cli: .codex),
+                      state: .signedOut, origin: .login, harness: .codex),
         ]
     }
 

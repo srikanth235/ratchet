@@ -14,5 +14,9 @@
 <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
 <key>ATSApplicationFontsPath</key><string>Fonts</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>CFBundleURLTypes</key><array><dict>
+<key>CFBundleURLName</key><string>dev.ratchet.app</string>
+<key>CFBundleURLSchemes</key><array><string>ratchet</string></array>
+</dict></array>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 </dict></plist>
