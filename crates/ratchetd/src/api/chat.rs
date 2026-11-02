@@ -447,13 +447,10 @@ pub enum ChatOutcome {
 
 /// Events of `GET /v1/chats/{id}/stream`. The SSE `event:` is the `type`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
-#[serde(
-    tag = "type",
-    rename_all = "kebab-case",
-    rename_all_fields = "camelCase"
-)]
+#[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ChatStreamEvent {
     /// First event of a connection (no `id`). `resync` is true when the events since `Last-Event-ID` are gone: refetch the chat.
+    #[serde(rename_all = "camelCase")]
     Ready {
         chat_id: String,
         harness: HarnessKind,
@@ -490,6 +487,7 @@ pub enum ChatStreamEvent {
     /// Tokens of the turn so far (incremental).
     Usage { usage: ChatUsageVm },
     /// The turn is over. Totals are for the turn.
+    #[serde(rename_all = "camelCase")]
     Done {
         turn: u64,
         outcome: ChatOutcome,

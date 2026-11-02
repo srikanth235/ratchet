@@ -746,21 +746,68 @@ async fn history_pages_by_seq() {
     d.stop().await;
 }
 
+async fn wait_idle(svc: &Arc<ratchetd::chat::ChatService>, id: &str) -> Value {
+    let end = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let chat = svc.get_chat(id, &Default::default()).await.unwrap();
+        let chat = serde_json::to_value(chat).unwrap();
+        if chat["state"] == "idle" && chat["messages"].as_array().unwrap().len() >= 2 {
+            return chat;
+        }
+        assert!(tokio::time::Instant::now() < end, "the chat never went idle");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 #[tokio::test]
-async fn a_chat_survives_the_service_forgetting_it_and_resumes_from_the_ledger() {
-    // a second daemon on the same ledger stands for a restart: the chat is read back and keeps its CLI session
-    let d = daemon().await;
-    let id = create(&d, json!({"repo": "acme/shop"})).await["id"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let mut sse = opened_stream(&d, &id).await;
-    say(&d, &id, "Make acme/shop faster").await;
-    turn(&mut sse).await;
-    let ledger = d.sim.ledger();
-    let row = ledger.get_chat(&id).await.unwrap().unwrap();
-    assert_eq!(row.cli_session_id.as_deref(), Some("scripted-1"));
-    assert_eq!(row.harness, "claude-code");
-    assert!(ledger.chat_messages(&id, 0, 100).await.unwrap().len() >= 4);
-    d.stop().await;
+async fn a_new_service_on_the_same_ledger_continues_the_chat_with_resume() {
+    // the second service stands for a daemon restart: it knows the chat only from the ledger
+    let ledger = ratchet_ledger::Ledger::open_memory(Default::default())
+        .await
+        .unwrap();
+    let engine = ScriptedChatEngine::new(Default::default());
+    let mcp = Arc::new(ratchetd::mcp::McpHub::new());
+    let make = || {
+        ratchetd::chat::ChatService::new(ledger.clone(), engine.clone(), mcp.clone(), None, quick())
+    };
+    let first = make();
+    let chat = first
+        .create_chat(ratchetd::api::CreateChatInput::default())
+        .await
+        .unwrap();
+    first
+        .send_message(
+            &chat.id,
+            ratchetd::api::SendChatMessageInput {
+                text: "hello".into(),
+            },
+        )
+        .await
+        .unwrap();
+    wait_idle(&first, &chat.id).await;
+    first.shutdown().await;
+    assert_eq!(engine.closed(), ["scripted-1"], "shutting down closes the session");
+
+    let second = make();
+    let seen = wait_idle(&second, &chat.id).await;
+    assert_eq!(seen["harness"], "claude-code");
+    assert_eq!(seen["live"], false);
+    assert_eq!(seen["messages"][0]["text"], "hello");
+    second
+        .send_message(
+            &chat.id,
+            ratchetd::api::SendChatMessageInput {
+                text: "and again".into(),
+            },
+        )
+        .await
+        .unwrap();
+    let end = tokio::time::Instant::now() + Duration::from_secs(5);
+    while engine.opened().len() < 2 {
+        assert!(tokio::time::Instant::now() < end);
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let opened = engine.opened();
+    assert_eq!(opened[1].spec.resume.as_deref(), Some("scripted-1"));
+    second.shutdown().await;
 }

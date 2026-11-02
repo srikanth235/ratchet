@@ -176,6 +176,234 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         default:
           $ref: '#/components/responses/Failure'
+  /v1/chats:
+    post:
+      tags:
+      - chats
+      summary: |-
+        Start a chat with one of the user's own agent CLIs (Claude Code, Codex or Grok on this Mac). An empty body starts a Home chat
+        with no repo. The harness is the request's, else the user's chat harness, else the first one that is signed in; the answer says
+        which, and which model. 409 when no harness is ready (sign in first). With `repo` the chat reads a read-only checkout of the
+        repo's default branch; with `optimization` it is bound to that optimization (steering). The first chat with a harness carries
+        `dataNotice`.
+      operationId: createChat
+      requestBody:
+        description: Optional; empty means a Home chat on the default harness
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateChatInput'
+        required: true
+      responses:
+        '201':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: No such optimization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: No agent is signed in, or the one asked for is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/chats/{id}:
+    get:
+      tags:
+      - chats
+      summary: A chat and its messages (oldest first), the reply being written, and what the stream would continue from.
+      operationId: getChat
+      parameters:
+      - name: id
+        in: path
+        description: Chat id
+        required: true
+        schema:
+          type: string
+      - name: after
+        in: query
+        description: Only messages after this `seq` (default all).
+        required: false
+        schema:
+          type: integer
+          format: int64
+      - name: limit
+        in: query
+        description: 1 to 1000; default 200.
+        required: false
+        schema:
+          type: integer
+          format: int32
+          minimum: 0
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatVm'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
+    delete:
+      tags:
+      - chats
+      summary: 'End the chat: stop the reply, close its session (its Ratchet tool token stops working), remove its checkout and forget it.'
+      operationId: deleteChat
+      parameters:
+      - name: id
+        in: path
+        description: Chat id
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/chats/{id}/interrupt:
+    post:
+      tags:
+      - chats
+      summary: |-
+        Stop the reply being written (the Stop button). What was written stays in the chat; the stream ends the turn with `done`
+        (`outcome: interrupted`). Nothing to stop is fine.
+      operationId: interruptChat
+      parameters:
+      - name: id
+        in: path
+        description: Chat id
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: Asked to stop
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/chats/{id}/messages:
+    post:
+      tags:
+      - chats
+      summary: |-
+        Say something. Answers 202 at once with the message's number; the reply arrives on the chat's stream. 409 while the chat is
+        still replying (press Stop first).
+      operationId: sendChatMessage
+      parameters:
+      - name: id
+        in: path
+        description: Chat id
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendChatMessageInput'
+        required: true
+      responses:
+        '202':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatMessageAccepted'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: The chat is still replying
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
+  /v1/chats/{id}/stream:
+    get:
+      tags:
+      - chats
+      summary: |-
+        The chat's live stream (server-sent events); each `data:` is a `ChatStreamEvent`. The first event is always `ready`. Events
+        carry an `id:` that counts up per chat; reconnect with `Last-Event-ID` to receive what was missed (`ready.resync` says when it is
+        gone and the chat must be fetched again). A connection that cannot keep up is closed: reconnect. A comment line keeps it alive.
+      operationId: streamChat
+      parameters:
+      - name: id
+        in: path
+        description: Chat id
+        required: true
+        schema:
+          type: string
+      - name: Last-Event-ID
+        in: header
+        description: Id of the last event the client saw.
+        required: false
+        schema:
+          type:
+          - integer
+          - 'null'
+          format: int64
+          minimum: 0
+      responses:
+        '200':
+          description: A stream of server-sent events; each `data:` is a ChatStreamEvent.
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/ChatStreamEvent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        default:
+          $ref: '#/components/responses/Failure'
   /v1/config/validations:
     post:
       tags:
@@ -2481,6 +2709,518 @@ components:
           - 'null'
           format: double
           description: Signed % improvement vs the baseline (positive = better).
+    CardErrorVm:
+      type: object
+      description: Something went wrong with a card, with the ways out ("Use Smaller Setup", "Try Again").
+      required:
+      - title
+      - message
+      properties:
+        message:
+          type: string
+        title:
+          type: string
+    CardOptionVm:
+      type: object
+      required:
+      - value
+      - label
+      properties:
+        label:
+          type: string
+        value:
+          type: object
+          description: 'What to send back: the value of the row after the change.'
+    CardRowVm:
+      type: object
+      description: |-
+        One line of a card: "Measures", "Agents", "Each run", "Schedule", "Output", "Config". The UI shows `label` and `value` and,
+        when `editable`, a Change button whose popover is built from `options` (or a free input of the type of `raw`). A change is
+        sent as a chat message ("Change the budget to $20"): the chat drafts again and the card updates in place.
+      required:
+      - key
+      - label
+      - value
+      - editable
+      - raw
+      properties:
+        editable:
+          type: boolean
+        key:
+          type: string
+          description: 'Stable name: `goal`, `repo`, `measure`, `agents`, `limits`, `schedule`, `output`, `config`.'
+        label:
+          type: string
+        options:
+          type: array
+          items:
+            $ref: '#/components/schemas/CardOptionVm'
+          description: Offered choices; empty for a free value.
+        raw:
+          type: object
+          description: The row's value as data (a number, a list, an object), for an editor.
+        value:
+          type: string
+          description: The line as shown.
+    ChatCardKind:
+      type: string
+      enum:
+      - draft
+      - note
+    ChatCardStatus:
+      type: string
+      enum:
+      - draft
+      - created
+      - failed
+      - replaced
+      - queued
+      - read
+    ChatCardVm:
+      type: object
+      description: |-
+        The card the chat shows for a draft optimization (or a steering note). The same `id` arriving again is an update: replace the
+        card you have (`card` events carry `replaces` when a new draft takes the place of an older one).
+      required:
+      - id
+      - kind
+      - status
+      - title
+      properties:
+        error:
+          $ref: '#/components/schemas/CardErrorVm'
+        id:
+          type: string
+          description: The draft id (`draft_...`) or note id (`note_...`).
+        kind:
+          $ref: '#/components/schemas/ChatCardKind'
+        optimization:
+          type: string
+          description: 'Set once the draft became an optimization, or on a note: the optimization it is about.'
+        readAt:
+          type: integer
+          format: int64
+          description: 'A note: when it was read (epoch ms).'
+        readBy:
+          type: string
+          description: 'A note: the agent that read it.'
+        repo:
+          type: string
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/CardRowVm'
+        status:
+          $ref: '#/components/schemas/ChatCardStatus'
+        subtitle:
+          type: string
+          description: '"up to $50 and 2 h per run" for a draft.'
+        title:
+          type: string
+          description: '"Checkout p95" for a draft; the note''s text for a note.'
+    ChatErrorCode:
+      type: string
+      enum:
+      - rate_limited
+      - auth_expired
+      - unavailable
+      - failed
+    ChatErrorVm:
+      type: object
+      description: What went wrong and what to press. `title` and `message` are written for people ("Claude Code reached its usage limit").
+      required:
+      - code
+      - harness
+      - title
+      - message
+      properties:
+        code:
+          $ref: '#/components/schemas/ChatErrorCode'
+        fixes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatFix'
+          description: The buttons to offer, best first.
+        harness:
+          $ref: '#/components/schemas/HarnessKind'
+        message:
+          type: string
+        retry:
+          $ref: '#/components/schemas/ChatRetryVm'
+        switchTo:
+          $ref: '#/components/schemas/HarnessKind'
+          description: 'For `switch-harness`: a signed-in harness other than this one.'
+        title:
+          type: string
+    ChatFix:
+      type: string
+      enum:
+      - retry
+      - sign-in
+      - switch-harness
+    ChatMessageAccepted:
+      type: object
+      description: 'Answer of `POST /v1/chats/{id}/messages`: the message was stored and the reply is on its way (follow the stream).'
+      required:
+      - seq
+      - turn
+      properties:
+        seq:
+          type: integer
+          format: int64
+          description: The user's message.
+        turn:
+          type: integer
+          format: int64
+          description: 1 for the first turn of the chat, then 2, 3, ...; `done` carries the same number.
+          minimum: 0
+    ChatMessageVm:
+      type: object
+      description: One message of a chat.
+      required:
+      - seq
+      - role
+      - text
+      - at
+      properties:
+        at:
+          type: integer
+          format: int64
+          description: Epoch ms.
+        card:
+          $ref: '#/components/schemas/ChatCardVm'
+        harness:
+          $ref: '#/components/schemas/HarnessKind'
+          description: Who wrote an assistant reply ("Written by Claude Code · Opus").
+        model:
+          type: string
+        role:
+          $ref: '#/components/schemas/ChatRole'
+        seq:
+          type: integer
+          format: int64
+          description: '1, 2, 3, ... per chat: the order of the conversation.'
+        text:
+          type: string
+          description: The text; for a tool step its one-line summary.
+        tool:
+          $ref: '#/components/schemas/ChatToolVm'
+        usage:
+          $ref: '#/components/schemas/ChatUsageVm'
+          description: What the turn cost; set on the last reply of a turn.
+    ChatOutcome:
+      type: string
+      enum:
+      - completed
+      - interrupted
+      - failed
+    ChatRetryVm:
+      type: object
+      description: When and whether trying again helps.
+      required:
+      - canRetryNow
+      properties:
+        canRetryNow:
+          type: boolean
+          description: Sending the same message again can work right now.
+        resetsAt:
+          type: integer
+          format: int64
+          description: Epoch ms when the quota lifts; absent when the CLI did not say.
+    ChatRole:
+      type: string
+      enum:
+      - user
+      - assistant
+      - tool
+      - card
+      - note
+    ChatState:
+      type: string
+      description: Whether the chat is answering right now.
+      enum:
+      - idle
+      - replying
+    ChatStreamEvent:
+      oneOf:
+      - type: object
+        description: 'First event of a connection (no `id`). `resync` is true when the events since `Last-Event-ID` are gone: refetch the chat.'
+        required:
+        - chatId
+        - harness
+        - model
+        - state
+        - lastSeq
+        - lastEventId
+        - resync
+        - type
+        properties:
+          chatId:
+            type: string
+          harness:
+            $ref: '#/components/schemas/HarnessKind'
+          lastEventId:
+            type: integer
+            format: int64
+            minimum: 0
+          lastSeq:
+            type: integer
+            format: int64
+            description: The newest message `seq`.
+          model:
+            type:
+            - string
+            - 'null'
+          pending:
+            $ref: '#/components/schemas/PendingReplyVm'
+            description: The partial reply written so far, if one is in progress.
+          resync:
+            type: boolean
+          state:
+            $ref: '#/components/schemas/ChatState'
+          type:
+            type: string
+            enum:
+            - ready
+      - type: object
+        description: 'A whole message: the user''s (echoed so every client agrees), or a finished reply with its harness and model.'
+        required:
+        - message
+        - type
+        properties:
+          message:
+            $ref: '#/components/schemas/ChatMessageVm'
+          type:
+            type: string
+            enum:
+            - message
+      - type: object
+        description: Part of the reply being written. Append; the finished `message` repeats the whole text.
+        required:
+        - text
+        - type
+        properties:
+          text:
+            type: string
+          type:
+            type: string
+            enum:
+            - delta
+      - type: object
+        description: Part of the reasoning summary (collapsed in the UI). Not stored.
+        required:
+        - text
+        - type
+        properties:
+          text:
+            type: string
+          type:
+            type: string
+            enum:
+            - thinking
+      - type: object
+        description: 'A step with a tool: `running`, then `done` or `failed` with the same `tool.id`.'
+        required:
+        - tool
+        - type
+        properties:
+          tool:
+            $ref: '#/components/schemas/ChatToolVm'
+          type:
+            type: string
+            enum:
+            - tool
+      - type: object
+        description: A draft card, new (`replaces` is the id of the draft it supersedes) or updated (same `card.id`).
+        required:
+        - seq
+        - card
+        - type
+        properties:
+          card:
+            $ref: '#/components/schemas/ChatCardVm'
+          replaces:
+            type: string
+          seq:
+            type: integer
+            format: int64
+          type:
+            type: string
+            enum:
+            - card
+      - type: object
+        description: 'A steering note: `queued` when sent, `read` once an agent took it up.'
+        required:
+        - seq
+        - card
+        - type
+        properties:
+          card:
+            $ref: '#/components/schemas/ChatCardVm'
+          seq:
+            type: integer
+            format: int64
+          type:
+            type: string
+            enum:
+            - note
+      - type: object
+        description: Tokens of the turn so far (incremental).
+        required:
+        - usage
+        - type
+        properties:
+          type:
+            type: string
+            enum:
+            - usage
+          usage:
+            $ref: '#/components/schemas/ChatUsageVm'
+      - type: object
+        description: The turn is over. Totals are for the turn.
+        required:
+        - turn
+        - outcome
+        - lastSeq
+        - usage
+        - type
+        properties:
+          lastSeq:
+            type: integer
+            format: int64
+          outcome:
+            $ref: '#/components/schemas/ChatOutcome'
+          turn:
+            type: integer
+            format: int64
+            minimum: 0
+          type:
+            type: string
+            enum:
+            - done
+          usage:
+            $ref: '#/components/schemas/ChatUsageVm'
+      - type: object
+        description: 'The turn failed; `done` follows with `outcome: failed`.'
+        required:
+        - error
+        - type
+        properties:
+          error:
+            $ref: '#/components/schemas/ChatErrorVm'
+          type:
+            type: string
+            enum:
+            - error
+      description: Events of `GET /v1/chats/{id}/stream`. The SSE `event:` is the `type`.
+    ChatToolState:
+      type: string
+      enum:
+      - running
+      - done
+      - failed
+    ChatToolVm:
+      type: object
+      description: 'One step of the agent: a line of the reply''s "what it did" list.'
+      required:
+      - id
+      - name
+      - state
+      - summary
+      properties:
+        id:
+          type: string
+          description: The CLI's id of the call; the `running` and `done` events of one call share it.
+        name:
+          type: string
+          description: The tool, e.g. `draft_optimization` (`mcp__ratchet__` removed) or `Read`.
+        state:
+          $ref: '#/components/schemas/ChatToolState'
+        summary:
+          type: string
+          description: One line to show, e.g. "Read RATCHET.md". Short; never a credential.
+    ChatUsageVm:
+      type: object
+      description: Tokens and dollars of a turn or a reply. `costUsd` is absent when the CLI reports tokens only; on a subscription login it is 0.
+      required:
+      - inputTokens
+      - outputTokens
+      properties:
+        billing:
+          $ref: '#/components/schemas/HarnessBilling'
+          description: 'How the tokens were paid for: the user''s plan or an API key. Absent while unknown.'
+        costUsd:
+          type: number
+          format: double
+        inputTokens:
+          type: integer
+          format: int64
+          minimum: 0
+        outputTokens:
+          type: integer
+          format: int64
+          minimum: 0
+    ChatVm:
+      type: object
+      description: A chat, with its messages (`GET`) or without (`POST`).
+      required:
+      - id
+      - repo
+      - optimization
+      - harness
+      - model
+      - state
+      - live
+      - createdAt
+      - updatedAt
+      - lastEventId
+      properties:
+        createdAt:
+          type: integer
+          format: int64
+        dataNotice:
+          $ref: '#/components/schemas/DataNoticeVm'
+          description: Set while this is the first chat with this harness.
+        harness:
+          $ref: '#/components/schemas/HarnessKind'
+        hasMore:
+          type: boolean
+          description: More messages follow the last one here (ask again with `after`).
+        id:
+          type: string
+        lastEventId:
+          type: integer
+          format: int64
+          description: Id of the newest stream event so far, for `Last-Event-ID`.
+          minimum: 0
+        live:
+          type: boolean
+          description: A live CLI session is open (it closes after 10 minutes without a message and reopens with the next one).
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatMessageVm'
+          description: Oldest first. Only on `GET`, and at most `limit` of the messages after `after`.
+        model:
+          type:
+          - string
+          - 'null'
+          description: The model the chat asked for (the catalog default when the request named none); `null` when the CLI chooses.
+        optimization:
+          type:
+          - string
+          - 'null'
+        pending:
+          $ref: '#/components/schemas/PendingReplyVm'
+        repo:
+          type:
+          - string
+          - 'null'
+        state:
+          $ref: '#/components/schemas/ChatState'
+        updatedAt:
+          type: integer
+          format: int64
     CompareRow:
       type: object
       description: One row of "Baseline vs best" / "Before and after".
@@ -2867,6 +3607,22 @@ components:
       - reconciled
       - unchanged
       - pending
+    CreateChatInput:
+      type: object
+      description: 'Body of `POST /v1/chats`. Every field is optional: an empty body starts a Home chat with no repo.'
+      properties:
+        harness:
+          $ref: '#/components/schemas/HarnessKind'
+          description: 'Default: the user''s chat harness, else the first signed-in one (Claude Code, then Codex, then Grok).'
+        model:
+          type: string
+          description: 'A model id or alias of the harness (`GET /v1/harnesses`). Default: the catalog''s chat model.'
+        optimization:
+          type: string
+          description: 'Steering: the chat is bound to this optimization, sees its context and gets the `add_steering_note` tool.'
+        repo:
+          type: string
+          description: '`owner/name`: the chat reads this repo (a read-only checkout of its default branch) and may only draft for it.'
     CreateEnvironmentDraftInput:
       type: object
       description: '`POST /v1/environment-drafts`.'
@@ -3020,6 +3776,18 @@ components:
         version:
           type: string
           description: Crate version of `ratchetd`.
+    DataNoticeVm:
+      type: object
+      description: 'The first-use notice: what leaves this machine when you chat. Show it once, dismissible.'
+      required:
+      - harness
+      - text
+      properties:
+        harness:
+          $ref: '#/components/schemas/HarnessKind'
+        text:
+          type: string
+          description: '"First time: your messages, the repo name and the files it reads go to Claude Code, signed in on this Mac. Ratchet sends nothing else."'
     DemoId:
       type: string
       enum:
@@ -4466,6 +5234,14 @@ components:
           type: number
           format: double
           description: What this win added, USD per year.
+    PendingReplyVm:
+      type: object
+      description: 'The reply being written when the client asks: text not yet part of a `message`, so a client that joins late does not miss it.'
+      required:
+      - text
+      properties:
+        text:
+          type: string
     PipelineCandidate:
       type: object
       required:
@@ -4950,6 +5726,15 @@ components:
         xaiApiKey:
           type: boolean
           description: 'Absent in a response from an older daemon: no key.'
+    SendChatMessageInput:
+      type: object
+      description: Body of `POST /v1/chats/{id}/messages`.
+      required:
+      - text
+      properties:
+        text:
+          type: string
+          description: 1 to 8000 characters.
     SetAwsProfileInput:
       type: object
       required:
@@ -5556,5 +6341,7 @@ tags:
   description: 'Overview: spent, value locked in, return, the value staircase, needs you, the table.'
 - name: connectors
   description: Saved GitHub accounts, AWS profiles and agent credentials, and the choice remembered per repo.
+- name: chats
+  description: 'Chat: a conversation with the user''s own agent CLI that acts on Ratchet only through Ratchet''s tools. Each chat has its own server-sent-event stream.'
 - name: environment drafts
   description: 'Dynamic environments: a setup agent drafts the environment a goal needs, the user asks for changes and approves, the files are committed and locked.'
