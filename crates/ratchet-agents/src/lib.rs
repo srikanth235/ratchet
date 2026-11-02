@@ -12,6 +12,7 @@
 //! are `ratchet-core`'s; the filesystem artifact store is `ratchet-sandbox`'s.
 
 pub mod artifacts;
+pub mod chat_harness;
 pub mod classify;
 pub mod claude_code;
 pub mod cli_agent;
@@ -42,6 +43,7 @@ pub use artifacts::{
     ArtifactEventSink, ArtifactInbox, AwsCliArtifactStore, EventSinkOptions, config_key, done_key,
     event_key, inbox_key, last_seq, read_events, runner_prefix, seq_of,
 };
+pub use chat_harness::local_harness_for;
 pub use claude_code::{
     ClaudeCodeAdapter, ClaudeCodeOptions, ClaudeLiveSession, ClaudePermissionMode, ClaudeResult,
     ClaudeStreamParser, DEFAULT_CLAUDE_TOOLS, PromptVia,

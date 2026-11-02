@@ -121,6 +121,17 @@ pub trait AppService: Send + Sync + 'static {
         None
     }
 
+    /// The ledger chats are stored in (and the user's chat harness is saved to). `None`: the daemon keeps chats in a ledger of
+    /// its own, in memory.
+    fn ledger(&self) -> Option<ratchet_ledger::Ledger> {
+        None
+    }
+
+    /// The harness layer chats run on. `None`: the scripted engine (no model, no CLI).
+    fn chat_engine(&self) -> Option<std::sync::Arc<dyn crate::chat::ChatEngine>> {
+        None
+    }
+
     /// Every event the engine publishes. The server numbers them and keeps a window for `Last-Event-ID` resume.
     fn subscribe(&self) -> broadcast::Receiver<ApiEvent>;
 

@@ -71,6 +71,8 @@ pub struct SimOptions {
     pub resume_runs: bool,
     /// Real-time ms a simulated GitHub device flow takes (0 = never completes by itself).
     pub github_flow_ms: u64,
+    /// Pause between the chunks the scripted chat streams (the typing effect); zero streams at full speed.
+    pub chat_chunk_delay: std::time::Duration,
 }
 
 impl Default for SimOptions {
@@ -86,6 +88,7 @@ impl Default for SimOptions {
             idle_minutes: 30,
             resume_runs: true,
             github_flow_ms: 2000,
+            chat_chunk_delay: std::time::Duration::ZERO,
         }
     }
 }
@@ -120,6 +123,8 @@ pub(crate) struct Inner {
     pub state: Mutex<State>,
     /// Environment drafts: the real `ratchet-env` flow with its deterministic mock drafter (no agent, no AWS).
     pub drafts: crate::drafts::EnvDrafts,
+    /// The chat harness of the simulation: scripted, no model.
+    pub chat: Arc<crate::chat::ScriptedChatEngine>,
 }
 
 impl Inner {
@@ -230,6 +235,11 @@ pub fn repo_slug(repo_url: &str) -> Option<String> {
 pub struct SimService(pub(crate) Arc<Inner>);
 
 impl SimService {
+    /// The scripted chat engine (tests: sessions opened and closed, harnesses signed in or out).
+    pub fn scripted_chat(&self) -> Arc<crate::chat::ScriptedChatEngine> {
+        Arc::clone(&self.0.chat)
+    }
+
     pub async fn new(opts: SimOptions) -> ServiceResult<Self> {
         let clock: Arc<dyn Clock> = opts.clock.clone().unwrap_or_else(|| Arc::new(SystemClock));
         let ledger_opts = LedgerOptions {
@@ -303,6 +313,10 @@ impl SimService {
             rng: Mutex::new(Rng::new(opts.rng_seed)),
             pr_urls,
             state: Mutex::new(State::default()),
+            chat: crate::chat::ScriptedChatEngine::new(crate::chat::ScriptedOptions {
+                chunk_delay: opts.chat_chunk_delay,
+                root: None,
+            }),
             opts: opts.clone(),
             drafts,
         });
@@ -384,6 +398,14 @@ fn effective_protected_for(cfg: &RatchetConfig) -> EffectiveProtected {
 impl AppService for SimService {
     fn engine(&self) -> EngineInfo {
         self.0.engine()
+    }
+
+    fn ledger(&self) -> Option<ratchet_ledger::Ledger> {
+        Some(self.0.ledger.clone())
+    }
+
+    fn chat_engine(&self) -> Option<Arc<dyn crate::chat::ChatEngine>> {
+        Some(self.0.chat.clone())
     }
 
     fn ledger_path(&self) -> Option<String> {

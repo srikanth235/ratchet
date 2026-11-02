@@ -10,7 +10,7 @@ use serde_json::json;
 
 use super::{emit_json, table, urlencode};
 use crate::cli::{
-    AgentArg, AgentCmd, Command, CostCmd, DemoArg, EnvCmd, EventsArgs, RunArgs, WhereArg,
+    AgentArg, AgentCmd, ChatCmd, Command, CostCmd, DemoArg, EnvCmd, EventsArgs, RunArgs, WhereArg,
 };
 use crate::client::{Client, ClientError};
 use crate::io::Io;
@@ -81,6 +81,7 @@ pub async fn run(c: &Client, cmd: Command, json: bool, io: &dyn Io) -> R {
         } => activity(c, optimization, limit, json, io).await,
         Command::Agent { action } => agent(c, action, json, io).await,
         Command::Events(args) => events(c, args, json, io).await,
+        Command::Chat { action } => chat(c, action, json, io).await,
         Command::Env { action } => env(c, action, json, io).await,
         Command::Cost {
             action: CostCmd::Reconcile { id },
@@ -750,6 +751,151 @@ async fn events(c: &Client, args: EventsArgs, json: bool, io: &dyn Io) -> R {
         None => read.await?,
     }
     Ok(0)
+}
+
+async fn chat(c: &Client, action: ChatCmd, json: bool, io: &dyn Io) -> R {
+    match action {
+        ChatCmd::New {
+            repo,
+            optimization,
+            harness,
+            model,
+        } => {
+            let harness = match harness.as_deref().map(HarnessKind::from_id) {
+                Some(Some(h)) => Some(h),
+                Some(None) => {
+                    io.err("ratchet: --harness is claude-code, codex or grok\n");
+                    return Ok(2);
+                }
+                None => None,
+            };
+            let chat: ChatVm = c
+                .post(
+                    "/v1/chats",
+                    &CreateChatInput {
+                        repo,
+                        optimization,
+                        harness,
+                        model,
+                    },
+                )
+                .await?;
+            if json {
+                emit_json(io, &chat);
+            } else {
+                io.out(&format!(
+                    "{}  {}{}\n",
+                    chat.id,
+                    chat.harness.label(),
+                    chat.model
+                        .as_deref()
+                        .map_or(String::new(), |m| format!(" · {m}"))
+                ));
+                if let Some(n) = &chat.data_notice {
+                    io.err(&format!("{}\n", n.text));
+                }
+            }
+            Ok(0)
+        }
+        ChatCmd::Send { id, text, timeout } => {
+            // open the stream first, so nothing of the reply is missed
+            let mut stream = c.chat_stream(&id).await?;
+            let _ready = stream.next().await;
+            let _: ChatMessageAccepted = c
+                .post(
+                    &format!("/v1/chats/{id}/messages"),
+                    &SendChatMessageInput { text },
+                )
+                .await?;
+            let mut failed = false;
+            let read = async {
+                while let Some(ev) = stream.next().await {
+                    let ev = ev?;
+                    if json {
+                        io.out(&(serde_json::to_string(&ev).unwrap_or_default() + "\n"));
+                    }
+                    match &ev {
+                        ChatStreamEvent::Delta { text } if !json => io.out(text),
+                        ChatStreamEvent::Tool { tool }
+                            if !json && tool.state != ChatToolState::Running =>
+                        {
+                            io.err(&format!("· {}\n", tool.summary));
+                        }
+                        ChatStreamEvent::Card { card, .. } if !json => {
+                            io.err(&format!("\n[draft {}] {}\n", card.id, card.title));
+                            for r in &card.rows {
+                                io.err(&format!("  {:<10} {}\n", r.label, r.value));
+                            }
+                        }
+                        ChatStreamEvent::Error { error } if !json => {
+                            io.err(&format!("\n{}\n{}\n", error.title, error.message));
+                        }
+                        ChatStreamEvent::Done { outcome, .. } => {
+                            failed = *outcome == ChatOutcome::Failed;
+                            if !json {
+                                io.out("\n");
+                            }
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+                Ok::<(), ClientError>(())
+            };
+            if let Ok(r) = tokio::time::timeout(Duration::from_secs(timeout), read).await {
+                r?;
+            } else {
+                io.err("ratchet: still replying; the chat keeps going (see `ratchet chat show`)\n");
+            }
+            Ok(i32::from(failed))
+        }
+        ChatCmd::Show { id, after, limit } => {
+            let mut q = format!("?limit={limit}");
+            if let Some(a) = after {
+                q.push_str(&format!("&after={a}"));
+            }
+            let chat: ChatVm = c.get(&format!("/v1/chats/{id}{q}")).await?;
+            if json {
+                emit_json(io, &chat);
+                return Ok(0);
+            }
+            for m in &chat.messages {
+                let who = match m.role {
+                    ChatRole::User => "you".to_owned(),
+                    ChatRole::Assistant => m
+                        .harness
+                        .map_or("assistant".to_owned(), |h| h.label().to_lowercase()),
+                    ChatRole::Tool => "step".to_owned(),
+                    ChatRole::Card => "draft".to_owned(),
+                    ChatRole::Note => "note".to_owned(),
+                };
+                io.out(&format!("#{:<4} {:<12} {}\n", m.seq, who, m.text));
+            }
+            if chat.has_more {
+                io.err("more messages follow: use --after\n");
+            }
+            Ok(0)
+        }
+        ChatCmd::Stop { id } => {
+            c.post_unit::<()>(&format!("/v1/chats/{id}/interrupt"), None)
+                .await?;
+            done(
+                io,
+                json,
+                json!({"id": id, "stopped": true}),
+                format!("stopped the reply in {id}\n"),
+            )
+        }
+        ChatCmd::End { id } => {
+            c.delete_unit(&format!("/v1/chats/{id}")).await?;
+            done(
+                io,
+                json,
+                json!({"id": id, "ended": true}),
+                format!("ended {id}\n"),
+            )
+        }
+    }
 }
 
 async fn env(c: &Client, action: EnvCmd, json: bool, io: &dyn Io) -> R {

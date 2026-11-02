@@ -6,8 +6,9 @@
 //!
 //! Groups: [`vm`] (optimizations, candidates, agents, spend, activity, config), [`settings`] (settings, GitHub,
 //! AWS, agent CLIs), [`repos`] (repos, environments), [`commands`] (bodies and queries), [`events`] (the SSE
-//! union), and the provisional [`connectors`], [`overview`] and [`env_drafts`].
+//! union), [`chat`] (conversations with the user's agent CLI), and the provisional [`connectors`], [`overview`] and [`env_drafts`].
 
+pub mod chat;
 pub mod commands;
 pub mod common;
 pub mod connectors;
@@ -20,6 +21,7 @@ pub mod summary;
 pub mod validate;
 pub mod vm;
 
+pub use chat::*;
 pub use commands::*;
 pub use common::*;
 pub use connectors::*;

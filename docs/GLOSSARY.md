@@ -13,6 +13,8 @@
 | Note | Text left on a run to steer the next candidate | comment, prompt |
 | Pause Schedule | Stop new runs of an optimization | Pause |
 | Pause Agent | Stop one agent inside a run | |
+| Chat | A conversation with your own agent (Claude Code, Codex or Grok) that acts on Ratchet through its tools | assistant session, thread |
+| Draft | An optimization the chat proposed as a card, not created yet | proposal |
 | Config branch | `ratchet/config`, where a new optimization's files go before any PR | draft PR |
 | Customize | Templates, Connectors, Agents: their only home | Settings |
 | Default | A value for new optimizations, set in Settings → Defaults | global |

@@ -36,6 +36,35 @@ impl TestDaemon {
         Self::with_window(opts, ratchetd::hub::DEFAULT_WINDOW).await
     }
 
+    /// A daemon whose chats use `chat` (idle window, pool size) and whose drafts go to an in-memory git host.
+    pub async fn with_chat(chat: ratchetd::chat::ChatOptions) -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let sim = SimService::new(SimOptions {
+            auto_run: false,
+            github_flow_ms: 0,
+            ..SimOptions::default()
+        })
+        .await
+        .unwrap();
+        let socket = dir.path().join("ratchetd.sock");
+        let mut cfg = DaemonConfig::new(&socket);
+        cfg.mcp = Some(Arc::new(ratchetd::mcp::McpHub::with_hosts(Arc::new(
+            ratchetd::mcp::MockHosts::new(),
+        ))));
+        cfg.chat_options = Some(chat);
+        let daemon = Daemon::start(Arc::new(sim.clone()), cfg).await.unwrap();
+        let http = Http {
+            socket,
+            token: Some(daemon.token.clone()),
+        };
+        Self {
+            dir,
+            daemon,
+            sim,
+            http,
+        }
+    }
+
     pub async fn with_window(opts: SimOptions, window: usize) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let sim = SimService::new(opts).await.unwrap();
@@ -159,10 +188,19 @@ impl Http {
         r.json()
     }
 
+    pub async fn delete(&self, path: &str) -> Reply {
+        self.send("DELETE", path, None).await
+    }
+
     /// Open the event stream; `last_event_id` is sent as the `Last-Event-ID` header.
     pub async fn events(&self, last_event_id: Option<u64>) -> SseReader {
+        self.stream("/v1/events", last_event_id).await
+    }
+
+    /// Open any server-sent-event route (a chat's stream).
+    pub async fn stream(&self, path: &str, last_event_id: Option<u64>) -> SseReader {
         let mut sender = self.connect().await;
-        let mut req = self.request("GET", "/v1/events", None);
+        let mut req = self.request("GET", path, None);
         if let Some(id) = last_event_id {
             req.headers_mut()
                 .insert("last-event-id", id.to_string().parse().unwrap());

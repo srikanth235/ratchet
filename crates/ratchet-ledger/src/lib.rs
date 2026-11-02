@@ -1,6 +1,6 @@
 //! Ratchet's ledger: SQLite through sqlx, the single source of truth for an optimization.
 //!
-//! `ratchet_moves` and `spend_events` are append-only (triggers in `migrations/0001_init.sql`); money is USD as
+//! `ratchet_moves` and `spend_events` are append-only (triggers in `migrations/0001_init.sql`; chats, P4, are `0002_chats.sql`); money is USD as
 //! `REAL`; timestamps are epoch milliseconds. Open one with [`Ledger::open`] (a file, WAL) or
 //! [`Ledger::open_memory`]; both apply the migration.
 //!
@@ -9,10 +9,12 @@
 //!
 //! Port of `packages/core/src/ledger`. See `PARITY.md`.
 
+mod chats;
 mod rowmap;
 mod store;
 mod traits;
 
+pub use chats::{ChatMessageRow, ChatRow, NewChat, NewChatMessage};
 pub use ratchet_core::ledger::{
     LedgerError, LedgerErrorCode, LedgerResult, Patch, RecordSandboxInput, SandboxStatusPatch,
 };

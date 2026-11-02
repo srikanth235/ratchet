@@ -923,6 +923,76 @@ async fn every_route_round_trips_its_types() {
     )
     .await;
 
+    // ---- chat -------------------------------------------------------------------------------------------
+    let chat: ChatVm = c
+        .rt("POST", "/v1/chats", "/v1/chats", Some(json!({})), 201)
+        .await;
+    assert_eq!(chat.harness, HarnessKind::ClaudeCode);
+    assert_eq!(chat.state, ChatState::Idle);
+    assert!(chat.data_notice.is_some());
+    let cid = chat.id.clone();
+    c.covered
+        .insert(("GET".into(), "/v1/chats/{id}/stream".into()));
+    let mut sse =
+        c.d.http
+            .stream(&format!("/v1/chats/{cid}/stream"), None)
+            .await;
+    let ready = sse.next().await.unwrap();
+    let parsed: ChatStreamEvent = serde_json::from_value(ready.data.clone()).unwrap();
+    assert_eq!(parsed.name(), "ready");
+    let accepted: ChatMessageAccepted = c
+        .rt(
+            "POST",
+            "/v1/chats/{id}/messages",
+            &format!("/v1/chats/{cid}/messages"),
+            Some(json!({"text": "hello"})),
+            202,
+        )
+        .await;
+    assert_eq!(accepted.turn, 1);
+    loop {
+        let m = sse.next().await.unwrap();
+        let ev: ChatStreamEvent =
+            serde_json::from_value(m.data.clone()).unwrap_or_else(|e| panic!("{e}: {m:?}"));
+        assert_eq!(
+            serde_json::to_value(&ev).unwrap(),
+            m.data,
+            "an event round-trips its type"
+        );
+        assert_eq!(Some(ev.name()), m.event.as_deref());
+        if matches!(ev, ChatStreamEvent::Done { .. }) {
+            break;
+        }
+    }
+    drop(sse);
+    let got: ChatVm = c
+        .rt(
+            "GET",
+            "/v1/chats/{id}",
+            &format!("/v1/chats/{cid}"),
+            None,
+            200,
+        )
+        .await;
+    assert_eq!(got.messages.len(), 2, "the user's message and the reply");
+    assert_eq!(got.messages[1].role, ChatRole::Assistant);
+    c.no_content(
+        "POST",
+        "/v1/chats/{id}/interrupt",
+        &format!("/v1/chats/{cid}/interrupt"),
+        None,
+    )
+    .await;
+    c.fails("GET", "/v1/chats/nope", None, 404, ErrorCode::NotFound)
+        .await;
+    c.no_content(
+        "DELETE",
+        "/v1/chats/{id}",
+        &format!("/v1/chats/{cid}"),
+        None,
+    )
+    .await;
+
     // ---- the document and the cases agree --------------------------------------------------------------
     let documented: BTreeSet<(String, String)> = ratchetd::openapi::route_table()
         .iter()

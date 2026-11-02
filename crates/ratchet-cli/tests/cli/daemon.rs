@@ -751,3 +751,59 @@ async fn the_preview_needs_no_daemon() {
     .await;
     assert_eq!(o.code, 1, "{}", o.stderr);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn chat_talks_to_the_scripted_assistant_and_ends() {
+    let env = Env::start().await;
+    let made = env.ratchet(&["chat", "new", "--repo", "acme/shop"]).await;
+    assert_eq!(made.code, 0, "{}", made.stderr);
+    assert!(
+        made.stdout.contains("Claude Code · sonnet"),
+        "{}",
+        made.stdout
+    );
+    assert!(made.stderr.starts_with("First time:"), "{}", made.stderr);
+    let id = made.stdout.split_whitespace().next().unwrap().to_owned();
+
+    // a reply streams as text; steps and the card go to stderr
+    let sent = env.ratchet(&["chat", "send", &id, "hello"]).await;
+    assert_eq!(sent.code, 0, "{}", sent.stderr);
+    assert!(
+        sent.stdout.contains("Here is the optimization")
+            || sent.stdout.contains("Which repository"),
+        "{}",
+        sent.stdout
+    );
+
+    // --json: one stream event per line, ending with done
+    let j = env
+        .ratchet(&["chat", "send", &id, "[simulate:crash]", "--json"])
+        .await;
+    assert_eq!(j.code, 1, "a failed turn exits 1: {}", j.stdout);
+    let events: Vec<serde_json::Value> = j
+        .stdout
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    let kinds: Vec<&str> = events.iter().filter_map(|e| e["type"].as_str()).collect();
+    assert_eq!(&kinds[kinds.len() - 2..], ["error", "done"], "{kinds:?}");
+
+    let shown = env.ratchet(&["chat", "show", &id]).await;
+    assert_eq!(shown.code, 0);
+    assert!(
+        shown.stdout.contains("you") && shown.stdout.contains("hello"),
+        "{}",
+        shown.stdout
+    );
+    let chat: ChatVm = parse(&env.ratchet(&["chat", "show", &id, "--json"]).await);
+    assert!(chat.messages.len() >= 3);
+
+    assert_eq!(env.ratchet(&["chat", "stop", &id]).await.code, 0);
+    let ended = env.ratchet(&["chat", "end", &id]).await;
+    assert_eq!(ended.code, 0, "{}", ended.stderr);
+    let gone = env.ratchet(&["chat", "show", &id]).await;
+    assert_ne!(gone.code, 0);
+    let bad = env.ratchet(&["chat", "new", "--harness", "gemini"]).await;
+    assert_eq!(bad.code, 2);
+    env.stop().await;
+}

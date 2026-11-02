@@ -8,16 +8,25 @@ use std::path::PathBuf;
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::{Row, SqlitePool};
 
+/// The objects of migration 0001 (the drizzle schema): chats, from 0002, are checked in `tests/chats.rs`.
 async fn schema(pool: &SqlitePool) -> Vec<(String, String, String, Option<String>)> {
     sqlx::query(
         "select type, name, tbl_name, sql from sqlite_master \
-         where name not like 'sqlite_%' and name not like '\\_sqlx%' escape '\\' order by type, name",
+         where name not like 'sqlite_%' and name not like '\\_sqlx%' escape '\\' \
+         and tbl_name not in ('chats', 'chat_messages') order by type, name",
     )
     .fetch_all(pool)
     .await
     .unwrap()
     .iter()
-    .map(|r| (r.get("type"), r.get("name"), r.get("tbl_name"), r.get("sql")))
+    .map(|r| {
+        (
+            r.get("type"),
+            r.get("name"),
+            r.get("tbl_name"),
+            r.get("sql"),
+        )
+    })
     .collect()
 }
 
@@ -68,7 +77,7 @@ async fn the_migration_creates_the_same_schema_as_the_drizzle_one() {
 }
 
 #[tokio::test]
-async fn opening_twice_applies_the_migration_once() {
+async fn opening_twice_applies_each_migration_once() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("ledger.db");
     for _ in 0..2 {
@@ -80,7 +89,8 @@ async fn opening_twice_applies_the_migration_once() {
             .await
             .unwrap()
             .get("n");
-        assert_eq!(n, 1);
+        // 0001 (the drizzle schema) and 0002 (chats)
+        assert_eq!(n, 2);
         l.close().await;
     }
 }

@@ -1,6 +1,5 @@
 ---
 source: crates/ratchetd/tests/api/openapi.rs
-assertion_line: 34
 expression: "openapi::route_table().join(\"\\n\")"
 ---
 GET /v1/activity listActivity
@@ -9,6 +8,12 @@ POST /v1/agents/{id}/messages messageAgent
 POST /v1/agents/{id}/pause pauseAgent
 POST /v1/agents/{id}/resume resumeAgent
 GET /v1/aws/profiles listAwsProfiles
+POST /v1/chats createChat
+GET /v1/chats/{id} getChat
+DELETE /v1/chats/{id} deleteChat
+POST /v1/chats/{id}/interrupt interruptChat
+POST /v1/chats/{id}/messages sendChatMessage
+GET /v1/chats/{id}/stream streamChat
 POST /v1/config/validations validateConfig
 POST /v1/connection-tests testConnection
 GET /v1/connector-selections getConnectorSelection

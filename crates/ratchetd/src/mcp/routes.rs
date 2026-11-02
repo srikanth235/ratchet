@@ -63,26 +63,40 @@ struct CallBody {
     arguments: Value,
 }
 
+/// Run one tool call for `session`: the same path for the stdio child (`/v1/mcp/call`) and for a scripted harness. The daemon is
+/// the authority: it checks the set again, whatever the child process believes, and tells the chat service what ran (cards, notes).
+pub async fn dispatch(
+    state: &AppState,
+    session: &SessionInfo,
+    tool: &str,
+    arguments: Value,
+) -> Result<Value, ServiceError> {
+    let arguments = if arguments.is_null() {
+        json!({})
+    } else {
+        arguments
+    };
+    let Some(def) = session.set.find(tool) else {
+        return Err(ServiceError::Invalid(format!(
+            "tool \"{tool}\" is not available in this session"
+        )));
+    };
+    if let Some(validate) = def.validate {
+        validate(&arguments).map_err(ServiceError::Invalid)?;
+    }
+    let outcome = super::tools::call(state, session, tool, arguments.clone()).await;
+    state
+        .chats
+        .observe(session, tool, &arguments, &outcome)
+        .await;
+    outcome
+}
+
 async fn call(
     State(s): State<AppState>,
     Extension(session): Extension<SessionInfo>,
     ApiJson(body): ApiJson<CallBody>,
 ) -> ApiResult<Json<Value>> {
-    let arguments = if body.arguments.is_null() {
-        json!({})
-    } else {
-        body.arguments
-    };
-    // The daemon is the authority: it checks the set again, whatever the child process believes.
-    let Some(tool) = session.set.find(&body.tool) else {
-        return Err(ServiceError::Invalid(format!(
-            "tool \"{}\" is not available in this session",
-            body.tool
-        )));
-    };
-    if let Some(validate) = tool.validate {
-        validate(&arguments).map_err(ServiceError::Invalid)?;
-    }
-    let result = super::tools::call(&s, &session, &body.tool, arguments).await?;
+    let result = dispatch(&s, &session, &body.tool, body.arguments).await?;
     Ok(Json(json!({ "result": result })))
 }
