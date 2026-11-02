@@ -152,7 +152,7 @@ struct RepoReview: View {
 
     @ViewBuilder
     private func templateLink(_ inspection: RepoInspection) -> some View {
-        let detection = inspection.harness
+        let detection = inspection.detection
         if let id = detection.suggestedTemplateID, let template = flow.templates.first(where: { $0.id == id }) {
             if flow.templateID == id {
                 Text("Starting from the " + template.title + " template.").kitType(.meta).foregroundStyle(Ink.textFaint)

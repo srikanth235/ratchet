@@ -20,6 +20,9 @@ final class DaemonController {
     let location: DaemonLocation
     let management: Management
     @ObservationIgnored private var probeTask: Task<Void, Never>?
+    /// The registration work in flight (launch, unregister, restart, switch). A newer command cancels the older one, so a
+    /// restart and a switch to demo mode cannot run their unregister and register steps into each other.
+    @ObservationIgnored private var registrationTask: Task<Void, Never>?
     @ObservationIgnored private var started = false
 
     /// Snapshot mode: show a status screen whatever the data says.
@@ -86,9 +89,10 @@ final class DaemonController {
     func start() {
         guard !started, management != .none else { return }
         started = true
-        Task {
+        registrationTask = Task { [weak self] in
+            guard let self else { return }
             // A daemon that already answers needs no registration (a dev daemon, or the agent from the last launch).
-            if await reachable() {
+            if await self.reachable() {
                 run(.probed(reachable: true))
             } else if management == .managed {
                 run(.launched(registration(of: mode)))
@@ -142,21 +146,24 @@ final class DaemonController {
         case .unregister:
             guard management == .managed else { return }
             let current = mode
-            Task { try? await SMAppService.agent(plistName: current.plistName).unregister() }
+            registrationTask?.cancel()
+            registrationTask = Task { try? await SMAppService.agent(plistName: current.plistName).unregister() }
         case .restart:
             guard management == .managed else { return }
             let current = mode
-            Task {
+            registrationTask?.cancel()
+            registrationTask = Task { [weak self] in
                 try? await SMAppService.agent(plistName: current.plistName).unregister()
                 try? await Task.sleep(for: .seconds(1))
-                register(current)
+                if !Task.isCancelled { self?.register(current) }
             }
         case .switchMode(let new):
             guard management == .managed else { return }
-            Task {
+            registrationTask?.cancel()
+            registrationTask = Task { [weak self] in
                 try? await SMAppService.agent(plistName: new.other.plistName).unregister()
                 try? await Task.sleep(for: .seconds(1))
-                register(new)
+                if !Task.isCancelled { self?.register(new) }
             }
         }
     }

@@ -241,15 +241,15 @@ struct DaemonMappingTests {
         #expect(repos.first?.name == "shop-api")
     }
 
-    @Test func anInspectedRepoBecomesAHarnessDetection() throws {
+    @Test func anInspectedRepoBecomesABenchmarkDetection() throws {
         let inspected = try decode(VM.RepoInspectVm.self, Fixtures.inspect)
-        let found = DaemonMapping.harness(repoID: "acme/search-api", inspected)
+        let found = DaemonMapping.benchmarkDetection(repoID: "acme/search-api", inspected)
         #expect(found.found)
         #expect(found.summary.hasPrefix("Found ratchet.yaml: p95"))
 
         var bare = inspected
         bare.config = nil
-        let missing = DaemonMapping.harness(repoID: "acme/search-api", bare)
+        let missing = DaemonMapping.benchmarkDetection(repoID: "acme/search-api", bare)
         #expect(!missing.found)
         #expect(missing.summary.contains("template"))
     }

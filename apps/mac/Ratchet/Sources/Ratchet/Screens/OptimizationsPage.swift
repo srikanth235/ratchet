@@ -16,7 +16,7 @@ struct OptimizationsPage: View {
     }
 
     private var list: some View {
-        let visible = store.visibleOptimizations(filter)
+        let visible = store.optimizationStore.visibleOptimizations(filter)
         return KitPage {
             PageHeader("Optimizations", subtitle: "Every run, live or done. Open one to see its agents and result.") {
                 KitSwitch(items: OptimizationFilter.allCases, selection: filter, title: { $0.title }) { filter = $0 }

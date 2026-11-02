@@ -67,23 +67,23 @@ enum SnapScene: String, CaseIterable {
     }
 
     /// Puts the window in this scene's state.
-    func apply(store: AppStore, router: AppRouter, daemon: DaemonController, notifier: AppNotifier) async {
+    func apply(
+        store: AppStore, router: AppRouter, connectors: ConnectorsPageState, daemon: DaemonController, notifier: AppNotifier
+    ) async {
         // Every scene starts from the calm state.
         SnapshotFocus.shared.target = nil
         SnapshotFocus.shared.metric = nil
         daemon.preview(nil)
         notifier.preview(.allowed, prompt: false)
         store.dismissError()
-        await store.cancelGithubSignIn()
+        await store.connectorStore.cancelGithubSignIn()
         KitGalleryState.shared.isShown = gallerySection != nil
         KitGalleryState.shared.section = gallerySection
         router.show(.overview)
-        router.rowModes = [:]
-        router.rowNotes = [:]
-        router.connectorSheet = nil
+        connectors.reset()
         router.templateProposal = nil
         router.advancedExpanded = false
-        let mock = store.client as? MockRatchetClient
+        let mock = store.scenario
         await mock?.simulate(keychainAvailable: true)
         await mock?.simulate(preflight: nil)
         await store.refresh()
@@ -96,10 +96,10 @@ enum SnapScene: String, CaseIterable {
         case .notificationPrompt: notifier.preview(.notDetermined, prompt: true)
         case .errorBanner:
             router.open(optimization: "opt-checkout")
-            await store.stopOptimization("opt-bundle")
+            await store.optimizationStore.stopOptimization("opt-bundle")
         case .connectorSignIn:
             router.show(.connectors)
-            await store.startGithubSignIn()
+            await store.connectorStore.startGithubSignIn()
         case .optimizations: router.show(.optimizations)
         case .benchmarks: router.show(.benchmarks)
         case .connectors: router.show(.connectors)
@@ -108,22 +108,22 @@ enum SnapScene: String, CaseIterable {
         case .detailNoWin: router.open(optimization: "opt-bundle")
         case .detailLiveLog:
             router.open(optimization: "opt-checkout")
-            await store.loadDetail(id: "opt-checkout")
-            await store.loadAgentLog("agent-claude-login")
+            await store.optimizationStore.loadDetail(id: "opt-checkout")
+            await store.insight.loadAgentLog("agent-claude-login")
             SnapshotFocus.shared.target = "log"
         case .detailResultTime:
             router.open(optimization: "opt-cli")
-            await store.loadDetail(id: "opt-cli")
-            await store.loadInsights("opt-cli")
+            await store.optimizationStore.loadDetail(id: "opt-cli")
+            await store.insight.loadInsights("opt-cli")
             SnapshotFocus.shared.target = "time"
         case .detailResultSpend:
             router.open(optimization: "opt-forecast")
-            await store.loadDetail(id: "opt-forecast")
-            await store.loadInsights("opt-forecast")
+            await store.optimizationStore.loadDetail(id: "opt-forecast")
+            await store.insight.loadInsights("opt-forecast")
             SnapshotFocus.shared.target = "spend"
         case .benchmarksRun, .benchmarksRunP99:
             router.show(.benchmarks)
-            await store.loadBenchmark("opt-checkout", metric: nil)
+            await store.insight.loadBenchmark("opt-checkout", metric: nil)
             if self == .benchmarksRunP99 { SnapshotFocus.shared.metric = "p99" }
             SnapshotFocus.shared.target = "run"
         case .newRepoFound, .newRepoInvalid, .newRepoTemplate, .newLocalFolder, .newLocalNoRemote, .newMissing:
@@ -159,15 +159,15 @@ enum SnapScene: String, CaseIterable {
             // The page has to be on screen to take what is set below.
             try? await Task.sleep(for: .milliseconds(400))
             switch self {
-            case .connectorsAddGithub: router.connectorSheet = ConnectorSheetRequest(kind: .github, showsToken: true)
-            case .connectorsAddAWS: router.connectorSheet = ConnectorSheetRequest(kind: .aws, pick: "sandbox-eu")
-            case .connectorsAddAgent: router.connectorSheet = ConnectorSheetRequest(kind: .agent)
-            case .connectorsEdit: router.rowModes["aws-acme-prod"] = .edit
-            case .connectorsRename: router.rowModes["gh-acme-org"] = .rename
+            case .connectorsAddGithub: connectors.sheet = ConnectorSheetRequest(kind: .github, showsToken: true)
+            case .connectorsAddAWS: connectors.sheet = ConnectorSheetRequest(kind: .aws, pick: "sandbox-eu")
+            case .connectorsAddAgent: connectors.sheet = ConnectorSheetRequest(kind: .agent)
+            case .connectorsEdit: connectors.rowModes["aws-acme-prod"] = .edit
+            case .connectorsRename: connectors.rowModes["gh-acme-org"] = .rename
             case .connectorsCheck:
-                router.rowModes["aws-acme-staging"] = .ssoHint
-                router.rowNotes["gh-srikanth235"] = ConnectorNote(ok: true, text: "GitHub says you are signed in as srikanth235.")
-                router.rowNotes["agent-codex-login"] = ConnectorNote(ok: false, text: "Codex is not signed in. Run `codex login` in a terminal.")
+                connectors.rowModes["aws-acme-staging"] = .ssoHint
+                connectors.rowNotes["gh-srikanth235"] = ConnectorNote(ok: true, text: "GitHub says you are signed in as srikanth235.")
+                connectors.rowNotes["agent-codex-login"] = ConnectorNote(ok: false, text: "Codex is not signed in. Run `codex login` in a terminal.")
             default:
                 await mock?.simulate(keychainAvailable: false)
                 await store.refresh()
@@ -213,8 +213,8 @@ enum SnapScene: String, CaseIterable {
 /// APP_SNAPSHOT_PAGES=overview,new-budget limits the scenes. "all" means every scene; add "settings" for Settings.
 enum Snapshot {
     static func runIfRequested(
-        store: AppStore, router: AppRouter, openSettings: OpenSettingsAction, daemon: DaemonController, notifier: AppNotifier,
-        loginItem: LoginItem
+        store: AppStore, router: AppRouter, connectors: ConnectorsPageState, openSettings: OpenSettingsAction,
+        daemon: DaemonController, notifier: AppNotifier, loginItem: LoginItem
     ) {
         let env = ProcessInfo.processInfo.environment
         guard let dir = env["APP_SNAPSHOT"], !dir.isEmpty else { return }
@@ -239,13 +239,14 @@ enum Snapshot {
             for mode in ["light", "dark"] {
                 NSApp.appearance = NSAppearance(named: mode == "light" ? .aqua : .darkAqua)
                 for scene in SnapScene.allCases where everything || only?.contains(scene.rawValue) == true {
-                    await scene.apply(store: store, router: router, daemon: daemon, notifier: notifier)
+                    await scene.apply(store: store, router: router, connectors: connectors, daemon: daemon, notifier: notifier)
                     try? await Task.sleep(for: .seconds(1.0))
                     capture(to: "\(dir)/\(scene.rawValue)-\(mode).png")
                 }
             }
             if everything || only?.contains("settings") == true {
-                await SnapScene.overview.apply(store: store, router: router, daemon: daemon, notifier: notifier)
+                await SnapScene.overview.apply(
+                    store: store, router: router, connectors: connectors, daemon: daemon, notifier: notifier)
                 let main = NSApp.windows.first { $0.canBecomeMain && !$0.isSheet }
                 loginItem.preview(.off)
                 openSettings()

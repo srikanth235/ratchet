@@ -189,16 +189,16 @@ enum DaemonMapping {
         return Repo(id: vm.fullName, defaultBranch: vm.defaultBranch, account: account)
     }
 
-    static func harness(repoID: String, _ vm: VM.RepoInspectVm) -> HarnessDetection {
+    static func benchmarkDetection(repoID: String, _ vm: VM.RepoInspectVm) -> BenchmarkDetection {
         if let config = vm.config {
             let summary = "Found ratchet.yaml: " + metricName(config.metric) + ", "
                 + (config.direction == .minimize ? "lower" : "higher") + " is better."
-            return HarnessDetection(repoID: repoID, found: true, summary: summary)
+            return BenchmarkDetection(repoID: repoID, found: true, summary: summary)
         }
         if let problem = vm.problem, !problem.isEmpty {
-            return HarnessDetection(repoID: repoID, found: false, summary: problem, suggestedTemplateID: vm.templates.first?.id)
+            return BenchmarkDetection(repoID: repoID, found: false, summary: problem, suggestedTemplateID: vm.templates.first?.id)
         }
-        return HarnessDetection(
+        return BenchmarkDetection(
             repoID: repoID, found: false, summary: "No benchmark found in this repo. Start from a template.",
             suggestedTemplateID: vm.templates.first?.id)
     }
@@ -244,7 +244,7 @@ enum DaemonMapping {
                 id: agent.id, kind: .agent, name: agent.name, detail: agent.detail,
                 state: state(agent.status, kind: .agent), isDefault: agent.isDefault,
                 canRunInCloud: agent.runsOn.contains(.cloud), origin: agent.source == .apiKey ? .apiKey : .login,
-                cli: AgentCLI(rawValue: agent.agent.rawValue))
+                harness: Harness(rawValue: agent.agent.rawValue))
         }
     }
 

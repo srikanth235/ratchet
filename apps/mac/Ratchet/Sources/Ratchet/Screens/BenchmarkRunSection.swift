@@ -9,6 +9,7 @@ struct BenchmarkRunSection: View {
     @State private var chosen: String?
     @State private var metric: String?
     @State private var filter: CandidateFilter = .all
+    @State private var cap = RowCap()
     @State private var points: PointsMode = .all
     @State private var focus = SnapshotFocus.shared
 
@@ -19,7 +20,7 @@ struct BenchmarkRunSection: View {
     }
 
     /// The optimizations that have a baseline to show.
-    private var runs: [Optimization] { store.optimizations.filter { $0.baseline != 0 } }
+    private var runs: [Optimization] { store.optimizationStore.optimizations.filter { $0.baseline != 0 } }
 
     private var runID: String? {
         if let chosen, runs.contains(where: { $0.id == chosen }) { return chosen }
@@ -34,7 +35,7 @@ struct BenchmarkRunSection: View {
                     content(id)
                 }
                 .task(id: "\(id)|\(metric ?? "")") {
-                    await store.loadBenchmark(id, metric: metric)
+                    await store.insight.loadBenchmark(id, metric: metric)
                 }
             } else {
                 Text("Start an optimization and its benchmark appears here.").kitType(.body).foregroundStyle(Ink.textMuted)
@@ -52,7 +53,7 @@ struct BenchmarkRunSection: View {
             .labelsHidden()
             .fixedSize()
             Spacer(minLength: Space.sm)
-            if let series = store.insight.series[id], series.hasMetricSwitch {
+            if let series = store.insight.model(for: id).series, series.hasMetricSwitch {
                 KitSwitch(items: series.options, selection: series.selected ?? series.options[0], title: { $0.label }) { choice in
                     metric = choice.isObjective ? nil : choice.key
                 }
@@ -63,8 +64,8 @@ struct BenchmarkRunSection: View {
 
     @ViewBuilder
     private func content(_ id: String) -> some View {
-        if let series = store.insight.series[id] {
-            let results = store.insight.results[id] ?? []
+        if let series = store.insight.model(for: id).series {
+            let results = store.insight.model(for: id).results ?? []
             header(series)
             if series.steps.isEmpty {
                 Text("The chart appears once the baseline run finishes.").kitType(.body).foregroundStyle(Ink.textMuted)
@@ -109,7 +110,7 @@ struct BenchmarkRunSection: View {
 
     @ViewBuilder
     private func histogram(_ id: String, series: BenchmarkSeries, results: [CandidateResult]) -> some View {
-        let baseline = store.insight.insights[id]?.baselineSamples ?? []
+        let baseline = store.insight.model(for: id).insights?.baselineSamples ?? []
         let best = results.filter { $0.movedRatchet && !$0.samples.isEmpty }.max { $0.at < $1.at }
         if !baseline.isEmpty, let best {
             SamplesHistogram(
@@ -122,7 +123,7 @@ struct BenchmarkRunSection: View {
 
     @ViewBuilder
     private func baselineVsBest(_ id: String) -> some View {
-        let insights = store.insight.insights[id]
+        let insights = store.insight.model(for: id).insights
         if let lines = insights?.compare, !lines.isEmpty {
             HairlineList {
                 ForEach(lines) { line in
@@ -182,7 +183,7 @@ struct BenchmarkRunSection: View {
                 Spacer(minLength: Space.sm)
                 KitSwitch(items: CandidateFilter.allCases, selection: filter, title: { $0.title }) { filter = $0 }
             }
-            VStack(alignment: .leading, spacing: 0) {
+            LazyVStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: Space.md) {
                     head("Commit").frame(width: Space.section * 3, alignment: .leading)
                     head("Change").frame(maxWidth: .infinity, alignment: .leading)
@@ -194,8 +195,13 @@ struct BenchmarkRunSection: View {
                 }
                 .padding(.bottom, Space.sm + 2)
                 .overlay(alignment: .bottom) { Hairline() }
-                ForEach(rows) { row in
+                ForEach(cap.shown(rows)) { row in
                     CandidateResultRow(row: row, unit: series.unit)
+                }
+                if let title = cap.buttonTitle(count: rows.count, noun: "candidates") {
+                    Button(title) { cap.showsAll = true }
+                        .buttonStyle(.kit(.quiet, small: true))
+                        .padding(.top, Space.md)
                 }
                 if rows.isEmpty {
                     Text("No candidates match.").kitType(.body).foregroundStyle(Ink.textMuted).padding(.vertical, Space.md)

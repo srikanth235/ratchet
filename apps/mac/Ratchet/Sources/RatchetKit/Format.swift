@@ -90,19 +90,35 @@ public enum Elapsed {
 
     /// "15:40", in the given time zone (the current one by default).
     public static func timeOfDay(_ date: Date, timeZone: TimeZone = .current) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
+        DateFormatters.shared.string(from: date, format: "HH:mm", timeZone: timeZone)
     }
 
     /// "Oct 31".
     public static func shortDate(_ date: Date, timeZone: TimeZone = .current) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = timeZone
-        formatter.dateFormat = "MMM d"
+        DateFormatters.shared.string(from: date, format: "MMM d", timeZone: timeZone)
+    }
+}
+
+/// One `DateFormatter` per (time zone, format), made on first use: building one costs far more than formatting with it, and
+/// these run in view bodies and chart axes. `DateFormatter.string(from:)` is safe to call from several threads; the dictionary
+/// is behind the lock.
+private final class DateFormatters: @unchecked Sendable {
+    static let shared = DateFormatters()
+
+    private let lock = NSLock()
+    private var formatters: [String: DateFormatter] = [:]
+
+    func string(from date: Date, format: String, timeZone: TimeZone) -> String {
+        let key = timeZone.identifier + "|" + format
+        let formatter: DateFormatter = lock.withLock {
+            if let found = formatters[key] { return found }
+            let made = DateFormatter()
+            made.locale = Locale(identifier: "en_US_POSIX")
+            made.timeZone = timeZone
+            made.dateFormat = format
+            formatters[key] = made
+            return made
+        }
         return formatter.string(from: date)
     }
 }

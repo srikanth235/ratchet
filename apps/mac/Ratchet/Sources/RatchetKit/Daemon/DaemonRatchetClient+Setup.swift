@@ -3,52 +3,32 @@ import HTTPTypes
 import OpenAPIRuntime
 import RatchetAPI
 
-// The routes behind New optimization step 1, the Connectors forms, draft discarding and the development overrides.
-// The generated client holds only the operations listed in tools/api/openapi-generator-config.yaml, and a PATCH that
-// must say "no cap" with a JSON null cannot be written with its optional fields, so these go through the same
-// transport and error middleware as JSON calls of their own. The bodies are built here and the answers decoded
-// here (or into the generated view models where the client has them).
+// The routes behind New optimization step 1: repos, what a repo says about its benchmark, "What's missing", template pull
+// requests, environment drafts, and the development overrides.
 
 extension DaemonRatchetClient {
-    /// One JSON request through the error middleware; the response body (empty for a 204).
-    func jsonCall(_ method: HTTPRequest.Method, _ path: String, operationID: String, json: Data? = nil) async throws -> Data {
-        let base = URL(string: "http://localhost") ?? URL(fileURLWithPath: "/")
-        var request = HTTPRequest(method: method, scheme: nil, authority: nil, path: path)
-        request.headerFields[.accept] = "application/json"
-        var payload: HTTPBody?
-        if let json {
-            request.headerFields[.contentType] = "application/json"
-            payload = HTTPBody(String(decoding: json, as: UTF8.self))
-        }
-        let transport = self.transport
-        let (_, body) = try await APIErrorMiddleware().intercept(request, body: payload, baseURL: base, operationID: operationID) {
-            request, body, url in
-            try await transport.send(request, body: body, baseURL: url, operationID: operationID)
-        }
-        var bytes: [UInt8] = []
-        if let body {
-            for try await chunk in body { bytes.append(contentsOf: chunk) }
-        }
-        return Data(bytes)
-    }
+    // MARK: Repos
 
-    /// A JSON object from a dictionary; `NSNull()` writes a null.
-    static func jsonBody(_ object: [String: Any]) throws -> Data {
-        try JSONSerialization.data(withJSONObject: object)
-    }
-
-    /// `?name=value`, with the characters that would end a value escaped.
-    static func queryItem(_ name: String, _ value: String) -> String {
-        var allowed = CharacterSet.urlQueryAllowed
-        allowed.remove(charactersIn: "&=+#?/")
-        return name + "=" + (value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value)
-    }
-
-    private func decode<T: Decodable>(_ type: T.Type, _ data: Data) throws -> T {
+    public func repos() async throws -> [Repo] {
         do {
-            return try JSONDecoder().decode(type, from: data)
+            return try await api.listRepos().ok.body.json.map(DaemonMapping.repo)
         } catch {
-            throw RatchetClientError.unavailable("ratchetd answered with something the app cannot read.")
+            // 409: not signed in to GitHub. The repo picker is simply empty until the user signs in.
+            if let failure = daemonError(in: error), failure.status == 409 { return [] }
+            throw wire.translate(error)
+        }
+    }
+
+    public func detectBenchmark(repoID: String) async throws -> BenchmarkDetection {
+        do {
+            let input = VM.InspectRepoInput(source: .case1(.init(kind: .github, repo: repoID)))
+            let inspected = try await api.inspectRepo(body: .json(input)).ok.body.json
+            return DaemonMapping.benchmarkDetection(repoID: repoID, inspected)
+        } catch {
+            if let failure = daemonError(in: error), !failure.isUnsupported {
+                return BenchmarkDetection(repoID: repoID, found: false, summary: failure.message)
+            }
+            throw wire.translate(error)
         }
     }
 
@@ -69,9 +49,9 @@ extension DaemonRatchetClient {
     public func searchRepos(query: String) async throws -> [Repo] {
         do {
             let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-            let path = "/v1/github/repos" + (trimmed.isEmpty ? "" : "?" + Self.queryItem("query", trimmed))
-            let data = try await jsonCall(.get, path, operationID: "listRepos")
-            return try decode([RepoPayload].self, data).map { repo in
+            let path = "/v1/github/repos" + (trimmed.isEmpty ? "" : "?" + DaemonTransport.queryItem("query", trimmed))
+            let data = try await wire.jsonCall(.get, path, operationID: "listRepos")
+            return try wire.decode([RepoPayload].self, data).map { repo in
                 let account = repo.fullName.split(separator: "/").first.map(String.init) ?? repo.fullName
                 return Repo(
                     id: repo.fullName, defaultBranch: repo.defaultBranch, account: account, isPrivate: repo.isPrivate,
@@ -80,20 +60,20 @@ extension DaemonRatchetClient {
         } catch {
             // 409: not signed in to GitHub. The list is simply empty until the user signs in.
             if let failure = daemonError(in: error), failure.status == 409 { return [] }
-            throw translate(error)
+            throw wire.translate(error)
         }
     }
 
     public func inspectRepo(_ source: RepoSource) async throws -> RepoInspection {
-        try await calling {
-            let wire: [String: Any]
+        try await wire.calling {
+            let described: [String: Any]
             switch source {
-            case .github(let repo): wire = ["kind": "github", "repo": repo]
-            case .local(let path): wire = ["kind": "local", "path": path]
+            case .github(let repo): described = ["kind": "github", "repo": repo]
+            case .local(let path): described = ["kind": "local", "path": path]
             }
-            let data = try await jsonCall(
-                .post, "/v1/repos/inspections", operationID: "inspectRepo", json: try Self.jsonBody(["source": wire]))
-            return DaemonMapping.inspection(try decode(VM.RepoInspectVm.self, data))
+            let data = try await wire.jsonCall(
+                .post, "/v1/repos/inspections", operationID: "inspectRepo", json: try DaemonTransport.jsonBody(["source": described]))
+            return DaemonMapping.inspection(try wire.decode(VM.RepoInspectVm.self, data))
         }
     }
 
@@ -107,7 +87,7 @@ extension DaemonRatchetClient {
     }
 
     public func preflight(_ request: PreflightRequest) async throws -> [PreflightItem] {
-        try await calling {
+        try await wire.calling {
             var kinds: [String] = []
             if request.source == .demo {
                 kinds = ["claude-code", "codex", "grok"]
@@ -119,14 +99,14 @@ extension DaemonRatchetClient {
                     }
                 }
             }
-            var wire: [String: Any] = [
+            var fields: [String: Any] = [
                 "agents": kinds,
                 "agentsWhere": request.source == .demo ? "local" : request.placement.rawValue,
                 "source": request.source.rawValue,
             ]
-            if let repo = request.repo, request.source != .demo { wire["repo"] = repo }
-            let data = try await jsonCall(.post, "/v1/preflight", operationID: "runPreflight", json: try Self.jsonBody(wire))
-            return try decode([PreflightPayload].self, data).map {
+            if let repo = request.repo, request.source != .demo { fields["repo"] = repo }
+            let data = try await wire.jsonCall(.post, "/v1/preflight", operationID: "runPreflight", json: try DaemonTransport.jsonBody(fields))
+            return try wire.decode([PreflightPayload].self, data).map {
                 PreflightItem(id: $0.id, label: $0.label, state: PreflightState(rawValue: $0.state) ?? .warn, detail: $0.detail)
             }
         }
@@ -140,112 +120,59 @@ extension DaemonRatchetClient {
     }
 
     public func proposeTemplate(_ request: TemplateProposalRequest) async throws -> TemplateProposal {
-        try await calling {
-            let body = try Self.jsonBody(["repoUrl": request.repo, "baseRef": request.baseRef, "templateId": request.templateID])
-            let data = try await jsonCall(.post, "/v1/template-proposals", operationID: "proposeTemplate", json: body)
-            let result = try decode(ProposalPayload.self, data)
+        try await wire.calling {
+            let body = try DaemonTransport.jsonBody(["repoUrl": request.repo, "baseRef": request.baseRef, "templateId": request.templateID])
+            let data = try await wire.jsonCall(.post, "/v1/template-proposals", operationID: "proposeTemplate", json: body)
+            let result = try wire.decode(ProposalPayload.self, data)
             return TemplateProposal(prURL: result.prUrl, branch: result.branch, files: result.files, templateID: result.templateId)
         }
     }
 
-    // MARK: Connectors
+    // MARK: Environment drafts
 
-    public func connectorSetup() async throws -> ConnectorSetup {
-        try await calling {
-            let list = try await api.listConnectors().ok.body.json
-            return ConnectorSetup(encryptionAvailable: list.encryptionAvailable, clientIdConfigured: list.clientIdConfigured)
+    public func createDraft(_ request: DraftRequest) async throws -> EnvironmentDraft {
+        try await wire.calling {
+            let input = VM.CreateEnvironmentDraftInput(agentConnector: .claudeCode, goal: request.goal, repo: request.repoID)
+            let created = try await api.createEnvironmentDraft(body: .json(input)).created.body.json
+            return try await settledDraft(created)
         }
     }
 
-    public func addGithubToken(_ token: String, name: String?) async throws -> [Connector] {
-        try await calling {
-            var wire: [String: Any] = ["token": token.trimmingCharacters(in: .whitespacesAndNewlines)]
-            if let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty { wire["name"] = name }
-            let data = try await jsonCall(.post, "/v1/connectors/github", operationID: "addGithubConnector", json: try Self.jsonBody(wire))
-            return try decode(VM.ConnectorsVm.self, data).connectors.map(DaemonMapping.connector)
+    public func reviseDraft(id: String, instruction: String) async throws -> EnvironmentDraft {
+        try await wire.calling {
+            let revised = try await api.reviseEnvironmentDraft(path: .init(id: id), body: .json(.init(message: instruction))).ok.body.json
+            return try await settledDraft(revised)
         }
     }
 
-    public func updateConnector(id: String, _ update: ConnectorUpdate) async throws -> [Connector] {
-        try await calling {
-            var wire: [String: Any] = [:]
-            if let name = update.name?.trimmingCharacters(in: .whitespacesAndNewlines) { wire["name"] = name }
-            if let region = update.region?.trimmingCharacters(in: .whitespacesAndNewlines) { wire["region"] = region }
-            switch update.cap {
-            case .keep: break
-            case .remove: wire["monthlyCapUsd"] = NSNull()
-            case .set(let usd): wire["monthlyCapUsd"] = usd
-            }
-            let data = try await jsonCall(
-                .patch, "/v1/connectors/\(escaped(id))", operationID: "updateConnector", json: try Self.jsonBody(wire))
-            return try decode(VM.ConnectorsVm.self, data).connectors.map(DaemonMapping.connector)
+    public func approveDraft(id: String) async throws -> EnvironmentDraft {
+        try await wire.calling {
+            DaemonMapping.draft(try await api.approveEnvironmentDraft(path: .init(id: id), body: .json(.init())).ok.body.json)
         }
     }
 
-    public func checkConnector(id: String) async throws -> ConnectorCheck {
-        try await calling {
-            let result = try await api.testConnector(path: .init(id: id)).ok.body.json
-            return ConnectorCheck(ok: result.ok, detail: result.detail)
+    /// An agent drafts the environment, so a new or revised draft is `drafting` for a while. Waits (up to 5 minutes) until
+    /// it is ready, the way the mock answers at once.
+    private func settledDraft(_ first: VM.EnvironmentDraftVm) async throws -> EnvironmentDraft {
+        var draft = first
+        var polls = 0
+        while draft.status == .drafting {
+            polls += 1
+            guard polls <= 300 else { throw RatchetClientError.unavailable("Drafting the environment is taking too long.") }
+            try await Task.sleep(for: .seconds(1))
+            draft = try await api.getEnvironmentDraft(path: .init(id: draft.id)).ok.body.json
         }
-    }
-
-    public func refreshConnectors() async throws -> [Connector] {
-        try await calling {
-            try await api.refreshConnectors().ok.body.json.connectors.map(DaemonMapping.connector)
+        if draft.status == .failed {
+            throw RatchetClientError.unavailable(draft.error ?? "The environment could not be drafted.")
         }
-    }
-
-    private struct AwsProfilesPayload: Decodable {
-        struct Profile: Decodable {
-            var name: String
-            var kind: String
-            var ssoSession: String?
-        }
-        var profiles: [Profile]
-        var ssoSessions: [String]
-        var filesFound: Bool
-    }
-
-    public func awsProfiles() async throws -> AwsProfiles {
-        try await calling {
-            let data = try await jsonCall(.get, "/v1/aws/profiles", operationID: "listAwsProfiles")
-            let list = try decode(AwsProfilesPayload.self, data)
-            return AwsProfiles(
-                profiles: list.profiles.map {
-                    AwsProfile(name: $0.name, kind: AwsProfileKind(rawValue: $0.kind) ?? .other, ssoSession: $0.ssoSession)
-                },
-                ssoSessions: list.ssoSessions, filesFound: list.filesFound)
-        }
-    }
-
-    private struct HarnessPayload: Decodable {
-        var kind: String
-        var installed: Bool
-        var version: String?
-        var auth: String
-    }
-
-    public func detectedAgents(redetect: Bool) async throws -> [DetectedAgent] {
-        try await calling {
-            let data: Data
-            if redetect {
-                data = try await jsonCall(.post, "/v1/harnesses/detections", operationID: "detectHarnesses", json: Data("{}".utf8))
-            } else {
-                data = try await jsonCall(.get, "/v1/harnesses", operationID: "listHarnesses")
-            }
-            return try decode([HarnessPayload].self, data).compactMap { found in
-                guard let cli = AgentCLI(rawValue: found.kind) else { return nil }
-                let auth: DetectedAgent.Auth = found.auth == "api-key" ? .apiKey : found.auth == "signed-in" ? .signedIn : .signedOut
-                return DetectedAgent(cli: cli, installed: found.installed, version: found.version, auth: auth)
-            }
-        }
+        return DaemonMapping.draft(draft)
     }
 
     // MARK: Drafts
 
     public func discardDraft(id: String) async throws {
-        try await calling {
-            _ = try await jsonCall(.delete, "/v1/environment-drafts/\(escaped(id))", operationID: "discardEnvironmentDraft")
+        try await wire.calling {
+            _ = try await wire.jsonCall(.delete, "/v1/environment-drafts/\(wire.escaped(id))", operationID: "discardEnvironmentDraft")
         }
     }
 
@@ -277,31 +204,21 @@ extension DaemonRatchetClient {
     }
 
     public func advancedSettings() async throws -> AdvancedSettings {
-        try await calling {
-            try decode(SettingsPayload.self, try await jsonCall(.get, "/v1/settings", operationID: "getSettings")).model
+        try await wire.calling {
+            try wire.decode(SettingsPayload.self, try await wire.jsonCall(.get, "/v1/settings", operationID: "getSettings")).model
         }
     }
 
     public func saveAdvancedSettings(_ settings: AdvancedSettings) async throws -> AdvancedSettings {
-        try await calling {
-            let body = try Self.jsonBody([
+        try await wire.calling {
+            let body = try DaemonTransport.jsonBody([
                 "runnerImageRef": settings.runnerAMI.trimmingCharacters(in: .whitespacesAndNewlines),
                 "benchImageRef": settings.benchAMI.trimmingCharacters(in: .whitespacesAndNewlines),
                 "tofuBinary": settings.tofuBinary.trimmingCharacters(in: .whitespacesAndNewlines),
                 "moduleDir": settings.moduleDir.trimmingCharacters(in: .whitespacesAndNewlines),
             ])
-            let data = try await jsonCall(.put, "/v1/settings/advanced", operationID: "saveAdvancedSettings", json: body)
-            return try decode(SettingsPayload.self, data).model
+            let data = try await wire.jsonCall(.put, "/v1/settings/advanced", operationID: "saveAdvancedSettings", json: body)
+            return try wire.decode(SettingsPayload.self, data).model
         }
-    }
-
-    // MARK: Adding an AWS profile with a region and a cap
-
-    func addAwsConnector(_ new: NewConnector) async throws -> VM.ConnectorsVm {
-        var wire: [String: Any] = ["profile": new.name]
-        if let region = new.region?.trimmingCharacters(in: .whitespacesAndNewlines), !region.isEmpty { wire["region"] = region }
-        if let cap = new.monthlyCapUSD { wire["monthlyCapUsd"] = cap }
-        let data = try await jsonCall(.post, "/v1/connectors/aws", operationID: "addAwsConnector", json: try Self.jsonBody(wire))
-        return try decode(VM.ConnectorsVm.self, data)
     }
 }

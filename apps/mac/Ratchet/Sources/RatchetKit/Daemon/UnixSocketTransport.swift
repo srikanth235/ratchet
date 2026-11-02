@@ -9,14 +9,20 @@ import OpenAPIRuntime
 /// Linux, so the unit tests and a real `ratchetd` can exercise it without a Mac, and the app gains no dependency.
 /// A blocking read lives on its own thread per connection; the async side only sees a stream of byte chunks, so a
 /// slow server or an event stream never holds a cooperative thread.
+///
+/// Each open request holds one thread, so the number open at once is capped (`maxConnections`, the event stream being one of
+/// them): a request over the cap waits for a slot instead of starting another thread, and a refresh that asks for many things
+/// at once cannot flood the daemon. The connect, which can block when the daemon's queue is full, happens on that thread too.
 public struct UnixSocketTransport: ClientTransport {
     public let socketPath: String
     /// Called for every request, so a daemon that restarted (and wrote a new token) is picked up without relaunching.
     private let token: @Sendable () -> String?
+    private let gate: ConnectionGate
 
-    public init(socketPath: String, token: @escaping @Sendable () -> String?) {
+    public init(socketPath: String, token: @escaping @Sendable () -> String?, maxConnections: Int = 8) {
         self.socketPath = socketPath
         self.token = token
+        self.gate = ConnectionGate(limit: maxConnections)
     }
 
     public func send(
@@ -45,17 +51,22 @@ public struct UnixSocketTransport: ClientTransport {
         }
         let bytes = HTTP1Request.encode(method: request.method.rawValue, target: target, fields: fields, body: payload)
 
-        let socket = try UnixSocket.connect(path: socketPath)
+        try await gate.acquire()
         let (stream, continuation) = AsyncThrowingStream<ArraySlice<UInt8>, any Error>.makeStream()
-        continuation.onTermination = { _ in socket.shutdown() }
+        let box = SocketBox()
+        continuation.onTermination = { _ in box.shutdown() }
+        let path = socketPath
+        let gate = self.gate
+        // The thread frees the slot when the response is over (the end of the body), or when the connect or the head failed.
         let head: HTTP1ResponseHead = try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (headContinuation: CheckedContinuation<HTTP1ResponseHead, any Error>) in
                 Thread.detachNewThread {
-                    pumpResponse(socket: socket, request: bytes, head: headContinuation, body: continuation)
+                    pumpResponse(path: path, box: box, request: bytes, head: headContinuation, body: continuation)
+                    Task { await gate.release() }
                 }
             }
         } onCancel: {
-            socket.shutdown()
+            box.shutdown()
         }
 
         var response = HTTPResponse(status: HTTPResponse.Status(code: head.status))
@@ -78,15 +89,54 @@ enum UnixSocketTransportError: Error, LocalizedError {
     var errorDescription: String? { "The request has no path." }
 }
 
-/// Runs on its own thread: writes the request, then reads until the response is complete. Resumes `head` once the head
-/// has arrived (or the connection failed before that) and feeds the body into `body`.
+/// The socket of one request, once it is connected, so a cancelled request can wake the thread that is reading it. Cancelling
+/// before the socket exists makes the thread give up as soon as it has connected.
+private final class SocketBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var socket: UnixSocket?
+    private var cancelled = false
+
+    /// False when the request was cancelled already: the caller closes the socket.
+    func store(_ socket: UnixSocket) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if cancelled { return false }
+        self.socket = socket
+        return true
+    }
+
+    func shutdown() {
+        lock.lock()
+        cancelled = true
+        let current = socket
+        lock.unlock()
+        current?.shutdown()
+    }
+}
+
+/// Runs on its own thread: connects, writes the request, then reads until the response is complete. Resumes `head` once the
+/// head has arrived (or the connection failed before that) and feeds the body into `body`.
 private func pumpResponse(
-    socket: UnixSocket,
+    path: String,
+    box: SocketBox,
     request: [UInt8],
     head: CheckedContinuation<HTTP1ResponseHead, any Error>,
     body: AsyncThrowingStream<ArraySlice<UInt8>, any Error>.Continuation
 ) {
+    let socket: UnixSocket
+    do {
+        socket = try UnixSocket.connect(path: path)
+    } catch {
+        head.resume(throwing: error)
+        body.finish(throwing: error)
+        return
+    }
     defer { socket.close() }
+    guard box.store(socket) else {
+        head.resume(throwing: CancellationError())
+        body.finish()
+        return
+    }
     var parser = HTTP1ResponseParser()
     var headSent = false
     do {
@@ -118,5 +168,51 @@ private func pumpResponse(
         } else {
             head.resume(throwing: error)
         }
+    }
+}
+
+/// Lets at most `limit` requests hold a connection at once; the others wait their turn, first come first served. A waiting
+/// request that is cancelled leaves the queue.
+actor ConnectionGate {
+    private let limit: Int
+    private var inUse = 0
+    private var waiters: [(id: UUID, continuation: CheckedContinuation<Void, any Error>)] = []
+
+    init(limit: Int) {
+        self.limit = max(limit, 1)
+    }
+
+    var openCount: Int { inUse }
+    var waitingCount: Int { waiters.count }
+
+    func acquire() async throws {
+        if inUse < limit {
+            inUse += 1
+            return
+        }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+                waiters.append((id, continuation))
+                // Cancelled before it was in the queue: the handler had nothing to remove.
+                if Task.isCancelled { leave(id) }
+            }
+        } onCancel: {
+            Task { await self.leave(id) }
+        }
+    }
+
+    func release() {
+        if waiters.isEmpty {
+            inUse = max(inUse - 1, 0)
+        } else {
+            // The slot passes to the first in line; the count stays.
+            waiters.removeFirst().continuation.resume()
+        }
+    }
+
+    private func leave(_ id: UUID) {
+        guard let at = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: at).continuation.resume(throwing: CancellationError())
     }
 }

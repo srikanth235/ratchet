@@ -193,14 +193,35 @@ struct DaemonClientTests {
         await store.refresh()
         #expect(store.lastError == nil)
         #expect(store.isLoaded)
-        #expect(store.optimizations.count == 4)
+        #expect(store.optimizationStore.optimizations.count == 4)
         #expect(store.needsYouCount == 2)
-        #expect(store.connectors.count == 7)
-        #expect(store.sandbox.isOn)
+        #expect(store.connectorStore.connectors.count == 7)
+        #expect(store.sandboxStore.sandbox.isOn)
         #expect(store.benchmarks.count == 3)
         #expect(store.repos.isEmpty)
-        await store.loadDetail(id: "opt_demo_ingest")
-        #expect(store.details["opt_demo_ingest"]?.moves.count == 2)
+        await store.optimizationStore.loadDetail(id: "opt_demo_ingest")
+        #expect(store.optimizationStore.details["opt_demo_ingest"]?.moves.count == 2)
+    }
+
+    @MainActor
+    @Test func aPartThatFailsLeavesTheRestLoaded() async throws {
+        let daemon = daemonWithData()
+        daemon.route("GET /v1/github/repos", 409, #"{"code":"not_ready","message":"sign in to GitHub first"}"#)
+        daemon.route("GET /v1/templates", 500, #"{"code":"internal","message":"templates are down"}"#)
+        let store = AppStore(client: make(daemon))
+        await store.refresh()
+        #expect(store.isLoaded)
+        #expect(store.sectionErrors.keys.contains(.templates) && store.sectionErrors.count == 1)
+        #expect(store.lastError != nil)
+        #expect(store.optimizationStore.optimizations.count == 4)
+        #expect(store.connectorStore.connectors.count == 7)
+        #expect(store.templates.isEmpty)
+        // The part comes back: the next refresh loads it and the error line clears.
+        daemon.route("GET /v1/templates", 200, Fixtures.templates)
+        await store.refresh()
+        #expect(store.sectionErrors.isEmpty)
+        #expect(store.lastError == nil)
+        #expect(!store.templates.isEmpty)
     }
 
     @Test func theSandboxAndItsReceipt() async throws {
@@ -246,7 +267,7 @@ struct DaemonClientTests {
         daemon.route("POST /v1/repos/inspections", 409, #"{"code":"not_ready","message":"sign in to GitHub first"}"#)
         let client = make(daemon)
         #expect(try await client.repos().isEmpty)
-        let harness = try await client.detectHarness(repoID: "acme/x")
+        let harness = try await client.detectBenchmark(repoID: "acme/x")
         #expect(!harness.found && harness.summary == "sign in to GitHub first")
     }
 
@@ -257,7 +278,7 @@ struct DaemonClientTests {
         let client = make(daemon)
         #expect(try await client.repos().first?.id == "acme-org/shop-api")
         #expect(try await client.templates().count > 3)
-        #expect(try await client.detectHarness(repoID: "acme/search-api").found)
+        #expect(try await client.detectBenchmark(repoID: "acme/search-api").found)
     }
 
     // MARK: Acting
@@ -394,6 +415,7 @@ struct DaemonClientTests {
         daemon.streams([hello + #"event: resync\#ndata: {"type":"resync","reason":"restarted"}\#n\#n"#])
         let stream = await make(daemon).events()
         for await event in stream {
+            if case .streamStateChanged = event { continue }
             #expect(event == .resync)
             break
         }

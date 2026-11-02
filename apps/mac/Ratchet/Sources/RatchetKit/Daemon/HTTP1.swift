@@ -72,7 +72,11 @@ struct HTTP1ResponseParser {
     private static let maxHeadBytes = 64 * 1024
 
     private var buffer: [UInt8] = []
+    /// How much of `buffer` is already parsed. Consumed bytes are dropped together at the end of each `advance`, not one
+    /// chunk at a time: a read that holds many small chunks used to shift the rest of the buffer for every one of them.
+    private var consumed = 0
     private var state: State = .head
+    private var unread: Int { buffer.count - consumed }
 
     init() {}
 
@@ -106,12 +110,12 @@ struct HTTP1ResponseParser {
         loop: while true {
             switch state {
             case .head:
-                guard let end = Self.find([13, 10, 13, 10], in: buffer) else {
-                    if buffer.count > Self.maxHeadBytes { throw ParseError.malformed("the head is too large") }
+                guard let end = Self.find([13, 10, 13, 10], in: buffer, from: consumed) else {
+                    if unread > Self.maxHeadBytes { throw ParseError.malformed("the head is too large") }
                     break loop
                 }
-                let head = try Self.parseHead(Array(buffer[0..<end]))
-                buffer.removeSubrange(0..<(end + 4))
+                let head = try Self.parseHead(Array(buffer[consumed..<end]))
+                consumed = end + 4
                 // 1xx answers ("100 Continue") are not the response.
                 if head.status >= 100 && head.status < 200 && head.status != 101 { continue loop }
                 events.append(.head(head))
@@ -123,25 +127,25 @@ struct HTTP1ResponseParser {
                     events.append(.end)
                     break loop
                 }
-                if buffer.isEmpty { break loop }
-                let count = min(remaining, buffer.count)
-                events.append(.body(Array(buffer[0..<count])))
-                buffer.removeSubrange(0..<count)
+                if unread == 0 { break loop }
+                let count = min(remaining, unread)
+                events.append(.body(Array(buffer[consumed..<(consumed + count)])))
+                consumed += count
                 state = .fixed(remaining: remaining - count)
 
             case .untilClose:
-                if buffer.isEmpty { break loop }
-                events.append(.body(buffer))
-                buffer.removeAll(keepingCapacity: true)
+                if unread == 0 { break loop }
+                events.append(.body(Array(buffer[consumed...])))
+                consumed = buffer.count
                 break loop
 
             case .chunkSize:
-                guard let end = Self.find([13, 10], in: buffer) else {
-                    if buffer.count > 1024 { throw ParseError.malformed("a chunk size line is too long") }
+                guard let end = Self.find([13, 10], in: buffer, from: consumed) else {
+                    if unread > 1024 { throw ParseError.malformed("a chunk size line is too long") }
                     break loop
                 }
-                let line = String(decoding: buffer[0..<end], as: UTF8.self)
-                buffer.removeSubrange(0..<(end + 2))
+                let line = String(decoding: buffer[consumed..<end], as: UTF8.self)
+                consumed = end + 2
                 // "1a;name=value": the size is the hex number before any extension.
                 let digits = line.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: false).first.map {
                     $0.trimmingCharacters(in: .whitespaces)
@@ -152,23 +156,26 @@ struct HTTP1ResponseParser {
                 state = size == 0 ? .trailers : .chunkData(remaining: size)
 
             case .chunkData(let remaining):
-                if buffer.isEmpty { break loop }
-                let count = min(remaining, buffer.count)
-                events.append(.body(Array(buffer[0..<count])))
-                buffer.removeSubrange(0..<count)
+                if unread == 0 { break loop }
+                let count = min(remaining, unread)
+                events.append(.body(Array(buffer[consumed..<(consumed + count)])))
+                consumed += count
                 state = count == remaining ? .chunkDataEnd : .chunkData(remaining: remaining - count)
 
             case .chunkDataEnd:
-                if buffer.count < 2 { break loop }
-                guard buffer[0] == 13, buffer[1] == 10 else { throw ParseError.malformed("a chunk does not end with CRLF") }
-                buffer.removeSubrange(0..<2)
+                if unread < 2 { break loop }
+                guard buffer[consumed] == 13, buffer[consumed + 1] == 10 else {
+                    throw ParseError.malformed("a chunk does not end with CRLF")
+                }
+                consumed += 2
                 state = .chunkSize
 
             case .trailers:
                 // Trailer lines are ignored; a blank line ends the message.
-                guard let end = Self.find([13, 10], in: buffer) else { break loop }
-                buffer.removeSubrange(0..<(end + 2))
-                if end == 0 {
+                guard let end = Self.find([13, 10], in: buffer, from: consumed) else { break loop }
+                let blank = end == consumed
+                consumed = end + 2
+                if blank {
                     state = .done
                     events.append(.end)
                     break loop
@@ -176,8 +183,13 @@ struct HTTP1ResponseParser {
 
             case .done:
                 buffer.removeAll()
+                consumed = 0
                 break loop
             }
+        }
+        if consumed > 0 {
+            buffer.removeSubrange(0..<consumed)
+            consumed = 0
         }
         return events
     }
@@ -216,11 +228,11 @@ struct HTTP1ResponseParser {
         return HTTP1ResponseHead(status: status, reason: reason, fields: fields)
     }
 
-    /// The index of the first occurrence of `pattern`.
-    private static func find(_ pattern: [UInt8], in bytes: [UInt8]) -> Int? {
-        guard !pattern.isEmpty, bytes.count >= pattern.count else { return nil }
+    /// The index of the first occurrence of `pattern` at or after `start`.
+    private static func find(_ pattern: [UInt8], in bytes: [UInt8], from start: Int = 0) -> Int? {
+        guard !pattern.isEmpty, bytes.count - start >= pattern.count else { return nil }
         let last = bytes.count - pattern.count
-        var i = 0
+        var i = start
         while i <= last {
             if bytes[i] == pattern[0] {
                 var match = true

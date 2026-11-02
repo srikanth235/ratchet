@@ -23,6 +23,7 @@ struct RatchetApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @State private var store = Store.makeStore()
     @State private var router = AppRouter()
+    @State private var connectorsState = ConnectorsPageState()
     @State private var daemon = DaemonController.make()
     @State private var notifier = AppNotifier(enabled: !Store.isOverridden)
     @State private var loginItem = LoginItem(touchesSystem: !Store.isOverridden && ProcessInfo.processInfo.environment["APP_DEMO"] != "1")
@@ -34,6 +35,7 @@ struct RatchetApp: App {
             ContentView()
                 .environment(store)
                 .environment(router)
+                .environment(connectorsState)
                 .environment(daemon)
                 .environment(notifier)
                 .environment(loginItem)
@@ -52,9 +54,9 @@ struct RatchetApp: App {
                     .keyboardShortcut("n")
             }
             CommandMenu("Go") {
-                ForEach(Page.allCases) { page in
+                ForEach(Page.sidebar) { page in
                     Button(page.title) { router.show(page) }
-                        .keyboardShortcut(page.shortcutKey, modifiers: .command)
+                        .keyboardShortcut(page.shortcut)
                 }
                 Divider()
                 Button("Refresh") { Task { await store.refresh() } }
@@ -66,6 +68,7 @@ struct RatchetApp: App {
             SettingsView()
                 .environment(store)
                 .environment(router)
+                .environment(connectorsState)
                 .environment(daemon)
                 .environment(notifier)
                 .environment(loginItem)
@@ -135,10 +138,12 @@ enum Store {
     @MainActor
     static func makeStore() -> AppStore {
         if isOverridden {
-            return AppStore(client: MockRatchetClient(now: fixedNow, live: false), cacheURL: nil, isDemoData: true)
+            let sample = MockRatchetClient(now: fixedNow, live: false)
+            return AppStore(client: sample, scenario: sample, cacheURL: nil, isDemoData: true)
         }
         if ProcessInfo.processInfo.environment["APP_DEMO"] == "1" {
-            return AppStore(client: MockRatchetClient(now: Date(), live: true), cacheURL: cacheURL(demo: true), isDemoData: true)
+            let sample = MockRatchetClient(now: Date(), live: true)
+            return AppStore(client: sample, scenario: sample, cacheURL: cacheURL(demo: true), isDemoData: true)
         }
         let demoMode = UserDefaults.standard.string(forKey: DaemonController.modeKey) == DaemonMode.demo.rawValue
         return AppStore(

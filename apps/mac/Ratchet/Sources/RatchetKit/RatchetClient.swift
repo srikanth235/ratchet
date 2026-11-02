@@ -1,9 +1,12 @@
 import Foundation
 
-/// Everything the app asks of `ratchetd`, shaped as REST resources plus one server-sent event stream.
-/// `MockRatchetClient` implements it with sample data and `DaemonRatchetClient` talks to the real daemon through the
-/// client generated from its OpenAPI; `AppStore` and the views never learn which one they talk to.
-public protocol RatchetClient: RatchetInsightsClient {
+// What the app asks of `ratchetd`, split by domain. `RatchetClient` is the composition the store holds; a screen or a
+// test double can depend on only the domain it uses. `MockRatchetClient` and `DaemonRatchetClient` implement all of
+// them, and one contract suite (Tests/RatchetKitTests/ClientContractTests.swift) runs against both.
+// Chats are separate: see `ChatClient` (Chat/ChatClient.swift).
+
+/// Overview, optimizations and their agents, benchmarks, templates, and the reads behind the live log and the Result details.
+public protocol OptimizationsClient: Sendable {
     // Overview and spend
     func overview(range: TimeRange) async throws -> Overview
     func spend(range: TimeRange) async throws -> SpendSummary
@@ -31,11 +34,20 @@ public protocol RatchetClient: RatchetInsightsClient {
     func benchmarks() async throws -> [BenchmarkRun]
     func templates() async throws -> [Template]
 
-    // Repos and harness detection
-    func repos() async throws -> [Repo]
-    func detectHarness(repoID: String) async throws -> HarnessDetection
+    // Insights: the live log, the Result details, the Benchmarks page
+    /// An agent's log. Without `cursor`: the newest `limit` lines (oldest first). With it: only lines newer than the cursor.
+    func agentLog(agentID: String, after cursor: Int64?, limit: Int) async throws -> AgentLogPage
+    /// Spend breakdown, "where the time went", before/after rows and the winning change of one optimization.
+    func insights(optimizationID: String) async throws -> RunInsights
+    /// The ratchet of one metric (`metric` is one of the series' options; nil is the objective).
+    func benchmarkSeries(optimizationID: String, metric: String?) async throws -> BenchmarkSeries
+    /// Every candidate with its verdict and bench results.
+    func candidateResults(optimizationID: String) async throws -> [CandidateResult]
+}
 
-    // Connectors
+/// Connectors (GitHub accounts, AWS profiles, agent logins and keys), the GitHub device flow, per-repo selections, and the
+/// harnesses detected on this Mac.
+public protocol ConnectorsClient: Sendable {
     func connectors() async throws -> [Connector]
     func addConnector(_ new: NewConnector) async throws -> Connector
     func removeConnector(id: String) async throws
@@ -50,17 +62,23 @@ public protocol RatchetClient: RatchetInsightsClient {
     func connectionSelection(repoID: String) async throws -> ConnectionSelection?
     func saveConnectionSelection(_ selection: ConnectionSelection) async throws
 
-    // Environment drafts
-    func createDraft(_ request: DraftRequest) async throws -> EnvironmentDraft
-    func reviseDraft(id: String, instruction: String) async throws -> EnvironmentDraft
-    func approveDraft(id: String) async throws -> EnvironmentDraft
+    // Pasted tokens, editing in place, checking, detecting
+    func connectorSetup() async throws -> ConnectorSetup
+    func addGithubToken(_ token: String, name: String?) async throws -> [Connector]
+    func updateConnector(id: String, _ update: ConnectorUpdate) async throws -> [Connector]
+    func checkConnector(id: String) async throws -> ConnectorCheck
+    /// Checks every connector with its provider, then lists them.
+    func refreshConnectors() async throws -> [Connector]
+    func awsProfiles() async throws -> AwsProfiles
+    /// The harnesses (agent CLIs) on this Mac; `redetect` probes the machine again first.
+    func detectedHarnesses(redetect: Bool) async throws -> [DetectedHarness]
+}
 
-    // Sandbox
-    func sandboxStatus() async throws -> SandboxStatus
-    func endSandbox() async throws -> TeardownReceipt
-    func sandboxReceipt() async throws -> TeardownReceipt?
-
-    // Setup: repo search, what step 1 learns about a repo, "What's missing", template pull requests
+/// Setting up an optimization: repos, what step 1 learns about a repo, "What's missing", template pull requests,
+/// environment drafts, and the development overrides.
+public protocol SetupClient: Sendable {
+    func repos() async throws -> [Repo]
+    func detectBenchmark(repoID: String) async throws -> BenchmarkDetection
     /// The signed-in account's repos whose name contains `query`. Empty (not an error) when not signed in to GitHub.
     func searchRepos(query: String) async throws -> [Repo]
     /// Reads `ratchet.yaml` from a GitHub repo or a local folder.
@@ -69,27 +87,42 @@ public protocol RatchetClient: RatchetInsightsClient {
     /// Commits the template's files on a branch of the repo and opens the pull request.
     func proposeTemplate(_ request: TemplateProposalRequest) async throws -> TemplateProposal
 
-    // Connectors: pasted tokens, editing in place, checking, detecting
-    func connectorSetup() async throws -> ConnectorSetup
-    func addGithubToken(_ token: String, name: String?) async throws -> [Connector]
-    func updateConnector(id: String, _ update: ConnectorUpdate) async throws -> [Connector]
-    func checkConnector(id: String) async throws -> ConnectorCheck
-    /// Checks every connector with its provider, then lists them.
-    func refreshConnectors() async throws -> [Connector]
-    func awsProfiles() async throws -> AwsProfiles
-    /// The agent CLIs on this Mac; `redetect` probes the machine again first.
-    func detectedAgents(redetect: Bool) async throws -> [DetectedAgent]
-
-    // Environment drafts, continued
+    // Environment drafts
+    func createDraft(_ request: DraftRequest) async throws -> EnvironmentDraft
+    func reviseDraft(id: String, instruction: String) async throws -> EnvironmentDraft
+    func approveDraft(id: String) async throws -> EnvironmentDraft
     /// Forgets a draft that was not approved.
     func discardDraft(id: String) async throws
 
     // Settings: development overrides
     func advancedSettings() async throws -> AdvancedSettings
     func saveAdvancedSettings(_ settings: AdvancedSettings) async throws -> AdvancedSettings
+}
 
-    // Live updates (server-sent events on the real daemon)
+/// The cloud sandbox and its teardown receipt.
+public protocol SandboxClient: Sendable {
+    func sandboxStatus() async throws -> SandboxStatus
+    func endSandbox() async throws -> TeardownReceipt
+    func sandboxReceipt() async throws -> TeardownReceipt?
+}
+
+/// Live updates (server-sent events on the real daemon).
+public protocol EventsClient: Sendable {
     func events() async -> AsyncStream<RatchetEvent>
+}
+
+/// Everything the app asks of `ratchetd` apart from chats: the five domain clients together. `AppStore` and the views
+/// never learn which implementation they talk to.
+public typealias RatchetClient = OptimizationsClient & ConnectorsClient & SetupClient & SandboxClient & EventsClient
+
+/// Whether the live connection to the daemon is up. The store keeps it (`AppStore.streamState`) so a stalled stream is never
+/// invisible.
+public enum StreamState: Sendable, Equatable {
+    /// The first connection is being made.
+    case connecting
+    case live
+    /// The connection dropped; it is tried again after a pause. `attempt` counts failures since the last good connection.
+    case reconnecting(attempt: Int, reason: String?)
 }
 
 /// One server-sent event. The app applies it to what it already shows; nothing polls.
@@ -109,6 +142,8 @@ public enum RatchetEvent: Sendable, Equatable {
     case receiptIssued(TeardownReceipt)
     /// The daemon could not replay what was missed (it restarted, or the gap is too old): reload everything shown.
     case resync
+    /// The live connection came up, dropped or is being retried.
+    case streamStateChanged(StreamState)
 }
 
 public enum RatchetClientError: Error, Sendable, Equatable, LocalizedError {

@@ -64,21 +64,21 @@ struct AgentLogTests {
         let mock = MockRatchetClient(now: testNow)
         let store = AppStore(client: mock)
         await store.refresh()
-        await store.loadDetail(id: "opt-checkout")
+        await store.optimizationStore.loadDetail(id: "opt-checkout")
         // An event for a log nobody opened changes nothing.
         store.apply(.agentLogAppended(optimizationID: "opt-checkout", agentID: "agent-claude-team"))
-        #expect(store.insight.logs["agent-claude-team"] == nil)
+        #expect(store.insight.log("agent-claude-team") == nil)
 
-        await store.loadAgentLog("agent-claude-team")
-        let first = try #require(store.insight.logs["agent-claude-team"])
+        await store.insight.loadAgentLog("agent-claude-team")
+        let first = try #require(store.insight.log("agent-claude-team"))
         #expect(first.isLoaded && first.error == nil && first.lines.count > 2)
-        await store.loadAgentLog("agent-claude-team")
-        #expect(store.insight.logs["agent-claude-team"]?.lines.count == first.lines.count, "nothing new, nothing added")
+        await store.insight.loadAgentLog("agent-claude-team")
+        #expect(store.insight.log("agent-claude-team")?.lines.count == first.lines.count, "nothing new, nothing added")
 
         _ = await mock.advance()
         _ = await mock.advance()
-        await store.loadAgentLog("agent-claude-team")
-        let later = try #require(store.insight.logs["agent-claude-team"])
+        await store.insight.loadAgentLog("agent-claude-team")
+        let later = try #require(store.insight.log("agent-claude-team"))
         #expect(later.lines.count > first.lines.count)
         #expect(later.lines.map(\.id) == later.lines.map(\.id).sorted())
     }
@@ -86,8 +86,8 @@ struct AgentLogTests {
     @MainActor
     @Test func anUnknownAgentShowsItsErrorInTheLog() async {
         let store = AppStore(client: MockRatchetClient(now: testNow))
-        await store.loadAgentLog("nobody")
-        #expect(store.insight.logs["nobody"]?.error != nil)
+        await store.insight.loadAgentLog("nobody")
+        #expect(store.insight.log("nobody")?.error != nil)
     }
 }
 
@@ -194,10 +194,10 @@ struct ResultDetailTests {
     @MainActor
     @Test func theStoreKeepsTheInsightsOfWhatWasOpened() async {
         let store = AppStore(client: MockRatchetClient(now: testNow))
-        #expect(store.insight.insights["opt-forecast"] == nil)
-        await store.loadInsights("opt-forecast")
-        #expect(store.insight.insights["opt-forecast"]?.spend?.wins == 3)
-        await store.loadInsights("nobody")
+        #expect(store.insight.insights(of: "opt-forecast") == nil)
+        await store.insight.loadInsights("opt-forecast")
+        #expect(store.insight.insights(of: "opt-forecast")?.spend?.wins == 3)
+        await store.insight.loadInsights("nobody")
         #expect(store.lastError != nil)
     }
 }

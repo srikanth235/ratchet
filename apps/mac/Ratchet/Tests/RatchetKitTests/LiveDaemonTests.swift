@@ -99,7 +99,7 @@ struct LiveDaemonTests {
         // Repos and the harness.
         let repos = try await client.repos()
         print("LIVE repos", repos.count)
-        let harness = try await client.detectHarness(repoID: "acme/shop-api")
+        let harness = try await client.detectBenchmark(repoID: "acme/shop-api")
         print("LIVE harness", harness)
 
         // The sandbox.

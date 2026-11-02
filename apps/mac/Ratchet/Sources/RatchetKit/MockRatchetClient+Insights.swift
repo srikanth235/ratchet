@@ -66,30 +66,6 @@ extension MockRatchetClient {
         return AgentLogPage(lines: newer, cursor: newer.last?.id ?? cursor)
     }
 
-    /// Called from the sample simulation when an agent starts or finishes a candidate.
-    func appendLog(
-        agent: Agent, evalsBy: Int, winsBy: Int, activity: String?, events: inout [RatchetEvent], id: String
-    ) {
-        let text: String
-        let kind: String
-        if let activity {
-            kind = "message"
-            text = "Trying: " + activity
-        } else if winsBy > 0 {
-            kind = "verdict"
-            text = "verified: a new best"
-        } else if evalsBy > 0 {
-            kind = "verdict"
-            text = "not a win"
-        } else {
-            return
-        }
-        var log = world.agentLogs[agent.id] ?? []
-        log.append(AgentLogLine(id: Int64((log.last?.id ?? 0) + 1), at: world.now, kind: kind, text: text))
-        world.agentLogs[agent.id] = log
-        events.append(.agentLogAppended(optimizationID: id, agentID: agent.id))
-    }
-
     public func insights(optimizationID: String) async throws -> RunInsights {
         guard let detail = world.details[optimizationID] else { throw RatchetClientError.notFound("optimization \(optimizationID)") }
         let optimization = detail.optimization
