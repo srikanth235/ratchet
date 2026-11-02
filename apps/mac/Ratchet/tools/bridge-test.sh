@@ -34,7 +34,13 @@ ctl() { RATCHET_HOME="$home" "$here/ratchetctl.sh" "$@"; }
 field() { plutil -extract "$2" raw -o - "$1" 2>/dev/null; }
 out="$home/reply.json"
 
-# status: the app's own view of itself.
+# status: the app's own view of itself. The bridge listens as soon as the window exists; the store loads a moment later (it
+# starts when the daemon phase is running), so wait for the sample data before reading the status that is checked.
+for _ in {1..50}; do
+  ctl status >"$out" 2>/dev/null
+  (( $(field $out status.optimizations) > 0 )) 2>/dev/null && break
+  sleep 0.2
+done
 ctl status >"$out"; code=$?; check "status answers" '(( code == 0 ))'
 check "status: the app starts on Overview" '[[ "$(field $out status.page)" == overview ]]'
 check "status: test mode is on" '[[ "$(field $out status.testMode)" == true ]]'
