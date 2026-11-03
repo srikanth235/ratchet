@@ -112,6 +112,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: mac-app-universal
+          # The universal daemon build takes 35-55 min cold. Keep it even when a later check (snapshots, contrast) fails,
+          # so the next run of a new branch doesn't start cold again.
+          cache-on-failure: true
       # build-and-verify skill, step 1: release build, installed to ~/Applications/<AppName>.app (ad-hoc signed), with
       # Contents/Helpers/{ratchetd,ratchet} and the LaunchAgent plists inside.
       - name: Build
