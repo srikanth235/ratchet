@@ -36,7 +36,8 @@ enum DaemonMapping {
         switch vm.status {
         case .draft: .waiting
         case .baselining, .running, .stopping: .running
-        case .completed, .stopped, .failed, .prOpen: vm.verifiedWins > 0 ? .done : .noWin
+        case .failed: .failed
+        case .completed, .stopped, .prOpen: vm.verifiedWins > 0 ? .done : .noWin
         }
     }
 

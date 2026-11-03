@@ -17,6 +17,11 @@ public enum MenuBarRules {
         return parts.joined(separator: " · ")
     }
 
+    /// "1 needs you", "3 need you": the count next to the menu bar icon's name and in the panel's header.
+    public static func needsYouText(_ count: Int) -> String {
+        "\(count) " + (count == 1 ? "needs" : "need") + " you"
+    }
+
     /// The sandbox line at the bottom of the panel.
     public static func sandboxLine(_ sandbox: SandboxStatus) -> String {
         guard sandbox.isOn else { return "Sandbox off" }

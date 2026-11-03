@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Type roles, from the reference CSS in design/v02.html and design/tools/v03.css (v0.3.1 text sizes 11, 12.5, 14): Instrument Sans for text (13.5 body, 12.5 notes, 12 captions),
-/// Instrument Serif for page titles and big numbers (32 title, 56 hero), SF Mono for numbers. The system fonts stand in
+/// Type roles, from the reference CSS in design/tools/v03.css: three text sizes, 11 (micro), 12.5 (notes, captions, buttons, mono) and 14
+/// (body, headings), plus 10 for chart axes only. Instrument Serif for page titles and big numbers (32 title, 52 hero), SF Mono for numbers. The system fonts stand in
 /// when the bundled faces are missing (`KitFonts`). Views set fonts only through `.kitType(...)`.
 enum KitType: CaseIterable {
     case pageTitle, brand, hero, heroUnit, quote
@@ -11,19 +11,19 @@ enum KitType: CaseIterable {
     var font: Font {
         switch self {
         case .pageTitle: serif(32)
-        case .brand: serif(23)
+        case .brand: serif(22)
         case .hero: serif(Dim.heroValue)
         case .heroUnit: serif(22)
-        case .quote: serif(26)
-        case .body: sans(KitFonts.sansRegular, 13.5, .regular)
-        case .bodyStrong: sans(KitFonts.sansMedium, 13.5, .medium)
+        case .quote: serif(28)
+        case .body: sans(KitFonts.sansRegular, 14, .regular)
+        case .bodyStrong: sans(KitFonts.sansMedium, 14, .medium)
         case .meta: sans(KitFonts.sansRegular, 12.5, .regular)
-        case .caption: sans(KitFonts.sansRegular, 12, .regular)
-        case .buttonPrimary: sans(KitFonts.sansSemibold, 13, .semibold)
-        case .captionStrong: sans(KitFonts.sansMedium, 12, .medium)
-        case .section: sans(KitFonts.sansSemibold, 13, .semibold)
-        case .button: sans(KitFonts.sansMedium, 13, .medium)
-        case .buttonSmall: sans(KitFonts.sansMedium, 12, .medium)
+        case .caption: sans(KitFonts.sansRegular, 12.5, .regular)
+        case .buttonPrimary: sans(KitFonts.sansSemibold, 12.5, .semibold)
+        case .captionStrong: sans(KitFonts.sansMedium, 12.5, .medium)
+        case .section: sans(KitFonts.sansSemibold, 14, .semibold)
+        case .button: sans(KitFonts.sansMedium, 12.5, .medium)
+        case .buttonSmall: sans(KitFonts.sansMedium, 12.5, .medium)
         case .mono: .system(size: 12.5, design: .monospaced)
         case .monoStrong: .system(size: 12.5, weight: .medium, design: .monospaced)
         // Chart axes: 10 pt, the smallest text anywhere (the reference scaled them to 8 pt, below the 10 pt floor).
@@ -33,6 +33,20 @@ enum KitType: CaseIterable {
         case .micro: sans(KitFonts.sansRegular, 11, .regular)
         case .microStrong: sans(KitFonts.sansSemibold, 11, .semibold)
         case .microMono: .system(size: 11, design: .monospaced)
+        }
+    }
+
+    /// The role's size in points: the contrast check treats 24 and up as large text.
+    var pointSize: CGFloat {
+        switch self {
+        case .pageTitle: 32
+        case .brand, .heroUnit: 22
+        case .quote: 28
+        case .hero: Dim.heroValue
+        case .body, .bodyStrong, .section: 14
+        case .meta, .caption, .captionStrong, .button, .buttonSmall, .buttonPrimary, .mono, .monoStrong: 12.5
+        case .micro, .microStrong, .microMono: 11
+        case .axis, .axisMono: 10
         }
     }
 
@@ -72,9 +86,9 @@ extension View {
     @ViewBuilder
     func kitType(_ type: KitType) -> some View {
         if let line = type.minLine {
-            font(type.font).tracking(type.tracking).frame(minHeight: line)
+            font(type.font).tracking(type.tracking).frame(minHeight: line).textProbe(size: type.pointSize)
         } else {
-            font(type.font).tracking(type.tracking)
+            font(type.font).tracking(type.tracking).textProbe(size: type.pointSize)
         }
     }
 }

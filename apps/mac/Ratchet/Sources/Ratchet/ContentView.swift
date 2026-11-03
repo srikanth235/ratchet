@@ -2,7 +2,7 @@ import AppKit
 import RatchetKit
 import SwiftUI
 
-/// The window: the system sidebar (the pages and the recent runs) and, beside it, the page or the New optimization flow, under
+/// The window: the system sidebar (the pages and the recent runs) and, beside it, the page or the New Optimization flow, under
 /// a native toolbar. Banners (the daemon is down, an action failed) sit above the page. The title bar names the page; the
 /// page and the open optimization are restored with the scene.
 struct ContentView: View {

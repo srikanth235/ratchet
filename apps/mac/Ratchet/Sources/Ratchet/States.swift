@@ -88,12 +88,12 @@ struct PagePlaceholder: View {
         KitPage {
             PageHeader(page.title)
             VStack(spacing: Space.lg) {
-                RatchetMarkView(height: 36)
+                RatchetMarkView(height: Dim.markLarge)
                 Text(page.title).kitType(.pageTitle).foregroundStyle(Ink.text)
                 Text(note)
                     .kitType(.body).foregroundStyle(Ink.textMuted)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 420)
+                    .frame(maxWidth: Layout.stateWidth)
             }
             .frame(maxWidth: .infinity)
             .padding(.top, Space.block)
@@ -115,7 +115,7 @@ struct EmptyOverview: View {
 
     var body: some View {
         VStack(spacing: Space.lg) {
-            RatchetMarkView(height: 44)
+            RatchetMarkView(height: Dim.markHero)
             Text(text?.title ?? "No wins yet").kitType(.pageTitle).foregroundStyle(Ink.text)
             Text(text?.body ?? "Start your first optimization.").kitType(.body).foregroundStyle(Ink.textMuted)
             Button("New Optimization") { router.newOptimization() }

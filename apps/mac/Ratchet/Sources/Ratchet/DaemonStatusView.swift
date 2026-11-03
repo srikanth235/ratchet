@@ -9,13 +9,13 @@ struct DaemonStatusView: View {
 
     var body: some View {
         VStack(spacing: Space.xxl) {
-            RatchetMarkView(height: 36)
+            RatchetMarkView(height: Dim.markLarge)
             VStack(spacing: Space.sm) {
                 Text(title).kitType(.pageTitle).foregroundStyle(Ink.text)
                 Text(message)
                     .kitType(.body).foregroundStyle(Ink.textMuted)
                     .multilineTextAlignment(.center)
-                    .frame(maxWidth: 420)
+                    .frame(maxWidth: Layout.stateWidth)
             }
             actions
         }

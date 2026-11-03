@@ -44,9 +44,9 @@ struct BenchmarksPage: View {
             HStack(spacing: Space.lg) {
                 column("Benchmark").frame(maxWidth: .infinity, alignment: .leading)
                 column("Result").frame(width: TableColumns.result, alignment: .leading)
-                column("Noise").frame(width: 72, alignment: .trailing)
-                column("Evals").frame(width: 64, alignment: .trailing)
-                column("Started").frame(width: 80, alignment: .trailing)
+                column("Noise").frame(width: Layout.numberColumn, alignment: .trailing)
+                column("Evals").frame(width: Layout.numberColumnNarrow, alignment: .trailing)
+                column("Started").frame(width: Layout.numberColumn, alignment: .trailing)
             }
             .padding(.bottom, Space.sm + 2)
             .overlay(alignment: .bottom) { Hairline() }
@@ -56,11 +56,11 @@ struct BenchmarksPage: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     result(run).frame(width: TableColumns.result, alignment: .leading)
                     Text(Percent.noise(run.noise)).kitType(.mono).foregroundStyle(Ink.textMuted)
-                        .frame(width: 72, alignment: .trailing)
+                        .frame(width: Layout.numberColumn, alignment: .trailing)
                     Text("\(run.evals)").kitType(.mono).foregroundStyle(Ink.text)
-                        .frame(width: 64, alignment: .trailing)
+                        .frame(width: Layout.numberColumnNarrow, alignment: .trailing)
                     Text(Elapsed.shortDate(run.date)).kitType(.meta).foregroundStyle(Ink.textFaint)
-                        .frame(width: 80, alignment: .trailing)
+                        .frame(width: Layout.numberColumn, alignment: .trailing)
                 }
                 .padding(.vertical, Dim.rowPadding)
                 .overlay(alignment: .bottom) { Hairline() }

@@ -38,7 +38,6 @@ struct NotificationRoutingTests {
     @Test func eachNeedsYouKindHasItsCategoryAndPlace() {
         let kinds: [(NeedsYouKind, NotificationCategory, NotificationDestination)] = [
             (.mergeWins, .winReady, .optimization("o1")),
-            (.approveEnvironment, .environmentDrafted, .newOptimization),
             (.budgetLimit, .budgetLimit, .optimization("o1")),
             (.runFailed, .runFinished, .optimization("o1")),
             (.signIn, .connectorExpired, .connectors),
@@ -103,14 +102,6 @@ struct NotificationRoutingTests {
         let found = NotificationRouting.changes(from: state(), to: new, enabled: [.connectorExpired])
         #expect(found.map(\.category) == [.connectorExpired])
         #expect(NotificationRouting.changes(from: state(), to: new, enabled: []).isEmpty)
-    }
-
-    @Test func aDraftedEnvironmentNotifiesWhenEnabled() {
-        let note = NotificationRouting.environmentDrafted(draftID: "d1", repoID: "acme/shop")
-        #expect(note?.category == .environmentDrafted)
-        #expect(note?.destination == .newOptimization)
-        #expect(note?.id == "draft-d1")
-        #expect(NotificationRouting.environmentDrafted(draftID: "d1", repoID: "acme/shop", enabled: [.winReady]) == nil)
     }
 
     @Test func destinationsSurviveTheNotificationsUserInfo() {

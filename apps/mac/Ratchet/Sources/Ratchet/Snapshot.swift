@@ -48,6 +48,13 @@ enum SnapScene: String, CaseIterable {
     case runByAgent = "run-by-agent"
     case runEverything = "run-everything"
     case runStop = "run-stop"
+    // F6: the bottom of a live run (the last rows clear the steering field), "Ask…" on a run, the AWS sign-in steps, the Overview's
+    // footnote and the Value row it opens.
+    case runBottom = "run-bottom"
+    case runAsk = "run-ask"
+    case connectorSSO = "connector-sso"
+    case overviewFootnote = "overview-footnote"
+    case valueRow = "value-row"
     case optimizationSettings = "optimization-settings"
     case optimizationSettingsPopover = "optimization-settings-popover"
     case agentsSignIn = "agents-signin"
@@ -132,6 +139,7 @@ enum SnapScene: String, CaseIterable {
         router.closeConversation()
         router.pendingStop = nil
         router.pendingArchive = nil
+        hub.forgetAsk()
         router.detailTab = .run
         router.show(.overview)
         connectors.reset()
@@ -175,8 +183,37 @@ enum SnapScene: String, CaseIterable {
             SnapshotFocus.shared.connectorsTab = "discover"
         case .conversationDrafting, .conversationDraft, .conversationDraftPopover, .conversationEnvError, .conversationLimit:
             await Self.startConversation(self, hub: hub, router: router, store: store)
-        case .runOverview, .runByAgent, .runEverything:
+        case .runOverview, .runByAgent, .runEverything, .runBottom:
             await Self.openRun(self, store: store, router: router, hub: hub)
+        case .runAsk:
+            router.open(optimization: "opt-checkout")
+            await store.optimizationStore.loadDetail(id: "opt-checkout")
+            await hub.askAboutRun("opt-checkout", store: store)
+            // The sheet is on screen now, and following its chat.
+            try? await Task.sleep(for: .milliseconds(600))
+            if let model = hub.askConversation("opt-checkout", router: router) {
+                model.draft = "Why was the last candidate blocked?"
+                await model.send()
+                for _ in 0..<300 {
+                    var replied = false
+                    for item in model.items { if case .reply = item { replied = true } }
+                    if !model.isReplying && replied { break }
+                    try? await Task.sleep(for: .milliseconds(10))
+                }
+            }
+        case .connectorSSO:
+            router.show(.connectors)
+            connectors.rowModes["aws-acme-staging"] = .ssoHint
+            SnapshotFocus.shared.target = "connectors-aws"
+        case .overviewFootnote:
+            SnapshotFocus.shared.target = "page-end"
+        case .valueRow:
+            // What the Overview's "Edit value" does: the Value row of the optimization the numbers lean on.
+            let id = ValueStoryModel.valueRowTarget(in: store.optimizationStore.optimizations)?.id ?? "opt-checkout"
+            router.open(optimization: id)
+            router.detailTab = .settings
+            await hub.settings(for: id).load()
+            SnapshotFocus.shared.target = "value"
         case .runStop:
             router.open(optimization: "opt-checkout")
             router.pendingStop = "opt-checkout"
@@ -270,9 +307,10 @@ enum SnapScene: String, CaseIterable {
     private static func startConversation(_ scene: SnapScene, hub: ChatHub, router: AppRouter, store: AppStore) async {
         router.show(.home)
         hub.composer.repo = scene == .conversationLimit ? nil : "acme-org/shop-api"
+        hub.composer.cloudAccount = hub.composer.options.cloudAccounts.first
         let words = "Make checkout p95 faster in shop-api. Run it every night, $50 a run."
         switch scene {
-        case .conversationDrafting: hub.composer.text = "[simulate:slow] " + words
+        case .conversationDrafting: hub.composer.text = "[simulate:drafting] " + words
         case .conversationEnvError: hub.composer.text = "[simulate:env-fail] " + words
         case .conversationLimit: hub.composer.text = "[simulate:rate-limit] " + words
         default: hub.composer.text = words
@@ -303,7 +341,8 @@ enum SnapScene: String, CaseIterable {
         case .runEverything: SnapshotFocus.shared.logTab = "everything"
         default: break
         }
-        SnapshotFocus.shared.target = "log"
+        // The bottom scene scrolls to the end of the page: the last rows must stop above the steering field.
+        SnapshotFocus.shared.target = scene == .runBottom ? "page-end" : "log"
         // The steering field is on screen now, and following its chat.
         try? await Task.sleep(for: .milliseconds(500))
         let steering = hub.steering(for: "opt-checkout")
@@ -320,7 +359,7 @@ enum SnapScene: String, CaseIterable {
 /// Screenshot mode for agents.
 ///   APP_STORE=/tmp/test.store APP_SNAPSHOT=/tmp/shots ~/Applications/Ratchet.app/Contents/MacOS/Ratchet
 /// writes <scene>-light.png and <scene>-dark.png for every SnapScene (the four pages, the optimization detail live,
-/// finished and without a win, the four New optimization steps, the eight gallery-<section> scenes of the parts gallery),
+/// finished and without a win, the four New Optimization steps, the eight gallery-<section> scenes of the parts gallery),
 /// and settings-<tab>-light.png and -dark.png for
 /// every Settings tab, then quits. Each PNG gets a <scene>-<mode>-layout.json with the grid probes
 /// (tools/check-layout.swift).
@@ -446,6 +485,39 @@ enum Snapshot {
         power.release()
     }
 
+    /// Brings the app and the window to the front and waits (up to two seconds) until the window is key and the app active, so the
+    /// picture is of a window in use. Returns whether it got there.
+    @discardableResult
+    static func makeActive(_ window: NSWindow) -> Bool {
+        // A sheet or a popover on the window is the key window then; the window itself still counts as the one in use.
+        func inUse() -> Bool {
+            if !NSApp.isActive { return false }
+            if window.isKeyWindow { return true }
+            if let sheet = window.attachedSheet, sheet.isKeyWindow { return true }
+            let children: [NSWindow] = window.childWindows ?? []
+            for child in children where child.isKeyWindow { return true }
+            return false
+        }
+        for attempt in 0..<12 {
+            if inUse() { return true }
+            if attempt == 0 { NSApp.setActivationPolicy(.regular) }
+            // A process started from a shell cannot always bring itself forward. Asking Launch Services to open the running bundle
+            // again is the user's own way to do it ("open Ratchet.app"), and it always works; the window is not re-created.
+            if attempt == 3 {
+                let open = Process()
+                open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                open.arguments = [Bundle.main.bundlePath]
+                try? open.run()
+                open.waitUntilExit()
+            }
+            NSApp.activate()
+            window.makeKeyAndOrderFront(nil)
+            // Let the window server and SwiftUI catch up: the key state arrives on the run loop.
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        return inUse()
+    }
+
     /// Captures the real window with screencapture, so glass, sidebars, and
     /// materials look exactly as on screen. That needs Screen Recording
     /// permission for the app that started this one (your terminal, or Claude).
@@ -459,11 +531,17 @@ enum Snapshot {
             print("SNAPSHOT no window")
             return
         }
-        // Active, like a window someone is using: real accent colors and focus rings.
-        NSApp.activate()
-        window.makeKeyAndOrderFront(nil)
+        // Active, like a window someone is using: real accent colors, focus rings, and no inactive dimming. A window of an app that
+        // is not frontmost is dimmed by the system and by `dimsWhenInactive`, so contrast cannot be read from its pixels.
+        let active = makeActive(window)
         let size = window.contentView?.bounds.size ?? .zero
         GridProbes.shared.write(to: path.replacingOccurrences(of: ".png", with: "-layout.json"), window: size)
+        // The text frames for the pixel contrast check: the main window only, and not under a sheet (a sheet's frames are its own
+        // window's).
+        if window === mainWindow && window.attachedSheet == nil {
+            TextProbes.shared.write(to: path.replacingOccurrences(of: ".png", with: "-text.json"), window: size, active: active)
+        }
+        if !active { print("SNAPSHOT inactive window: \(path) (dimmed; contrast is not checked)") }
         try? FileManager.default.removeItem(atPath: path)
         // The first capture of a run sometimes misses the window. Try three times.
         for _ in 1...3 {

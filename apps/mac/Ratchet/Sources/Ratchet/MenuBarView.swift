@@ -8,7 +8,7 @@ struct MenuBarLabel: View {
     /// Drawn once: the label is evaluated again whenever the count changes, and the image never does.
     private static let image = RatchetMarkImage.menuBar()
 
-    private var shownCount: Int { store.needsYou.filter { $0.kind != .approveEnvironment }.count }
+    private var shownCount: Int { store.needsYou.count }
 
     var body: some View {
         HStack(spacing: Space.xs) {
@@ -17,7 +17,7 @@ struct MenuBarLabel: View {
                 Text("\(shownCount)")
             }
         }
-        .accessibilityLabel("Ratchet, \(shownCount) need you")
+        .accessibilityLabel("Ratchet, " + MenuBarRules.needsYouText(shownCount))
     }
 }
 
@@ -31,11 +31,11 @@ struct MenuBarView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.md) {
             HStack(spacing: Space.sm) {
-                RatchetMarkView(height: 16)
+                RatchetMarkView(height: Dim.mark)
                 Text("Ratchet").kitType(.brand).foregroundStyle(Ink.text)
                 Spacer()
-                if !shownNeedsYou.isEmpty {
-                    Text("\(shownNeedsYou.count) need you").kitType(.caption).foregroundStyle(Ink.wait)
+                if !store.needsYou.isEmpty {
+                    Text(MenuBarRules.needsYouText(store.needsYou.count)).kitType(.caption).foregroundStyle(Ink.wait)
                 }
             }
             Hairline()
@@ -47,9 +47,9 @@ struct MenuBarView: View {
                         .buttonStyle(.plain)
                 }
             }
-            if !shownNeedsYou.isEmpty {
+            if !store.needsYou.isEmpty {
                 Hairline()
-                ForEach(shownNeedsYou) { item in
+                ForEach(store.needsYou) { item in
                     Button { show { router.open(optimization: item.optimizationID) } } label: {
                         HStack(alignment: .top, spacing: Space.sm) {
                             StatusShape(tone: .wait, size: Dim.icon - Space.xs).frame(height: Dim.textLine)
@@ -83,7 +83,7 @@ struct MenuBarView: View {
             .accessibilityElement(children: .combine)
             HStack(spacing: Space.sm) {
                 Button("Open Ratchet") { show {} }.buttonStyle(.kit(.quiet, small: true))
-                Button("New optimization") { show { router.newOptimization() } }
+                Button("New Optimization") { show { router.newOptimization() } }
                     .buttonStyle(.kit(.primary, small: true))
                 Spacer()
                 Button("Quit") { NSApplication.shared.terminate(nil) }.buttonStyle(.kit(.link, small: true))
@@ -94,9 +94,6 @@ struct MenuBarView: View {
         .gridArea("menubar", inset: Space.lg)
         .tint(Ink.brass)
     }
-
-    /// Nothing waits for an environment approval any more: only what a person can really act on.
-    private var shownNeedsYou: [NeedsYouItem] { store.needsYou.filter { $0.kind != .approveEnvironment } }
 
     private func runRow(_ optimization: Optimization) -> some View {
         VStack(alignment: .leading, spacing: Space.xs) {

@@ -81,9 +81,9 @@ public struct MockWorld: Sendable {
                 winsCount: 2, evalsCount: 11, agentsCount: 2),
             Optimization(
                 id: "opt-search", title: "Search relevance", repo: "acme-org/search-svc", goal: "Improve search relevance",
-                status: .waiting, metric: MetricSpec(name: "relevance", label: "nDCG", decimals: 3, lowerIsBetter: false),
+                status: .done, metric: MetricSpec(name: "relevance", label: "nDCG", decimals: 3, lowerIsBetter: false),
                 baseline: 0.612, best: 0.648, noise: 0.008, spentUSD: 22, budgetUSD: 80, valuePerYearUSD: 2900,
-                timeLimitHours: 4, startedAt: now.addingTimeInterval(-3 * day), winsCount: 2, evalsCount: 9, agentsCount: 1),
+                timeLimitHours: 4, startedAt: now.addingTimeInterval(-3 * day), prNumber: 311, winsCount: 2, evalsCount: 9, agentsCount: 1),
             Optimization(
                 id: "opt-forecast", title: "Forecast accuracy", repo: "acme-org/demand-model", goal: "Lower the forecast error",
                 status: .merged, metric: MetricSpec(name: "WAPE", label: "WAPE", unit: "%", decimals: 1),
@@ -91,12 +91,18 @@ public struct MockWorld: Sendable {
                 timeLimitHours: 6, startedAt: now.addingTimeInterval(-40 * day), prNumber: 198, winsCount: 3, evalsCount: 21, agentsCount: 2),
             Optimization(
                 id: "opt-cli", title: "CLI cold start", repo: "srikanth235/acme-cli", goal: "Make the CLI start faster",
-                status: .done, metric: ms, baseline: 840, best: 510, noise: 0.03, spentUSD: 41, valuePerYearUSD: 1200,
-                timeLimitHours: 2, startedAt: now.addingTimeInterval(-70 * day), prNumber: 214, winsCount: 2, evalsCount: 14, agentsCount: 1),
+                status: .failed, metric: ms, baseline: 840, best: 510, noise: 0.03, spentUSD: 41, valuePerYearUSD: 1200,
+                timeLimitHours: 2, startedAt: now.addingTimeInterval(-70 * day), winsCount: 2, evalsCount: 14, agentsCount: 1,
+                failureReason: "AWS session expired"),
             Optimization(
                 id: "opt-bundle", title: "Bundle size", repo: "acme-org/web-app", goal: "Shrink the JavaScript bundle",
                 status: .noWin, metric: MetricSpec(name: "bundle size", unit: "KB"), baseline: 1840, noise: 0.02,
                 spentUSD: 19, timeLimitHours: 2, startedAt: now.addingTimeInterval(-20 * day), evalsCount: 8, agentsCount: 1),
+            // Created, and its schedule starts it at 02:00: nothing waits on a person ("Run Now" starts it sooner).
+            Optimization(
+                id: "opt-nightly", title: "Checkout p95 · nightly", repo: "acme-org/shop-api", goal: "Make checkout p95 faster, every night",
+                status: .waiting, metric: ms, baseline: 412, noise: 0.021, spentUSD: 0, budgetUSD: 50, timeLimitHours: 3,
+                evalsCount: 0, agentsCount: 2),
         ]
     }
 
@@ -132,8 +138,7 @@ public struct MockWorld: Sendable {
         case "opt-search":
             return OptimizationDetail(
                 optimization: optimization,
-                agents: [Agent(id: "agent-search-1", name: login, placement: .local, state: .paused,
-                               activity: "Waiting for the environment to be approved", evals: 9, wins: 2, spentUSD: 22)],
+                agents: [],
                 candidates: [
                     candidate("5ab90c4", "Rerank with a cross-encoder", login, .verified, 0.648, 40),
                     candidate("c7710e2", "Expand queries with synonyms", login, .verified, 0.631, 20),
@@ -169,6 +174,9 @@ public struct MockWorld: Sendable {
                     id: "receipt-cli", account: "personal-dev", startedAt: start, endedAt: start.addingTimeInterval(1.9 * hour),
                     costUSD: 0.38, destroyed: ["EC2 c7i.large × 1", "EBS 40 GB", "Security group"]),
                 filesChanged: 5, additions: 118, deletions: 34)
+        case "opt-nightly":
+            // Created, not started: nothing to show yet.
+            return OptimizationDetail(optimization: optimization)
         default:
             return OptimizationDetail(
                 optimization: optimization,
@@ -250,7 +258,8 @@ public struct MockWorld: Sendable {
             "opt-cli": ("Cold start", "cli-cold-start"),
             "opt-bundle": ("Bundle size", "build-size"),
         ]
-        return optimizations.map { optimization in
+        // A benchmark run exists once the optimization started.
+        return optimizations.filter { $0.status != .waiting }.map { optimization in
             let info = templates[optimization.id] ?? ("Benchmark", "custom")
             return BenchmarkRun(
                 id: "bench-" + optimization.id, title: info.0, optimizationTitle: optimization.title, templateID: info.1,

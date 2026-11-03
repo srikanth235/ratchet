@@ -1,8 +1,8 @@
 import RatchetKit
 import SwiftUI
 
-/// The draft card of the creation conversation (screens 8 and 18): Measures, Agents, Each run, Schedule, Output, Config. Each
-/// editable row has its own button ("Change agents") that opens a popover; a change is said to the chat, the card updates, and the
+/// The draft card of the creation conversation (screens 8 and 18): Goal, Measures, Agents, Repository, Cloud, Each run, Schedule, Output,
+/// Config. Each editable row has its own quiet "Change" (read out as "Change agents") that opens a popover; a change is said to the chat, the card updates, and the
 /// row shows "Updated" with Undo. Start Over, Create and Run Once · ≈$38 and Create Optimization are at the foot; nothing waits
 /// on a human after them.
 struct DraftCardView: View {
@@ -70,33 +70,44 @@ struct DraftCardView: View {
         .accessibilityElement(children: .contain)
     }
 
+    /// The note on a line of its own, the buttons under it: nothing wraps, whatever the width and the state.
     private var footer: some View {
-        HStack(alignment: .center, spacing: Space.md) {
-            Text("Runs at once from \(Text("ratchet/config").font(KitType.monoStrong.font)). A PR adopts it into main later.")
-                .kitType(.meta).foregroundStyle(Ink.textFaint)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .fixedSize(horizontal: false, vertical: true)
-            if model.status == .created {
-                Text("Created. Opening it…").kitType(.meta).foregroundStyle(Ink.ok)
-            }
-            Button {
-                Task { await hub.startOver(chatID: model.chatID, router: router) }
-            } label: {
-                HStack(spacing: Space.xs) {
-                    KitIconView(icon: .undo, size: Dim.icon - Space.xs)
-                    Text("Start Over")
+        VStack(alignment: .leading, spacing: Space.md) {
+            HStack(spacing: Space.md) {
+                Text("Runs at once from \(Text("ratchet/config").font(KitType.monoStrong.font)). A PR adopts it into main later.")
+                    .kitType(.meta).foregroundStyle(Ink.textFaint)
+                    .lineLimit(1)
+                Spacer(minLength: Space.md)
+                if model.status == .created {
+                    Text("Created. Opening it…").kitType(.meta).foregroundStyle(Ink.ok).lineLimit(1)
                 }
             }
-            .buttonStyle(.kit(.ghost))
-            .help("End this conversation and go back to Home with your first words")
-            Button(model.createAndRunOnceTitle) { Task { await model.createAndRunOnce() } }
-                .buttonStyle(.kit(.quiet))
-                .disabled(!model.canCreate || !actionsEnabled)
-                .help("Create it and run it once now. No schedule is added.")
-            Button(model.createTitle) { Task { await model.create() } }
-                .buttonStyle(.kit(.primary))
-                .disabled(!model.canCreate || !actionsEnabled)
-                .help("Create it. The first run starts at once; nothing waits on a pull request.")
+            HStack(alignment: .center, spacing: Space.md) {
+                Button {
+                    Task { await hub.startOver(chatID: model.chatID, router: router) }
+                } label: {
+                    HStack(spacing: Space.xs) {
+                        KitIconView(icon: .undo, size: Dim.icon - Space.xs)
+                        Text("Start Over")
+                    }
+                }
+                .buttonStyle(.kit(.ghost))
+                .fixedSize()
+                .help("End this conversation and go back to Home with your first words")
+                Spacer(minLength: Space.md)
+                Button(model.createAndRunOnceTitle) { Task { await model.createAndRunOnce() } }
+                    .buttonStyle(.kit(.quiet))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .disabled(!model.canCreate || !actionsEnabled)
+                    .help("Create it and run it once now. No schedule is added.")
+                Button(model.createTitle) { Task { await model.create() } }
+                    .buttonStyle(.kit(.primary))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .disabled(!model.canCreate || !actionsEnabled)
+                    .help("Create it. The first run starts at once; nothing waits on a pull request.")
+            }
         }
         .padding(.horizontal, Space.lg)
         .padding(.vertical, Space.md)
@@ -136,12 +147,15 @@ private struct DraftRowView: View {
                 .accessibilityLabel("\(row.label) updated")
             }
             if state.isEditable {
-                Button(state.changeTitle) {
+                // A quiet "Change": text, not a bordered button, so six rows do not read as six buttons. Its label says which row.
+                Button("Change") {
                     edit = model.editor(for: row.key)
                     typed = ""
                     open = true
                 }
-                .buttonStyle(.kit(.quiet, small: true))
+                .buttonStyle(.kit(.link))
+                .accessibilityLabel(state.changeTitle)
+                .help(state.changeTitle)
                 .disabled(!model.canCreate && model.status != .failed)
                 .popover(isPresented: $open, arrowEdge: .trailing) { popover }
                 .task(id: focus.popover) {
@@ -166,25 +180,29 @@ private struct DraftRowView: View {
         Task { await model.edit(row.key, edit) }
     }
 
+    /// What the popover edits: the person's edit so far, else the row's own editor. A row never opens on a bare text box when it
+    /// has a structured editor ("Change agents" is the same ordered list as Home's agents chip).
+    private var current: DraftRowEdit? { edit ?? model.editor(for: row.key) }
+
     @ViewBuilder
     private var popover: some View {
-        switch edit {
+        switch current {
         case .agents?:
             AgentOrderPopover(
                 editor: Binding(
-                    get: { if case .agents(let editor)? = edit { editor } else { AgentOrderEditor(order: [.claudeCode]) } },
+                    get: { if case .agents(let editor)? = current { editor } else { AgentOrderEditor(order: [.claudeCode]) } },
                     set: { edit = .agents($0) }),
                 done: finish)
         case .limits?:
             LimitsPopover(
                 editor: Binding(
-                    get: { if case .limits(let editor)? = edit { editor } else { LimitsEditor() } },
+                    get: { if case .limits(let editor)? = current { editor } else { LimitsEditor() } },
                     set: { edit = .limits($0) }),
                 done: finish)
         case .schedule?:
             SchedulePopover(
                 kind: Binding(
-                    get: { if case .schedule(let kind)? = edit { kind } else { nil } },
+                    get: { if case .schedule(let kind)? = current { kind } else { nil } },
                     set: { if let kind = $0 { edit = .schedule(kind) } }),
                 done: finish)
         case .option?:
@@ -212,7 +230,7 @@ private struct DraftRowView: View {
     }
 
     private var selectedOption: String? {
-        if case .option(_, let option)? = edit { return option.label }
+        if case .option(_, let option)? = current { return option.label }
         return nil
     }
 }

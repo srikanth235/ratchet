@@ -2,7 +2,7 @@ import RatchetKit
 import SwiftUI
 
 /// The header of an optimization (screens 2, 3, 19, 20): the name and where it runs, a status word with its shape, and the
-/// actions: Run Now, Stop…, Pause Schedule (Pause Agent on a single agent), Open PR #n and a ⋯ menu with Archive… and Export Report….
+/// actions: Run Now, Stop…, Pause Schedule (Pause Agent on a single agent), Ask… (a chat about the run), Open PR #n and a ⋯ menu with Archive… and Export Report….
 /// Stop… asks first (the window's one confirmation, "Stop Checkout p95?").
 struct RunHeader: View {
     let optimization: Optimization
@@ -15,7 +15,7 @@ struct RunHeader: View {
     private var settings: OptimizationSettingsModel { hub.settings(for: optimization.id) }
 
     /// "Running", "Not started", "Merged"…; "Archived" once the schedule is stopped by Archive.
-    private var statusWord: String { settings.isArchived ? "Archived" : optimization.status.title }
+    private var statusWord: String { settings.isArchived ? "Archived" : optimization.statusText }
 
     private var subtitle: String {
         var parts = [optimization.repo + " · " + optimization.branch]
@@ -57,6 +57,10 @@ struct RunHeader: View {
                     .help("Stop this optimization. Wins found so far are kept. (Command-Period)")
             }
             pauseButton
+            Button("Ask…") { Task { await hub.askAboutRun(optimization.id, store: store) } }
+                .buttonStyle(.kit(.quiet))
+                .disabled(!actionsEnabled)
+                .help("Ask the default agent about this run")
             if OptimizationAction.canOpenPullRequest(optimization) {
                 Button(optimization.prNumber.map { "Open PR #\($0)" } ?? "Create PR") {
                     Task { await OptimizationAction.openPullRequest(optimization, store: store) }
@@ -66,6 +70,8 @@ struct RunHeader: View {
                 .help("Open the pull request with the verified wins (Shift-Command-P)")
             }
             KitMoreMenu("More actions for \(optimization.title)") {
+                Button("Ask About This Run…") { Task { await hub.askAboutRun(optimization.id, store: store) } }
+                    .disabled(!actionsEnabled)
                 Button("Archive…") { router.pendingArchive = optimization.id }
                     .disabled(!actionsEnabled || settings.isArchived)
                 if optimization.status.isFinished {

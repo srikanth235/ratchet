@@ -84,9 +84,10 @@ public struct ReplyLabel: Equatable, Sendable {
         self.init(harness: harness, model: Self.modelTitle(message.model, harness: harness, catalog: catalog))
     }
 
-    /// The model's name in the catalog ("Opus"), else its id; nothing for the CLI's own default.
+    /// The model's name in the catalog ("Opus"), else its id. The CLI's own default ("default", or none) is the catalog's default
+    /// model of that harness, so the line always says which model wrote; nothing only when the catalog does not know it either.
     static func modelTitle(_ id: String?, harness: Harness, catalog: HarnessCatalog) -> String? {
-        guard let id, !id.isEmpty, id != "default" else { return nil }
+        guard let id, !id.isEmpty, id != "default" else { return catalog.choice(for: harness).model?.title }
         return catalog.models(of: harness).first { $0.id == id }?.title ?? id
     }
 

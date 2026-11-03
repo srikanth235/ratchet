@@ -22,11 +22,16 @@ struct OverviewPage: View {
     var body: some View {
         KitPage {
             PageHeader("Overview") {
-                if isLoading {
-                    HStack(spacing: Space.sm) {
-                        ProgressView().controlSize(.small)
-                        Text("Loading your optimizations…").kitType(.meta).foregroundStyle(Ink.textMuted)
+                HStack(spacing: Space.lg) {
+                    if isLoading {
+                        HStack(spacing: Space.sm) {
+                            ProgressView().controlSize(.small)
+                            Text("Loading your optimizations…").kitType(.meta).foregroundStyle(Ink.textMuted)
+                        }
                     }
+                    // The period belongs to the page's numbers, so it sits on the page, not in the window's toolbar.
+                    RangeSwitch(selection: store.range) { range in Task { await store.setRange(range) } }
+                        .help("Show wins from the last 30 days, 90 days or all time")
                 }
             }
             .gridProbe("header", area: "overview")
@@ -49,16 +54,6 @@ struct OverviewPage: View {
             }
         }
         .gridArea("overview", inset: Space.pageX)
-        .toolbar {
-            ToolbarItem {
-                Picker("Range", selection: Binding(get: { store.range }, set: { range in Task { await store.setRange(range) } })) {
-                    ForEach(TimeRange.allCases) { range in Text(range.title).tag(range) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .help("Show wins from the last 30 days, 90 days or all time")
-            }
-        }
         .searchable(text: $query, placement: .toolbar, prompt: "Search optimizations")
         .searchFocused($searching)
         .focusedSceneValue(\.findAction, FindAction { searching = true })
@@ -240,8 +235,7 @@ struct OverviewPage: View {
 
     /// The Value row of the optimization the numbers lean on most: the one with a pull request, else the first.
     private func openValueRow() {
-        let all = store.optimizationStore.optimizations
-        guard let target = all.first(where: { $0.prNumber != nil }) ?? all.first else { return }
+        guard let target = ValueStoryModel.valueRowTarget(in: store.optimizationStore.optimizations) else { return }
         router.open(optimization: target.id)
         router.detailTab = .settings
         SnapshotFocus.shared.target = "value"

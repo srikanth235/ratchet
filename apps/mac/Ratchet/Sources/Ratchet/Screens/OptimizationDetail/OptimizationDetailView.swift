@@ -19,6 +19,7 @@ struct OptimizationDetailView: View {
     var body: some View {
         Group {
             if let optimization {
+                // The steering field is the page's bottom bar: the content scrolls to a stop above it.
                 KitPage {
                     Button { router.optimizationID = nil } label: {
                         HStack(spacing: Space.xs) {
@@ -45,9 +46,7 @@ struct OptimizationDetailView: View {
                     case .settings:
                         OptimizationSettingsView(optimization: optimization, detail: detail)
                     }
-                }
-                // The steering field floats over the log while the optimization runs.
-                .safeAreaInset(edge: .bottom, spacing: 0) {
+                } bottomBar: {
                     if router.detailTab == .run && !optimization.status.isFinished {
                         SteeringBar(optimizationID: id)
                     }
@@ -57,6 +56,9 @@ struct OptimizationDetailView: View {
             }
         }
         .gridArea("detail", inset: Space.pageX)
+        .sheet(isPresented: Binding(get: { hub.asking == id }, set: { if !$0 { hub.asking = nil } })) {
+            AskRunSheet(optimizationID: id, title: optimization?.title ?? "this run")
+        }
         .toolbar {
             ToolbarItemGroup {
                 if let optimization, optimization.status.isFinished {

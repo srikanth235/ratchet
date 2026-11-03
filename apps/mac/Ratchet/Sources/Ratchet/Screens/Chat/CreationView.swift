@@ -30,9 +30,13 @@ struct CreationView: View {
     }
 }
 
-private struct ConversationBody: View {
+/// The conversation itself, shared by the creation view (with its draft card) and the "Ask about a run" sheet (no card).
+struct ConversationBody: View {
     @Bindable var model: ConversationModel
-    let card: DraftCardModel
+    var card: DraftCardModel?
+    var placeholder = "Change anything in plain words, e.g. “use Grok too” or “only weekdays”."
+    /// The layout area the composer is measured in; nil where there is none (a sheet).
+    var probeArea: String? = "conversation"
     @Environment(AppRouter.self) private var router
     @Environment(ChatHub.self) private var hub
     @Environment(\.daemonActionsEnabled) private var actionsEnabled
@@ -52,7 +56,7 @@ private struct ConversationBody: View {
                             NoticeLine(text: notice, closeLabel: "Dismiss the first-use notice") { model.dismissDataNotice() }
                         }
                     }
-                    LiveReplyView(model: model)
+                    LiveReplyView(model: model, showsWorking: !items.contains { if case .step = $0 { true } else { false } })
                     if let error = model.error {
                         ChatErrorBlock(error: error) { action in Task { await model.perform(action) } }
                     }
@@ -87,7 +91,7 @@ private struct ConversationBody: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             KitComposer(
-                text: $model.draft, placeholder: "Change anything in plain words, e.g. “use Grok too” or “only weekdays”.",
+                text: $model.draft, placeholder: placeholder,
                 isSending: model.isReplying, canSend: model.canSend && actionsEnabled,
                 onSend: { Task { await model.pressButton() } }
             ) {
@@ -95,7 +99,7 @@ private struct ConversationBody: View {
             }
             .frame(maxWidth: Layout.contentWidth)
             // The floating bar spans its own width, centred: it is measured on its own, not against the column's leading edge.
-            .gridProbe("composer", area: "conversation", edge: nil)
+            .probed("composer", area: probeArea)
             .padding(.horizontal, Space.pageX)
             .padding(.bottom, Space.lg)
             .frame(maxWidth: .infinity)
@@ -120,7 +124,7 @@ private struct ConversationBody: View {
             }
         case .card(let drawn):
             // The draft being talked about; a replaced draft is not drawn (its newer one is).
-            if drawn.id == card.card?.id {
+            if let card, drawn.id == card.card?.id {
                 DraftCardView(model: card)
             }
         }
@@ -130,13 +134,15 @@ private struct ConversationBody: View {
 /// The reply being written. It reads only `LiveReply`, so a streamed word invalidates this view and nothing else.
 private struct LiveReplyView: View {
     let model: ConversationModel
+    /// "Claude Code is working…" says it only while there are no steps to show: the steps are the progress.
+    var showsWorking = true
 
     var body: some View {
         if let live = model.live, !live.text.isEmpty {
             Text(live.text).kitType(.body).foregroundStyle(Ink.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityLabel("Reply so far: " + live.text)
-        } else if model.isReplying {
+        } else if model.isReplying && showsWorking {
             HStack(spacing: Space.sm) {
                 StatusShape(tone: .run).frame(height: Dim.textLine)
                 Text(model.harnessLabel + " is working…").kitType(.meta).foregroundStyle(Ink.textMuted)
@@ -178,5 +184,13 @@ struct ChatErrorBlock: View {
         .overlay(shape.strokeBorder(Ink.bad.opacity(0.5), lineWidth: Dim.hairline))
         .accessibilityElement(children: .contain)
         .onAppear { AccessibilityNotification.Announcement(error.title).post() }
+    }
+}
+
+extension View {
+    /// A layout probe in `area`, or none when the view is not in a measured area (a sheet).
+    @ViewBuilder
+    func probed(_ name: String, area: String?) -> some View {
+        if let area { gridProbe(name, area: area, edge: nil) } else { self }
     }
 }

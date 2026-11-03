@@ -152,6 +152,9 @@ enum Dim {
     static let bar: CGFloat = 4
     static let segment: CGFloat = 28
     static let mark: CGFloat = 16
+    /// The brand mark above an empty or failed state, and above a full-window one.
+    static let markLarge: CGFloat = 36
+    static let markHero: CGFloat = 44
     static let icon: CGFloat = 16
     static let statusShape: CGFloat = 16
     static let rowPadding: CGFloat = 12
@@ -160,13 +163,13 @@ enum Dim {
     /// Heading to content (v0.3.1 h2 margin), and the gap between choice cards.
     static let sectionGap: CGFloat = 12
     static let cardGap: CGFloat = 12
-    static let heroValue: CGFloat = 56
+    static let heroValue: CGFloat = 52
     /// The Overview chart. The reference draws a 760 x 250 viewBox about 440 pt wide, so about 145 pt tall with its axis
     /// labels; the extra room here is the tooltip's.
     static let chartHeight: CGFloat = 160
     /// The chart of a running optimization has the page to itself.
     static let chartHeightDetail: CGFloat = 248
-    /// Line heights of the reference (line-height 1.45): 12.5 pt text 18, 13.5 pt text 20. The bundled sans is set
+    /// Line heights of the reference (line-height 1.45): 12.5 pt text 18, 14 pt text 20. The bundled sans is set
     /// tighter by default, so text roles get these as a minimum height.
     static let textLine: CGFloat = 18 // grid: ok text line height (12.5 pt x 1.45)
     static let titleLine: CGFloat = 32
@@ -179,6 +182,8 @@ enum Dim {
 enum Layout {
     /// Sheets and the Settings window: one width, so nothing resizes between tabs.
     static let sheetWidth: CGFloat = 520
+    /// The height of a sheet that holds a conversation ("Ask about a run").
+    static let conversationSheetHeight: CGFloat = 560
     static let settingsWidth: CGFloat = 520
     /// The menu bar window and popovers.
     static let popoverWidth: CGFloat = 320
@@ -186,6 +191,13 @@ enum Layout {
     static let settingsSidebarWidth: CGFloat = 176
     static let labelColumn: CGFloat = 160
     static let labelColumnCompact: CGFloat = 128
+    /// The status column of a connector row, a field for one short value (a region), a wide inline field (a name, a note), the
+    /// tallest list that scrolls inside a sheet, and the width of the text of a full-window state.
+    static let statusColumn: CGFloat = 120
+    static let fieldMedium: CGFloat = 200
+    static let fieldWide: CGFloat = 280
+    static let listMaxHeight: CGFloat = 200
+    static let stateWidth: CGFloat = 420
     /// Columns of numbers, right aligned: a count or a percent, and a short money or time figure.
     static let numberColumnNarrow: CGFloat = 56
     static let numberColumn: CGFloat = 80

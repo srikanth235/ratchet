@@ -96,6 +96,7 @@ struct ConnectorsPage: View {
                     }
                 }
                 .gridProbe(kind.rawValue, area: areaName)
+                .id("connectors-" + kind.rawValue)
             }
     }
 

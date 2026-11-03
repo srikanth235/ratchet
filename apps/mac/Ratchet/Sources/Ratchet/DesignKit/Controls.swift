@@ -90,13 +90,15 @@ struct KitSegmented<Item: Identifiable & Hashable>: View {
                 if index > 0 { Rectangle().fill(Ink.hairlineStrong).frame(width: Dim.hairline) }
                 Button(title(item)) { selection = item }
                     .buttonStyle(KitSegmentStyle(isSelected: item == selection, forced: index == 1 ? forced : nil))
+                    .focusable(false)
                     .help(help?(item) ?? "")
                     .accessibilityAddTraits(item == selection ? .isSelected : [])
             }
         }
         .clipShape(shape)
         .overlay(shape.strokeBorder(Ink.controlBorder, lineWidth: Dim.hairline))
-        .onMoveCommand { direction in
+        // One tab stop for the whole control; Left and Right move the selection.
+        .arrowGroup(radius: Dim.radiusButton) { direction in
             guard let index = items.firstIndex(of: selection) else { return }
             switch direction {
             case .left: selection = items[max(index - 1, 0)]
@@ -144,6 +146,31 @@ private struct KitSegmentStyle: ButtonStyle {
                 .focusEffectDisabled()
                 .animation(Motion.hover, value: hovering)
         }
+    }
+}
+
+// MARK: - One tab stop for a group of choices
+
+/// A group of choices (a segmented control, a range switch, a settings list) is one tab stop: the group takes the keyboard focus,
+/// wears the focus ring, and the arrow keys move the selection (`onMoveCommand`). The choices inside stay clickable.
+private struct ArrowGroup: ViewModifier {
+    let radius: CGFloat
+    let move: (MoveCommandDirection) -> Void
+    @FocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .focusable()
+            .focused($focused)
+            .focusEffectDisabled()
+            .kitFocusRing(radius: radius, visible: focused)
+            .onMoveCommand(perform: move)
+    }
+}
+
+extension View {
+    func arrowGroup(radius: CGFloat, move: @escaping (MoveCommandDirection) -> Void) -> some View {
+        modifier(ArrowGroup(radius: radius, move: move))
     }
 }
 
@@ -331,7 +358,7 @@ struct SettingsSidebar: View {
             }
         }
         .frame(width: Layout.settingsSidebarWidth, alignment: .leading)
-        .onMoveCommand { direction in
+        .arrowGroup(radius: Dim.radiusRow) { direction in
             guard let index = items.firstIndex(where: { $0.id == selection }) else { return }
             switch direction {
             case .up: selection = items[max(index - 1, 0)].id

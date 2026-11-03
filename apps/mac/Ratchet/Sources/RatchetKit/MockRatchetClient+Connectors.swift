@@ -165,7 +165,13 @@ extension MockRatchetClient {
     public func detectedHarnesses(redetect: Bool) async throws -> [DetectedHarness] {
         if redetect { redetected = true }
         return [
-            DetectedHarness(harness: .claudeCode, installed: true, version: "2.1.314", auth: .signedIn),
+            DetectedHarness(
+                harness: .claudeCode, installed: true, version: "2.1.314", auth: .signedIn,
+                models: [
+                    HarnessModel(id: "opus", title: "Opus", harness: .claudeCode),
+                    HarnessModel(id: "sonnet", title: "Sonnet", harness: .claudeCode),
+                ],
+                defaultModel: "opus"),
             DetectedHarness(harness: .codex, installed: redetected, version: redetected ? "0.166" : nil, auth: .signedOut),
         ]
     }

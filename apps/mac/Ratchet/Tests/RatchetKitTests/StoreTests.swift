@@ -19,7 +19,7 @@ struct StoreTests {
 
     @Test func eachStoreOwnsItsPartOfWhatARefreshLoads() async {
         let (store, _) = await loaded()
-        #expect(store.optimizationStore.optimizations.count == 5)
+        #expect(store.optimizationStore.optimizations.count == 6)
         #expect(store.connectorStore.connectors.count == 8)
         #expect(store.connectorStore.connectors(of: .aws).count == 3)
         #expect(store.sandboxStore.sandbox.isOn && store.sandboxStore.receipt != nil)
@@ -45,11 +45,11 @@ struct StoreTests {
         #expect(!store.sandboxStore.sandbox.isOn)
         await scenario?.simulate(empty: false)
         await store.refresh()
-        #expect(store.optimizationStore.optimizations.count == 5)
+        #expect(store.optimizationStore.optimizations.count == 6)
         // Asking for the sample again changes nothing once it is back.
         await scenario?.simulate(empty: false)
         await store.refresh()
-        #expect(store.optimizationStore.optimizations.count == 5)
+        #expect(store.optimizationStore.optimizations.count == 6)
     }
 
     // MARK: Events through the reducer
@@ -79,12 +79,13 @@ struct StoreTests {
         let store = AppStore(client: client)
         var posted: [NotificationRequest] = []
         store.onNotification = { posted.append($0) }
+        let item = NeedsYouItem(id: "ship-1", kind: .mergeWins, title: "3 wins ready", detail: "d", actionTitle: "Open", optimizationID: "opt-checkout")
         // Before the first load nothing is announced.
-        store.apply(.environmentDraftReady(draftID: "d0", repoID: "acme/shop"))
+        store.apply(.needsYouChanged([item]))
         #expect(posted.isEmpty)
         await store.refresh()
-        store.apply(.environmentDraftReady(draftID: "d1", repoID: "acme/shop"))
-        #expect(posted.map(\.id) == ["draft-d1"])
+        store.apply(.needsYouChanged(store.needsYou + [item]))
+        #expect(posted.map(\.id) == ["needs-ship-1"])
     }
 
     // MARK: Resync

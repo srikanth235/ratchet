@@ -12,7 +12,7 @@ public struct OptimizationReport: Hashable, Sendable {
 }
 
 public enum OptimizationStatus: String, CaseIterable, Codable, Sendable {
-    case running, waiting, merged, done, noWin
+    case running, waiting, merged, done, noWin, failed
 
     public var title: String {
         switch self {
@@ -22,10 +22,11 @@ public enum OptimizationStatus: String, CaseIterable, Codable, Sendable {
         case .merged: "Merged"
         case .done: "Done"
         case .noWin: "No win"
+        case .failed: "Failed"
         }
     }
 
-    public var isFinished: Bool { self == .merged || self == .done || self == .noWin }
+    public var isFinished: Bool { self == .merged || self == .done || self == .noWin || self == .failed }
 }
 
 public struct Optimization: Identifiable, Codable, Hashable, Sendable {
@@ -52,13 +53,15 @@ public struct Optimization: Identifiable, Codable, Hashable, Sendable {
     public var winsCount: Int
     public var evalsCount: Int
     public var agentsCount: Int
+    /// Why a failed run failed, in a few words ("AWS session expired"); nil when the daemon did not say.
+    public var failureReason: String?
 
     public init(
         id: String, title: String, repo: String, branch: String = "main", goal: String = "",
         status: OptimizationStatus, metric: MetricSpec, baseline: Double, best: Double? = nil, noise: Double? = nil,
         spentUSD: Double = 0, budgetUSD: Double? = nil, valuePerYearUSD: Double? = nil,
         secondsLeft: Double? = nil, timeLimitHours: Double = 2, startedAt: Date? = nil, prNumber: Int? = nil,
-        prURL: String? = nil, winsCount: Int = 0, evalsCount: Int = 0, agentsCount: Int = 1
+        prURL: String? = nil, winsCount: Int = 0, evalsCount: Int = 0, agentsCount: Int = 1, failureReason: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -81,6 +84,13 @@ public struct Optimization: Identifiable, Codable, Hashable, Sendable {
         self.winsCount = winsCount
         self.evalsCount = evalsCount
         self.agentsCount = agentsCount
+        self.failureReason = failureReason
+    }
+
+    /// What the status reads as: "PR #311 open" for a win whose pull request is waiting to merge, else the status word.
+    public var statusText: String {
+        if status == .done, let prNumber { return "PR #\(prNumber) open" }
+        return status.title
     }
 
     /// (best - baseline) / baseline, or nil before the first win.

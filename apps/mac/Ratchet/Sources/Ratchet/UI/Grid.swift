@@ -13,10 +13,11 @@ enum Space {
     static let section: CGFloat = 32
     /// Window and page margins.
     static let margin: CGFloat = 20
-    /// Ratchet pages: generous side margins, as in design/v02.html.
-    static let pageX: CGFloat = 56
-    static let pageTop: CGFloat = 40
-    static let pageBottom: CGFloat = 48
+    /// The one margin of a Ratchet page: the same step at the sides, the top and the bottom (it was 56 / 40 / 48).
+    static let page: CGFloat = 40
+    static let pageX: CGFloat = page
+    static let pageTop: CGFloat = page
+    static let pageBottom: CGFloat = page
     /// Gap between the big blocks of a page.
     static let block: CGFloat = 40
     /// The same, on a page that has to fit a short window.

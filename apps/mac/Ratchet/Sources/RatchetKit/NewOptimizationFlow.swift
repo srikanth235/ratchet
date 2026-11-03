@@ -17,7 +17,7 @@ public enum WizardStep: Int, CaseIterable, Sendable {
     public var caption: String { "Step \(rawValue + 1) of \(Self.allCases.count) · \(title)" }
 }
 
-/// The four steps of "New optimization": Goal & repo, Connections, Environment, Budget & time. All rules live here so
+/// The four steps of "New Optimization": Goal & repo, Connections, Environment, Budget & time. All rules live here so
 /// the views stay dumb and the tests can walk the flow.
 @MainActor @Observable
 public final class NewOptimizationFlow {
@@ -219,7 +219,7 @@ public final class NewOptimizationFlow {
 
     public var title: String {
         let text = goal.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? "New optimization" : text
+        return text.isEmpty ? "New Optimization" : text
     }
 
     public var subtitle: String {

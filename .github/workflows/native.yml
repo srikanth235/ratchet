@@ -115,6 +115,9 @@ jobs:
       # build-and-verify skill, step 1: release build, installed to ~/Applications/<AppName>.app (ad-hoc signed), with
       # Contents/Helpers/{ratchetd,ratchet} and the LaunchAgent plists inside.
       - name: Build
+        # About 12 minutes with a warm Rust cache; a branch's first run builds the daemon cold (the cache is saved only when the
+        # job succeeds), so leave room for that.
+        timeout-minutes: 80
         env:
           RATCHET_REQUIRE_DAEMON: "1"
         run: ./build.sh --universal
@@ -187,6 +190,15 @@ jobs:
         run: |
           RATCHET_SKIP_DAEMON=1 ./build.sh --debug
           tools/bridge-test.sh "$HOME/Applications/$APP_NAME.app"
+      # WCAG 1.4.3 on the real pixels of the snapshots (F6): snapshot mode captures the key window, writes the frame of every text
+      # next to each picture, and tools/check-contrast.swift measures text against its ground inside those frames. The same rule
+      # as design/tools/audit.js, which checks the mockup's DOM. A picture of an inactive (dimmed) window is skipped; all skipped fails.
+      - name: Contrast on pixels
+        run: |
+          shopt -s nullglob
+          files=(/tmp/${APP_NAME}-shots/*-text.json)
+          echo "${#files[@]} text-frame files"
+          swift tools/check-contrast.swift "${files[@]}"
       - name: Upload snapshots
         if: always()
         uses: actions/upload-artifact@v4

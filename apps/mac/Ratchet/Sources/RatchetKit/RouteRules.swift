@@ -1,6 +1,6 @@
 import Foundation
 
-/// Where the window is, as plain values: the page (by name), the open optimization, and whether the New optimization
+/// Where the window is, as plain values: the page (by name), the open optimization, and whether the New Optimization
 /// flow is open. The rules of the sidebar, the menus and the links, kept apart from the observable router.
 public struct RouteState: Equatable, Sendable {
     public var page: String
@@ -40,7 +40,7 @@ public enum RouteRules {
         RouteState(page: "home", optimizationID: nil, wizardOpen: true)
     }
 
-    /// The old New optimization wizard (its screens are gone; kept for its tests).
+    /// The old New Optimization wizard (its screens are gone; kept for its tests).
     public static func startWizard(from state: RouteState) -> RouteState {
         RouteState(page: optimizationsPage, optimizationID: nil, wizardOpen: true)
     }

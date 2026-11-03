@@ -31,11 +31,7 @@ extension MockWorld {
     func needsYou() -> [NeedsYouItem] {
         var items: [NeedsYouItem] = []
         for optimization in optimizations {
-            if optimization.status == .waiting {
-                items.append(NeedsYouItem(
-                    id: "approve-" + optimization.id, kind: .approveEnvironment, title: "Approve environment",
-                    detail: optimization.title + " · full stack, $0.59/h", actionTitle: "Review", optimizationID: optimization.id))
-            } else if optimization.status == .done, let pr = optimization.prNumber {
+            if optimization.status == .done, let pr = optimization.prNumber {
                 var parts = [optimization.title]
                 if let change = optimization.change { parts.append(Percent.signed(change)) }
                 parts.append("PR #\(pr)")

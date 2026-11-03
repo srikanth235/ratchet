@@ -49,11 +49,11 @@ struct RunLogSection: View {
                 PausedNote(agentIDs: agents.map(\.id))
                 switch tab {
                 case .overview:
-                    MergedLog(agents: agents, kinds: MergedLog.overviewKinds, notes: hub.steering(for: optimizationID))
+                    OverviewTimeline(agents: agents, notes: hub.steering(for: optimizationID))
                 case .byAgent:
                     lanes
                 case .everything:
-                    MergedLog(agents: agents, kinds: nil, notes: nil)
+                    MergedLog(agents: agents)
                 }
             }
         }
@@ -125,16 +125,10 @@ private struct AgentLane: View {
     }
 }
 
-/// The lines of all agents in time order, in one quiet box that follows the newest line. `kinds` keeps only what a person reads
-/// (the Overview); nil keeps everything. Steering notes of the run close the Overview.
+/// Everything: the lines of all agents in time order, every one, in one quiet box that follows the newest line.
 private struct MergedLog: View {
     let agents: [Agent]
-    let kinds: Set<String>?
-    let notes: SteeringModel?
     @Environment(AppStore.self) private var store
-
-    /// What the Overview keeps: statuses, messages and verdicts. Tool calls and the rest are in Everything.
-    static let overviewKinds: Set<String> = ["status", "message", "verdict", "error"]
 
     private struct Entry: Identifiable {
         let agent: String
@@ -144,10 +138,7 @@ private struct MergedLog: View {
 
     private var entries: [Entry] {
         agents.flatMap { agent in
-            store.insight.logModel(agent.id).log.lines.compactMap { line -> Entry? in
-                if let kinds, !kinds.contains(line.kind) { return nil }
-                return Entry(agent: agent.name, line: line)
-            }
+            store.insight.logModel(agent.id).log.lines.map { Entry(agent: agent.name, line: $0) }
         }
         .sorted { $0.line.at < $1.line.at }
     }
@@ -162,18 +153,110 @@ private struct MergedLog: View {
             ForEach(rows) { entry in
                 LogEntryRow(agent: agents.count > 1 ? entry.agent : nil, line: entry.line)
             }
-            if let notes {
-                ForEach(notes.entries) { note in
-                    SteeringNoteRow(entry: note) { Task { await notes.undo(note.id) } }
-                }
-            }
         }
         .padding(Space.md)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(shape.fill(Ink.raised.opacity(0.4)))
         .overlay(shape.strokeBorder(Ink.hairline, lineWidth: Dim.hairline))
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(kinds == nil ? "Everything" : "Overview")
+        .accessibilityLabel("Everything")
+    }
+}
+
+/// The Overview (screen 2): one timeline of what the run did, each event once, however many agents saw it. Prose in the reading
+/// face, not log lines; a sealed verdict and a blocked candidate are cards; the person's own notes close it. The per-agent
+/// view is By Agent, every line is Everything.
+private struct OverviewTimeline: View {
+    let agents: [Agent]
+    let notes: SteeringModel?
+    @Environment(AppStore.self) private var store
+
+    private var entries: [RunTimelineEntry] {
+        RunTimeline.overview(agents: agents.map { (name: $0.name, lines: store.insight.logModel($0.id).log.lines) })
+    }
+
+    var body: some View {
+        let rows = entries
+        VStack(alignment: .leading, spacing: Space.md) {
+            if rows.isEmpty {
+                Text(agents.isEmpty ? "No agents yet." : "No events yet.").kitType(.meta).foregroundStyle(Ink.textFaint)
+            }
+            ForEach(rows) { entry in TimelineRow(entry: entry) }
+            if let notes {
+                ForEach(notes.entries) { note in
+                    SteeringNoteRow(entry: note) { Task { await notes.undo(note.id) } }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Overview")
+    }
+}
+
+/// One entry of the Overview: the time in the margin, then a sentence, a quiet line, or a card.
+private struct TimelineRow: View {
+    let entry: RunTimelineEntry
+
+    var body: some View {
+        switch entry {
+        case .harness(_, let at, let event):
+            HarnessEventRow(at: at, event: event)
+        case .line(_, let at, let agent, let text, let isMessage):
+            row(at) { sentence(agent: agent, text: text, tone: isMessage ? Ink.text : Ink.textMuted) }
+        case .noise(_, let at, let agent, let text):
+            row(at) { sentence(agent: agent, text: text, tone: Ink.textFaint) }
+        case .failure(_, let at, let agent, let text):
+            row(at) {
+                HStack(alignment: .top, spacing: Space.sm) {
+                    StatusShape(tone: .bad).frame(height: Dim.lineBody)
+                    sentence(agent: agent, text: text, tone: Ink.bad)
+                }
+            }
+        case .verified(_, let at, let agent, let text):
+            row(at) { card(tone: .ok, title: "Verified by the evaluator", agent: agent, text: text) }
+        case .blocked(_, let at, let agent, let text):
+            row(at) { card(tone: .bad, title: "Blocked before measuring", agent: agent, text: text) }
+        }
+    }
+
+    private func row<Content: View>(_ at: Date, @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .top, spacing: Space.md) {
+            Text(Elapsed.timeOfDay(at)).kitType(.mono).foregroundStyle(Ink.textFaint)
+                .frame(width: Space.section * 2, alignment: .leading)
+                .frame(minHeight: Dim.lineBody, alignment: .leading)
+            content().frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// "Claude Code · team key  proposes Pool size 20 → 48": the agent in the stronger face when one of several said it.
+    private func sentence(agent: String?, text: String, tone: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.sm) {
+            if let agent { Text(agent).kitType(.bodyStrong).foregroundStyle(Ink.text).lineLimit(1).fixedSize() }
+            Text(text).kitType(.body).foregroundStyle(tone).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func card(tone: StatusTone, title: String, agent: String?, text: String) -> some View {
+        let shape = RoundedRectangle(cornerRadius: Dim.radiusCard, style: .continuous)
+        let ok = tone == .ok
+        return VStack(alignment: .leading, spacing: Space.xs) {
+            HStack(spacing: Space.sm) {
+                StatusShape(tone: tone, size: Dim.icon - Space.xs)
+                Text(title).kitType(.microStrong).foregroundStyle(ok ? Ink.ok : Ink.bad)
+                if let agent { Text(agent).kitType(.micro).foregroundStyle(Ink.textFaint) }
+            }
+            Text(text).kitType(.body).foregroundStyle(Ink.text).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(Space.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(shape.fill(ok ? Ink.okWash : Ink.badWash))
+        .overlay(shape.strokeBorder(ok ? Ink.ok.opacity(0.5) : Ink.bad.opacity(0.5), lineWidth: Dim.hairline))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title + ". " + text)
     }
 }
 

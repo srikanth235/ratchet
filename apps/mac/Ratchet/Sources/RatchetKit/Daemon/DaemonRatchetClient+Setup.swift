@@ -3,7 +3,7 @@ import HTTPTypes
 import OpenAPIRuntime
 import RatchetAPI
 
-// The routes behind New optimization step 1: repos, what a repo says about its benchmark, "What's missing", template pull
+// The routes behind New Optimization step 1: repos, what a repo says about its benchmark, "What's missing", template pull
 // requests, environment drafts, and the development overrides.
 
 extension DaemonRatchetClient {

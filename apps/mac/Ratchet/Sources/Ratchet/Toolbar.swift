@@ -17,6 +17,8 @@ struct ShellToolbar: ToolbarContent {
         ToolbarItem { SandboxStatusItem() }
         ToolbarSpacer(.fixed)
         ToolbarItem(placement: .primaryAction) { NewOptimizationToolbarButton() }
+        // New Optimization is the app's action; what follows (a page's filter, Refresh All, Add…) is the page's, in its own capsule.
+        ToolbarSpacer(.fixed, placement: .primaryAction)
     }
 }
 
@@ -147,6 +149,7 @@ struct SandboxPopover: View {
         }
         .padding(Space.lg)
         .frame(width: Layout.popoverWidth, alignment: .leading)
+        .closesOnEscape()
     }
 
     private func detailLine(_ label: String, _ value: String) -> some View {

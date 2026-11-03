@@ -29,7 +29,7 @@ struct AgentActions: View {
             Text("Message to " + agent.name).kitType(.section).foregroundStyle(Ink.textMuted)
             TextField("Try caching the tax table first", text: $text)
                 .kitField()
-                .frame(width: 280)
+                .frame(width: Layout.fieldWide)
                 .onSubmit(send)
             HStack {
                 Spacer()
@@ -39,6 +39,7 @@ struct AgentActions: View {
             }
         }
         .padding(Space.lg)
+        .closesOnEscape()
     }
 
     private func send() {

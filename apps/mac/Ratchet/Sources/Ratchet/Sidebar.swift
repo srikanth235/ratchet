@@ -3,11 +3,10 @@ import SwiftUI
 
 /// The system sidebar: the pages, then the recent runs, two levels at most and no action rows (New Optimization and search are
 /// in the toolbar). The system paints it (glass, the scroll edge, the selection); nothing here has a background or an edge of its
-/// own. A selected run wears a brass wash so it reads apart from a selected page.
+/// own. One selection style for pages and runs alike: the system's.
 struct SidebarView: View {
     @Environment(AppRouter.self) private var router
     @Environment(AppStore.self) private var store
-    @Environment(\.appearsActive) private var appearsActive
 
     /// How many recent runs the sidebar lists.
     private static let recentLimit = 8
@@ -82,7 +81,6 @@ struct SidebarView: View {
                 let isSelected = router.page == .optimizations && router.optimizationID == optimization.id
                 RunRow(optimization: optimization, isSelected: isSelected)
                     .tag(SidebarItem.run(optimization.id))
-                    .listRowBackground(isSelected ? RunSelectionBackground(isActive: appearsActive) : nil)
             }
         }
     }
@@ -98,13 +96,14 @@ struct RunRow: View {
             StatusShape(tone: optimization.status.tone, size: Dim.icon)
                 .frame(height: Dim.textLine)
             VStack(alignment: .leading, spacing: 0) {
+                // On the selected row the system paints its own fill (the accent) and its own text colours; ours would not read on it.
                 Text(optimization.title)
                     .kitType(isSelected ? .bodyStrong : .body)
-                    .foregroundStyle(Ink.text)
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.primary) : AnyShapeStyle(Ink.text))
                     .lineLimit(1)
                 Text(statusLine)
                     .kitType(.caption)
-                    .foregroundStyle(Ink.textFaint)
+                    .foregroundStyle(isSelected ? AnyShapeStyle(.secondary) : AnyShapeStyle(Ink.textFaint))
                     .lineLimit(1)
             }
         }
@@ -117,28 +116,16 @@ struct RunRow: View {
 
     /// "Running · 1 h 12 m left", "Merged · −13%", "No win · within noise".
     var statusLine: String {
-        var line = optimization.status.title
+        var line = optimization.statusText
         if optimization.status == .running, let left = optimization.secondsLeft {
             line += " · " + Elapsed.hm(left) + " left"
+        } else if optimization.status == .failed {
+            if let reason = optimization.failureReason { line += " · " + reason }
         } else if let change = optimization.change {
             line += " · " + Percent.signed(change)
         } else if optimization.status == .noWin {
             line += " · within noise"
         }
         return line
-    }
-}
-
-/// The selected run's row: a brass wash and a brass edge, so a run reads apart from a page. Dims with the window.
-private struct RunSelectionBackground: View {
-    let isActive: Bool
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: Dim.radiusRow, style: .continuous)
-        shape
-            .fill(Ink.brassWash)
-            .overlay(shape.strokeBorder(Ink.brassBorder, lineWidth: Dim.hairline))
-            .padding(.horizontal, Space.xs)
-            .opacity(isActive ? 1 : Dim.inactiveOpacity)
     }
 }
