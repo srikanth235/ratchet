@@ -139,7 +139,7 @@ enum SnapScene: String, CaseIterable {
         router.closeConversation()
         router.pendingStop = nil
         router.pendingArchive = nil
-        hub.asking = nil
+        hub.forgetAsk()
         router.detailTab = .run
         router.show(.overview)
         connectors.reset()

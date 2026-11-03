@@ -107,7 +107,7 @@ struct SpentCell: View {
 
 enum TableColumns {
     /// The optimization name column's floor: a title and its `owner/repo` line without a cut at the default window.
-    static let name: CGFloat = 224
+    static let name: CGFloat = 208
     static let status: CGFloat = 128
     static let result: CGFloat = 176
     static let spent: CGFloat = 88
@@ -154,23 +154,23 @@ struct OptimizationTable: View {
             TableColumn("Optimization", value: \.title) { optimization in
                 TitleStack(title: optimization.title, subtitle: optimization.repo)
             }
-            .width(min: TableColumns.name, ideal: TableColumns.name + Space.section * 2)
+            .width(min: TableColumns.name, ideal: TableColumns.name + Space.lg)
             TableColumn("Status", value: \.statusRank) { optimization in
                 StatusLabel(tone: optimization.status.tone, text: optimization.statusText, caption: Self.caption(optimization))
             }
-            .width(min: 112, ideal: 120, max: 160)
+            .width(min: 112, ideal: 120, max: 144)
             TableColumn("Result", value: \.changeSort) { optimization in
                 ResultCell(optimization: optimization)
             }
-            .width(min: 136, ideal: 168)
+            .width(min: 136, ideal: 152)
             TableColumn("Spent", value: \.spentUSD) { optimization in
                 SpentCell(optimization: optimization).frame(maxWidth: .infinity, alignment: .trailing)
             }
-            .width(min: 72, ideal: 88, max: 120)
+            .width(min: 72, ideal: 80, max: 104)
             TableColumn("Value / yr", value: \.valueSort) { optimization in
                 ValueCell(optimization: optimization)
             }
-            .width(min: 72, ideal: 96, max: 120)
+            .width(min: 72, ideal: 88, max: 112)
         } rows: {
             ForEach(rows) { optimization in
                 TableRow(optimization)

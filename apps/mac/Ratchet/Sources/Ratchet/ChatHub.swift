@@ -192,6 +192,12 @@ final class ChatHub {
         asking = optimizationID
     }
 
+    /// Forgets the ask chats and closes the sheet (snapshot mode starts every scene from nothing).
+    func forgetAsk() {
+        askChats = [:]
+        asking = nil
+    }
+
     /// The conversation of an optimization's ask sheet; "Use Codex" after a failed turn moves the sheet to the new chat.
     func askConversation(_ optimizationID: String, router: AppRouter) -> ConversationModel? {
         guard let chatID = askChats[optimizationID] else { return nil }

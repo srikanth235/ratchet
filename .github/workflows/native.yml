@@ -194,8 +194,6 @@ jobs:
       # next to each picture, and tools/check-contrast.swift measures text against its ground inside those frames. The same rule
       # as design/tools/audit.js, which checks the mockup's DOM. A picture of an inactive (dimmed) window is skipped; all skipped fails.
       - name: Contrast on pixels
-        # Advisory while the kit's pairs are being fixed; it still prints every failure. Remove this line to make it blocking.
-        continue-on-error: true
         run: |
           shopt -s nullglob
           files=(/tmp/${APP_NAME}-shots/*-text.json)
