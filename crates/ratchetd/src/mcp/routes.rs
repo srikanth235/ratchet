@@ -1,0 +1,102 @@
+//! `/v1/mcp/*`: the only routes a session token opens. They sit outside the owner-token layer and are not part of the app's
+//! OpenAPI contract (the Mac app never calls them; the `ratchetd mcp` child process does).
+
+use axum::extract::{Request, State};
+use axum::http::{HeaderValue, StatusCode, header};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Extension, Json, Router};
+use serde::Deserialize;
+use serde_json::{Value, json};
+
+use super::SessionInfo;
+use crate::routes::AppState;
+use crate::routes::extract::{ApiJson, ApiResult};
+use crate::service::ServiceError;
+
+pub fn router(state: AppState) -> Router {
+    Router::new()
+        .route("/v1/mcp/session", get(describe))
+        .route("/v1/mcp/call", post(call))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_session,
+        ))
+        .with_state(state)
+}
+
+fn bearer(value: Option<&HeaderValue>) -> Option<&str> {
+    let (scheme, token) = value?.to_str().ok()?.split_once(' ')?;
+    scheme
+        .eq_ignore_ascii_case("bearer")
+        .then_some(token.trim())
+}
+
+async fn require_session(State(s): State<AppState>, mut req: Request, next: Next) -> Response {
+    let Some(info) =
+        bearer(req.headers().get(header::AUTHORIZATION)).and_then(|t| s.mcp.sessions.resolve(t))
+    else {
+        return crate::auth::unauthorized("not a valid MCP session token");
+    };
+    req.extensions_mut().insert(info);
+    next.run(req).await
+}
+
+async fn describe(Extension(session): Extension<SessionInfo>) -> Response {
+    (
+        StatusCode::OK,
+        Json(json!({
+            "id": session.id,
+            "set": session.set,
+            "repo": session.scope.repo,
+            "optimization": session.scope.optimization,
+        })),
+    )
+        .into_response()
+}
+
+#[derive(Deserialize)]
+struct CallBody {
+    tool: String,
+    #[serde(default)]
+    arguments: Value,
+}
+
+/// Run one tool call for `session`: the same path for the stdio child (`/v1/mcp/call`) and for a scripted harness. The daemon is
+/// the authority: it checks the set again, whatever the child process believes, and tells the chat service what ran (cards, notes).
+pub async fn dispatch(
+    state: &AppState,
+    session: &SessionInfo,
+    tool: &str,
+    arguments: Value,
+) -> Result<Value, ServiceError> {
+    let arguments = if arguments.is_null() {
+        json!({})
+    } else {
+        arguments
+    };
+    let Some(def) = session.set.find(tool) else {
+        return Err(ServiceError::Invalid(format!(
+            "tool \"{tool}\" is not available in this session"
+        )));
+    };
+    if let Some(validate) = def.validate {
+        validate(&arguments).map_err(ServiceError::Invalid)?;
+    }
+    let outcome = super::tools::call(state, session, tool, arguments.clone()).await;
+    state
+        .chats
+        .observe(session, tool, &arguments, &outcome)
+        .await;
+    outcome
+}
+
+async fn call(
+    State(s): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
+    ApiJson(body): ApiJson<CallBody>,
+) -> ApiResult<Json<Value>> {
+    let result = dispatch(&s, &session, &body.tool, body.arguments).await?;
+    Ok(Json(json!({ "result": result })))
+}

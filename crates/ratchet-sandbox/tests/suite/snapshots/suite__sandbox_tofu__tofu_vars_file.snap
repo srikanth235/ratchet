@@ -1,0 +1,17 @@
+---
+source: crates/ratchet-sandbox/tests/suite/sandbox_tofu.rs
+expression: vars
+---
+{
+  "sandbox_id": "demo",
+  "region": "us-east-1",
+  "allowed_instance_types": [
+    "c7i.large",
+    "c7i.2xlarge"
+  ],
+  "max_instances_per_agent": 4,
+  "max_instance_lifetime_hours": 2,
+  "tags": {
+    "owner": "me"
+  }
+}

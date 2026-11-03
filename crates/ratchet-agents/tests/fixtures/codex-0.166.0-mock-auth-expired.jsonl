@@ -1,0 +1,5 @@
+{"type":"thread.started","thread_id":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e"}
+{"type":"turn.started"}
+{"type":"error","message":"Reconnecting... 1/5"}
+{"type":"error","message":"unexpected status 401 Unauthorized: Your access token could not be refreshed. Please log out and sign in again."}
+{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized: Your access token could not be refreshed. Please log out and sign in again."}}

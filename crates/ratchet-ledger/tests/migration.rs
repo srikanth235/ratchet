@@ -1,0 +1,119 @@
+//! The Rust migration must create the same schema as the drizzle migration it was ported from
+//! (`tests/fixtures/drizzle_0000_init.sql`, a frozen copy of the TypeScript package's migration).
+
+mod common;
+
+use std::path::PathBuf;
+
+use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::{Row, SqlitePool};
+
+/// The objects of migration 0001 (the drizzle schema): chats, from 0002, are checked in `tests/chats.rs`.
+async fn schema(pool: &SqlitePool) -> Vec<(String, String, String, Option<String>)> {
+    sqlx::query(
+        "select type, name, tbl_name, sql from sqlite_master \
+         where name not like 'sqlite_%' and name not like '\\_sqlx%' escape '\\' \
+         and tbl_name not in ('chats', 'chat_messages') order by type, name",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+    .iter()
+    .map(|r| {
+        (
+            r.get("type"),
+            r.get("name"),
+            r.get("tbl_name"),
+            r.get("sql"),
+        )
+    })
+    .collect()
+}
+
+#[tokio::test]
+async fn the_migration_creates_the_same_schema_as_the_drizzle_one() {
+    let l = common::ledger().await;
+    let ours = schema(l.pool()).await;
+
+    let drizzle = std::fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/drizzle_0000_init.sql"),
+    )
+    .unwrap();
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    for statement in drizzle.split("--> statement-breakpoint") {
+        if statement.trim().is_empty() {
+            continue;
+        }
+        sqlx::raw_sql(sqlx::AssertSqlSafe(statement.to_owned()))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let theirs = schema(&pool).await;
+
+    assert_eq!(ours.len(), theirs.len(), "{ours:#?}\n{theirs:#?}");
+    for (a, b) in ours.iter().zip(&theirs) {
+        assert_eq!(a.0, b.0, "type");
+        assert_eq!(a.1, b.1, "name");
+        assert_eq!(a.2, b.2, "table of {}", a.1);
+        // SQLite keeps the statement text as written. Migration 0003 (P7) adds columns to these two tables, so their text
+        // differs from drizzle's by those columns only: checked below.
+        if a.0 == "table" && ["spend_events", "optimizations"].contains(&a.1.as_str()) {
+            continue;
+        }
+        assert_eq!(
+            a.3.as_deref().map(str::trim),
+            b.3.as_deref().map(str::trim),
+            "DDL of {}",
+            a.1
+        );
+    }
+    // every drizzle column is still there, in the same order, with the same type, before the columns 0003 added
+    for table in ["spend_events", "optimizations"] {
+        let cols = |p: &SqlitePool, t: &str| {
+            let q = format!("select name, type from pragma_table_info('{t}') order by cid");
+            let p = p.clone();
+            async move {
+                sqlx::query(sqlx::AssertSqlSafe(q))
+                    .fetch_all(&p)
+                    .await
+                    .unwrap()
+                    .iter()
+                    .map(|r| (r.get::<String, _>("name"), r.get::<String, _>("type")))
+                    .collect::<Vec<_>>()
+            }
+        };
+        let (mine, theirs) = (cols(l.pool(), table).await, cols(&pool, table).await);
+        assert_eq!(&mine[..theirs.len()], &theirs[..], "columns of {table}");
+        assert!(mine.len() > theirs.len(), "0003 added columns to {table}");
+    }
+    // 10 tables, 10 indexes (the primary-key autoindexes included), 4 triggers
+    let count = |t: &str| ours.iter().filter(|r| r.0 == t).count();
+    assert_eq!(
+        (count("table"), count("index"), count("trigger")),
+        (10, 10, 4)
+    );
+}
+
+#[tokio::test]
+async fn opening_twice_applies_each_migration_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("ledger.db");
+    for _ in 0..2 {
+        let l = ratchet_ledger::Ledger::open(&path, Default::default())
+            .await
+            .unwrap();
+        let n: i64 = sqlx::query("select count(*) n from _sqlx_migrations")
+            .fetch_one(l.pool())
+            .await
+            .unwrap()
+            .get("n");
+        // 0001 (the drizzle schema), 0002 (chats) and 0003 (billing, value)
+        assert_eq!(n, 3);
+        l.close().await;
+    }
+}

@@ -1,0 +1,204 @@
+# Tasks \(200 tasks)
+
+| id | title | status | priority | assignee | labels | estimate | created | due |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Rename coupon when the queue is full | todo | 2 | jonas.berg |  | 12.5 | 2025-11-29 |  |
+| 2 | Test webhook when the queue is full | todo | 1 | omar.haddad |  | 4 | 2026-01-25 |  |
+| 3 | Document refund in staging | todo | 1 | yara.saleh | search, checkout | 13 | 2025-11-04 | 2026-03-30 |
+| 4 | Fix webhook in the mobile app | done | 2 | maya.chen | support | 1 | 2025-12-08 |  |
+| 5 | Split sitemap in the mobile app | doing | 1 | tomas.ruiz | infra | 1 | 2026-01-10 |  |
+| 6 | Migrate invoice with better errors | todo | 4 | omar.haddad |  | 28 | 2025-11-12 |  |
+| 7 | Simplify inventory sync in the admin console | done | 4 | ivan.petrov |  | 37.5 | 2026-01-23 | 2026-03-09 |
+| 8 | Migrate avatar upload for EU customers | done | 3 | iris.tanaka |  | 13 | 2025-12-21 | 2026-02-18 |
+| 9 | Fix checkout in the admin console | done | 4 | zoe.martin | perf, auth | 0.5 | 2025-11-04 | 2026-03-17 |
+| 10 | Validate permissions for the new plan | done | 1 | iris.tanaka | billing, a11y | 11 | 2025-10-23 |  |
+| 11 | Instrument password reset with better errors | todo | 4 | ivan.petrov | search | 22 | 2026-01-20 |  |
+| 12 | Cache address form after the last release | doing | 2 | hana.kim |  | 11.5 | 2025-07-26 | 2026-01-21 |
+| 13 | Refactor checkout on slow networks | doing | 4 | iris.tanaka | checkout | 0.5 | 2025-07-25 | 2026-02-14 |
+| 14 | Split tax rules for EU customers | doing | 3 | sofia.rossi | mobile | 13 | 2025-08-21 |  |
+| 15 | Validate report behind a flag | blocked | 1 | yara.saleh | bug, billing | 3 | 2025-09-06 |  |
+| 16 | Review rate limit for EU customers | doing | 1 | felix.wagner | api, a11y | 13.5 | 2026-01-27 | 2026-04-25 |
+| 17 | Automate importer after the last release | doing | 3 | sofia.rossi | email | 15.5 | 2025-12-28 |  |
+| 18 | Rename avatar upload in the admin console | doing | 1 | amara.okafor |  | 0.5 | 2025-11-27 | 2026-05-09 |
+| 19 | Document refund when the queue is full | done | 3 | sam.osei | payments, search | 16 | 2025-11-28 |  |
+| 20 | Update session in staging | done | 2 | nora.lund | billing | 12.5 | 2026-01-05 |  |
+| 21 | Document coupon when the queue is full | done | 4 | ana.silva |  | 11.5 | 2026-01-09 | 2026-01-25 |
+| 22 | Backfill cache layer for the new plan | doing | 1 | priya.nair | email, i18n | 23 | 2025-07-09 | 2025-12-25 |
+| 23 | Document report in staging | done | 1 | kenji.mori |  | 39 | 2025-07-03 | 2025-12-25 |
+| 24 | Remove cart behind a flag | doing | 2 | priya.nair | email, billing | 24.5 | 2025-08-23 | 2026-04-01 |
+| 25 | Split inventory sync before the audit | done | 4 | zoe.martin |  | 4.5 | 2025-07-06 | 2025-12-29 |
+| 26 | Test onboarding in staging | done | 1 | sam.osei | billing, docs | 1.5 | 2025-08-08 | 2026-01-13 |
+| 27 | Backfill email template behind a flag | done | 2 | ella.novak |  | 1.5 | 2025-10-12 | 2025-12-23 |
+| 28 | Optimize invoice on retry | done | 1 | priya.nair | testing, bug | 3.5 | 2025-09-02 | 2026-04-17 |
+| 29 | Simplify avatar upload with better errors | done | 1 | sofia.rossi | admin, onboarding | 18 | 2025-08-29 |  |
+| 30 | Review avatar upload before the audit | todo | 3 | omar.haddad | security | 8 | 2025-09-13 |  |
+| 31 | Test importer without downtime | done | 1 | sofia.rossi |  | 36 | 2025-11-25 | 2026-03-03 |
+| 32 | Add password reset behind a flag | done | 1 | hana.kim |  | 2.5 | 2025-12-28 |  |
+| 33 | Update webhook for large accounts | done | 3 | sam.osei | payments | 2.5 | 2025-06-16 | 2026-02-27 |
+| 34 | Backfill notification for EU customers | done | 3 | lena.fischer |  | 1 | 2025-11-07 | 2025-12-31 |
+| 35 | Split audit log in staging | blocked | 2 | sam.osei | email | 15.5 | 2025-11-03 |  |
+| 36 | Instrument sitemap without downtime | done | 1 | amara.okafor | admin, onboarding | 40 | 2025-07-31 |  |
+| 37 | Test tax rules before the audit | done | 1 | lena.fischer |  | 20 | 2025-11-10 |  |
+| 38 | Backfill search index after the last release | todo | 1 | sam.osei |  | 0.5 | 2025-11-26 | 2025-12-12 |
+| 39 | Optimize report before the audit | done | 1 | raj.patel | payments | 24 | 2025-10-17 | 2026-04-09 |
+| 40 | Optimize export job in staging | doing | 1 | lena.fischer | search | 1 | 2025-08-31 | 2026-05-10 |
+| 41 | Fix webhook after the last release | done | 2 | kenji.mori | onboarding | 1.5 | 2025-09-27 |  |
+| 42 | Simplify onboarding in the mobile app | doing | 1 | kenji.mori |  | 24.5 | 2025-12-31 | 2026-03-08 |
+| 43 | Validate report in the admin console | done | 3 | ella.novak | payments, auth | 4.5 | 2025-08-23 |  |
+| 44 | Automate audit log before the audit | done | 2 | raj.patel | reports | 33.5 | 2025-08-22 | 2025-12-14 |
+| 45 | Review webhook with better errors | blocked | 3 | mia.jensen | bug | 24.5 | 2025-12-11 | 2026-03-02 |
+| 46 | Migrate email template for the new plan | done | 2 | sofia.rossi | perf, payments | 3.5 | 2025-10-07 |  |
+| 47 | Simplify avatar upload without downtime | done | 4 | maya.chen | auth, reports | 25.5 | 2026-01-12 |  |
+| 48 | Test onboarding in the admin console | todo | 4 | priya.nair | reports | 18 | 2025-08-08 |  |
+| 49 | Rename permissions for the new plan | blocked | 1 | priya.nair | perf | 30 | 2025-07-01 | 2026-04-21 |
+| 50 | Investigate session behind a flag | todo | 2 | tomas.ruiz | auth | 38.5 | 2025-06-29 |  |
+| 51 | Backfill sitemap for large accounts | done | 1 | ivan.petrov | checkout | 2.5 | 2025-08-24 |  |
+| 52 | Update sitemap in the admin console | doing | 3 | zoe.martin |  | 9.5 | 2025-09-04 | 2025-12-25 |
+| 53 | Add dashboard on slow networks | todo | 2 | ella.novak | security | 35.5 | 2025-07-03 |  |
+| 54 | Update invoice before the audit | done | 3 | tomas.ruiz | infra, tech-debt | 6 | 2025-12-14 |  |
+| 55 | Rename importer in the mobile app | done | 1 | ben.carter | docs | 28 | 2025-09-08 |  |
+| 56 | Add dashboard on retry | doing | 4 | ben.carter | testing | 25.5 | 2025-09-27 | 2026-02-02 |
+| 57 | Refactor login flow in the mobile app | doing | 2 | amara.okafor |  | 16.5 | 2026-01-18 | 2026-05-20 |
+| 58 | Review report on retry | todo | 4 | lena.fischer | testing, onboarding | 1 | 2025-09-16 |  |
+| 59 | Add export job behind a flag | todo | 1 | yara.saleh |  | 20.5 | 2025-09-04 |  |
+| 60 | Automate coupon in the admin console | done | 3 | maya.chen |  | 30.5 | 2026-01-20 | 2026-04-18 |
+| 61 | Add session for the new plan | todo | 1 | tomas.ruiz | search | 13 | 2026-01-04 | 2026-02-20 |
+| 62 | Update feature flag on retry | done | 2 | omar.haddad | auth, bug | 20.5 | 2025-12-08 | 2026-02-13 |
+| 63 | Automate checkout before the audit | todo | 4 | nora.lund | checkout | 25 | 2026-01-03 | 2026-03-29 |
+| 64 | Add tax rules after the last release | doing | 1 | jonas.berg | infra, admin | 2.5 | 2025-12-17 | 2025-12-14 |
+| 65 | Add invoice in staging | blocked | 1 | amara.okafor | ux | 18 | 2025-10-24 | 2026-01-25 |
+| 66 | Migrate report behind a flag | doing | 3 | ana.silva | checkout | 31 | 2025-08-26 |  |
+| 67 | Cache permissions when the queue is full | done | 1 | luca.bianchi | data | 32 | 2025-12-20 |  |
+| 68 | Optimize onboarding in the admin console | todo | 4 | nora.lund | docs | 23 | 2025-09-08 | 2026-03-12 |
+| 69 | Migrate refund in staging | todo | 1 | ella.novak |  | 0.5 | 2026-01-24 |  |
+| 70 | Optimize sitemap behind a flag | blocked | 1 | diego.alves | ux | 8.5 | 2025-07-11 |  |
+| 71 | Add report in the admin console | todo | 1 | nora.lund | onboarding | 1.5 | 2025-12-04 | 2026-01-07 |
+| 72 | Automate retry policy behind a flag | done | 3 | nora.lund | a11y | 32 | 2025-07-14 | 2026-01-01 |
+| 73 | Optimize checkout without downtime | doing | 4 | ivan.petrov |  | 39 | 2025-06-27 | 2026-03-26 |
+| 74 | Deprecate password reset in staging | todo | 3 | sofia.rossi | reports, bug | 34.5 | 2025-11-12 | 2026-02-18 |
+| 75 | Instrument email template before the audit | done | 3 | yara.saleh | data, bug | 8.5 | 2025-09-30 |  |
+| 76 | Test email template after the last release | doing | 2 | maya.chen | security | 6 | 2025-10-16 | 2026-03-09 |
+| 77 | Cache inventory sync behind a flag | done | 1 | amara.okafor | admin, email | 31.5 | 2025-10-22 | 2026-04-13 |
+| 78 | Simplify checkout behind a flag | done | 3 | priya.nair | auth | 4 | 2025-10-22 | 2025-12-25 |
+| 79 | Simplify password reset before the audit | blocked | 2 | ella.novak | checkout | 1 | 2025-09-09 | 2026-01-23 |
+| 80 | Test tax rules in the mobile app | done | 4 | nora.lund | perf, docs | 3.5 | 2025-10-19 | 2026-05-03 |
+| 81 | Split report after the last release | done | 1 | luca.bianchi | reports, bug | 3.5 | 2025-07-24 | 2026-03-05 |
+| 82 | Rename avatar upload before the audit | todo | 2 | luca.bianchi | auth, ux | 32 | 2025-08-23 |  |
+| 83 | Backfill rate limit without downtime | doing | 1 | sam.osei | bug | 3.5 | 2025-07-27 | 2026-01-06 |
+| 84 | Split tax rules behind a flag | todo | 1 | lena.fischer | perf | 11.5 | 2025-11-26 | 2025-12-31 |
+| 85 | Simplify inventory sync in staging | blocked | 1 | maya.chen | docs, ux | 34.5 | 2025-11-13 |  |
+| 86 | Deprecate session on slow networks | todo | 2 | sam.osei | checkout, payments | 11.5 | 2025-10-20 |  |
+| 87 | Split password reset for EU customers | doing | 2 | lena.fischer | data | 39 | 2025-10-10 |  |
+| 88 | Add coupon behind a flag | todo | 1 | zoe.martin | a11y, billing | 7 | 2026-01-27 | 2026-02-22 |
+| 89 | Add email template on slow networks | done | 3 | priya.nair | bug, docs | 16 | 2025-06-28 | 2026-05-12 |
+| 90 | Automate dashboard after the last release | doing | 1 | tomas.ruiz |  | 24.5 | 2025-12-31 | 2026-02-03 |
+| 91 | Fix search index for EU customers | done | 1 | jonas.berg | onboarding, search | 4 | 2025-12-11 |  |
+| 92 | Split refund for the new plan | todo | 1 | kenji.mori | search, security | 8.5 | 2025-07-30 | 2026-04-30 |
+| 93 | Cache retry policy without downtime | done | 3 | lena.fischer | perf, bug | 4 | 2025-07-26 |  |
+| 94 | Simplify pricing page in the mobile app | doing | 1 | luca.bianchi | growth, search | 14 | 2026-01-11 | 2026-04-05 |
+| 95 | Cache feature flag for the new plan | blocked | 3 | nora.lund | checkout | 1.5 | 2026-01-27 |  |
+| 96 | Refactor rate limit before the audit | done | 2 | ella.novak | reports | 18.5 | 2025-11-15 | 2026-02-27 |
+| 97 | Handle "quoted" titles, commas and pipes \| in exports | doing | 1 | maya.chen |  | 1.5 | 2025-10-21 | 2026-01-14 |
+| 98 | Document notification after the last release | todo | 3 | lena.fischer | ux | 5 | 2025-06-20 | 2026-02-14 |
+| 99 | Automate schema for the new plan | doing | 1 | sofia.rossi | tech-debt, support | 15 | 2025-06-28 | 2026-04-04 |
+| 100 | Investigate cart on slow networks | done | 4 | nora.lund | search | 3.5 | 2025-06-29 | 2025-12-28 |
+| 101 | Split email template after the last release | todo | 1 | kenji.mori |  | 0.5 | 2025-12-09 |  |
+| 102 | Optimize cart before the audit | doing | 3 | sofia.rossi | reports | 21.5 | 2025-11-11 | 2026-02-20 |
+| 103 | Update pricing page in staging | todo | 3 | priya.nair |  | 13.5 | 2025-11-27 |  |
+| 104 | Split webhook with better errors | todo | 1 | ella.novak | checkout, perf | 16.5 | 2025-09-26 |  |
+| 105 | Optimize webhook for EU customers | done | 1 | maya.chen |  | 36.5 | 2025-12-30 | 2026-01-10 |
+| 106 | Migrate email template in the admin console | done | 1 | kenji.mori | checkout, billing | 6 | 2025-08-19 | 2026-04-09 |
+| 107 | Remove refund when the queue is full | todo | 1 | mia.jensen | support | 9.5 | 2025-08-10 | 2026-04-29 |
+| 108 | Split notification on retry | todo | 4 | yara.saleh | search | 8.5 | 2025-08-07 | 2026-03-22 |
+| 109 | Automate inventory sync on slow networks | todo | 2 | amara.okafor | a11y | 1.5 | 2025-10-25 | 2026-04-23 |
+| 110 | Split pricing page for the new plan | doing | 4 | amara.okafor | a11y, docs | 32 | 2025-10-22 | 2026-04-04 |
+| 111 | Rename report in the mobile app | done | 4 | jonas.berg |  | 0.5 | 2025-06-26 | 2026-01-07 |
+| 112 | Remove password reset for the new plan | done | 1 | tomas.ruiz |  | 23 | 2025-09-29 | 2026-03-20 |
+| 113 | Cache checkout on retry | todo | 3 | kenji.mori | testing, bug | 0.5 | 2025-08-03 |  |
+| 114 | Review refund without downtime | todo | 1 | omar.haddad |  | 13.5 | 2026-01-04 | 2026-01-22 |
+| 115 | Instrument schema for large accounts | done | 1 | sam.osei | checkout, security | 15 | 2026-01-03 | 2026-01-07 |
+| 116 | Instrument onboarding in the admin console | todo | 2 | priya.nair |  | 4.5 | 2025-09-18 |  |
+| 117 | Test inventory sync in staging | blocked | 1 | maya.chen | ux | 40 | 2025-09-24 | 2025-12-26 |
+| 118 | Fix feature flag on slow networks | done | 1 | tomas.ruiz | search, auth | 10 | 2025-06-27 |  |
+| 119 | Refactor rate limit without downtime | done | 2 | iris.tanaka |  | 3 | 2025-06-26 | 2026-04-23 |
+| 120 | Test webhook without downtime | todo | 2 | yara.saleh |  | 17 | 2025-10-30 | 2026-05-16 |
+| 121 | Split permissions behind a flag | todo | 1 | zoe.martin | checkout, bug | 0.5 | 2025-07-30 | 2026-04-05 |
+| 122 | Cache importer without downtime | done | 3 | amara.okafor |  | 7 | 2025-09-20 | 2026-03-13 |
+| 123 | Refactor schema for EU customers | blocked | 3 | ella.novak | bug | 2.5 | 2025-11-18 | 2026-02-13 |
+| 124 | Document session for large accounts | todo | 3 | amara.okafor | growth | 29 | 2025-08-03 | 2026-04-26 |
+| 125 | Simplify search index in the admin console | done | 4 | priya.nair |  | 17.5 | 2025-09-15 | 2026-04-06 |
+| 126 | Split coupon in the mobile app | done | 2 | ben.carter | perf | 7.5 | 2025-08-08 | 2026-04-09 |
+| 127 | Rename coupon in the mobile app | blocked | 2 | tomas.ruiz |  | 10.5 | 2025-12-18 |  |
+| 128 | Review address form without downtime | done | 2 | sam.osei | search | 1.5 | 2025-12-16 |  |
+| 129 | Deprecate onboarding after the last release | done | 1 | lena.fischer | mobile, bug | 5.5 | 2025-07-14 | 2026-03-07 |
+| 130 | Update schema in staging | done | 1 | mia.jensen |  | 20.5 | 2025-09-17 | 2026-01-19 |
+| 131 | Refactor refund when the queue is full | done | 1 | diego.alves |  | 12.5 | 2025-09-20 |  |
+| 132 | Optimize report on retry | done | 3 | ella.novak | billing | 39 | 2025-12-30 |  |
+| 133 | Migrate password reset behind a flag | todo | 3 | diego.alves | auth | 26 | 2025-07-25 | 2026-02-26 |
+| 134 | Fix notification in the admin console | done | 2 | felix.wagner | email | 2.5 | 2025-07-04 |  |
+| 135 | Rename refund for large accounts | doing | 4 | sofia.rossi | data, bug | 1 | 2025-06-21 | 2026-01-12 |
+| 136 | Fix password reset on retry | doing | 1 | maya.chen | bug, testing | 18 | 2026-01-15 | 2026-03-14 |
+| 137 | Test webhook before the audit | done | 1 | ella.novak |  | 1 | 2026-01-26 |  |
+| 138 | Split schema for large accounts | done | 3 | amara.okafor | bug, security | 6.5 | 2025-10-22 | 2026-03-23 |
+| 139 | Migrate sitemap before the audit | todo | 1 | maya.chen | search, bug | 12.5 | 2025-10-29 | 2026-01-21 |
+| 140 | Update login flow for large accounts | done | 3 | luca.bianchi | growth, bug | 9.5 | 2025-06-22 | 2026-04-27 |
+| 141 | Refactor retry policy for EU customers | done | 2 | tomas.ruiz |  | 15 | 2025-09-14 |  |
+| 142 | Refactor rate limit for large accounts | todo | 1 | omar.haddad | checkout | 3 | 2025-09-08 | 2026-03-12 |
+| 143 | Update cart when the queue is full | done | 1 | sam.osei | reports, security | 7.5 | 2025-11-04 | 2026-04-20 |
+| 144 | Automate search index for the new plan | todo | 4 | ana.silva |  | 6.5 | 2026-01-28 |  |
+| 145 | Add cache layer behind a flag | todo | 3 | priya.nair | tech-debt, a11y | 1 | 2026-01-06 | 2025-12-12 |
+| 146 | Update feature flag on retry | done | 1 | felix.wagner | bug | 9 | 2025-11-17 |  |
+| 147 | Deprecate rate limit when the queue is full | done | 3 | kenji.mori | perf | 14 | 2025-06-19 | 2025-12-21 |
+| 148 | Refactor importer on slow networks | todo | 4 | maya.chen | api, search | 15 | 2026-01-10 | 2026-02-23 |
+| 149 | Instrument importer without downtime | todo | 1 | mia.jensen | checkout, security | 23 | 2025-07-31 |  |
+| 150 | Automate login flow behind a flag | done | 2 | maya.chen | auth, ux | 4.5 | 2025-10-03 |  |
+| 151 | Fix checkout on slow networks | doing | 1 | yara.saleh | api | 34 | 2025-08-10 | 2026-01-14 |
+| 152 | Investigate permissions for EU customers | done | 1 | ana.silva | api | 37 | 2025-06-28 | 2026-04-26 |
+| 153 | Document cart for large accounts | todo | 1 | hana.kim |  | 3 | 2025-11-15 | 2025-12-13 |
+| 154 | Deprecate password reset before the audit | doing | 4 | lena.fischer | billing | 17 | 2025-10-07 |  |
+| 155 | Cache login flow when the queue is full | todo | 3 | tomas.ruiz | reports | 28.5 | 2025-12-09 | 2026-01-02 |
+| 156 | Instrument address form on slow networks | todo | 4 | priya.nair | i18n | 7 | 2025-06-29 | 2026-03-03 |
+| 157 | Deprecate schema in staging | todo | 1 | tomas.ruiz | infra | 5 | 2026-01-23 | 2026-03-22 |
+| 158 | Deprecate webhook when the queue is full | todo | 2 | jonas.berg | email | 20 | 2025-11-20 | 2026-03-14 |
+| 159 | Rename rate limit behind a flag | done | 1 | maya.chen |  | 1.5 | 2025-06-26 |  |
+| 160 | Validate export job for large accounts | done | 1 | ella.novak | bug, perf | 13.5 | 2025-11-21 | 2026-01-17 |
+| 161 | Optimize email template when the queue is full | todo | 1 | tomas.ruiz | billing | 15 | 2025-08-02 |  |
+| 162 | Review refund for large accounts | todo | 1 | kenji.mori |  | 8.5 | 2026-01-01 |  |
+| 163 | Test refund on slow networks | todo | 4 | tomas.ruiz | docs, admin | 24.5 | 2025-08-24 |  |
+| 164 | Test importer without downtime | done | 1 | hana.kim | search, support | 39.5 | 2025-10-22 |  |
+| 165 | Cache retry policy on slow networks | todo | 1 | ivan.petrov | perf | 2.5 | 2026-01-18 | 2026-01-02 |
+| 166 | Rename onboarding before the audit | todo | 1 | sofia.rossi | email, bug | 2 | 2025-11-02 |  |
+| 167 | Update refund for the new plan | blocked | 1 | priya.nair | a11y | 15 | 2025-06-18 | 2026-02-15 |
+| 168 | Instrument tax rules after the last release | blocked | 4 | jonas.berg | onboarding, api | 12 | 2025-08-28 |  |
+| 169 | Instrument inventory sync for the new plan | done | 1 | jonas.berg |  | 22.5 | 2025-12-23 | 2025-12-23 |
+| 170 | Test search index before the audit | done | 4 | priya.nair |  | 16 | 2025-11-26 | 2026-02-07 |
+| 171 | Investigate rate limit for the new plan | todo | 4 | raj.patel | security | 2 | 2025-11-21 | 2025-12-14 |
+| 172 | Test inventory sync after the last release | todo | 4 | sam.osei | testing | 21.5 | 2025-11-26 |  |
+| 173 | Cache retry policy in the mobile app | done | 3 | amara.okafor | api | 31 | 2026-01-27 |  |
+| 174 | Update onboarding in the mobile app | done | 1 | hana.kim |  | 17.5 | 2025-11-19 | 2025-12-19 |
+| 175 | Test report in the admin console | todo | 2 | zoe.martin |  | 35.5 | 2025-08-27 |  |
+| 176 | Add permissions without downtime | todo | 3 | ivan.petrov | i18n | 30 | 2025-12-07 |  |
+| 177 | Refactor notification for EU customers | doing | 2 | jonas.berg |  | 5.5 | 2025-08-07 | 2026-04-08 |
+| 178 | Optimize search index before the audit | todo | 2 | tomas.ruiz | testing | 14.5 | 2025-07-08 | 2026-02-05 |
+| 179 | Instrument search index in the mobile app | done | 4 | lena.fischer | search, auth | 1 | 2025-08-22 | 2026-02-02 |
+| 180 | Automate cache layer for EU customers | blocked | 3 | ben.carter | bug | 34 | 2025-09-22 | 2026-02-17 |
+| 181 | Deprecate cart with better errors | done | 1 | nora.lund | onboarding | 4 | 2025-10-03 | 2026-04-17 |
+| 182 | Optimize onboarding when the queue is full | done | 1 | nora.lund | api, search | 0.5 | 2025-07-23 | 2026-04-18 |
+| 183 | Add webhook in the admin console | done | 4 | jonas.berg | reports, a11y | 30 | 2025-07-04 | 2025-12-25 |
+| 184 | Rename cache layer on slow networks | done | 1 | raj.patel | tech-debt, payments | 17.5 | 2025-12-21 |  |
+| 185 | Add rate limit for the new plan | done | 1 | tomas.ruiz | mobile, reports | 32 | 2026-01-30 |  |
+| 186 | Rename search index on slow networks | done | 2 | sofia.rossi | admin, i18n | 26 | 2025-07-09 |  |
+| 187 | Rename checkout in the admin console | doing | 1 | zoe.martin |  | 37 | 2025-07-30 | 2025-12-15 |
+| 188 | Automate login flow for the new plan | done | 1 | tomas.ruiz |  | 29.5 | 2025-09-04 | 2025-12-21 |
+| 189 | Migrate pricing page without downtime | done | 4 | yara.saleh | testing, mobile | 11 | 2026-01-18 | 2026-04-01 |
+| 190 | Document sitemap for large accounts | todo | 1 | maya.chen |  | 33.5 | 2025-10-03 |  |
+| 191 | Document cart in the admin console | doing | 1 | raj.patel | perf, data | 21 | 2025-09-01 | 2026-02-01 |
+| 192 | Migrate notification for large accounts | todo | 3 | amara.okafor | ux, support | 1 | 2025-07-19 | 2026-04-11 |
+| 193 | Rename coupon in staging | todo | 2 | lena.fischer | perf | 0.5 | 2025-08-09 | 2026-02-22 |
+| 194 | Support tab	and ünïcödé names in labels | todo | 1 | nora.lund | testing | 20 | 2025-11-06 | 2026-02-13 |
+| 195 | Migrate session for EU customers | doing | 1 | maya.chen | search, perf | 28.5 | 2025-07-15 | 2026-02-03 |
+| 196 | Optimize audit log in the mobile app | done | 1 | ben.carter |  | 28 | 2025-07-20 | 2026-05-10 |
+| 197 | Optimize address form in the admin console | done | 2 | lena.fischer | mobile | 2.5 | 2025-09-03 | 2026-05-09 |
+| 198 | Update cart for EU customers | todo | 2 | ivan.petrov | api, auth | 10 | 2025-11-11 |  |
+| 199 | Cache audit log with better errors | todo | 1 | omar.haddad |  | 16.5 | 2025-06-16 | 2025-12-15 |
+| 200 | Document onboarding on retry | done | 1 | zoe.martin | api | 33 | 2025-06-30 | 2026-01-15 |

@@ -1,0 +1,93 @@
+openapi: 3.0.3
+info:
+  title: demo-search
+  version: 1.0.0
+  description: Product search over an in-memory catalog of ~50k generated products.
+paths:
+  /health:
+    get:
+      operationId: health
+      summary: Liveness probe
+      responses:
+        "200":
+          description: Service is up.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /search:
+    get:
+      operationId: search
+      summary: Search products
+      description: |
+        Every whitespace-separated term in `q` must match the start of a word in the
+        product name (score 3) or one of its tags (score 1); scores add up across terms.
+        With no `q`, all products match with score 0. Results are ordered by score
+        (desc), rating (desc), name (A-Z), id (asc).
+
+        `filters` is a boolean expression (`AND`, `OR`, `NOT`, parentheses; AND binds
+        tighter than OR) over: `category:<slug>`, `brand:<slug>`, `tag:<slug>`,
+        `instock:true|false`, `price:` and `rating:` with `N`, `<N`, `<=N`, `>N`,
+        `>=N` or `LO-HI`. Example: `category:kitchen AND (brand:acme OR brand:zenith) AND price:10-50`.
+      parameters:
+        - { name: q, in: query, required: false, schema: { type: string, maxLength: 200 } }
+        - { name: filters, in: query, required: false, schema: { type: string, maxLength: 500 } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, maximum: 10000, default: 0 } }
+      responses:
+        "200":
+          description: A page of matches.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SearchResponse" }
+        "400":
+          description: Invalid parameter or filter expression.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+components:
+  schemas:
+    Health:
+      type: object
+      required: [status, products]
+      additionalProperties: false
+      properties:
+        status: { type: string, enum: [ok] }
+        products: { type: integer, minimum: 0 }
+    Product:
+      type: object
+      required: [id, name, brand, category, price, rating, inStock, tags, description, score]
+      additionalProperties: false
+      properties:
+        id: { type: integer, minimum: 1 }
+        name: { type: string }
+        brand: { type: string }
+        category: { type: string }
+        price: { type: number, minimum: 0 }
+        rating: { type: number, minimum: 0, maximum: 5 }
+        inStock: { type: boolean }
+        tags: { type: array, items: { type: string } }
+        description: { type: string }
+        score: { type: integer, minimum: 0 }
+    SearchResponse:
+      type: object
+      required: [total, limit, offset, results]
+      additionalProperties: false
+      properties:
+        total: { type: integer, minimum: 0, description: Number of matches before paging. }
+        limit: { type: integer, minimum: 1, maximum: 100 }
+        offset: { type: integer, minimum: 0 }
+        results:
+          type: array
+          items: { $ref: "#/components/schemas/Product" }
+    Error:
+      type: object
+      required: [error]
+      additionalProperties: false
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          additionalProperties: false
+          properties:
+            code: { type: string, enum: [invalid_request, invalid_filters, not_found, method_not_allowed, internal_error] }
+            message: { type: string }

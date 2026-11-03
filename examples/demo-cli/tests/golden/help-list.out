@@ -1,0 +1,3 @@
+Usage: taskr list [--status S] [--assignee A] [--label L] [--sort id|priority|due|estimate] [--limit N]
+
+List tasks as a table, filtered and sorted. The title column is truncated to the terminal width.

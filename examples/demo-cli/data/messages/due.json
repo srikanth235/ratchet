@@ -1,0 +1,4 @@
+{
+ "due.header": "Due within {within, plural, one {# day} other {# days}} in {zone} ({offset}); today is {today}",
+ "due.summary": "{count, plural, one {# task} other {# tasks}} due, {overdue} overdue"
+}

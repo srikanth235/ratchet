@@ -1,0 +1,26 @@
+[package]
+name = "ratchet-mcp"
+version = "0.0.0"
+description = "Ratchet's MCP server: stdio JSON-RPC, the chat and optimization tool sets, and the plumbing the owner mode reuses"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "ratchet_mcp"
+
+[dependencies]
+ratchet-core = { path = "../ratchet-core" }
+async-trait = "0.1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+schemars = { version = "1", features = ["preserve_order", "indexmap2"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "io-std", "sync", "time", "process"] }
+
+[dev-dependencies]
+tempfile = "3"

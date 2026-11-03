@@ -1,0 +1,5 @@
+{
+  "command": "npm test --silent",
+  "runs": 1,
+  "timeout_s": 900
+}

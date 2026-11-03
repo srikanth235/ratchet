@@ -1,0 +1,8 @@
+{"id":"$ID","result":{"userAgent":"codex-cli/0.166.0"}}
+{"id":"$ID","result":{"thread":{"id":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","cliVersion":"0.166.0"},"model":"gpt-5","cwd":"/work/chat-1","approvalPolicy":"never","sandbox":{"type":"read-only","networkAccess":false}}}
+{"method":"thread/started","params":{"thread":{"id":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e"}}}
+{"id":"$ID","result":{"turn":{"id":"turn_1","status":"inProgress","items":[]}}}
+{"method":"turn/started","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turn":{"id":"turn_1","status":"inProgress","items":[]}}}
+{"method":"account/rateLimits/updated","params":{"rateLimits":{"limitId":"codex","primary":{"usedPercent":100,"windowDurationMins":300,"resetsAt":1793614200},"secondary":{"usedPercent":40,"windowDurationMins":10080,"resetsAt":1794014200},"rateLimitReachedType":"primary"}}}
+{"method":"error","params":{"error":{"message":"You've hit your usage limit. Upgrade to Pro, or try again at Nov 4th, 2026 2:35 AM.","codexErrorInfo":"UsageLimitExceeded","additionalDetails":null},"willRetry":false,"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_1"}}
+{"method":"turn/completed","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turn":{"id":"turn_1","status":"failed","items":[],"error":{"message":"You've hit your usage limit. Upgrade to Pro, or try again at Nov 4th, 2026 2:35 AM.","codexErrorInfo":"UsageLimitExceeded"}}}}

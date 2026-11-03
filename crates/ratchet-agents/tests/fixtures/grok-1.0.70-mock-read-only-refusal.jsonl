@@ -1,0 +1,5 @@
+{"type":"available_commands","tools":["read_file","run_terminal_command"],"commands":["compact"]}
+{"type":"tool_call","toolCallId":"call-1","title":"search_replace","kind":"edit","status":"pending","toolName":"search_replace","rawInput":{"file_path":"/work/chat-1/src/app.ts","old_string":"a","new_string":"b"},"content":[],"locations":[]}
+{"type":"tool_call_update","toolCallId":"call-1","status":"failed","content":[{"type":"content","content":{"type":"text","text":"Operation not permitted: sandbox profile read-only denies writes to /work/chat-1\n"}}],"rawOutput":{"type":"SearchReplace","error":"sandbox denied"},"locations":[]}
+{"type":"text","data":"The sandbox is read-only, so I could not change the file."}
+{"type":"end","stopReason":"end_turn","sessionId":"01a2b3c4-d5e6-7f80-9a1b-2c3d4e5f6a7b","requestId":"req-mock-1","cwd":"/work/chat-1","num_turns":1,"usage":{"input_tokens":812,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"output_tokens":45,"reasoning_tokens":10},"total_cost_usd":0.004}

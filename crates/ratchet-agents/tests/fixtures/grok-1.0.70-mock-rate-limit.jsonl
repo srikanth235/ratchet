@@ -1,0 +1,2 @@
+{"type":"available_commands","tools":["read_file","run_terminal_command"],"commands":["compact"]}
+{"type":"error","message":"429 Too Many Requests: rate limit exceeded, retry after 30s"}

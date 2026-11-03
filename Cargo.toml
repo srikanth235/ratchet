@@ -1,0 +1,13 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.97"
+license = "UNLICENSED"
+publish = false
+
+# The AWS SDK makes full debug info huge (16 GB target dirs); line tables keep backtraces useful.
+[profile.dev]
+debug = "line-tables-only"

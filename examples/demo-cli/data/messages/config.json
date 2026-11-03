@@ -1,0 +1,10 @@
+{
+ "config.sources": "sources",
+ "config.dataFile": "data file",
+ "config.tz": "time zone",
+ "config.pageSize": "page size",
+ "config.terminal": "terminal",
+ "config.plugins": "plugins",
+ "config.none": "(none)",
+ "config.terminalValue": "{columns} columns, {colors} colors"
+}

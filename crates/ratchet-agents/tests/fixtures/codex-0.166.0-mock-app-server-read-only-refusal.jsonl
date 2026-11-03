@@ -1,0 +1,13 @@
+{"id":"$ID","result":{"userAgent":"codex-cli/0.166.0"}}
+{"id":"$ID","result":{"thread":{"id":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","cliVersion":"0.166.0"},"model":"gpt-5","cwd":"/work/chat-1","approvalPolicy":"never","sandbox":{"type":"read-only","networkAccess":false}}}
+{"method":"thread/started","params":{"thread":{"id":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e"}}}
+{"id":"$ID","result":{"turn":{"id":"turn_1","status":"inProgress","items":[]}}}
+{"method":"turn/started","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turn":{"id":"turn_1","status":"inProgress","items":[]}}}
+{"method":"item/started","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_1","item":{"type":"commandExecution","id":"item_1","command":"bash -lc 'echo x > src/app.ts'","status":"inProgress"}}}
+{"method":"item/completed","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_1","item":{"type":"commandExecution","id":"item_1","command":"bash -lc 'echo x > src/app.ts'","aggregatedOutput":"bash: src/app.ts: Read-only file system\n","exitCode":1,"status":"failed"}}}
+{"method":"item/started","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_1","item":{"type":"agentMessage","id":"item_2","text":""}}}
+{"method":"item/agentMessage/delta","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_1","itemId":"item_2","delta":"The sandbox is read-only, "}}
+{"method":"item/agentMessage/delta","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_1","itemId":"item_2","delta":"so I could not change the file."}}
+{"method":"item/completed","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_1","item":{"type":"agentMessage","id":"item_2","text":"The sandbox is read-only, so I could not change the file."}}}
+{"method":"thread/tokenUsage/updated","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turnId":"turn_1","tokenUsage":{"total":{"inputTokens":5200,"cachedInputTokens":4096,"outputTokens":240,"reasoningOutputTokens":64,"totalTokens":5440}}}}
+{"method":"turn/completed","params":{"threadId":"0199b3a0-5c1e-7a40-9d2e-6f1a2b3c4d5e","turn":{"id":"turn_1","status":"completed","items":[]}}}

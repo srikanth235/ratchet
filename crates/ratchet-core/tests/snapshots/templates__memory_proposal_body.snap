@@ -1,0 +1,40 @@
+---
+source: crates/ratchet-core/tests/templates.rs
+expression: p.body
+---
+## Add the Ratchet "Peak memory" template
+
+This adds what Ratchet needs to make a workload use less memory: a trusted benchmark that agents cannot edit, the config and a brief. It only adds files; it does not change your code.
+
+**Objective:** minimize `peak_rss_mb` (MB).
+**Measures:** peak resident set size (RSS) of the workload process tree.
+**Holdout:** every win is re-checked on a hidden workload that the agents never see.
+**Bench machine:** `c7i.xlarge`.
+
+### What was added
+
+| File | Purpose |
+|---|---|
+| `ratchet.yaml` | the optimization config: objective, evaluator template, guardrails |
+| `RATCHET.md` | the brief every agent session starts from |
+| `bench/memory.config.json` | evaluator input you tune (protected) |
+| `bench/memory.mjs` | the trusted evaluator (protected) |
+| `bench/workload.json` | evaluator input you tune (protected) |
+
+`ratchet.yaml`, the evaluator files above, lockfiles and install config are protected automatically: a candidate that edits them is blocked.
+
+### Before you start an optimization
+
+- Fill in the `TODO`s: the evaluator's config (`bench/memory.config.json`, `bench/workload.json`), the guardrail test command in `ratchet.yaml`, and the brief in `RATCHET.md`.
+- Replace the placeholder metric value (`objective.value`) with your own numbers if you want a dollar figure on the result.
+
+### Run a baseline
+
+```sh
+node bench/memory.mjs          # the evaluator on its own: prints the JSON that contains `peak_rss_mb`
+ratchet validate         # checks ratchet.yaml
+ratchet baseline         # runs the evaluator several times: prints the noise and the gain a win must beat
+```
+
+In the Ratchet app: New optimization, pick this repository, and the Review step runs the baseline and shows the
+noise and the gain a win has to beat.

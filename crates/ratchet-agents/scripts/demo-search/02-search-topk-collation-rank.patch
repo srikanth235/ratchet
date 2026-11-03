@@ -1,0 +1,105 @@
+diff --git a/src/search.ts b/src/search.ts
+index ca1884a..808cad4 100644
+--- a/src/search.ts
++++ b/src/search.ts
+@@ -48,3 +48,3 @@ function toHit(p: Product, score: number): SearchHit {
+ interface Match {
+-  p: Product;
++  position: number;
+   score: number;
+@@ -52,5 +52,61 @@ interface Match {
+ 
+-/** Order: score desc, rating desc, name A-Z, id asc. */
+-function byRelevance(a: Match, b: Match): number {
+-  return b.score - a.score || b.p.rating - a.p.rating || a.p.name.localeCompare(b.p.name) || a.p.id - b.p.id;
++/** Collation rank of every product name (index = catalog position), so ordering needs no localeCompare. */
++const nameRankCache = new WeakMap<Catalog, Int32Array>();
++function nameRanks(catalog: Catalog): Int32Array {
++  let ranks = nameRankCache.get(catalog);
++  if (ranks) return ranks;
++  const names = [...new Set(catalog.products.map((p) => p.name))].sort((a, b) => a.localeCompare(b));
++  const rankOf = new Map<string, number>();
++  let rank = 0;
++  names.forEach((name, i) => {
++    if (i > 0 && name.localeCompare(names[i - 1] as string) !== 0) rank = i;
++    rankOf.set(name, rank);
++  });
++  ranks = Int32Array.from(catalog.products, (p) => rankOf.get(p.name) as number);
++  nameRankCache.set(catalog, ranks);
++  return ranks;
++}
++
++/** Bounded selection of the `k` best matches under `compare` (a max-heap holding the worst kept item at the root). */
++class TopK {
++  private heap: Match[] = [];
++  constructor(private k: number, private compare: (a: Match, b: Match) => number) {}
++
++  offer(m: Match): void {
++    const heap = this.heap;
++    if (heap.length < this.k) {
++      heap.push(m);
++      this.up(heap.length - 1);
++    } else if (this.k > 0 && this.compare(m, heap[0] as Match) < 0) {
++      heap[0] = m;
++      this.down(0);
++    }
++  }
++
++  sorted(): Match[] {
++    return this.heap.slice().sort(this.compare);
++  }
++
++  private up(i: number): void {
++    const heap = this.heap;
++    while (i > 0) {
++      const parent = (i - 1) >> 1;
++      if (this.compare(heap[i] as Match, heap[parent] as Match) <= 0) break;
++      [heap[i], heap[parent]] = [heap[parent] as Match, heap[i] as Match];
++      i = parent;
++    }
++  }
++
++  private down(i: number): void {
++    const heap = this.heap;
++    for (;;) {
++      let worst = i;
++      for (const child of [2 * i + 1, 2 * i + 2]) {
++        if (child < heap.length && this.compare(heap[child] as Match, heap[worst] as Match) > 0) worst = child;
++      }
++      if (worst === i) return;
++      [heap[i], heap[worst]] = [heap[worst] as Match, heap[i] as Match];
++      i = worst;
++    }
++  }
+ }
+@@ -77,6 +133,16 @@ export function search(catalog: Catalog, params: SearchParams): SearchResult {
+ 
+-  const matches: Match[] = [];
++  const ranks = nameRanks(catalog);
++  // Order: score desc, rating desc, name A-Z, id asc.
++  const byRelevance = (a: Match, b: Match): number => {
++    const pa = catalog.products[a.position] as Product;
++    const pb = catalog.products[b.position] as Product;
++    return b.score - a.score || pb.rating - pa.rating || (ranks[a.position] as number) - (ranks[b.position] as number) || pa.id - pb.id;
++  };
++  const top = new TopK(params.offset + params.limit, byRelevance);
++  let total = 0;
+   const consider = (position: number, score: number) => {
+     const p = catalog.products[position] as Product;
+-    if (!filter || evaluateFilter(filter, p)) matches.push({ p, score });
++    if (filter && !evaluateFilter(filter, p)) return;
++    total++;
++    top.offer({ position, score });
+   };
+@@ -85,9 +151,7 @@ export function search(catalog: Catalog, params: SearchParams): SearchResult {
+ 
+-  matches.sort(byRelevance);
+-
+   return {
+-    total: matches.length,
++    total,
+     limit: params.limit,
+     offset: params.offset,
+-    results: matches.slice(params.offset, params.offset + params.limit).map((m) => toHit(m.p, m.score)),
++    results: top.sorted().slice(params.offset).map((m) => toHit(catalog.products[m.position] as Product, m.score)),
+   };

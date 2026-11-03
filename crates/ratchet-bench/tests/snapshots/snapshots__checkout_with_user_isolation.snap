@@ -1,0 +1,91 @@
+---
+source: crates/ratchet-bench/tests/snapshots.rs
+expression: "checkout_script(&i).expect(\"script\")"
+---
+set -uo pipefail
+W='/var/tmp/ratchet-bench/opt1-1234'
+CODE="$W/code"; STAGE="$W/stage"; G="$W/repo.git"; H="$W/harness"
+emit() { printf '%s %s %s\n' '@@RATCHET@@' "$1" "$2"; }
+b64() { base64 | tr -d '\n'; }
+
+parents_real() {
+  local d acc="$CODE" part; local -a parts
+  d=$(dirname -- "$1"); [ "$d" = . ] && return 0
+  IFS=/ read -ra parts <<< "$d"
+  for part in "${parts[@]}"; do acc="$acc/$part"; [ -L "$acc" ] && return 1; [ -d "$acc" ] || return 1; done
+  return 0
+}
+ensure_parents() {
+  local d acc="$CODE" part; local -a parts
+  d=$(dirname -- "$1"); [ "$d" = . ] && return 0
+  IFS=/ read -ra parts <<< "$d"
+  for part in "${parts[@]}"; do
+    acc="$acc/$part"
+    if [ -L "$acc" ] || { [ -e "$acc" ] && [ ! -d "$acc" ]; }; then rm -f -- "${acc:?}"; fi
+    [ -d "$acc" ] || mkdir -- "$acc"
+  done
+}
+same() {
+  if [ -L "$1" ]; then [ -L "$2" ] && [ "$(readlink -- "$1")" = "$(readlink -- "$2")" ]
+  else [ -f "$2" ] && [ ! -L "$2" ] && cmp -s -- "$1" "$2"; fi
+}
+copied=0
+apply() {
+  local mode="$1" p
+  : > "$W/changed.list"
+  while IFS= read -r -d '' p; do
+    if [ "$mode" = check ] && parents_real "$p" && same "$STAGE/$p" "$CODE/$p"; then continue; fi
+    [ "$mode" = check ] && printf '%s\0' "$p" >> "$W/changed.list"
+    ensure_parents "$p"
+    rm -rf -- "${CODE:?}/${p:?}"
+    cp -P -p -- "$STAGE/$p" "$CODE/$p" || return 1
+    copied=$((copied+1))
+  done < "$W/bench.match"
+}
+
+RE='(?s)^(?:bench\/.*|ratchet\.yaml)(?:/.*)?\z'; RE_USER='(?s)^(?:bench\/.*|ratchet\.yaml)(?:/.*)?\z'
+rm -rf -- "${W:?}"; mkdir -p "$CODE" "$STAGE" "$W/logs" "$W/in" || exit 10
+fetch() {
+  aws s3 cp --only-show-errors "$1" "$3" || { echo "cannot download $1" >&2; return 1; }
+  [ "$(sha256sum -- "$3" | cut -d' ' -f1)" = "$2" ] || { echo "sha256 mismatch for $1" >&2; return 2; }
+}
+fetch 's3://ratchet-test-artifacts/bench-inputs/opt1/job1/code.tgz' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "$W/in/code.tgz" || exit 20
+fetch 's3://ratchet-test-artifacts/bench-inputs/opt1/job1/bench.tgz' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "$W/in/bench.tgz" || exit 21
+tar -xzf "$W/in/code.tgz" -C "$CODE" --no-same-owner || exit 22
+tar -xzf "$W/in/bench.tgz" -C "$STAGE" --no-same-owner || exit 23
+list() { (cd -- "$1" && find . -mindepth 1 \( -type f -o -type l \) -printf '%P\0'); }
+list "$STAGE" | grep -zP "$RE" > "$W/bench.match" || true
+matched=$(list "$STAGE" | grep -zcP "$RE_USER" || true)
+list "$CODE" | grep -zP "$RE" > "$W/code.match" || true
+removed=0
+if [ 1 = 1 ]; then
+  CODE_REAL=$(cd "$CODE" && pwd -P)
+  while IFS= read -r -d '' p; do
+    d=$(dirname -- "$p")
+    if [ "$d" = . ] || [ "$(realpath -m -- "$CODE/$d")" = "$CODE_REAL/$d" ]; then
+      rm -rf -- "${CODE:?}/${p:?}"
+      grep -zqxF -- "$p" "$W/bench.match" || removed=$((removed+1))
+    fi
+  done < "$W/code.match"
+fi
+apply init || exit 24
+BU='ratchet-bench'; HU='ratchet-holdout'; LAUNCHER='/usr/local/bin/ratchet-candidate'
+id -u "$BU" >/dev/null 2>&1 || { echo "bench user $BU does not exist on this image" >&2; exit 12; }
+id -u "$HU" >/dev/null 2>&1 || { echo "holdout user $HU does not exist on this image" >&2; exit 12; }
+for u in "$BU" "$HU"; do
+  iptables -C OUTPUT -m owner --uid-owner "$u" -d 169.254.169.254 -j REJECT >/dev/null 2>&1 || { echo "IMDS is not blocked for $u (iptables owner rule missing)" >&2; exit 13; }
+done
+if setpriv --reuid="$BU" --regid="$BU" --clear-groups --no-new-privs -- timeout 3 bash -c 'exec 3<>/dev/tcp/169.254.169.254/80' 2>/dev/null; then echo "instance metadata is reachable as $BU" >&2; exit 14; fi
+if setpriv --reuid="$HU" --regid="$HU" --clear-groups -- timeout 3 bash -c 'exec 3<>/dev/tcp/169.254.169.254/80' 2>/dev/null; then echo "instance metadata is reachable as $HU" >&2; exit 14; fi
+mkdir -p "$W/home" "$W/tmp" "$W/hhome" "$W/htmp" "$W/out" "$W/holdout" || exit 15
+chown -R "$BU:" "$CODE" "$W/home" "$W/tmp" || exit 16
+chown -R "$HU:" "$W/hhome" "$W/htmp" "$W/out" "$W/holdout" || exit 16
+chmod 700 "$W/holdout"
+chmod 755 "$W"
+export RATCHET_CANDIDATE_DIR="$CODE" RATCHET_CANDIDATE_HOME="$W/home" RATCHET_CANDIDATE_TMP="$W/tmp" RATCHET_CANDIDATE_PATH="$PATH"
+printf x > "$W/holdout/.probe" && chown "$HU:" "$W/holdout/.probe" && chmod 600 "$W/holdout/.probe" || exit 15
+if setpriv --reuid="$BU" --regid="$BU" --clear-groups --no-new-privs -- cat "$W/holdout/.probe" >/dev/null 2>&1; then echo "the holdout directory is readable by $BU" >&2; exit 17; fi
+setpriv --reuid="$HU" --regid="$HU" --clear-groups -- cat "$W/holdout/.probe" >/dev/null 2>&1 || { echo "the holdout directory is not readable by $HU" >&2; exit 19; }
+rm -f "$W/holdout/.probe"
+[ "$(setpriv --reuid="$HU" --regid="$HU" --clear-groups -- "$LAUNCHER" id -un 2>/dev/null)" = "$BU" ] || { echo "the candidate launcher $LAUNCHER does not run commands as $BU for $HU" >&2; exit 18; }
+emit checkout "{\"code\":\"cccccccccccccccccccccccccccccccccccccccc\",\"bench\":\"cccccccccccccccccccccccccccccccccccccccc\",\"removed\":$removed,\"copied\":$copied,\"matched\":$matched,\"isolation\":\"user\",\"container\":false}"

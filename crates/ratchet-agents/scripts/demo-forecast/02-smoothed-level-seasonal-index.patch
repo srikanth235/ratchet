@@ -1,0 +1,74 @@
+diff --git a/src/model.ts b/src/model.ts
+index 2e57fbe..629a578 100644
+--- a/src/model.ts
++++ b/src/model.ts
+@@ -1,2 +1,5 @@
+-/** The forecasting model: seasonal naive. Same week last year, scaled by how recent sales compare with a year ago. */
++/**
++ * The forecasting model: an exponentially smoothed level times seasonal indexes. The indexes are averaged over every
++ * full year of history (and smoothed across neighbouring weeks), so one noisy week does not decide the forecast.
++ */
+ import { mean, tail, type Series } from './features.js';
+@@ -5,20 +8,46 @@ export const WINDOW = 4;
+ export const SEASON = 52;
+-/** Weeks over which this year's level is compared with last year's. */
+-const RATIO_WINDOW = 8;
++/** Weight of each neighbouring week when smoothing the seasonal profile. */
++const PROFILE_SMOOTHING = 0.25;
++/** Smoothing constant of the deseasonalised level. */
++const LEVEL_ALPHA = 0.2;
+ 
+ export interface Model {
+-  /** Per SKU: sales history. */
+-  history: number[][];
++  /** Per SKU: deseasonalised level at the origin. */
++  level: number[];
++  /** Per SKU: seasonal index of the weeks origin-52 .. origin-1 (position j is the same week of the year as origin+j). */
++  profile: number[][];
+ }
+ 
+-export function fit(series: readonly Series[]): Model {
+-  return { history: series.map((s) => s.y) };
++/** Mean index of each week of the year over all full years before the origin, normalised to mean 1. */
++function seasonalProfile(y: readonly number[]): number[] {
++  const n = y.length;
++  const years = Math.floor(n / SEASON);
++  if (years < 1) return new Array<number>(SEASON).fill(1);
++  const raw = new Array<number>(SEASON).fill(0);
++  for (let k = 1; k <= years; k++) {
++    const block = y.slice(n - k * SEASON, n - (k - 1) * SEASON);
++    const yearLevel = Math.max(1e-6, mean(block));
++    block.forEach((v, j) => (raw[j]! += v / yearLevel / years));
++  }
++  const w = PROFILE_SMOOTHING;
++  const smooth = raw.map((v, j) => (1 - 2 * w) * v + w * raw[(j + SEASON - 1) % SEASON]! + w * raw[(j + 1) % SEASON]!);
++  const norm = mean(smooth);
++  if (!(norm > 0)) return new Array<number>(SEASON).fill(1); // a SKU that never sold has no seasonality to learn
++  return smooth.map((v) => Math.max(0.1, v / norm));
+ }
+ 
+-function seasonalNaive(y: readonly number[], horizon: number): number[] {
++function smoothedLevel(y: readonly number[], profile: readonly number[]): number {
+   const n = y.length;
+-  if (n < SEASON + RATIO_WINDOW) return new Array<number>(horizon).fill(mean(tail(y, WINDOW)));
+-  const lastYear = mean(y.slice(n - SEASON - RATIO_WINDOW, n - SEASON));
+-  const ratio = Math.min(2, Math.max(0.5, mean(tail(y, RATIO_WINDOW)) / Math.max(1e-6, lastYear)));
+-  return Array.from({ length: horizon }, (_, h) => y[n - SEASON + (h % SEASON)]! * ratio);
++  if (n === 0) return 0;
++  let level = mean(tail(y, WINDOW));
++  for (let t = 0; t < n; t++) {
++    const index = profile[(t - (n - SEASON) + 10 * SEASON) % SEASON]!;
++    level = t === 0 ? y[0]! / index : LEVEL_ALPHA * (y[t]! / index) + (1 - LEVEL_ALPHA) * level;
++  }
++  return level;
++}
++
++export function fit(series: readonly Series[]): Model {
++  const profile = series.map((s) => seasonalProfile(s.y));
++  return { profile, level: series.map((s, i) => smoothedLevel(s.y, profile[i]!)) };
+ }
+@@ -26,3 +55,3 @@ function seasonalNaive(y: readonly number[], horizon: number): number[] {
+ export function forecast(model: Model, horizon: number): number[][] {
+-  return model.history.map((y) => seasonalNaive(y, horizon));
++  return model.level.map((level, i) => Array.from({ length: horizon }, (_, h) => level * model.profile[i]![h % SEASON]!));
+ }

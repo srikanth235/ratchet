@@ -1,0 +1,56 @@
+---
+source: crates/ratchet-agents/tests/snapshots.rs
+expression: config()
+---
+{
+  "optimizationId": "opt1",
+  "agentId": "a",
+  "kind": "mock",
+  "repoUrl": "/nowhere.git",
+  "branch": "ratchet/a",
+  "baseRef": "main",
+  "config": {
+    "version": 0,
+    "objective": {
+      "metric": "http_req_duration.p95",
+      "direction": "minimize",
+      "min_gain": 0.03
+    },
+    "evaluator": {
+      "kind": "benchmark",
+      "ref": "ratchet/bench",
+      "run": "k6 run bench/k6/search.js",
+      "repeats": 5,
+      "hardware": "c7i.2xlarge",
+      "deps": "auto"
+    },
+    "guardrails": [
+      {
+        "kind": "command",
+        "run": "pnpm test"
+      },
+      {
+        "kind": "threshold",
+        "metric": "error_rate",
+        "op": "<",
+        "value": 0.001,
+        "relative": false,
+        "raw": "< 0.001"
+      }
+    ],
+    "protected": [
+      "bench/**",
+      "ratchet.yaml"
+    ],
+    "agent": {
+      "instructions": "RATCHET.md",
+      "allowed_instance_types": [
+        "c7i.2xlarge"
+      ]
+    }
+  },
+  "brief": "# Brief\n\nMake it faster. Do not touch bench/**.\n",
+  "baselineValue": 20.0,
+  "budgetUsd": 20.0,
+  "deadlineAt": 13500000
+}

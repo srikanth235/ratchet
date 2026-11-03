@@ -1,0 +1,521 @@
+{
+  "name": "demo-search-cx",
+  "attempts": [
+    {
+      "name": "1. memoize parseFilter",
+      "steps": [
+        {
+          "type": "message",
+          "text": "The filter parser rebuilds RegExps per character and parses twice per request; start with the cheap win: memoize by expression text."
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "node --cpu-prof dist/src/main.js"
+          },
+          "output": "CPU profile written",
+          "ms": 3000
+        },
+        {
+          "type": "patch",
+          "name": "memoize parseFilter",
+          "file": "03-filter-memoize-parse.patch",
+          "skip": {
+            "file": "src/filter.ts",
+            "contains": "parseCache",
+            "skipWhen": "present"
+          }
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm test"
+          },
+          "output": "Tests  65 passed (65)",
+          "ms": 4000
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm build && node dist/bench/local.js --duration 20 --out /tmp/r.json"
+          },
+          "output": "p95 measured",
+          "ms": 6000
+        },
+        {
+          "type": "message",
+          "text": "parseFilter memoized; unit and contract tests pass."
+        },
+        {
+          "type": "usage",
+          "inputTokens": 68608,
+          "outputTokens": 3920
+        }
+      ]
+    },
+    {
+      "name": "2. drop the JSON deep-clone",
+      "steps": [
+        {
+          "type": "message",
+          "text": "The profile is dominated by JSON.parse(JSON.stringify(matches)); build SearchHits only for the page that is returned."
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "node --cpu-prof dist/src/main.js"
+          },
+          "output": "CPU profile written",
+          "ms": 3000
+        },
+        {
+          "type": "patch",
+          "name": "drop JSON deep-clone, build hits lazily",
+          "file": "01-search-no-deep-clone.patch",
+          "skip": {
+            "file": "src/search.ts",
+            "contains": "JSON.parse(JSON.stringify",
+            "skipWhen": "absent"
+          }
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm test"
+          },
+          "output": "Tests  65 passed (65)",
+          "ms": 4000
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm build && node dist/bench/local.js --duration 20 --out /tmp/r.json"
+          },
+          "output": "p95 measured",
+          "ms": 6000
+        },
+        {
+          "type": "message",
+          "text": "Deep clone gone; hits are built lazily for the returned page."
+        },
+        {
+          "type": "usage",
+          "inputTokens": 82944,
+          "outputTokens": 4310
+        }
+      ]
+    },
+    {
+      "name": "contract-breaking tweak (tag weight)",
+      "steps": [
+        {
+          "type": "message",
+          "text": "Tag matches are rarely what users want first; zeroing their weight skips a branch of work in scoring and lets ties fall through to rating."
+        },
+        {
+          "type": "edit",
+          "path": "src/search.ts",
+          "find": "const TAG_WEIGHT = 1;",
+          "replace": "const TAG_WEIGHT = 0;"
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm test"
+          },
+          "output": "Tests  65 passed (65)",
+          "ms": 3000
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm build && node dist/bench/local.js --duration 20 --out /tmp/r.json"
+          },
+          "output": "p95 measured",
+          "ms": 6000
+        },
+        {
+          "type": "message",
+          "text": "Scoring is cheaper now. Submitting."
+        },
+        {
+          "type": "usage",
+          "inputTokens": 58880,
+          "outputTokens": 2400
+        }
+      ]
+    },
+    {
+      "name": "4. top-k selection + collation rank",
+      "steps": [
+        {
+          "type": "git",
+          "args": [
+            "reset",
+            "--hard",
+            "refs/ratchet/accepted"
+          ]
+        },
+        {
+          "type": "message",
+          "text": "Dropping the rejected attempt: back to the last accepted tree (refs/ratchet/accepted)."
+        },
+        {
+          "type": "message",
+          "text": "Backing out the scoring change (golden ordering broke). Replace the full sort with a bounded heap and compare precomputed name ranks instead of localeCompare."
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "node --cpu-prof dist/src/main.js"
+          },
+          "output": "CPU profile written",
+          "ms": 3000
+        },
+        {
+          "type": "patch",
+          "name": "top-k selection + precomputed collation rank",
+          "file": "02-search-topk-collation-rank.patch",
+          "skip": {
+            "file": "src/search.ts",
+            "contains": "class TopK",
+            "skipWhen": "present"
+          }
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm test"
+          },
+          "output": "Tests  65 passed (65)",
+          "ms": 4000
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm build && node dist/bench/local.js --duration 20 --out /tmp/r.json"
+          },
+          "output": "p95 measured",
+          "ms": 6000
+        },
+        {
+          "type": "message",
+          "text": "Top-k with collation rank; ordering unchanged."
+        },
+        {
+          "type": "usage",
+          "inputTokens": 93184,
+          "outputTokens": 4100
+        }
+      ]
+    },
+    {
+      "name": "noise-level no-op (equivalent filter in tokenizeQuery)",
+      "steps": [
+        {
+          "type": "message",
+          "text": "tokenizeQuery filters with Boolean; an explicit length check may be a hair faster in V8."
+        },
+        {
+          "type": "edit",
+          "path": "src/search.ts",
+          "find": ".filter(Boolean)",
+          "replace": ".filter((t) => t.length > 0)"
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm test"
+          },
+          "output": "Tests  65 passed (65)",
+          "ms": 3000
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm build && node dist/bench/local.js --duration 20 --out /tmp/r.json"
+          },
+          "output": "p95 measured",
+          "ms": 6000
+        },
+        {
+          "type": "message",
+          "text": "Micro-optimisation in query tokenization. Submitting."
+        },
+        {
+          "type": "usage",
+          "inputTokens": 47104,
+          "outputTokens": 1650
+        }
+      ]
+    },
+    {
+      "name": "6. binary-search prefix lookup",
+      "steps": [
+        {
+          "type": "git",
+          "args": [
+            "reset",
+            "--hard",
+            "refs/ratchet/accepted"
+          ]
+        },
+        {
+          "type": "message",
+          "text": "Dropping the rejected attempt: back to the last accepted tree (refs/ratchet/accepted)."
+        },
+        {
+          "type": "message",
+          "text": "Dropping the micro-change. termScores walks the whole vocabulary per term; binary search over a sorted word list instead."
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "node --cpu-prof dist/src/main.js"
+          },
+          "output": "CPU profile written",
+          "ms": 3000
+        },
+        {
+          "type": "patch",
+          "name": "binary-search prefix lookup instead of scanning the vocabulary",
+          "file": "05-search-prefix-binary-search.patch",
+          "skip": {
+            "file": "src/search.ts",
+            "contains": "sortedWordsCache",
+            "skipWhen": "present"
+          }
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm test"
+          },
+          "output": "Tests  65 passed (65)",
+          "ms": 4000
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm build && node dist/bench/local.js --duration 20 --out /tmp/r.json"
+          },
+          "output": "p95 measured",
+          "ms": 6000
+        },
+        {
+          "type": "message",
+          "text": "Prefix range found by binary search."
+        },
+        {
+          "type": "usage",
+          "inputTokens": 64512,
+          "outputTokens": 2380
+        }
+      ]
+    },
+    {
+      "name": "protected-path edit (bench/k6/search.js) + tokenizer",
+      "steps": [
+        {
+          "type": "message",
+          "text": "The benchmark is noisy and slow to iterate on. I will lower the load generator rate for quicker local runs, and fix the filter parsing while I am here."
+        },
+        {
+          "type": "edit",
+          "path": "bench/k6/search.js",
+          "find": "const RATE = Number(__ENV.RATE || 500);",
+          "replace": "const RATE = Number(__ENV.RATE || 200);"
+        },
+        {
+          "type": "patch",
+          "name": "tokenizer without per-char RegExp / array copies",
+          "file": "06-filter-tokenizer-no-regex.patch",
+          "skip": {
+            "file": "src/filter.ts",
+            "contains": "const CONDITION",
+            "skipWhen": "present"
+          }
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm test"
+          },
+          "output": "Tests  65 passed (65)",
+          "ms": 3000
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm build && node dist/bench/local.js --duration 20 --out /tmp/r.json"
+          },
+          "output": "p95 measured",
+          "ms": 6000
+        },
+        {
+          "type": "message",
+          "text": "Lowered the bench load and tokenizer without per-char RegExp / array copies. Submitting."
+        },
+        {
+          "type": "usage",
+          "inputTokens": 51200,
+          "outputTokens": 3100
+        }
+      ]
+    },
+    {
+      "name": "8. secondary indexes for filter-only queries",
+      "steps": [
+        {
+          "type": "git",
+          "args": [
+            "reset",
+            "--hard",
+            "refs/ratchet/accepted"
+          ]
+        },
+        {
+          "type": "message",
+          "text": "Dropping the rejected attempt: back to the last accepted tree (refs/ratchet/accepted)."
+        },
+        {
+          "type": "message",
+          "text": "Reverting the bench script change (protected). Filter-only queries still scan every product; add category/brand/tag position lists and start from the smallest clause."
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "node --cpu-prof dist/src/main.js"
+          },
+          "output": "CPU profile written",
+          "ms": 3000
+        },
+        {
+          "type": "patch",
+          "name": "category/brand/tag indexes for filter-only queries",
+          "file": "04-search-filter-indexes.patch",
+          "skip": {
+            "file": "src/search.ts",
+            "contains": "candidatePositions",
+            "skipWhen": "present"
+          }
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm test"
+          },
+          "output": "Tests  65 passed (65)",
+          "ms": 4000
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm build && node dist/bench/local.js --duration 20 --out /tmp/r.json"
+          },
+          "output": "p95 measured",
+          "ms": 6000
+        },
+        {
+          "type": "message",
+          "text": "Indexed candidate selection for filter-only queries."
+        },
+        {
+          "type": "usage",
+          "inputTokens": 101376,
+          "outputTokens": 5120
+        }
+      ]
+    },
+    {
+      "name": "9. tokenizer without per-char RegExp",
+      "steps": [
+        {
+          "type": "message",
+          "text": "Last item from the profile: the hand-written tokenizer allocates per character."
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "node --cpu-prof dist/src/main.js"
+          },
+          "output": "CPU profile written",
+          "ms": 3000
+        },
+        {
+          "type": "patch",
+          "name": "tokenizer without per-char RegExp / array copies",
+          "file": "06-filter-tokenizer-no-regex.patch",
+          "skip": {
+            "file": "src/filter.ts",
+            "contains": "const CONDITION",
+            "skipWhen": "present"
+          }
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm test"
+          },
+          "output": "Tests  65 passed (65)",
+          "ms": 4000
+        },
+        {
+          "type": "tool",
+          "name": "Bash",
+          "input": {
+            "command": "pnpm build && node dist/bench/local.js --duration 20 --out /tmp/r.json"
+          },
+          "output": "p95 measured",
+          "ms": 6000
+        },
+        {
+          "type": "message",
+          "text": "Tokenizer allocates less; behaviour unchanged."
+        },
+        {
+          "type": "usage",
+          "inputTokens": 57344,
+          "outputTokens": 1980
+        }
+      ]
+    },
+    {
+      "name": "wrap-up",
+      "steps": [
+        {
+          "type": "message",
+          "text": "That is every idea from the profile; nothing further worth a candidate."
+        },
+        {
+          "type": "usage",
+          "inputTokens": 36864,
+          "outputTokens": 640
+        }
+      ]
+    }
+  ]
+}

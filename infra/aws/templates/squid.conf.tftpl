@@ -1,0 +1,18 @@
+# Ratchet egress proxy: HTTPS CONNECT to an allow-list of domains, nothing else.
+http_port ${proxy_port}
+
+acl agent_subnet src ${agent_subnet_cidr}
+acl tls_port port 443
+acl connect_method method CONNECT
+acl allowed_domains dstdomain ${allowed_domains}
+
+http_access deny !agent_subnet
+http_access deny !connect_method
+http_access deny connect_method !tls_port
+http_access allow connect_method allowed_domains
+http_access deny all
+
+cache deny all
+via off
+forwarded_for delete
+access_log stdio:/var/log/squid/access.log

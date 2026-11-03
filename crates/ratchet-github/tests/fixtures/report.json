@@ -1,0 +1,109 @@
+{
+  "optimizationId": "opt1",
+  "name": "Demo search p95",
+  "repo": "acme/search",
+  "baseRef": "main",
+  "metric": "http_req_duration.p95",
+  "direction": "minimize",
+  "status": "draft",
+  "baseline": {
+    "value": 412,
+    "noiseFloor": 0.02,
+    "stats": {
+      "value": 412,
+      "p50": 240,
+      "p95": 412,
+      "p99": 690,
+      "mean": 260
+    }
+  },
+  "best": {
+    "value": 180,
+    "stats": {
+      "value": 180,
+      "p50": 150,
+      "p95": 180,
+      "p99": 300,
+      "mean": 160
+    },
+    "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "gainPct": 56.310679611650485,
+  "wins": [
+    {
+      "index": 1,
+      "candidateId": "c1",
+      "agentId": "a1",
+      "agentKind": "claude-code",
+      "branch": "ratchet/opt1/claude",
+      "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "change": "Cache tokenizer",
+      "benchValue": 300,
+      "confirmValue": 305,
+      "fromValue": 412,
+      "toValue": 300,
+      "gainPct": 27.184466019417474,
+      "costUsd": 1.5
+    },
+    {
+      "index": 2,
+      "candidateId": "c2",
+      "agentId": "a2",
+      "agentKind": "codex",
+      "branch": "ratchet/opt1/codex",
+      "sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "change": "Index postings | fast",
+      "benchValue": 180,
+      "confirmValue": 185,
+      "fromValue": 300,
+      "toValue": 180,
+      "gainPct": 40,
+      "costUsd": 3.75
+    }
+  ],
+  "agents": [
+    {
+      "agentId": "a1",
+      "kind": "claude-code",
+      "branch": "ratchet/opt1/claude",
+      "candidates": 3,
+      "verified": 1,
+      "spendUsd": 3.75
+    },
+    {
+      "agentId": "a2",
+      "kind": "codex",
+      "branch": "ratchet/opt1/codex",
+      "candidates": 2,
+      "verified": 1,
+      "spendUsd": 3.75
+    }
+  ],
+  "verdicts": {
+    "pending": 0,
+    "verified": 2,
+    "rejected": 1,
+    "failed_confirm": 1,
+    "blocked": 1
+  },
+  "spend": {
+    "total": 8,
+    "estimated": 6.5,
+    "actual": 1.5,
+    "byCategory": {
+      "agent_runner": 3,
+      "experiment": 2.25,
+      "bench_runner": 0.5,
+      "storage_egress": 0,
+      "tokens": 2.25
+    }
+  },
+  "costPerVerifiedWinUsd": 4,
+  "reproduction": {
+    "commands": [
+      "git fetch origin main ratchet/opt1/claude ratchet/opt1/codex",
+      "git checkout bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "k6 run bench/k6/search.js"
+    ]
+  }
+}

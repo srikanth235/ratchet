@@ -1,0 +1,19 @@
+{
+  "name": "@ratchet/demo-search",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:contract": "vitest run tests/contract",
+    "start": "node dist/src/main.js",
+    "bench:local": "pnpm build && node dist/bench/local.js",
+    "bench:mix": "pnpm build && node dist/bench/traces/generate.js"
+  },
+  "devDependencies": {
+    "yaml": "^2.9.1"
+  }
+}

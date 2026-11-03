@@ -1,0 +1,3 @@
+dist/
+.last-build-*.log
+.packer.d/

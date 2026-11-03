@@ -1,0 +1,5 @@
+{
+ "search.none": "No task title contains \"{query}\".",
+ "search.suggest": "Try: {words}",
+ "search.summary": "{shown} of {total, plural, one {# match} other {# matches}}"
+}

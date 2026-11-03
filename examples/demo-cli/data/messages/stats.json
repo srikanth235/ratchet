@@ -1,0 +1,10 @@
+{
+ "stats.by.status": "STATUS",
+ "stats.by.assignee": "ASSIGNEE",
+ "stats.by.label": "LABEL",
+ "stats.by.priority": "PRIORITY",
+ "stats.header.count": "TASKS",
+ "stats.header.hours": "HOURS",
+ "stats.header.share": "SHARE",
+ "stats.total": "{total, plural, one {# task} other {# tasks}} in {groups, plural, one {# group} other {# groups}}"
+}

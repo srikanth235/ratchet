@@ -1,0 +1,40 @@
+diff --git a/src/tz.ts b/src/tz.ts
+index f72c53a..c0368b4 100644
+--- a/src/tz.ts
++++ b/src/tz.ts
+@@ -1,5 +1,5 @@
+ /**
+- * Time zones: which names are valid and what they are (standard offset, daylight-saving offset). The table of
+- * every zone the runtime knows is built when the module loads, by asking Intl for the UTC offset in force on
+- * the 15th of every second month of a reference year.
++ * Time zones: which names are valid and what they are (standard offset, daylight-saving offset). A zone is
++ * described when it is first asked for, by asking Intl for the UTC offset in force on the 15th of every
++ * second month of a reference year.
+  */
+@@ -30,4 +30,4 @@ function describeZone(name: string): ZoneInfo {
+ 
+-const ZONES = new Map<string, ZoneInfo>();
+-for (const name of ['UTC', ...Intl.supportedValuesOf('timeZone')]) ZONES.set(name, describeZone(name));
++/** Zones are described when first asked for (null: not a zone); a run uses one or two. */
++const ZONES = new Map<string, ZoneInfo | null>();
+ 
+@@ -43,4 +43,13 @@ function resolves(name: string): boolean {
+ 
++function lookup(name: string): ZoneInfo | undefined {
++  let zone = ZONES.get(name);
++  if (zone === undefined) {
++    zone = resolves(name) ? describeZone(name) : null;
++    ZONES.set(name, zone);
++  }
++  return zone ?? undefined;
++}
++
+ export function isKnownZone(name: string): boolean {
+-  return ZONES.has(name) || resolves(name);
++  return lookup(name) !== undefined;
+ }
+@@ -48,3 +57,3 @@ export function isKnownZone(name: string): boolean {
+ export function zoneInfo(name: string): ZoneInfo {
+-  const zone = ZONES.get(name) ?? (resolves(name) ? describeZone(name) : undefined);
++  const zone = lookup(name);
+   if (!zone) throw new RangeError(`unknown time zone ${JSON.stringify(name)}`);

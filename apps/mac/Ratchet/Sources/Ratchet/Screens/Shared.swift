@@ -1,0 +1,201 @@
+import RatchetKit
+import SwiftUI
+
+// Small pieces shared by several screens: status tones for the domain types, the result cell, the optimization table.
+
+extension OptimizationStatus {
+    var tone: StatusTone {
+        switch self {
+        case .running: .run
+        case .waiting: .off
+        case .merged, .done: .ok
+        case .noWin: .off
+        case .failed: .bad
+        }
+    }
+}
+
+extension Verdict {
+    var tone: StatusTone {
+        switch self {
+        case .evaluating: .run
+        case .verified: .ok
+        case .noise: .off
+        case .blocked: .bad
+        }
+    }
+}
+
+extension ConnectorState {
+    var tone: StatusTone {
+        switch self {
+        case .connected, .signedIn, .valid: .ok
+        case .expired: .wait
+        case .signedOut: .off
+        }
+    }
+}
+
+extension AgentState {
+    var tone: StatusTone {
+        switch self {
+        case .working: .run
+        case .paused: .wait
+        case .idle: .off
+        }
+    }
+}
+
+/// "−30%  412 → 288 ms", or why there is no result.
+struct ResultCell: View {
+    let optimization: Optimization
+
+    var body: some View {
+        if let change = optimization.change, let text = optimization.resultText {
+            HStack(spacing: Space.sm) {
+                Text(Percent.signed(change))
+                    .kitType(.mono)
+                    .foregroundStyle(optimization.isImprovement ? Ink.ok : Ink.bad)
+                Text(text).kitType(.meta).foregroundStyle(Ink.textFaint).lineLimit(1)
+            }
+        } else if optimization.status == .noWin {
+            let noise = optimization.noise.map { " (" + Percent.noise($0) + ")" } ?? ""
+            Text("nothing beat the noise" + noise).kitType(.meta).foregroundStyle(Ink.textFaint).lineLimit(1)
+        } else {
+            Text("no win yet").kitType(.meta).foregroundStyle(Ink.textFaint)
+        }
+    }
+}
+
+/// "$4.8k", or "$2.9k pending" while the win is in an open pull request: pending value is quieter and never counts as delivered.
+struct ValueCell: View {
+    let optimization: Optimization
+
+    /// Verified wins whose pull request is open and not merged yet.
+    static func isPending(_ optimization: Optimization) -> Bool {
+        optimization.status == .done && optimization.prNumber != nil && optimization.valuePerYearUSD != nil
+    }
+
+    var body: some View {
+        let pending = Self.isPending(optimization)
+        HStack(spacing: Space.xs) {
+            if pending { Text("pending").kitType(.micro).foregroundStyle(Ink.textFaint) }
+            Text(optimization.valuePerYearUSD.map(Money.short) ?? "—")
+                .kitType(.mono)
+                .foregroundStyle(optimization.valuePerYearUSD == nil || pending ? Ink.textFaint : Ink.text)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(optimization.valuePerYearUSD.map { Money.short($0) + " a year" + (pending ? ", pending until its pull request merges" : "") } ?? "No value yet")
+    }
+}
+
+/// "$38 / 50" in mono, the budget quieter.
+struct SpentCell: View {
+    let optimization: Optimization
+
+    var body: some View {
+        let parts = Figure.spentOf(optimization.spentUSD, budget: optimization.budgetUSD)
+        HStack(spacing: 0) {
+            Text(parts.spent).kitType(.mono).foregroundStyle(Ink.text)
+            if let budget = parts.budget {
+                Text(" / " + budget).kitType(.mono).foregroundStyle(Ink.textFaint)
+            }
+        }
+    }
+}
+
+enum TableColumns {
+    /// The optimization name column's floor: a title and its `owner/repo` line without a cut at the default window.
+    static let name: CGFloat = 208
+    static let status: CGFloat = 128
+    static let result: CGFloat = 176
+    static let spent: CGFloat = 88
+    static let value: CGFloat = 72
+}
+
+extension Optimization {
+    // Sort keys of the table's columns: the columns whose value is not Comparable as it stands.
+    var statusRank: Int {
+        switch status {
+        case .running: 0
+        case .waiting: 1
+        case .merged: 2
+        case .done: 3
+        case .noWin: 4
+        case .failed: 5
+        }
+    }
+
+    var changeSort: Double { change ?? 0 }
+    var valueSort: Double { valuePerYearUSD ?? 0 }
+}
+
+/// The optimizations table of the Overview and the Optimizations page: a native `Table` with selection (one or several rows),
+/// sorting by any column, a context menu (Open, Run Now, Stop…, Open Pull Request, Copy Link), a drag that carries the pull
+/// request's link, and Return or a double click to open. The selection is published to the menu bar (`optimizationSelection`).
+struct OptimizationTable: View {
+    let optimizations: [Optimization]
+    /// True inside a scrolling page (the Overview): the table takes the height its rows need and scrolls with the page. False:
+    /// it fills the space it is given and scrolls itself.
+    var sizesToRows = false
+    @Environment(AppRouter.self) private var router
+    @State private var selection = Set<Optimization.ID>()
+    @State private var sortOrder: [KeyPathComparator<Optimization>] = []
+
+    /// A two-line row and the header, with room to spare: the table has no way to say how tall its rows came out.
+    private static let rowHeight: CGFloat = 56
+    private static let headerHeight: CGFloat = 32
+
+    var body: some View {
+        let rows = sortOrder.isEmpty ? optimizations : optimizations.sorted(using: sortOrder)
+        Table(of: Optimization.self, selection: $selection, sortOrder: $sortOrder) {
+            // The name column never gives way below its floor, so "Forecast accuracy" and its repo are read whole at the default width.
+            TableColumn("Optimization", value: \.title) { optimization in
+                TitleStack(title: optimization.title, subtitle: optimization.repo)
+            }
+            .width(min: TableColumns.name, ideal: TableColumns.name + Space.lg)
+            TableColumn("Status", value: \.statusRank) { optimization in
+                StatusLabel(tone: optimization.status.tone, text: optimization.statusText, caption: Self.caption(optimization))
+            }
+            .width(min: 112, ideal: 120, max: 144)
+            TableColumn("Result", value: \.changeSort) { optimization in
+                ResultCell(optimization: optimization)
+            }
+            .width(min: 136, ideal: 152)
+            TableColumn("Spent", value: \.spentUSD) { optimization in
+                SpentCell(optimization: optimization).frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .width(min: 72, ideal: 80, max: 104)
+            TableColumn("Value / yr", value: \.valueSort) { optimization in
+                ValueCell(optimization: optimization)
+            }
+            .width(min: 72, ideal: 88, max: 112)
+        } rows: {
+            ForEach(rows) { optimization in
+                TableRow(optimization)
+                    .draggable(OptimizationAction.link(for: optimization))
+            }
+        }
+        // No banded rows: bands past the last row read as empty skeleton rows.
+        .tableStyle(.inset(alternatesRowBackgrounds: false))
+        .scrollContentBackground(.hidden)
+        .contextMenu(forSelectionType: Optimization.ID.self) { ids in
+            OptimizationMenuItems(ids: Array(ids))
+        } primaryAction: { ids in
+            if ids.count == 1, let id = ids.first { router.open(optimization: id) }
+        }
+        .onChange(of: rows.map(\.id)) { _, ids in selection.formIntersection(ids) }
+        .focusedSceneValue(\.optimizationSelection, Array(selection))
+        .frame(height: sizesToRows ? CGFloat(rows.count) * Self.rowHeight + Self.headerHeight : nil)
+        .scrollDisabled(sizesToRows)
+        .accessibilityLabel("Optimizations")
+    }
+
+    /// The grey line under the status: the time left while it runs, why it failed after a failure.
+    private static func caption(_ optimization: Optimization) -> String? {
+        if optimization.status == .failed { return optimization.failureReason }
+        guard optimization.status == .running, let left = optimization.secondsLeft else { return nil }
+        return Elapsed.hm(left) + " left"
+    }
+}

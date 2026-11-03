@@ -1,0 +1,21 @@
+Due within 14 days in Europe/Berlin (UTC+01:00/UTC+02:00); today is 2026-03-02
+2026-03-02
+  #45 P3 mia.jensen     Review webhook with better errors
+2026-03-03
+  #156 P4 priya.nair     Instrument address form on slow networks
+2026-03-06
+  #218 P1 raj.patel      Review dashboard for large accounts
+  #211 P3 maya.chen      Simplify tax rules for EU customers
+2026-03-08
+  #42 P1 kenji.mori     Simplify onboarding in the mobile app
+2026-03-09
+  #76 P2 maya.chen      Test email template after the last release
+2026-03-12
+  #142 P1 omar.haddad    Refactor rate limit for large accounts
+  #68 P4 nora.lund      Optimize onboarding in the admin console
+2026-03-14
+  #136 P1 maya.chen      Fix password reset on retry
+  #158 P2 jonas.berg     Deprecate webhook when the queue is full
+2026-03-16
+  #209 P1 hana.kim       Optimize coupon with better errors
+11 tasks due, 48 overdue

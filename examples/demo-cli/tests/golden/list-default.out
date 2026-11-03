@@ -1,0 +1,14 @@
+ID  PRI  STATUS  ASSIGNEE     DUE         TITLE
+ 1  P2   todo    jonas.berg   -           Rename coupon when the queue is full
+ 2  P1   todo    omar.haddad  -           Test webhook when the queue is full
+ 3  P1   todo    yara.saleh   2026-03-30  Document refund in staging
+ 4  P2   done    maya.chen    -           Fix webhook in the mobile app
+ 5  P1   doing   tomas.ruiz   -           Split sitemap in the mobile app
+ 6  P4   todo    omar.haddad  -           Migrate invoice with better errors
+ 7  P4   done    ivan.petrov  2026-03-09  Simplify inventory sync in the admin …
+ 8  P3   done    iris.tanaka  2026-02-18  Migrate avatar upload for EU customers
+ 9  P4   done    zoe.martin   2026-03-17  Fix checkout in the admin console
+10  P1   done    iris.tanaka  -           Validate permissions for the new plan
+11  P4   todo    ivan.petrov  -           Instrument password reset with better…
+12  P2   doing   hana.kim     2026-01-21  Cache address form after the last rel…
+12 of 240 tasks

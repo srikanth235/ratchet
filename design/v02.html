@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ratchet v0.2 · calm screens</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Instrument+Serif&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Calm Midnight Brass: one accent, hairlines instead of boxes, few words, big numbers only where they matter. */
+:root{--bg:#070B12;--win:#0B1019;--raise:#101724;--line:rgba(148,163,190,.11);--line2:rgba(148,163,190,.2);
+--tx:#ECEFF4;--mu:#A7B1C2;--fa:#7E8CA3;--br:#D9B26F;--br2:#EBCB8E;--mint:#7FD1AE;--amber:#E9B85C;--rose:#E58C8C}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:13.5px/1.45 'Instrument Sans',-apple-system,'Helvetica Neue',sans-serif}
+.serif{font-family:'Instrument Serif',Georgia,serif;font-weight:400;letter-spacing:-.01em}
+.mono{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-size:12.5px}
+.screen{padding:28px;width:1440px}
+.win{display:flex;background:var(--win);border:1px solid var(--line);border-radius:16px;overflow:hidden;min-height:880px}
+nav{width:216px;flex:none;border-right:1px solid var(--line);padding:18px 14px;display:flex;flex-direction:column;gap:26px}
+.lights{display:flex;gap:8px;padding:0 4px}.lights i{width:12px;height:12px;border-radius:6px;display:block;background:#2A3242}
+.brand{display:flex;align-items:center;gap:10px;padding:0 6px}
+.nav{display:flex;align-items:center;gap:11px;height:34px;padding:0 10px;border-radius:8px;color:var(--fa)}
+.nav svg{stroke:currentColor}
+.nav.on{color:var(--tx);background:rgba(148,163,190,.07)}
+.nav.on svg{stroke:var(--br)}
+.sbx{margin-top:auto;padding:0 10px;color:var(--fa);font-size:12px;line-height:1.6}
+.dot{display:inline-block;width:7px;height:7px;border-radius:4px;margin-right:7px;vertical-align:1px}
+.d-ok{background:var(--mint)}.d-run{background:var(--br);box-shadow:0 0 0 3px rgba(217,178,111,.18)}.d-wait{background:var(--amber)}.d-off{background:#4A5568}.d-bad{background:var(--rose)}
+main{flex:1;padding:40px 56px 48px;display:flex;flex-direction:column;gap:40px;min-width:0}
+.head{display:flex;align-items:center;gap:14px}
+h1{margin:0;font-size:32px;line-height:1}
+h2{margin:0 0 14px;font-size:13px;font-weight:600;color:var(--mu)}
+.sub{color:var(--fa);margin-top:8px}
+.btn{height:34px;padding:0 14px;border-radius:9px;border:1px solid var(--line2);background:transparent;color:var(--tx);font:500 13px 'Instrument Sans',sans-serif;display:inline-flex;align-items:center;gap:8px;white-space:nowrap}
+.btn.pri{background:var(--br);color:#16110A;border-color:var(--br);font-weight:600}
+.btn.sm{height:28px;padding:0 11px;font-size:12px}
+.link{color:var(--br2)}
+.sp{margin-left:auto}
+.range{display:inline-flex;gap:2px;color:var(--fa);font-size:12px}
+.range span{padding:5px 10px;border-radius:7px}.range .on{color:var(--tx);background:rgba(148,163,190,.08)}
+/* hero numbers */
+.hero{display:grid;grid-template-columns:repeat(3,1fr);gap:0}
+.hero>div{padding-right:32px}
+.hero>div+div{padding-left:32px;border-left:1px solid var(--line)}
+.lbl{color:var(--fa);font-size:12.5px}
+.big{font-size:56px;line-height:1.05;margin-top:6px}
+.big small{font-size:22px;color:var(--mu);margin-left:4px}
+.note{color:var(--fa);font-size:12.5px;margin-top:6px}
+.bar{height:3px;border-radius:2px;background:rgba(148,163,190,.12);margin-top:12px;overflow:hidden}.bar i{display:block;height:100%;background:var(--br);border-radius:2px}
+/* lists */
+.list{border-top:1px solid var(--line)}
+.li{display:flex;align-items:center;gap:14px;padding:14px 0;border-bottom:1px solid var(--line)}
+.li .t{font-weight:500}.li .s{color:var(--fa);font-size:12.5px}
+.grid2{display:grid;grid-template-columns:1.7fr 1fr;gap:56px}
+table{width:100%;border-collapse:collapse}
+th{font-weight:500;color:var(--fa);font-size:12px;text-align:left;padding:0 0 10px;border-bottom:1px solid var(--line)}
+td{padding:15px 0;border-bottom:1px solid var(--line);vertical-align:middle}
+th.r,td.r{text-align:right}
+td .s{color:var(--fa);font-size:12.5px}
+.up{color:var(--mint)}
+/* chart */
+.chart{position:relative}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.tip{position:absolute;pointer-events:none;background:#1A2232;border:1px solid var(--line2);border-radius:8px;padding:7px 10px;font-size:12px;white-space:nowrap;transform:translate(-50%,-115%);opacity:0;transition:opacity .1s}
+.tip b{font-weight:600}.tip span{color:var(--fa)}
+/* steps */
+.progress{display:flex;align-items:center;gap:14px;color:var(--fa);font-size:12.5px}
+.progress .segs{display:flex;gap:4px}.progress .segs i{width:28px;height:3px;border-radius:2px;background:rgba(148,163,190,.18)}.progress .segs i.on{background:var(--br)}
+/* choices */
+.choices{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.ch{border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:flex;gap:12px;align-items:flex-start}
+.ch.sel{border-color:rgba(217,178,111,.55);background:rgba(217,178,111,.05)}
+.ch.dis{opacity:.45}
+.ch .t{font-weight:500}.ch .s{color:var(--fa);font-size:12.5px;margin-top:2px}
+.rd{width:15px;height:15px;border-radius:8px;border:1.5px solid var(--line2);flex:none;margin-top:2px}
+.sel .rd{border:4.5px solid var(--br)}
+.cb{width:15px;height:15px;border-radius:4px;border:1.5px solid var(--line2);flex:none;margin-top:2px;position:relative}
+.sel .cb{background:var(--br);border-color:var(--br)}
+.sel .cb:after{content:'';position:absolute;left:3.5px;top:.5px;width:4px;height:8px;border:solid #16110A;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.where{margin-top:10px;font-size:12px;color:var(--fa)}.where b{color:var(--tx);font-weight:500}
+.field{flex:1;height:36px;border:1px solid var(--line2);border-radius:9px;color:var(--fa);padding:0 12px;display:flex;align-items:center}
+.ok-line{display:flex;align-items:center;gap:8px;color:var(--mu)}
+.ok-line svg{flex:none}
+.quote{font-size:26px;line-height:1.25;max-width:880px}
+.quote em{font-style:normal;color:var(--br2)}
+</style>
+</head>
+<body>
+
+<template id="side">
+<nav>
+  <div class="lights"><i></i><i></i><i></i></div>
+  <div class="brand"><svg width="22" height="22" viewBox="0 0 18 18" fill="none" stroke="#D9B26F" stroke-width="1.7" stroke-linejoin="round"><path d="M2 13.5 L6 5 V13.5 L10 5 V13.5 L14 5 V13.5"/></svg><span class="serif" style="font-size:23px">Ratchet</span></div>
+  <div style="display:flex;flex-direction:column;gap:2px">
+    <div class="nav" data-k="home"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round"><path d="M2.5 11.5a5.5 5.5 0 1 1 11 0"/><path d="M8 11.5l2.8-3.6"/></svg>Overview</div>
+    <div class="nav" data-k="opt"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round"><path d="M2 13.5 L5.5 6 V13.5 L9 6 V13.5 L12.5 6 V13.5"/></svg>Optimizations</div>
+    <div class="nav" data-k="bench"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round"><path d="M3 13.5V9M6.3 13.5V5M9.7 13.5V7.5M13 13.5V3"/></svg>Benchmarks</div>
+    <div class="nav" data-k="conn"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke-width="1.5" stroke-linecap="round"><path d="M6 10l4-4M5 7.5 3.5 9a2.5 2.5 0 0 0 3.5 3.5L8.5 11M11 8.5 12.5 7A2.5 2.5 0 0 0 9 3.5L7.5 5"/></svg>Connectors</div>
+  </div>
+  <div class="sbx"><span class="dot d-ok"></span>Sandbox on · acme-prod<br><span style="padding-left:14px">$1.20 so far · off at 15:40</span></div>
+</nav>
+</template>
+
+<!-- ================= 1 · Overview ================= -->
+<section class="screen" id="s1"><div class="win"><div data-side="home"></div>
+<main>
+  <div class="head">
+    <h1 class="serif">Overview</h1>
+    <div class="range sp"><span>30 days</span><span class="on">90 days</span><span>All time</span></div>
+    <button class="btn pri">New optimization</button>
+  </div>
+
+  <div class="hero">
+    <div>
+      <div class="lbl">Spent</div>
+      <div class="big serif">$184</div>
+      <div class="bar"><i style="width:37%"></i></div>
+      <div class="note">of $500 across AWS and agent keys</div>
+    </div>
+    <div>
+      <div class="lbl">Value locked in</div>
+      <div class="big serif">$15.4k<small>/ yr</small></div>
+      <div class="note">from 9 verified wins (estimated)</div>
+    </div>
+    <div>
+      <div class="lbl">Return</div>
+      <div class="big serif">84×</div>
+      <div class="note">yearly value for every $1 spent · paid back in 4 days</div>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div>
+      <h2>Value locked in, per year</h2>
+      <div class="chart" id="chart"><div class="tip" id="tip"></div></div>
+    </div>
+    <div>
+      <h2>Needs you</h2>
+      <div class="list">
+        <div class="li"><span class="dot d-wait"></span><div><div class="t">Approve environment</div><div class="s">Search relevance · full stack, $0.59/h</div></div><button class="btn sm sp">Review</button></div>
+        <div class="li"><span class="dot d-wait"></span><div><div class="t">Merge 3 verified wins</div><div class="s">CLI cold start · −39% · PR #214</div></div><button class="btn sm sp">Open PR</button></div>
+      </div>
+      <div class="note" style="margin-top:14px">Nothing else is waiting on you.</div>
+    </div>
+  </div>
+
+  <div>
+    <h2>Optimizations</h2>
+    <table>
+      <thead><tr><th style="width:34%">Optimization</th><th>Status</th><th>Result</th><th class="r">Spent</th><th class="r">Value / yr</th></tr></thead>
+      <tbody>
+        <tr><td>Checkout p95<div class="s">acme-org/shop-api</div></td><td><span class="dot d-run"></span>Running<div class="s" style="padding-left:14px">1 h 12 m left</div></td><td><span class="up mono">−30%</span> <span class="s">412 → 288 ms</span></td><td class="r mono">$38 <span class="s">/ 50</span></td><td class="r mono">$4.8k</td></tr>
+        <tr><td>Search relevance<div class="s">acme-org/search-svc</div></td><td><span class="dot d-wait"></span>Waiting on you</td><td><span class="up mono">+5.9%</span> <span class="s">nDCG 0.612 → 0.648</span></td><td class="r mono">$22 <span class="s">/ 80</span></td><td class="r mono">$2.9k</td></tr>
+        <tr><td>Forecast accuracy<div class="s">acme-org/demand-model</div></td><td><span class="dot d-ok"></span>Merged</td><td><span class="up mono">−13%</span> <span class="s">WAPE 18.2 → 15.9%</span></td><td class="r mono">$64</td><td class="r mono">$6.5k</td></tr>
+        <tr><td>CLI cold start<div class="s">srikanth235/acme-cli</div></td><td><span class="dot d-ok"></span>Done</td><td><span class="up mono">−39%</span> <span class="s">840 → 510 ms</span></td><td class="r mono">$41</td><td class="r mono">$1.2k</td></tr>
+        <tr><td>Bundle size<div class="s">acme-org/web-app</div></td><td><span class="dot d-off"></span>No win</td><td><span class="s">nothing beat the noise (±2%)</span></td><td class="r mono">$19</td><td class="r mono s">—</td></tr>
+      </tbody>
+    </table>
+  </div>
+</main></div></section>
+
+<!-- ================= 2 · Connectors ================= -->
+<section class="screen" id="s2"><div class="win"><div data-side="conn"></div>
+<main style="max-width:980px">
+  <div class="head">
+    <div><h1 class="serif">Connectors</h1><div class="sub">Accounts each optimization can use. Secrets stay in your keychain.</div></div>
+    <button class="btn pri sp">Add connector</button>
+  </div>
+
+  <div>
+    <h2>GitHub</h2>
+    <div class="list">
+      <div class="li"><div style="flex:1"><div class="t">srikanth235</div><div class="s">Personal · 42 repos</div></div><span class="s link">Default</span><span style="width:120px"><span class="dot d-ok"></span>Connected</span></div>
+      <div class="li"><div style="flex:1"><div class="t">acme-org</div><div class="s">GitHub App · 18 repos</div></div><span style="width:120px"><span class="dot d-ok"></span>Connected</span></div>
+    </div>
+  </div>
+
+  <div>
+    <h2>AWS</h2>
+    <div class="list">
+      <div class="li"><div style="flex:1"><div class="t">acme-prod</div><div class="s">SSO · us-east-1 · cap $500 / month</div></div><span class="s link">Default</span><span style="width:120px"><span class="dot d-ok"></span>Connected</span></div>
+      <div class="li"><div style="flex:1"><div class="t">personal-dev</div><div class="s">~/.aws profile · us-west-2 · cap $100 / month</div></div><span style="width:120px"><span class="dot d-ok"></span>Connected</span></div>
+      <div class="li"><div style="flex:1"><div class="t">acme-staging</div><div class="s">SSO · eu-west-1</div></div><button class="btn sm">Sign in</button><span style="width:120px"><span class="dot d-wait"></span>Expired</span></div>
+    </div>
+  </div>
+
+  <div>
+    <h2>Agents</h2>
+    <div class="list">
+      <div class="li"><div style="flex:1"><div class="t">Claude Code · your login</div><div class="s">Found on this Mac · v2.1.314</div></div><span class="s link">Default</span><span style="width:120px"><span class="dot d-ok"></span>Signed in</span></div>
+      <div class="li"><div style="flex:1"><div class="t">Claude Code · team key</div><div class="s">API key ····4f2a · also runs in the cloud</div></div><span style="width:120px"><span class="dot d-ok"></span>Valid</span></div>
+      <div class="li"><div style="flex:1"><div class="t">Codex · your login</div><div class="s">Found on this Mac · v0.166 · run <span class="mono">codex login</span></div></div><span style="width:120px"><span class="dot d-off"></span>Signed out</span></div>
+    </div>
+  </div>
+</main></div></section>
+
+<!-- ================= 3 · New optimization · connections ================= -->
+<section class="screen" id="s3"><div class="win"><div data-side="opt"></div>
+<main style="max-width:1080px">
+  <div>
+    <div class="progress"><span class="segs"><i class="on"></i><i class="on"></i><i></i><i></i></span>Step 2 of 4 · Connections</div>
+    <h1 class="serif" style="margin-top:16px">Make checkout p95 faster</h1>
+    <div class="sub">acme-org/shop-api · main</div>
+  </div>
+
+  <div>
+    <h2>AWS account</h2>
+    <div class="choices">
+      <div class="ch sel"><span class="rd"></span><div><div class="t">acme-prod</div><div class="s">$412 left this month</div></div></div>
+      <div class="ch"><span class="rd"></span><div><div class="t">personal-dev</div><div class="s">$96 left this month</div></div></div>
+      <div class="ch dis"><span class="rd"></span><div><div class="t">acme-staging</div><div class="s">Expired</div></div></div>
+    </div>
+  </div>
+
+  <div>
+    <h2>Agents</h2>
+    <div class="choices">
+      <div class="ch sel"><span class="cb"></span><div><div class="t">Claude Code · your login</div><div class="s">Free while this Mac is awake</div><div class="where">Runs on <b>this Mac</b> · <span class="link">change</span></div></div></div>
+      <div class="ch sel"><span class="cb"></span><div><div class="t">Claude Code · team key</div><div class="s">Billed to the key</div><div class="where">Runs in <b>the cloud</b> · <span class="link">change</span></div></div></div>
+      <div class="ch dis"><span class="cb"></span><div><div class="t">Codex · your login</div><div class="s">Signed out</div></div></div>
+    </div>
+  </div>
+
+  <div class="head" style="margin-top:auto">
+    <button class="btn">Back</button>
+    <span class="note sp" style="margin-top:0">Remembered for this repo</span>
+    <button class="btn pri">Continue</button>
+  </div>
+</main></div></section>
+
+<!-- ================= 4 · New optimization · environment ================= -->
+<section class="screen" id="s4"><div class="win"><div data-side="opt"></div>
+<main style="max-width:1080px">
+  <div>
+    <div class="progress"><span class="segs"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></span>Step 3 of 4 · Environment</div>
+    <h1 class="serif" style="margin-top:16px">Make checkout p95 faster</h1>
+    <div class="sub">Drafted by Claude Code from the repo and your goal · 2 min · $0.31</div>
+  </div>
+
+  <div>
+    <div class="quote serif">This task needs the <em>full stack</em>: the API, Postgres with seeded orders, Redis, and a separate load generator.</div>
+    <div class="note" style="margin-top:10px">p95 depends on database queries, so a single machine wouldn't measure it. <span class="link">Use a smaller setup</span></div>
+  </div>
+
+  <div class="grid2" style="grid-template-columns:1.4fr 1fr">
+    <div>
+      <h2>What gets created</h2>
+      <table>
+        <tbody>
+          <tr><td>API<div class="s">shop-api in the repo's container</div></td><td class="s">c7i.2xlarge</td><td class="r mono">$0.36/h</td></tr>
+          <tr><td>Postgres 16<div class="s">2.1 GB of anonymised orders</div></td><td class="s">r7g.large</td><td class="r mono">$0.11/h</td></tr>
+          <tr><td>Redis 7<div class="s">emptied before each measurement</div></td><td class="s">t4g.medium</td><td class="r mono">$0.03/h</td></tr>
+          <tr><td>Load generator<div class="s">k6, on its own host</div></td><td class="s">c7i.large</td><td class="r mono">$0.09/h</td></tr>
+        </tbody>
+      </table>
+      <div class="note" style="margin-top:12px"><span class="link">View files</span> · main.tf, Dockerfile, seed.sh</div>
+    </div>
+    <div>
+      <h2>Cost</h2>
+      <div class="big serif" style="font-size:44px;margin:0">$0.59<small>/ h</small></div>
+      <div class="note">ready in ~6 min · about $1.18 for a 2 h run</div>
+      <div class="ok-line" style="margin-top:22px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#7FD1AE" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3 3 7-7"/></svg>Passed Ratchet's checks</div>
+      <div class="note" style="padding-left:24px;margin-top:2px">isolated, results sealed, same hardware every time, full teardown</div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:10px;align-items:center;margin-top:auto">
+    <div class="field">Ask for a change, e.g. “use RDS instead of a Postgres container”</div>
+    <button class="btn">Send</button>
+  </div>
+  <div class="head">
+    <button class="btn">Back</button>
+    <span class="note sp" style="margin-top:0">Locked once approved. Agents change code only.</span>
+    <button class="btn">Open as PR</button>
+    <button class="btn pri">Approve</button>
+  </div>
+</main></div></section>
+
+<script>
+document.querySelectorAll('[data-side]').forEach(h=>{const n=document.getElementById('side').content.cloneNode(true);n.querySelector(`[data-k="${h.dataset.side}"]`).classList.add('on');h.replaceWith(n)});
+
+// Staircase of value locked in (single series, brass). Each step is one verified win.
+const wins=[[6,1.2,'CLI cold start'],[14,2.4,'CLI cold start'],[23,4.1,'Forecast accuracy'],[31,6.0,'Forecast accuracy'],[38,8.6,'Forecast accuracy'],[52,10.6,'Search relevance'],[60,11.5,'Search relevance'],[73,13.6,'Checkout p95'],[84,15.4,'Checkout p95']];
+const W=760,H=250,L=8,R=58,T=12,B=28,X=d=>L+d/90*(W-L-R),Y=v=>T+(1-v/16)*(H-T-B);
+let d=`M${X(0)} ${Y(0)}`;for(const[x,v]of wins){d+=` H${X(x)} V${Y(v)}`}d+=` H${X(90)}`;
+const grid=[0,5,10,15].map(v=>`<line x1="${L}" x2="${W-R}" y1="${Y(v)}" y2="${Y(v)}" stroke="rgba(148,163,190,.1)"/><text x="${W-R+10}" y="${Y(v)+4}" fill="#7E8CA3" font-size="11" font-family="JetBrains Mono,monospace">${v?"$"+v+"k":"$0"}</text>`).join('');
+const ticks=[[0,'Aug 2'],[30,'Sep 1'],[60,'Oct 1'],[90,'Oct 31']].map(([x,t],i)=>`<text x="${X(x)}" y="${H-6}" fill="#7E8CA3" font-size="11" text-anchor="${i===0?'start':i===3?'end':'middle'}" font-family="Instrument Sans,sans-serif">${t}</text>`).join('');
+const dots=wins.map(([x,v,n],i)=>`<circle cx="${X(x)}" cy="${Y(v)}" r="4" fill="#D9B26F" stroke="#0B1019" stroke-width="2"/><circle cx="${X(x)}" cy="${Y(v)}" r="14" fill="transparent" data-i="${i}" style="cursor:pointer"/>`).join('');
+const svg=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Value locked in per year rose from $0 to $15.4k over 90 days through 9 verified wins">
+<defs><linearGradient id="g" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#D9B26F" stop-opacity=".16"/><stop offset="1" stop-color="#D9B26F" stop-opacity="0"/></linearGradient></defs>
+${grid}<path d="${d} V${Y(0)} H${X(0)}Z" fill="url(#g)"/><path d="${d}" fill="none" stroke="#D9B26F" stroke-width="2" stroke-linejoin="round"/>${dots}${ticks}</svg>`;
+const c=document.getElementById('chart');c.insertAdjacentHTML('afterbegin',svg);
+const tip=document.getElementById('tip');
+c.querySelectorAll('[data-i]').forEach(el=>{el.addEventListener('mouseenter',()=>{const[x,v,n]=wins[+el.dataset.i];const r=c.querySelector('svg').getBoundingClientRect(),s=r.width/W;tip.innerHTML=`<b>$${v.toFixed(1)}k / yr</b> <span>· ${n}</span>`;tip.style.left=X(x)*s+'px';tip.style.top=Y(v)*s+'px';tip.style.opacity=1});el.addEventListener('mouseleave',()=>tip.style.opacity=0)});
+</script>
+</body>
+</html>

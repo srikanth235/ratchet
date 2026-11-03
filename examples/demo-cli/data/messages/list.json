@@ -1,0 +1,10 @@
+{
+ "list.empty": "No tasks match.",
+ "list.header.id": "ID",
+ "list.header.priority": "PRI",
+ "list.header.status": "STATUS",
+ "list.header.assignee": "ASSIGNEE",
+ "list.header.due": "DUE",
+ "list.header.title": "TITLE",
+ "list.summary": "{shown} of {total, plural, one {# task} other {# tasks}}"
+}

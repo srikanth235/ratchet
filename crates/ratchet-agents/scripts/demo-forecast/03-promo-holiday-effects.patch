@@ -1,0 +1,77 @@
+diff --git a/src/calendar.ts b/src/calendar.ts
+new file mode 100644
+index 0000000..269e9d4
+--- /dev/null
++++ b/src/calendar.ts
+@@ -0,0 +1,55 @@
++/**
++ * Promotion and holiday effects. Planned promotions and holidays are known in advance, so their lift is estimated from
++ * history (per category: robust median of the sales ratio against nearby ordinary weeks), taken out of the history
++ * before the model sees it, and put back on the forecast weeks that have a promotion or holiday.
++ */
++import { type Series } from './features.js';
++
++/** Weeks on each side that define "ordinary" nearby sales. */
++const NEIGHBOURHOOD = 6;
++const MIN_NEIGHBOURS = 4;
++
++export interface Effects {
++  /** Per category: relative lift of a promotion week. */
++  promo: number[];
++  /** Per category: relative lift of a week with holiday intensity 1. */
++  holiday: number[];
++}
++
++function median(xs: number[]): number {
++  if (xs.length === 0) return 0;
++  const s = [...xs].sort((a, b) => a - b);
++  const m = s.length >> 1;
++  return s.length % 2 ? s[m]! : (s[m - 1]! + s[m]!) / 2;
++}
++
++export function estimateEffects(series: readonly Series[]): Effects {
++  const categories = Math.max(0, ...series.map((s) => s.category)) + 1;
++  const promoRatios: number[][] = Array.from({ length: categories }, () => []);
++  const holidayRatios: number[][] = Array.from({ length: categories }, () => []);
++  for (const s of series) {
++    const n = s.y.length;
++    for (let t = NEIGHBOURHOOD; t < n - NEIGHBOURHOOD; t++) {
++      const ordinary: number[] = [];
++      for (let k = -NEIGHBOURHOOD; k <= NEIGHBOURHOOD; k++) {
++        if (k !== 0 && s.promo[t + k] === 0 && s.holiday[t + k] === 0) ordinary.push(s.y[t + k]!);
++      }
++      if (ordinary.length < MIN_NEIGHBOURS) continue;
++      const lift = s.y[t]! / Math.max(1e-6, median(ordinary)) - 1;
++      if (s.holiday[t] === 0 && s.promo[t] === 1) promoRatios[s.category]!.push(lift);
++      else if (s.holiday[t]! > 0 && s.promo[t] === 0) holidayRatios[s.category]!.push(lift / s.holiday[t]!);
++    }
++  }
++  return { promo: promoRatios.map(median), holiday: holidayRatios.map(median) };
++}
++
++/** Multiplier of week `w` for this series' category: (1 + promo lift) * (1 + holiday lift). */
++export function calendarFactor(s: Series, w: number, effects: Effects): number {
++  const factor = (1 + effects.promo[s.category]! * (s.promo[w] ?? 0)) * (1 + effects.holiday[s.category]! * (s.holiday[w] ?? 0));
++  return Math.max(0.2, factor);
++}
++
++/** The history with promotions and holidays divided out. */
++export function removeCalendar(s: Series, effects: Effects): Series {
++  return { ...s, y: s.y.map((v, w) => v / calendarFactor(s, w, effects)) };
++}
+diff --git a/src/predict.ts b/src/predict.ts
+index 5de26c9..724428b 100644
+--- a/src/predict.ts
++++ b/src/predict.ts
+@@ -1,2 +1,3 @@
+ /** Entry point of the pipeline. The signature and output shape are pinned by tests/contract. */
++import { calendarFactor, estimateEffects, removeCalendar } from './calendar.js';
+ import { buildSeries } from './features.js';
+@@ -7,4 +8,5 @@ export function predict(table: SalesTable, origin: number, horizon: number): For
+   const series = buildSeries(table, origin, horizon);
+-  const model = fit(series);
+-  return forecast(model, horizon);
++  const effects = estimateEffects(series);
++  const model = fit(series.map((s) => removeCalendar(s, effects)));
++  return forecast(model, horizon).map((row, i) => row.map((v, h) => v * calendarFactor(series[i]!, origin + h, effects)));
+ }

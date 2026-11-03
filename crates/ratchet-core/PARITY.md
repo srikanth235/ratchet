@@ -1,0 +1,279 @@
+# ratchet-core: parity with `packages/core`
+
+`packages/core` (TypeScript) is the executable spec. This file maps every TS test case to the Rust test that
+ports it, lists what was dropped or changed on purpose, and says how behaviour identity is checked.
+
+How "behaviour-identical" is verified, beyond the ported cases:
+
+| Check | Where | What it proves |
+|---|---|---|
+| **Golden fixtures** from the TS code | `tests/golden.rs` + `tests/golden/*.json` (the generator that produced them, `generate.mjs`, imported the TypeScript sources and was deleted with them at the cut-over: the fixtures are now frozen expectations; the generator is at `fc503b1:ratchet-core/tests/golden/generate.mjs`, see docs/CUTOVER.md) | The same inputs give the same answers: statistics (`mean`, `median`, `stddev`, `cv`, `noise_floor`), `calibrate` (940 inputs incl. the explanation text), `niceGain`/`formatPercent`, the ratchet rule (1000+ inputs incl. every reason string), glob matching (2000+ pairs), `normalizeRepoPath`, `findProtectedViolations`, `effectiveProtected`, `evaluatorDirsFromRun`, `parseThreshold`/`evaluateThreshold`, all templates rendered with 4 option sets plus their PR proposals, and 700+ mutated `ratchet.yaml` documents (the config, or the exact list of `{path, message}` errors). Floats are compared **bit for bit**; strings exactly. |
+| **Property tests** | `tests/properties.rs` | Laws that must keep holding: the calibration formula `n = clamp(ceil(18 CV^2 / g^2), 3, 15)` with `g = max(2 CV, 1%)`, threshold >= what the repeats resolve, monotone in noise, the rule's gate order (blocked > rejected > pending_confirm > failed_confirm > verified), min/max symmetry, glob laws (a literal protects itself and its children; `dir/**` is exactly the subtree; `*` never crosses `/`), no panics on arbitrary text, `String(number)` reads back. |
+| Number formatting | `src/numfmt.rs` | `toFixed`, `toPrecision` and `String(number)` are re-implemented on the exact decimal expansion, because messages such as `improvement 2.87654 exceeds ...` and `0.9%` depend on them (Rust rounds ties to even, V8 rounds them up). Verified against V8 on ~7000 values incl. exact ties. |
+
+Two real differences between the languages that the golden tests caught (and that are fixed):
+`serde_json` needs the `float_roundtrip` feature to parse floats exactly (otherwise samples are off by one ulp),
+and Zod 4.6 still runs a schema's `.transform` when the only problems are unknown keys, so `bench: {a: 1}` reports
+both `unknown key "a"` and `evaluator.run is required`.
+
+## Test mapping
+
+Rust paths are relative to `crates/ratchet-core`. "unit" = a `#[cfg(test)]` module next to the code.
+
+### `src/bench/stats.test.ts` (10) -> `src/bench/stats.rs` (unit)
+
+| TS case | Rust test |
+|---|---|
+| stats: mean | `mean_basic` |
+| stats: median, odd/even/unsorted, without mutating input | `median_odd_even_unsorted_without_mutating` |
+| stats: stddev is the sample (n-1) deviation | `stddev_is_the_sample_deviation` |
+| stats: coefficient of variation | `coefficient_of_variation_cases` |
+| stats: summarize | `summarize_basic` |
+| stats: rejects empty and non-finite samples | `rejects_empty_and_non_finite_samples` (`RangeError` -> `StatsError`) |
+| noiseFloor: is 2 x stddev by default | `noise_floor_is_two_stddev_by_default` |
+| noiseFloor: honours k and the absolute minimum | `noise_floor_honours_k_and_the_absolute_minimum` |
+| noiseFloor: is 0 for perfectly stable runs and a single run | `noise_floor_is_zero_for_stable_runs_and_a_single_run` |
+| noiseFloor: validates options | `noise_floor_validates_options` |
+
+### `src/bench/output.test.ts` (11) -> `src/bench/output.rs` (unit)
+
+| TS case | Rust test |
+|---|---|
+| extractLastJsonObject: finds a lone object | `finds_a_lone_object` |
+| ...: takes the last object when there are several | `takes_the_last_object_when_there_are_several` |
+| ...: ignores surrounding text, including stray braces | `ignores_surrounding_text_including_stray_braces` |
+| ...: handles braces and escaped quotes inside strings | `handles_braces_and_escaped_quotes_inside_strings` |
+| ...: handles pretty-printed multi-line JSON | `handles_pretty_printed_multi_line_json` |
+| ...: returns undefined when there is none | `returns_none_when_there_is_none` |
+| lookupPath: walks dotted paths | `walks_dotted_paths` |
+| lookupPath: supports keys containing dots and parens | `supports_keys_containing_dots_and_parens` |
+| lookupPath: returns undefined for missing paths and non-objects | `returns_none_for_missing_paths_and_non_objects` |
+| extractMetric: returns the number | `extract_metric_returns_the_number` |
+| extractMetric: explains failures | `extract_metric_explains_failures` |
+
+### `src/bench/calibrate.test.ts` (18) -> `src/bench/calibrate.rs` (unit)
+
+| TS case | Rust test |
+|---|---|
+| niceGain / formatPercent: rounds up to readable steps and never below the floor | `nice_gain_rounds_up_to_readable_steps` |
+| ...: formats fractions as short percentages | `formats_fractions_as_short_percentages` |
+| nothing set: a stable metric needs the minimum repeats and a 1% threshold | `a_stable_metric_needs_the_minimum_repeats_and_a_one_percent_threshold` |
+| nothing set: a noisy metric raises the threshold ... | `a_noisy_metric_raises_the_threshold_and_the_repeats` |
+| nothing set: threshold is never below what the chosen repeats can resolve | `threshold_is_never_below_what_the_chosen_repeats_can_resolve` |
+| nothing set: is monotone | `is_monotone` (+ proptest `a_noisier_baseline_never_gets_a_lower_threshold`) |
+| nothing set: a constant baseline has CV 0 | `a_constant_baseline_has_cv_zero` |
+| explicit: repeats set: used as-is | `repeats_set_is_used_as_is` |
+| explicit: min_gain set: used as-is, repeats derived, capped | `min_gain_set_is_used_as_is_and_repeats_are_capped` |
+| explicit: min_gain set and loose: fewer repeats suffice | `min_gain_set_and_loose_needs_fewer_repeats` |
+| explicit: both set: a too-optimistic pair is called out | `both_set_calls_out_a_too_optimistic_pair` |
+| explicit: noise_factor is carried through | `noise_factor_is_carried_through` |
+| degenerate: fewer than 3 runs falls back to 3% | `fewer_than_three_runs_falls_back_to_three_percent` |
+| degenerate: a zero mean falls back the same way | `a_zero_mean_falls_back_the_same_way` |
+| degenerate: a single run with repeats set keeps them | `a_single_run_with_repeats_set_keeps_them` |
+| degenerate: a maximize-style metric near zero stays finite and capped | `a_metric_near_zero_stays_finite_and_capped` |
+| explainCalibration: names the noise level in words | `names_the_noise_level_in_words` |
+| explainCalibration: stable under a JSON round trip | `explanation_is_stable_under_a_json_round_trip` |
+
+### `src/ratchet/rule.test.ts` (25) -> `src/ratchet.rs` (unit)
+
+| TS case | Rust test |
+|---|---|
+| improvementOf | `improvement_of_is_positive_when_better` |
+| minimize: pending_confirm when the bench wins and there is no confirm run | `minimize_pending_confirm_without_a_confirm_run` |
+| minimize: treats an empty confirm array as missing | `minimize_treats_an_empty_confirm_array_as_missing` |
+| minimize: verified when the confirm run also beats the best | `minimize_verified_when_the_confirm_run_also_beats_the_best` |
+| minimize: failed_confirm when the confirm run does not beat the best | `minimize_failed_confirm_when_the_confirm_run_does_not_beat_the_best` |
+| minimize: failed_confirm on a tie with the best on the hidden trace | `minimize_failed_confirm_on_a_tie_with_the_best` |
+| minimize: confirmBest overrides currentBest | `minimize_confirm_best_overrides_current_best` |
+| minimize: rejected when the candidate is worse or equal | `minimize_rejected_when_worse_or_equal` |
+| minimize: rejected within the required gain; ties are rejected | `minimize_rejected_within_the_required_gain_and_on_ties` |
+| minimize: uses the median of candidate samples | `minimize_uses_the_median_of_candidate_samples` |
+| maximize: higher is better | `maximize_higher_is_better` |
+| maximize: lower candidate is rejected | `maximize_lower_candidate_is_rejected` |
+| maximize: ties at the threshold | `maximize_ties_at_the_threshold` |
+| maximize: confirm must be higher than best | `maximize_confirm_must_be_higher_than_best` |
+| threshold: noise larger than min_gain dominates | `noise_larger_than_min_gain_dominates` |
+| threshold: min_gain dominates when noise is small | `min_gain_dominates_when_noise_is_small` |
+| threshold: zero noise and zero min_gain | `zero_noise_and_zero_min_gain_any_strict_improvement_counts` |
+| threshold: uses \|best\| when best is negative | `uses_abs_best_for_the_relative_gain` |
+| blocked: a failed guardrail blocks even a great, confirmed result | `a_failed_guardrail_blocks_even_a_great_confirmed_result` |
+| blocked: a protected path violation blocks | `a_protected_path_violation_blocks` |
+| blocked: blocked even when there is no gain | `blocked_even_when_there_is_no_gain` |
+| blocked: lists all blocking reasons | `lists_all_blocking_reasons` |
+| blocked: passing guardrails and no violations do not block | `passing_guardrails_and_no_violations_do_not_block` |
+| invalid input: throws on empty candidate samples | `errors_on_empty_candidate_samples` |
+| invalid input: throws on non-finite or negative parameters | `errors_on_non_finite_or_negative_parameters` |
+
+### `src/protected.test.ts` (15) -> `src/protected.rs` (unit)
+
+| TS case | Rust test |
+|---|---|
+| normalizeRepoPath: normalises | `normalizes` |
+| matchesGlob: literal paths match exactly (root only) | `literal_paths_match_exactly` |
+| ...: dir/** matches everything underneath | `dir_double_star_matches_everything_underneath` |
+| ...: single * does not cross directories | `single_star_does_not_cross_directories` |
+| ...: ? matches exactly one non-slash char | `question_mark_matches_one_non_slash_char` |
+| ...: **/ matches zero or more directories | `double_star_slash_matches_zero_or_more_directories` |
+| ...: character classes and braces | `character_classes_and_braces` |
+| ...: treats regex metacharacters literally | `treats_regex_metacharacters_literally` |
+| ...: a pattern matching a parent directory protects its children | `a_pattern_matching_a_parent_directory_protects_its_children` |
+| ...: normalises the candidate path before matching | `normalises_the_candidate_path_before_matching` |
+| ...: is case-sensitive and ignores empty inputs | `is_case_sensitive_and_ignores_empty_inputs` |
+| ...: globToRegExp is anchored | `glob_to_regexp_is_anchored` |
+| findProtectedViolations: returns nothing when no path is protected | `returns_nothing_when_no_path_is_protected` |
+| ...: reports each violating path with the first matching pattern | `reports_each_violating_path_with_the_first_matching_pattern` |
+| ...: deduplicates paths after normalisation | `deduplicates_paths_after_normalisation` |
+
+### `src/protected-set.test.ts` (16) -> `src/protected_set.rs` (unit)
+
+| TS case | Rust test |
+|---|---|
+| evaluatorDirsFromRun: finds bench/ and eval/ directories | `finds_bench_and_eval_directories_referenced_by_the_command` |
+| ...: treats a built copy as the evaluator | `treats_a_built_copy_as_the_evaluator` |
+| ...: sees paths inside shell expansions and quotes | `sees_paths_inside_shell_expansions_and_quotes` |
+| ...: ignores lookalikes, absolute paths, paths that leave the repo | `ignores_lookalikes_absolute_paths_and_paths_that_leave_the_repo` |
+| effectiveProtected: always protects the config and the lockfiles | `always_protects_the_config_and_the_install_files_at_any_depth` |
+| ...: uses the config path in use | `uses_the_config_path_in_use` |
+| ...: protects what evaluator.run references | `protects_what_evaluator_run_references` |
+| ...: protects a template's evaluator files | `protects_a_templates_evaluator_files` |
+| ...: an unknown template adds nothing | `an_unknown_template_adds_nothing` |
+| ...: protects the environment image and a custom infra module | `protects_the_environment_image_and_a_custom_infra_module` |
+| ...: the user's protected: list only adds | `the_users_protected_list_only_adds` |
+| ...: is deterministic and de-duplicated | `is_deterministic_and_deduplicated` |
+| ...: splits install files from the evaluator set | `splits_install_files_from_the_evaluator_set` |
+| ...: gives every entry a reason in plain words | `gives_every_entry_a_reason` |
+| required globs: the evaluator files and the user list | `required_globs_are_the_evaluator_files_and_the_user_list` |
+| required globs: empty when nothing marks the evaluator | `required_is_empty_when_nothing_marks_the_evaluator` |
+
+### `src/value.test.ts` (5) -> `src/value.rs` (unit)
+
+`returns_none_without_objective_value`, `values_a_minimize_improvement_per_year`,
+`annualizes_monthly_values_and_handles_maximize`, `never_reports_negative_value_for_a_regression`,
+`return_on_spend_divides_yearly_value_by_spend`.
+
+### `src/config/config.test.ts` (50) -> `tests/config.rs` + `src/config/guardrails.rs` (unit)
+
+| TS case | Rust test |
+|---|---|
+| parseConfig: parses the section 4 example | `parses_the_section_4_example` |
+| ...: accepts maximize and omits optional fields | `accepts_maximize_and_omits_optional_fields` |
+| ...: reports invalid YAML syntax with a line number | `reports_invalid_yaml_syntax_with_a_line_number` |
+| ...: reports empty and non-mapping documents | `reports_empty_and_non_mapping_documents` |
+| ...: reports missing required sections with their paths | `reports_missing_required_sections_with_their_paths` |
+| ...: reports a wrong version | `reports_a_wrong_version` |
+| ...: reports a bad direction | `reports_a_bad_direction` |
+| ...: validates min_gain range and type | `validates_min_gain_range_and_type` |
+| ...: validates repeats | `validates_repeats` |
+| ...: rejects unknown keys (typos) with their location | `rejects_unknown_keys_with_their_location` |
+| ...: reports bad guardrail thresholds with index and metric in the path | `reports_bad_guardrail_thresholds_with_the_index_and_metric_in_the_path` |
+| ...: rejects guardrails with several keys, no keys, or non-string values | `rejects_guardrails_with_several_keys_no_keys_or_non_string_values` |
+| ...: rejects empty run guardrail | `rejects_an_empty_run_guardrail` |
+| ...: requires at least one instance type and string globs | `requires_at_least_one_instance_type_and_string_globs` |
+| ...: collects multiple errors at once | `collects_multiple_errors_at_once` |
+| loadConfig: loads from disk | `loads_from_disk` |
+| loadConfig: reports a missing file as an error | `reports_a_missing_file_as_an_error` |
+| parseThreshold: parses x10 (`< 0.001`, `<=5`, ... `> -1`) | `guardrails::tests::parses_thresholds` |
+| parseThreshold: rejects x9 (`""`, `0.001`, ... `< 0x`) | `guardrails::tests::rejects_malformed_thresholds` |
+| guardrail evaluation: absolute thresholds | `guardrails::tests::absolute_thresholds` |
+| ...: relative thresholds need a baseline | `guardrails::tests::relative_thresholds_need_a_baseline` |
+| ...: non-finite observations fail | `guardrails::tests::non_finite_observations_fail` |
+| ...: command results | `guardrails::tests::command_results` |
+| generic evaluator: parses `evaluator`, holdout and value, aliases `bench` | `parses_evaluator_holdout_and_value` |
+| ...: defaults evaluator.kind to benchmark for legacy `bench:` | `defaults_evaluator_kind_to_benchmark_for_legacy_bench_configs` |
+| ...: rejects a non-positive value | `rejects_a_non_positive_value` |
+| evaluator.deps: defaults to auto | `deps_default_to_auto` |
+| ...: accepts auto/pnpm/npm/none, also under `bench:` (x4) | `deps_accepts_each_mode_also_under_the_legacy_key` |
+| ...: rejects other package managers | `deps_rejects_other_package_managers_with_the_list_of_valid_ones` |
+| ...: rejects a boolean | `deps_rejects_a_boolean` |
+
+### `src/config/config-simplified.test.ts` (28) -> `tests/config_simplified.rs`
+
+All 28 cases are ported one for one (the 12 `environment rejects ...` rows and the 4 `existing configs stay
+valid` rows are loops inside `environment_rejects_bad_values`, `existing_example_configs_stay_valid` and
+`the_example_directories_are_the_ones_listed`). The `examples/demo-*/ratchet.yaml` files are read from the repo.
+
+### `src/templates/templates.test.ts` (57) -> `tests/templates.rs`
+
+| TS case | Rust test |
+|---|---|
+| registry: seven templates, then three demos | `has_the_seven_templates_of_the_spec_table_then_the_three_demos` |
+| registry: carries the metadata the gallery shows | `carries_the_metadata_the_gallery_shows` |
+| registry: demos are metadata only | `demos_are_metadata_only_and_point_at_the_examples` |
+| registry: filters by category, resolves legacy pack names | `filters_by_category_and_resolves_the_legacy_pack_names` |
+| registry: the list is a copy | `the_list_is_a_copy` |
+| registry: embedded files in sync (`gen-templates.mjs --check`) | `the_embedded_files_are_in_sync_with_the_template_directory` (compares `include_dir!` with the files on disk; there is no generated file any more) |
+| template <id> (x7 each): generates a ratchet.yaml that passes parseConfig | `each_template_generates_a_ratchet_yaml_that_passes_parse_config` |
+| ...: writes the evaluator files, the brief, nothing outside the repo | `each_template_writes_the_evaluator_files_the_brief_and_nothing_outside_the_repo` |
+| ...: every evaluator file is protected automatically | `each_templates_evaluator_files_are_protected_automatically` |
+| ...: works without the template | `each_templates_run_command_points_at_one_of_its_files` |
+| ...: honours --metric, --direction, --value-usd | `each_template_honours_metric_direction_and_value_and_quotes_what_needs_it` |
+| ...: the PR proposal says what was added | `each_templates_pr_proposal_says_what_was_added_and_how_to_run_a_baseline` |
+| legacy pack aliases | `perf_and_forecasting_render_the_templates_that_replaced_them` |
+| evaluator scripts run: http-latency | `http_latency_drives_a_service_and_reports_percentiles_and_the_error_rate` |
+| ...: cli-cold-start | `cli_cold_start_times_invocations_counts_unexpected_exits_and_reads_the_holdout` |
+| ...: test-suite-time | `test_suite_time_times_the_test_command_and_reports_failures_as_error_rate` |
+| ...: build-size | `build_size_runs_the_build_sizes_the_output_and_reports_a_failed_build` |
+| ...: memory (x2) | `memory_reports_the_peak_resident_memory_of_the_workload_tree`, `memory_hands_the_workload_path_to_the_command` |
+| ...: forecast-backtest | `forecast_backtest_is_deterministic_scores_the_holdout_and_has_no_look_ahead` |
+| ...: llm-eval | `llm_eval_scores_the_eval_set_reports_cost_reads_the_hidden_set_and_counts_failures` |
+
+The evaluator-script cases run the unchanged `.mjs` files with `node`; they print a note and pass when `node` is
+not installed.
+
+### Cost reconcile, sandbox lifecycle, ledger
+
+These tests need the SQLite ledger; they live in `crates/ratchet-ledger/tests` (see its `PARITY.md`):
+`cost/reconcile.test.ts` -> `cost_reconcile.rs`, `sandbox/lifecycle.test.ts` -> `sandbox_lifecycle.rs`,
+`ledger/ledger.test.ts` -> `ledger.rs`. The pure part of the reconcile (the correction arithmetic) is
+`cost::plan_corrections`, unit-tested in `src/cost.rs`.
+
+## Tests that only exist in Rust
+
+`src/enums.rs` (3), `src/ids.rs` (2), `src/rows.rs` (4: JSON shape of `BenchStats`, `ActivityItem`,
+`CategoryTotals`), `src/numfmt.rs` (4), `src/ports.rs` (5: clocks, memory artifact store, wire shape of
+`RunnerMessage` / `EngineEvent` / `SandboxOutputs`), `src/sandbox.rs` (2), `src/cost.rs` (2), plus in the
+integration tests: a config JSON round trip, both-`bench`-and-`evaluator` -> unknown key, several unknown keys,
+zod's default wording for wrong types, integral floats as `repeats`, blank/missing `metric`, value defaults, the
+evaluator field messages, insta snapshots of one generated `ratchet.yaml` and one PR body (`tests/snapshots`),
+JSON Schema and OpenAPI (`--features utoipa`) generation (`tests/schemas.rs`).
+
+## Dropped or changed on purpose
+
+| TS | Rust | Why |
+|---|---|---|
+| zod `configSchema` (`config/schema.ts`) | `config/parse.rs`: a hand-written validator over `serde_norway::Value` | Same messages, paths, order and "collect every error" behaviour (checked by the golden corpus), without a derive that would report `serde` wording. `RatchetConfig` itself derives `Serialize`/`Deserialize`/`JsonSchema`. |
+| `bench` alias object identical to `evaluator` | `RatchetConfig::bench()` returns `&evaluator` | One field, same reference semantics. |
+| `scripts/gen-templates.mjs`, `files.generated.ts`, `scripts/copy-assets.mjs` | `include_dir!` of `packages/core/templates` (`src/templates/files.rs`) | No generated file to keep in sync. When the TS packages are deleted, move the directory into this crate and change one path. |
+| YAML syntax error text (`yaml` package: "Nested mappings are not allowed ...") | libyaml's wording (`serde_norway`) | The prefix `invalid YAML (line L, column C): ` is kept; the golden test only requires that. |
+| `RangeError` thrown by `mean`, `median`, `noiseFloor`, `evaluateRatchet` | `Result<_, StatsError>` / `Result<_, RatchetError>` | No panics on bad input. |
+| `[z-a]`, an unterminated `{a`: `new RegExp` throws (TS crashes) | the glob never matches | A bad user glob must not take the engine down. Documented in `protected.rs`. |
+| `ledger/*`, `sandbox/lifecycle.ts`, `cost/reconcile.ts` call the concrete `Ledger` | traits `SandboxLedger` / `SpendLedger` in `ledger.rs`; implemented by `ratchet-ledger` | `ratchet-core` must not depend on the database crate. |
+| `AbortSignal`, `onEvent` callbacks | `CancellationToken`, `EventSink<'_>` (`dyn Fn(AgentEvent) + Send + Sync`; `channel_sink` feeds a channel) | Async Rust equivalents. A synchronous callback keeps events in order and lets the runner loop see usage before the adapter goes on. |
+| `subscribe(listener) => unsubscribe` on `EngineApi` | `subscribe() -> broadcast::Receiver<EngineEvent>` | Drop the receiver to unsubscribe. |
+| `ports/index.ts` is types only | `ports.rs` adds `PortError`, `ports::mock` (`SystemClock`, `ManualClock`, `MockCostReconciler`, `MemoryArtifactStore`, `StaticPriceBook`, `MockSandboxProvider`) | The mocks of the AWS / GitHub / agent ports live with their crates. |
+
+## Changes made when `ratchet-sandbox`, `ratchet-github` and `ratchet-agents` were unified with core
+
+Where core and those crates disagreed, core moved when the other shape was better (the TS stays the reference for JSON):
+
+| Change in core | Why |
+|---|---|
+| `SandboxOutputs` is the full `infra/contract.md` shape (`region`, `vpc_id`, `eval_identity`, `confirm_identity`, `deps_identity?`, `sealed_confirm_prefix`, `limits`, `network.bench_subnet_id`, `network.egress_proxy_url`); new `AwsIdentityRef`, `SandboxLimits` | TS has `SandboxOutputs` in core and `AwsSandboxOutputs extends` it in `packages/aws`. A port trait cannot return a subtype and the engine only ever stores and reads the full shape (`row.outputs as AwsSandboxOutputs`), so the AWS shape is the one type. `ports::mock::sample_sandbox_outputs` builds one for tests. |
+| `SandboxInput.max_instance_lifetime_hours` is an `f64` printed like a JS number (`2`, `0.5`) | The contract says "number"; `u32` could not carry `0.5`. `numfmt::serialize_js_number`. |
+| `BenchStats.extra` is an `IndexMap` | JS objects keep insertion order and the TS result report prints the stats in the order the evaluator gave them. |
+| `EventSink<'a>` is a callback type (was an `mpsc` sender); `SharedEventSink`, `channel_sink` | See above. |
+| `AgentAdapter::resume` takes `&mut AgentSession` | A CLI may fork the session id on resume (Claude Code does); the TS adapter mutates the session object. |
+| `PortError::AgentFailed { message, exit_code, stderr }`, `PortError::Http { status, message }`, `status()`, `is_cancelled()`, `agent_failed()`, `From<io::Error>`, `From<serde_json::Error>` | The adapters report the exit code and stderr of a failed turn (events and tests use them); the code host errors carry an HTTP status (TS `err.status`). |
+| `RunnerMessage::Unknown` (`#[serde(other)]`) | A runner older than its engine reports an unknown message and carries on instead of failing to decode it. Never sent. |
+| `AgentEvent::new/with_text/with_data/with_usage/data_str`; `at` defaults to 0 on read; `AgentUsage` is `Copy + Default` | Older event writers omit `at`; the builders are what every adapter and the runner loop use (`with_data` drops top-level `null`s like `JSON.stringify`). |
+| `PullRequestInput.commit_message` (+ `Default`); `CommitFile::new/executable/is_executable`; `RemoteCommand::new` (+ `Default`); `BenchLaunchPurpose::as_str`; `ArtifactStore::put_str` | Used by the GitHub and AWS crates. |
+| `RunnerLoopOptions` removed | It cannot hold the loop's tuning (git handles, retry delays); it lives with `run_runner_loop` in `ratchet-agents` (the TS `RunnerLoopDeps`). |
+
+## Gaps
+
+- `ports::EngineApi` and the other port traits compile and have wire-shape tests but no behavioural tests here:
+  nothing in `ratchet-core` implements them. Their implementations (and mocks) belong to the crates that port
+  `engine`, `aws`, `github`, `agents`, `bench`.
+- The JSON number edge cases `JSON.parse` accepts but `serde_json` does not (`1e999` read as `Infinity`, lone
+  surrogate escapes) make `extract_last_json_object` skip such an object instead of returning it.
+- `Summary.cv` can be infinite (mean 0, stddev > 0) as in TS; it serializes as `null`.

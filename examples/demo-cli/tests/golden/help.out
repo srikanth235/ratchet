@@ -1,0 +1,15 @@
+taskr 1.4.2: a small task tracker
+
+Usage: taskr <command> [options]
+
+  config   show the effective configuration
+  due      tasks due soon, by day
+  export   write tasks as JSON, CSV or Markdown
+  help     show help
+  list     list tasks
+  search   find tasks by title
+  show     show one task
+  stats    counts and hours per group
+  version  print the version
+
+Run "taskr help <command>" for the options of one command.

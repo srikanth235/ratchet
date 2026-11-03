@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ratchet — Result</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&amp;family=Instrument+Serif:ital@0;1&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#070B12}
+a{color:#EBCB8E}a:hover{color:#F6DDAE}
+.serif{font-family:'Instrument Serif',Georgia,'Times New Roman',serif;font-weight:400;letter-spacing:-0.01em}
+.mono{font-family:'JetBrains Mono',ui-monospace,Menlo,monospace;font-variant-numeric:tabular-nums}
+.eyebrow{font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:#8592A6;font-weight:600}
+.card{background:#111827;border:1px solid rgba(148,163,190,.13);border-radius:14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.035),0 18px 40px -24px rgba(0,0,0,.8)}
+.nav{display:flex;align-items:center;gap:11px;height:34px;padding:0 10px;border-radius:8px;color:#A7B1C2;text-decoration:none;font-size:13px}
+.nav:hover{background:rgba(148,163,190,.07);color:#ECEFF4}
+</style>
+</helmet>
+<div style="font-family: 'Instrument Sans', -apple-system, 'Helvetica Neue', sans-serif; color: #ECEFF4; background: #070B12; min-height: 1240px; padding: 28px; box-sizing: border-box; font-size: 13px">
+<div style="max-width: 1384px; margin: 0 auto; display: flex; flex-wrap: wrap; background: #0B1019; border: 1px solid rgba(148,163,190,.14); border-radius: 16px; overflow: hidden; box-shadow: 0 40px 90px -40px rgba(0,0,0,.9)">
+
+<nav aria-label="Main" style="flex: 1 1 236px; background: #0E1420; border-right: 1px solid rgba(148,163,190,.10); padding: 16px 14px 18px; box-sizing: border-box; display: flex; flex-direction: column; gap: 22px">
+<div aria-hidden="true" style="display: flex; gap: 8px; padding: 2px 4px"><span style="width: 12px; height: 12px; border-radius: 6px; background: #FF5F57"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #FEBC2E"></span><span style="width: 12px; height: 12px; border-radius: 6px; background: #28C840"></span></div>
+<div style="display: flex; align-items: center; gap: 11px; padding: 0 4px">
+<span style="width: 34px; height: 34px; border-radius: 9px; background: #151D2B; border: 1px solid rgba(217,178,111,.35); display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="#D9B26F" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M2 13.5 L6 5 V13.5 L10 5 V13.5 L14 5 V13.5"></path></svg></span>
+<span class="serif" style="font-size: 24px; line-height: 1">Ratchet</span>
+<span class="mono" style="margin-left: auto; font-size: 10px; color: #8592A6; border: 1px solid rgba(148,163,190,.2); border-radius: 5px; padding: 2px 5px">v0</span>
+</div>
+<button type="button" style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; border: 1px solid rgba(148,163,190,.14); background: #111827; color: #ECEFF4; font: inherit; text-align: left">
+<span style="width: 26px; height: 26px; border-radius: 7px; background: rgba(217,178,111,.16); color: #EBCB8E; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px">A</span>
+<span style="display: flex; flex-direction: column; gap: 1px; line-height: 1.2"><span style="font-weight: 600">acme</span><span style="font-size: 11.5px; color: #8592A6">platform-eng</span></span>
+<svg style="margin-left: auto" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#8592A6" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6l3-3 3 3M5 10l3 3 3-3"></path></svg>
+</button>
+<div style="display: flex; flex-direction: column; gap: 2px">
+<div class="eyebrow" style="padding: 0 10px 8px">Workspace</div>
+<a href="Main.dc.html" class="nav" style="background: rgba(217,178,111,.10); color: #F4E3C0; font-weight: 500"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#D9B26F" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2.5 11.5a5.5 5.5 0 1 1 11 0"></path><path d="M8 11.5l2.8-3.6"></path><circle cx="8" cy="11.5" r="0.9" fill="#D9B26F"></circle></svg>Optimizations<span class="mono" style="margin-left: auto; font-size: 11px; color: #D9B26F">4</span></a>
+<a href="Benchmarks.dc.html" class="nav"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M3 13.5V9M6.3 13.5V5M9.7 13.5V7.5M13 13.5V3"></path></svg>Benchmarks</a>
+<a href="Live.dc.html" class="nav"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="2"></rect><path d="M5 6.5l2 1.5-2 1.5M8.5 10H11"></path></svg>Agents</a>
+<a href="Environment.dc.html" class="nav"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 12.5h7a3 3 0 0 0 .3-6A4 4 0 0 0 4.2 7.6 2.5 2.5 0 0 0 4.5 12.5z"></path></svg>Environments</a>
+<a href="#" class="nav"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 2h8v12l-2-1-2 1-2-1-2 1z"></path><path d="M6 5.5h4M6 8.5h4"></path></svg>Spend</a>
+<a href="#" class="nav"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M2.5 5h11M2.5 11h11"></path><circle cx="6" cy="5" r="1.8" fill="#0E1420"></circle><circle cx="10.5" cy="11" r="1.8" fill="#0E1420"></circle></svg>Settings</a>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div class="eyebrow" style="padding: 0 10px">Recently finished</div>
+<a href="Result.dc.html" style="display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 10px; background: #161E2D; border: 1px solid rgba(123,216,176,.35); color: #ECEFF4; text-decoration: none">
+<span style="display: flex; align-items: center; gap: 8px"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#7BD8B0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"></path></svg><span style="font-weight: 500">search-api p95</span><span class="mono" style="margin-left: auto; color: #7BD8B0; font-size: 11.5px">−32%</span></span>
+<span class="mono" style="font-size: 11px; color: #8592A6">8h · $268 of $300</span>
+</a>
+</div>
+<div style="margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 12px 4px 0; border-top: 1px solid rgba(148,163,190,.10)">
+<span style="width: 30px; height: 30px; border-radius: 15px; background: linear-gradient(135deg, #D9B26F, #8C6A33); color: #1A1408; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 11px">SK</span>
+<span style="display: flex; flex-direction: column; line-height: 1.25"><span style="font-weight: 500">Srikanth</span><span style="font-size: 11.5px; color: #8592A6">Owner</span></span>
+</div>
+</nav>
+
+<main style="flex: 999 1 640px; min-width: 0; padding: 30px 34px 36px; box-sizing: border-box; display: flex; flex-direction: column; gap: 22px">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span class="eyebrow" style="display: flex; gap: 8px"><a href="Main.dc.html" style="color: #8592A6; text-decoration: none">Optimizations</a><span>/</span><span class="mono" style="letter-spacing: 0; text-transform: none; font-weight: 400">acme/search-service</span></span>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 14px"><h1 class="serif" style="margin: 0; font-size: 44px; line-height: 1">search-api p95 latency</h1><span style="display: inline-flex; align-items: center; gap: 7px; height: 26px; padding: 0 11px; border-radius: 13px; background: rgba(123,216,176,.12); color: #7BD8B0; font-size: 12px; font-weight: 500"><svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"></path></svg>Completed · time limit</span></div>
+</div>
+<div style="margin-left: auto; display: flex; gap: 10px">
+<button type="button" style="height: 38px; padding: 0 16px; border-radius: 10px; border: 1px solid rgba(148,163,190,.2); background: transparent; color: #ECEFF4; font: inherit">Export report</button>
+<a href="#" style="display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 10px; background: linear-gradient(180deg, #E6C487, #C99C55); color: #1A1408; text-decoration: none; font-weight: 600; box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 6px 18px -6px rgba(217,178,111,.5)"><svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="5" cy="4" r="1.6"></circle><circle cx="5" cy="12" r="1.6"></circle><circle cx="11" cy="6" r="1.6"></circle><path d="M5 5.6v4.8M11 7.6c0 2-2 2.4-6 2.8"></path></svg>Open pull request</a>
+</div>
+</div>
+
+<section class="card" style="padding: 26px 28px 18px; display: flex; flex-direction: column; gap: 20px; border-color: rgba(217,178,111,.28)">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 28px">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<span class="eyebrow" style="color: #EBCB8E">Verified improvement · confirmed on hidden trace</span>
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 16px">
+<span class="serif" style="font-size: 92px; line-height: 0.82; color: #6B778A">182</span>
+<span class="serif" style="font-size: 52px; line-height: 0.82; color: #8592A6; font-style: italic">to</span>
+<span class="serif" style="font-size: 92px; line-height: 0.82; color: #F4E3C0">124</span>
+<span style="font-size: 20px; color: #A7B1C2">ms p95</span>
+</div>
+<span style="color: #A7B1C2; font-size: 14px"><span class="mono" style="color: #7BD8B0">−31.9%</span> · 5 verified wins from 2 agents over 8 hours</span>
+</div>
+<div style="margin-left: auto; display: grid; grid-template-columns: repeat(2, minmax(150px, 1fr)); gap: 1px; background: rgba(148,163,190,.10); border-radius: 12px; overflow: hidden; flex: 0 1 380px">
+<div style="background: #0E1420; padding: 14px 16px"><div class="eyebrow">AWS spend</div><div class="serif" style="font-size: 30px; margin-top: 4px">$268 <span style="font-size: 16px; color: #8592A6">/ 300</span></div></div>
+<div style="background: #0E1420; padding: 14px 16px"><div class="eyebrow">Per verified win</div><div class="serif" style="font-size: 30px; margin-top: 4px">$53.60</div></div>
+<div style="background: #0E1420; padding: 14px 16px"><div class="eyebrow">Evals</div><div class="serif" style="font-size: 30px; margin-top: 4px">41 <span style="font-size: 16px; color: #8592A6">· 5 wins</span></div></div>
+<div style="background: #0E1420; padding: 14px 16px"><div class="eyebrow">Blocked</div><div class="serif" style="font-size: 30px; margin-top: 4px; color: #F5A8AF">6</div></div>
+</div>
+</div>
+<svg viewBox="0 0 1000 100" preserveAspectRatio="none" style="width: 100%; height: 90px; display: block" role="img" aria-label="Five ratchet steps from 182 to 124 ms across eight hours">
+<defs><linearGradient id="brassFillR" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#D9B26F" stop-opacity="0.25"></stop><stop offset="1" stop-color="#D9B26F" stop-opacity="0"></stop></linearGradient></defs>
+<path d="M0,13.75 H150 V36.25 H262.5 V57.5 H362.5 V77.5 H575 V81.25 H787.5 V86.25 H1000 V100 H0 Z" fill="url(#brassFillR)"></path>
+<path d="M0,13.75 H150 V36.25 H262.5 V57.5 H362.5 V77.5 H575 V81.25 H787.5 V86.25 H1000" fill="none" stroke="#D9B26F" stroke-width="2" vector-effect="non-scaling-stroke"></path>
+</svg>
+<div class="mono" style="display: flex; justify-content: space-between; font-size: 11px; color: #8592A6; margin-top: -12px"><span>0h · 182</span><span>164</span><span>147</span><span>131</span><span>128</span><span>124 · 8h</span></div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: stretch">
+<section class="card" style="flex: 3 1 460px; min-width: 0; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px"><h2 class="serif" style="margin: 0; font-size: 26px">Where the time went</h2><span style="color: #8592A6">p95 request, by span</span>
+<span style="margin-left: auto; display: flex; gap: 14px; font-size: 12px; color: #A7B1C2"><span style="display: flex; align-items: center; gap: 6px"><span aria-hidden="true" style="width: 12px; height: 6px; border-radius: 2px; background: #3A4558"></span>Baseline</span><span style="display: flex; align-items: center; gap: 6px"><span aria-hidden="true" style="width: 12px; height: 6px; border-radius: 2px; background: #D9B26F"></span>Final</span></span></div>
+<sc-for list="{{spans}}" as="s" hint-placeholder-count="4">
+<div style="display: grid; grid-template-columns: minmax(130px, 180px) minmax(0, 1fr) 96px; align-items: center; gap: 14px; padding: 8px 0; border-top: 1px solid rgba(148,163,190,.08)">
+<span class="mono" style="font-size: 12px; color: #C3CBD8">{{s.name}}</span>
+<span style="display: flex; flex-direction: column; gap: 5px"><span style="height: 8px; width: {{s.wa}}; border-radius: 3px; background: #3A4558"></span><span style="height: 8px; width: {{s.wb}}; border-radius: 3px; background: #D9B26F"></span></span>
+<span class="mono" style="text-align: right; font-size: 12px"><span style="color: #8592A6">{{s.a}}</span> → {{s.b}}</span>
+</div>
+</sc-for>
+<span style="color: #8592A6; font-size: 12px">Biggest single win: <span class="mono" style="color: #F4E3C0">query_parser.parse</span> fell from 41 to 6 ms after the LRU parse cache.</span>
+</section>
+<section class="card" style="flex: 2 1 320px; min-width: 0; padding: 20px 22px; display: flex; flex-direction: column; gap: 4px">
+<h2 class="serif" style="margin: 0 0 8px; font-size: 26px">Before and after</h2>
+<sc-for list="{{pct}}" as="p" hint-placeholder-count="6">
+<div style="display: flex; align-items: baseline; gap: 10px; padding: 10px 0; border-top: 1px solid rgba(148,163,190,.08)"><span style="width: 84px; color: #A7B1C2">{{p.k}}</span><span class="mono" style="color: #8592A6">{{p.a}}</span><span style="color: #5F6B7E">→</span><span class="mono">{{p.b}}</span><span class="mono" style="margin-left: auto; font-size: 11.5px; padding: 2px 7px; border-radius: 6px; background: {{p.dBg}}; color: {{p.dFg}}">{{p.d}}</span></div>
+</sc-for>
+</section>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start">
+<section class="card" style="flex: 999 1 520px; min-width: 0; overflow: hidden">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; padding: 18px 20px 14px"><h2 class="serif" style="margin: 0; font-size: 26px">Winning change</h2><span style="color: #8592A6">5 verified commits, squashed</span><span class="mono" style="margin-left: auto; font-size: 12px; color: #8592A6">5 files · <span style="color: #7BD8B0">+118</span> <span style="color: #F5A8AF">−34</span></span></div>
+<div class="mono" style="font-size: 12px">
+<div style="display: flex; justify-content: space-between; padding: 9px 20px; border-top: 1px solid rgba(148,163,190,.08)"><span>search/query_parser.py</span><span><span style="color: #7BD8B0">+46</span> <span style="color: #F5A8AF">−9</span></span></div>
+<div style="display: flex; justify-content: space-between; padding: 9px 20px; border-top: 1px solid rgba(148,163,190,.08)"><span>search/index/lookup.py</span><span><span style="color: #7BD8B0">+31</span> <span style="color: #F5A8AF">−14</span></span></div>
+<div style="display: flex; justify-content: space-between; padding: 9px 20px; border-top: 1px solid rgba(148,163,190,.08)"><span>api/serialize.py</span><span><span style="color: #7BD8B0">+22</span> <span style="color: #F5A8AF">−8</span></span></div>
+<div style="display: flex; justify-content: space-between; padding: 9px 20px; border-top: 1px solid rgba(148,163,190,.08)"><span>requirements.txt</span><span style="color: #7BD8B0">+1</span></div>
+<div style="display: flex; justify-content: space-between; padding: 9px 20px; border-top: 1px solid rgba(148,163,190,.08)"><span>tests/test_query_cache.py</span><span><span style="color: #7BD8B0">+18</span> <span style="color: #F5A8AF">−3</span></span></div>
+<div style="background: #0A0F18; border-top: 1px solid rgba(148,163,190,.10); padding: 12px 0; line-height: 1.8; overflow-x: auto; white-space: pre"><span style="display: block; padding: 0 20px; color: #5F6B7E">@@ search/query_parser.py:41 @@</span><span style="display: block; padding: 0 20px; color: #A7B1C2">  from functools import lru_cache</span><span style="display: block; padding: 0 20px; background: rgba(123,216,176,.08); color: #9BE3C3">+ @lru_cache(maxsize=4096)</span><span style="display: block; padding: 0 20px; background: rgba(123,216,176,.08); color: #9BE3C3">+ def _parse_cached(raw: str) -&gt; FilterAST:</span><span style="display: block; padding: 0 20px; background: rgba(123,216,176,.08); color: #9BE3C3">+     return Parser(raw).run()</span><span style="display: block; padding: 0 20px; background: rgba(240,138,147,.08); color: #F5A8AF">- def parse(raw):  return Parser(raw).run()</span><span style="display: block; padding: 0 20px; background: rgba(123,216,176,.08); color: #9BE3C3">+ def parse(raw):  return _parse_cached(normalize(raw))</span></div>
+</div>
+</section>
+
+<aside style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 14px">
+<section class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 12px">
+<span class="eyebrow">By agent</span>
+<div style="display: flex; align-items: center; gap: 12px"><span style="width: 30px; height: 30px; border-radius: 15px; background: #2A2547; color: #CFC2FF; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600">CC</span><span style="display: flex; flex-direction: column; gap: 5px; flex: 1"><span style="display: flex; justify-content: space-between"><span>Claude Code · 3 wins</span><span class="mono" style="color: #7BD8B0">−38 ms</span></span><span style="height: 5px; border-radius: 3px; background: rgba(148,163,190,.12)"><span style="display: block; width: 66%; height: 5px; border-radius: 3px; background: #B8A6FF"></span></span><span class="mono" style="font-size: 11px; color: #8592A6">$151 · $50.30 per win</span></span></div>
+<div style="display: flex; align-items: center; gap: 12px"><span style="width: 30px; height: 30px; border-radius: 15px; background: #1A3042; color: #A9DBFA; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600">CX</span><span style="display: flex; flex-direction: column; gap: 5px; flex: 1"><span style="display: flex; justify-content: space-between"><span>Codex · 2 wins</span><span class="mono" style="color: #7BD8B0">−20 ms</span></span><span style="height: 5px; border-radius: 3px; background: rgba(148,163,190,.12)"><span style="display: block; width: 34%; height: 5px; border-radius: 3px; background: #7CC4F2"></span></span><span class="mono" style="font-size: 11px; color: #8592A6">$117 · $58.50 per win</span></span></div>
+</section>
+<section class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 12px">
+<span class="eyebrow">Spend breakdown</span>
+<span aria-hidden="true" style="display: flex; height: 10px; border-radius: 5px; overflow: hidden; gap: 2px"><span style="width: 19.4%; background: #EBCB8E"></span><span style="width: 51.1%; background: #D9B26F"></span><span style="width: 23.9%; background: #8C7448"></span><span style="width: 5.6%; background: #4A5568"></span></span>
+<div style="display: flex; flex-direction: column; gap: 7px; font-size: 12.5px">
+<span style="display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 2px; background: #EBCB8E"></span>Agent runners<span class="mono" style="margin-left: auto">$52</span></span>
+<span style="display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 2px; background: #D9B26F"></span>Agent experiments<span class="mono" style="margin-left: auto">$137</span></span>
+<span style="display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 2px; background: #8C7448"></span>Trusted bench runner<span class="mono" style="margin-left: auto">$64</span></span>
+<span style="display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 2px; background: #4A5568"></span>Storage &amp; egress<span class="mono" style="margin-left: auto">$15</span></span>
+</div>
+</section>
+<section class="card" style="padding: 18px 20px; display: flex; flex-direction: column; gap: 10px">
+<span class="eyebrow">Teardown</span>
+<span style="display: flex; align-items: center; gap: 10px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#7BD8B0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"></path></svg>Agent runners terminated</span>
+<span style="display: flex; align-items: center; gap: 10px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#7BD8B0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"></path></svg>Tagged instances terminated · 0 left</span>
+<span style="display: flex; align-items: center; gap: 10px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#7BD8B0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"></path></svg>Agent roles and secrets deleted</span>
+<span style="display: flex; align-items: center; gap: 10px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#7BD8B0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"></path></svg>Bench artifacts kept in S3</span>
+<span style="display: flex; align-items: center; gap: 10px; color: #8592A6"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="5.5"></circle><path d="M8 5v3l2 1.5"></path></svg>Cost reconcile in ~24 h</span>
+<button type="button" style="margin-top: 6px; align-self: flex-start; height: 34px; padding: 0 14px; border-radius: 9px; border: 1px solid rgba(240,138,147,.4); background: transparent; color: #F5A8AF; font: inherit; font-size: 12.5px">Destroy sandbox…</button>
+</section>
+</aside>
+</div>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1240}}'>
+class Component extends DCLogic {
+renderVals() {
+const spans = [
+{ name: 'index.lookup', a: 63, b: 48 },
+{ name: 'query_parser.parse', a: 41, b: 6 },
+{ name: 'serialize.response', a: 38, b: 31 },
+{ name: 'network + io', a: 40, b: 39 }
+].map((s) => ({ ...s, wa: Math.round(s.a / 63 * 100) + '%', wb: Math.max(2, Math.round(s.b / 63 * 100)) + '%', a: s.a + ' ms', b: s.b + ' ms' }));
+const good = ['rgba(123,216,176,.12)', '#7BD8B0'];
+const meh = ['rgba(148,163,190,.12)', '#C3CBD8'];
+const pct = [
+{ k: 'p50', a: '74 ms', b: '58 ms', d: '−22%', t: good },
+{ k: 'p95', a: '182 ms', b: '124 ms', d: '−32%', t: good },
+{ k: 'p99', a: '311 ms', b: '219 ms', d: '−30%', t: good },
+{ k: 'Throughput', a: '640 rps', b: '845 rps', d: '+32%', t: good },
+{ k: 'Memory', a: '412 MB', b: '441 MB', d: '+7% ok', t: meh },
+{ k: 'Errors', a: '0.02%', b: '0.01%', d: 'ok', t: meh }
+].map((p) => ({ ...p, dBg: p.t[0], dFg: p.t[1] }));
+return { spans, pct };
+}
+}
+</script>
+</body>
+</html>

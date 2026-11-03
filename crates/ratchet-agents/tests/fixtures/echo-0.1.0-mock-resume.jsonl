@@ -1,0 +1,6 @@
+{"t":"session","id":"echo-session-1"}
+{"t":"delta","text":"Welcome "}
+{"t":"delta","text":"back."}
+{"t":"message","text":"Welcome back."}
+{"t":"usage","input":150,"output":9,"cost":0.0017}
+{"t":"done"}

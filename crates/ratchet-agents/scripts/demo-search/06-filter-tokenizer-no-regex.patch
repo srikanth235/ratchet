@@ -1,0 +1,51 @@
+diff --git a/src/filter.ts b/src/filter.ts
+index 1dc27b9..9c35334 100644
+--- a/src/filter.ts
++++ b/src/filter.ts
+@@ -32,13 +32,17 @@ const FIELDS = ["category", "brand", "tag", "instock", "price", "rating"];
+ 
++const CONDITION = new RegExp("^(" + FIELDS.join("|") + "):(.+)$", "i");
++const WHITESPACE = /\s/;
++// "word" characters: anything that can appear inside field:value
++const WORD_CHARS = /[A-Za-z0-9_.<>=:-]/;
++
+ function tokenize(input: string): Token[] {
+-  let tokens: Token[] = [];
++  const tokens: Token[] = [];
+   let pos = 0;
+-  // "word" characters: anything that can appear inside field:value
+-  const isWordChar = (ch: string) => new RegExp("[A-Za-z0-9_.<>=:-]").test(ch);
++  const isWordChar = (ch: string) => WORD_CHARS.test(ch);
+   while (pos < input.length) {
+     const ch = input.charAt(pos);
+-    if (new RegExp("\\s").test(ch)) {
++    if (WHITESPACE.test(ch)) {
+       pos++;
+     } else if (ch === "(" || ch === ")") {
+-      tokens = [...tokens, { kind: ch === "(" ? "lparen" : "rparen", pos }];
++      tokens.push({ kind: ch === "(" ? "lparen" : "rparen", pos });
+       pos++;
+@@ -46,12 +50,12 @@ function tokenize(input: string): Token[] {
+       const start = pos;
+-      let word = "";
+-      while (pos < input.length && isWordChar(input.charAt(pos))) word += input.charAt(pos++);
++      while (pos < input.length && isWordChar(input.charAt(pos))) pos++;
++      const word = input.slice(start, pos);
+       const lower = word.toLowerCase();
+       if (lower === "and" || lower === "or" || lower === "not") {
+-        tokens = [...tokens, { kind: lower, pos: start }];
++        tokens.push({ kind: lower, pos: start });
+         continue;
+       }
+-      const cond = new RegExp("^(" + FIELDS.join("|") + "):(.+)$", "i").exec(word);
++      const cond = CONDITION.exec(word);
+       if (!cond) throw new FilterSyntaxError(`unexpected input at position ${start}: "${input.slice(start, start + 12)}"`, start);
+-      tokens = [...tokens, { kind: "cond", field: (cond[1] as string).toLowerCase(), value: cond[2] as string, pos: start }];
++      tokens.push({ kind: "cond", field: (cond[1] as string).toLowerCase(), value: cond[2] as string, pos: start });
+     } else {
+@@ -111,4 +115,3 @@ function parseOnce(input: string): FilterNode {
+   let pos = 0;
+-  // every peek re-slices the remaining tokens
+-  const peek = (): Token | undefined => tokens.slice(pos)[0];
++  const peek = (): Token | undefined => tokens[pos];
+   const endPos = input.length;

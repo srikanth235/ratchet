@@ -1,0 +1,46 @@
+---
+source: crates/ratchet-bench/tests/snapshots.rs
+expression: "deps_build_script(&i).expect(\"script\")"
+---
+set -uo pipefail
+W='/var/tmp/ratchet-bench/deps-opt1-1234'
+TREE="$W/tree"; STORE='/var/tmp/ratchet-bench/deps-opt1-1234/store'; OUT="$W/out"
+emit() { printf '%s %s %s\n' '@@RATCHET@@' "$1" "$2"; }
+rm -rf -- "${W:?}"; mkdir -p "$TREE" "$STORE" "$OUT" "$W/in" "$W/home" "$W/tmp" || exit 10
+chmod 755 "$W"
+aws s3 cp --only-show-errors 's3://ratchet-test-artifacts/bench-inputs/opt1/job1/deps-base.tgz' "$W/in/base.tgz" || { echo "cannot download the base tree s3://ratchet-test-artifacts/bench-inputs/opt1/job1/deps-base.tgz" >&2; exit 20; }
+[ "$(sha256sum -- "$W/in/base.tgz" | cut -d' ' -f1)" = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ] || { echo "sha256 mismatch for the base tree" >&2; exit 21; }
+tar -xzf "$W/in/base.tgz" -C "$TREE" --no-same-owner || exit 22
+rm -f "$W/in/base.tgz"
+DU='ratchet-deps'
+id -u "$DU" >/dev/null 2>&1 || { echo "snapshot user $DU does not exist on this image" >&2; exit 12; }
+iptables -C OUTPUT -m owner --uid-owner "$DU" -d 169.254.169.254 -j REJECT >/dev/null 2>&1 || { echo "IMDS is not blocked for $DU (iptables owner rule missing)" >&2; exit 13; }
+if setpriv --reuid="$DU" --regid="$DU" --clear-groups --no-new-privs -- timeout 3 bash -c 'exec 3<>/dev/tcp/169.254.169.254/80' 2>/dev/null; then echo "instance metadata is reachable as $DU" >&2; exit 14; fi
+chown -R "$DU:" "$TREE" "$STORE" "$W/home" "$W/tmp" || exit 16
+[ -r /etc/ratchet/runner.env ] && { set -a; . /etc/ratchet/runner.env; set +a; }
+PX=(); for v in HTTPS_PROXY https_proxy HTTP_PROXY http_proxy NO_PROXY no_proxy NODE_USE_ENV_PROXY; do [ -n "${!v:-}" ] && PX+=("$v=${!v}"); done
+cd "$TREE" || exit 10
+s=$(date +%s%N)
+timeout -k 10 600 setpriv --reuid="$DU" --regid="$DU" --clear-groups --no-new-privs -- env -i PATH="$PATH" HOME="$W/home" TMPDIR="$W/tmp" LANG=C.UTF-8 USER="$DU" LOGNAME="$DU" ${PX[@]+"${PX[@]}"} npm_config_cache='/var/tmp/ratchet-bench/deps-opt1-1234/store' npm_config_ignore_scripts='true' npm_config_update_notifier='false' npm_config_fund='false' npm_config_audit='false' bash -c 'npm ci --ignore-scripts --no-audit --no-fund' </dev/null >"$W/fetch.out" 2>&1; rc=$?
+e=$(date +%s%N); ms=$(( (e - s) / 1000000 ))
+echo "--- fetch output tail ---"; tail -c 4000 "$W/fetch.out"
+[ $rc -eq 0 ] || { echo "the package fetch (npm) exited with status $rc" >&2; exit 50; }
+
+rm -rf "$STORE/_logs" "$STORE/_update-notifier-last-checked"
+if [ -n "$(find "$STORE" -type l -print -quit)" ]; then echo "the fetched store contains symlinks; refusing to pack it" >&2; exit 51; fi
+if command -v zstd >/dev/null 2>&1; then
+  EXT=tar.zst; COMP=zstd
+  tar -C "$STORE" --sort=name --owner=0 --group=0 --numeric-owner -cf - . | zstd -T0 -3 -q -o "$OUT/snapshot" || exit 52
+else
+  EXT=tgz; COMP=gzip
+  tar -C "$STORE" --sort=name --owner=0 --group=0 --numeric-owner -cf - . | gzip -3 > "$OUT/snapshot" || exit 52
+fi
+SHA=$(sha256sum -- "$OUT/snapshot" | cut -d' ' -f1); BYTES=$(stat -c %s -- "$OUT/snapshot")
+NODEV=$(node --version 2>/dev/null | tr -cd 'A-Za-z0-9._+-'); PMV=$(npm --version 2>/dev/null | tr -cd 'A-Za-z0-9._+-')
+[ -n "$NODEV" ] && [ -n "$PMV" ] || { echo "cannot determine the node and npm versions" >&2; exit 52; }
+ARCHIVE='bench-deps/npm-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'/"$SHA.$EXT"
+printf '%s,"node":"%s","pm":"%s","compression":"%s","archive":"%s","sha256":"%s","bytes":%s,"createdAt":%s}\n' '{"v":1,"key":"npm-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee","strategy":"npm","rev":1,"lockfiles":{"package-lock.json":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"image":"ami-1","arch":"x86_64"' "$NODEV" "$PMV" "$COMP" "$ARCHIVE" "$SHA" "$BYTES" "$(date +%s%3N)" > "$OUT/manifest.json"
+aws s3 cp --only-show-errors "$OUT/snapshot" "s3://ratchet-test-artifacts/$ARCHIVE" || { echo "cannot upload the snapshot" >&2; exit 53; }
+aws s3 cp --only-show-errors "$OUT/manifest.json" 's3://ratchet-test-artifacts/bench-deps/npm-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee.json' || { echo "cannot upload the manifest" >&2; exit 54; }
+emit deps "{\"key\":\"npm-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"sha256\":\"$SHA\",\"bytes\":$BYTES,\"compression\":\"$COMP\",\"ms\":$ms}"
+exit 0

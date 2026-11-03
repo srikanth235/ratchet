@@ -1,0 +1,33 @@
+Due within 30 days in Asia/Tokyo (UTC+09:00); today is 2026-03-02
+2026-03-02
+  #45 P3 mia.jensen     Review webhook with better errors
+2026-03-03
+  #156 P4 priya.nair     Instrument address form on slow networks
+2026-03-06
+  #218 P1 raj.patel      Review dashboard for large accounts
+  #211 P3 maya.chen      Simplify tax rules for EU customers
+2026-03-08
+  #42 P1 kenji.mori     Simplify onboarding in the mobile app
+2026-03-09
+  #76 P2 maya.chen      Test email template after the last release
+2026-03-12
+  #142 P1 omar.haddad    Refactor rate limit for large accounts
+  #68 P4 nora.lund      Optimize onboarding in the admin console
+2026-03-14
+  #136 P1 maya.chen      Fix password reset on retry
+  #158 P2 jonas.berg     Deprecate webhook when the queue is full
+2026-03-16
+  #209 P1 hana.kim       Optimize coupon with better errors
+2026-03-22
+  #157 P1 tomas.ruiz     Deprecate schema in staging
+  #108 P4 yara.saleh     Split notification on retry
+2026-03-26
+  #73 P4 ivan.petrov    Optimize checkout without downtime
+2026-03-29
+  #213 P2 luca.bianchi   Automate audit log after the last release
+  #63 P4 nora.lund      Automate checkout before the audit
+2026-03-30
+  #3 P1 yara.saleh     Document refund in staging
+2026-04-01
+  #24 P2 priya.nair     Remove cart behind a flag
+18 tasks due, 48 overdue

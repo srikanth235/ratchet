@@ -1,0 +1,55 @@
+[package]
+name = "ratchet-connectors"
+version = "0.0.0"
+description = "Ratchet connectors: saved GitHub accounts, AWS profiles and agent credentials, one default per kind, the choice remembered per repo, and where their secrets live (port of the desktop main process connectors)."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "ratchet_connectors"
+
+[features]
+# `store` (default) is the connector store, the secret stores and everything that touches the machine. Without it the crate
+# is only the wire types (`model`), which is all a client such as the `ratchet` CLI needs.
+default = ["store"]
+store = [
+    "dep:async-trait",
+    "dep:futures",
+    "dep:rand",
+    "dep:ratchet-agents",
+    "dep:ratchet-github",
+    "dep:regex",
+    "dep:tokio",
+    "dep:tracing",
+]
+# Derive `utoipa::ToSchema` on the wire types (the OpenAPI contract of `ratchetd`).
+utoipa = ["dep:utoipa", "ratchet-core/utoipa"]
+
+[dependencies]
+ratchet-core = { path = "../ratchet-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror = "2"
+
+async-trait = { version = "0.1", optional = true }
+futures = { version = "0.3", optional = true }
+rand = { version = "0.9", optional = true }
+ratchet-agents = { path = "../ratchet-agents", optional = true }
+ratchet-github = { path = "../ratchet-github", optional = true }
+regex = { version = "1", optional = true }
+tokio = { version = "1", features = ["sync", "time", "rt", "macros"], optional = true }
+tracing = { version = "0.1", optional = true }
+utoipa = { version = "5", optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3"
+
+[dev-dependencies]
+ratchet-github = { path = "../ratchet-github" }
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+
+[lints.rust]
+unsafe_code = "forbid"

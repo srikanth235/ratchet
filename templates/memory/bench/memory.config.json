@@ -1,0 +1,5 @@
+{
+  "command": "node -e \"const b=[];for(let i=0;i<200;i++)b.push(Buffer.alloc(100000,i));\"",
+  "workload": "bench/workload.json",
+  "runs": 3
+}

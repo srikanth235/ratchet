@@ -1,0 +1,37 @@
+version: 0
+pack: forecasting                  # domain pack: demand forecasting
+objective:
+  name: weekly SKU demand forecast WAPE
+  metric: wape                    # key in the evaluator's JSON output (percent)
+  direction: minimize
+  min_gain: 0.03                  # 3% relative: 43.5 -> must reach 42.2 or better to count
+  value:                          # business case: what 1 WAPE point is worth
+    usd_per_unit: 20000           # USD per WAPE point per year. This assortment sells ~550k units/yr; one point of WAPE is
+                                  # ~5.5k units/yr of forecast error, each costing ~$3.6 (lost margin on stockouts + carrying
+                                  # cost and markdowns on overstock). Scale with volume; replace with the customer's own number.
+    period: year
+    basis: estimated              # becomes `measured` once confirmed in production
+    unit: WAPE point
+evaluator:                        # the trusted evaluation (alias: bench)
+  kind: backtest
+  ref: ratchet/bench              # protected ref holding the trusted evaluator
+  run: node dist/eval/backtest.js # rolling-origin backtest -> {wape, mape, bias, train_ms, leakage_violations}; with RATCHET_TRACE set, scores the sealed holdout instead
+  repeats: 3                      # WAPE is deterministic (0 noise floor); repeats guard train_ms jitter
+  hardware: c7i.large
+  holdout: s3://sealed/demo-forecast-holdout.json   # node dist/eval/holdout.js --seed <hidden> --out <path>: the 12 weeks after the training data
+guardrails:
+  - run: pnpm test:unit
+  - run: pnpm test:contract       # predict() interface: shape, finiteness, determinism
+  - leakage_violations: "== 0"    # look-ahead / side-channel findings of eval/leakage.ts, run by the evaluator itself
+  - train_ms: "< 2000"            # ms per fit+forecast of all SKUs (baseline ~0.4 ms); caps the compute an idea may burn
+protected:                        # changes here block a candidate
+  - eval/**
+  - data/**
+  - ratchet.yaml
+  - package.json                  # defines the guardrail commands
+  - src/types.ts
+  - tests/contract/**
+  - SOLUTIONS.md
+agent:
+  instructions: RATCHET.md        # brief injected into every session
+  allowed_instance_types: [c7i.large, c7i.xlarge, m7i.large]

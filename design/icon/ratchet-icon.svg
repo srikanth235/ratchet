@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<title>Ratchet</title>
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1B2539"/><stop offset="1" stop-color="#05080E"/></linearGradient>
+  <linearGradient id="brass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F8E4B8"/><stop offset=".6" stop-color="#E2BE7C"/><stop offset="1" stop-color="#BE8F49"/></linearGradient>
+  <clipPath id="tile"><rect width="1024" height="1024" rx="230"/></clipPath>
+</defs>
+<g clip-path="url(#tile)">
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+  <path d="M373.9 428.3L442.4 428.3A68.4 68.4 0 0 0 373.9 359.9Z" fill="#DCE3EE" fill-opacity="0.55"/>
+  <path d="M365.2 469.0L256.0 469.0A109.2 109.2 0 0 1 365.2 359.9Z" fill="#DCE3EE" fill-opacity="0.78"/>
+  <path d="M446.6 477.7L446.6 668.3A190.6 190.6 0 0 1 256.0 477.7Z" fill="#DCE3EE" fill-opacity="1.00"/>
+  <path d="M455.3 355.7L455.3 668.3A312.7 312.7 0 0 0 768.0 355.7Z" fill="url(#brass)"/>
+</g>
+</svg>

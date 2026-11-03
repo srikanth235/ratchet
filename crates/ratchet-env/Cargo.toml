@@ -1,0 +1,31 @@
+[package]
+name = "ratchet-env"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Dynamic environments: scope, validator, cost estimate, setup-agent brief, drafter (real + mock), approve and lock."
+
+[dependencies]
+async-trait = "0.1"
+rand = "0.9"
+ratchet-core = { path = "../ratchet-core" }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }
+serde_norway = "0.9"
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["fs", "sync", "time", "rt", "macros", "io-util"] }
+tokio-util = { version = "0.7", default-features = false }
+tracing = "0.1"
+
+[dev-dependencies]
+ratchet-github = { path = "../ratchet-github" }
+tokio = { version = "1", features = ["fs", "sync", "time", "rt-multi-thread", "macros", "io-util", "test-util"] }
+insta = { version = "1", features = ["json"] }
+
+[lints.rust]
+unsafe_code = "forbid"
